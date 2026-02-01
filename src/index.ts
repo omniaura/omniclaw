@@ -221,6 +221,8 @@ async function processTaskIpc(data: {
         const scheduleType = data.schedule_type as 'cron' | 'interval' | 'once';
 
         let nextRun: string | null = null;
+        let status: 'active' | 'completed' = 'active';
+
         if (scheduleType === 'cron') {
           const interval = CronExpressionParser.parse(data.schedule_value);
           nextRun = interval.next().toISOString();
@@ -228,7 +230,19 @@ async function processTaskIpc(data: {
           const ms = parseInt(data.schedule_value, 10);
           nextRun = new Date(Date.now() + ms).toISOString();
         } else if (scheduleType === 'once') {
-          nextRun = data.schedule_value; // ISO timestamp
+          const scheduledTime = new Date(data.schedule_value);
+          if (isNaN(scheduledTime.getTime())) {
+            logger.warn({ scheduleValue: data.schedule_value }, 'Invalid once schedule timestamp, skipping task creation');
+            break;
+          }
+          // If the scheduled time is in the past, mark as completed immediately
+          if (scheduledTime.getTime() <= Date.now()) {
+            logger.info({ scheduleValue: data.schedule_value }, 'Once schedule is in the past, marking as completed');
+            nextRun = null;
+            status = 'completed';
+          } else {
+            nextRun = scheduledTime.toISOString();
+          }
         }
 
         const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -240,10 +254,10 @@ async function processTaskIpc(data: {
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
           next_run: nextRun,
-          status: 'active',
+          status,
           created_at: new Date().toISOString()
         });
-        logger.info({ taskId, groupFolder: data.groupFolder }, 'Task created via IPC');
+        logger.info({ taskId, groupFolder: data.groupFolder, status }, 'Task created via IPC');
       }
       break;
 
