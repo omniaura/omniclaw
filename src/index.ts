@@ -740,8 +740,9 @@ async function connectWhatsApp(): Promise<void> {
         onProcess: (groupJid, proc, containerName) => queue.registerProcess(groupJid, proc, containerName),
       });
       startIpcWatcher();
-      startMessageLoop();
+      queue.setProcessMessagesFn(processGroupMessages);
       recoverPendingMessages();
+      startMessageLoop();
     }
   });
 
@@ -782,9 +783,6 @@ async function startMessageLoop(): Promise<void> {
     return;
   }
   messageLoopRunning = true;
-
-  // Wire up the queue's message processing function
-  queue.setProcessMessagesFn(processGroupMessages);
 
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
