@@ -334,6 +334,25 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+server.tool(
+  'share_request',
+  'Request context or information from the admin. Use this when you need information that you don\'t have access to — for example, files from another project, context from a different group, credentials, or any data outside your workspace. The request is sent to the admin who can then share the relevant context with you.',
+  {
+    description: z.string().describe('What context or information you need and why'),
+  },
+  async (args) => {
+    writeIpcFile(TASKS_DIR, {
+      type: 'share_request',
+      description: args.description,
+      sourceGroup: groupFolder,
+      chatJid,
+      timestamp: new Date().toISOString(),
+    });
+
+    return { content: [{ type: 'text' as const, text: 'Context request sent to admin. They\'ll review it and share relevant information if approved.' }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

@@ -34,6 +34,10 @@ Text inside `<internal>` tags is logged but not sent to the user. If you've alre
 
 When working as a sub-agent or teammate, only use `send_message` if instructed to by the main agent.
 
+## Requesting Context
+
+If you need information from outside your workspace (files from another project, context from another group, credentials, etc.), use `mcp__nanoclaw__share_request`. This sends a request to the admin, who can review and share the relevant context with you. Don't guess — ask.
+
 ## Your Workspace
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.

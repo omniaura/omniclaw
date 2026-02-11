@@ -178,6 +178,9 @@ export async function processTaskIpc(
     interval?: string;
     heartbeat_schedule_type?: string;
     target_group_jid?: string;
+    // For share_request
+    description?: string;
+    sourceGroup?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -424,6 +427,37 @@ export async function processTaskIpc(
       logger.info(
         { targetJid, folder: targetGroup.folder, enabled: data.enabled },
         'Heartbeat configured via IPC',
+      );
+      break;
+    }
+
+    case 'share_request': {
+      if (!data.description) {
+        logger.warn({ data }, 'share_request missing description');
+        break;
+      }
+
+      // Find the main group's JID to send the request to
+      const mainJid = Object.entries(registeredGroups).find(
+        ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+      )?.[0];
+
+      if (!mainJid) {
+        logger.warn('share_request: could not find main group JID');
+        break;
+      }
+
+      // Find the source group's display name
+      const sourceGroupEntry = Object.entries(registeredGroups).find(
+        ([, g]) => g.folder === sourceGroup,
+      );
+      const sourceName = sourceGroupEntry?.[1].name || sourceGroup;
+
+      const message = `*Context Request* from _${sourceName}_:\n\n${data.description}\n\n_Reply here to share context. I can write files to their workspace._`;
+      await deps.sendMessage(mainJid, message);
+      logger.info(
+        { sourceGroup, mainJid },
+        'Share request forwarded to main group',
       );
       break;
     }
