@@ -4,6 +4,10 @@ import {
   Partials,
   Events,
   Message,
+  MessageReaction,
+  PartialMessageReaction,
+  User as DiscordUser,
+  PartialUser,
   TextChannel,
   DMChannel,
   ChannelType,
@@ -21,24 +25,30 @@ import {
 import { logger } from '../logger.js';
 import { Channel } from '../types.js';
 
+export interface DiscordChannelOpts {
+  token: string;
+  onReaction?: (chatJid: string, messageId: string, emoji: string) => void;
+}
+
 export class DiscordChannel implements Channel {
   name = 'discord';
   prefixAssistantName = false;
 
   private client: Client;
   private connected = false;
-  private token: string;
+  private opts: DiscordChannelOpts;
 
-  constructor(token: string) {
-    this.token = token;
+  constructor(opts: DiscordChannelOpts) {
+    this.opts = opts;
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.GuildMessageReactions,
       ],
-      partials: [Partials.Channel],
+      partials: [Partials.Channel, Partials.Message, Partials.Reaction],
     });
   }
 
@@ -60,15 +70,21 @@ export class DiscordChannel implements Channel {
         );
       });
 
+      this.client.on(Events.MessageReactionAdd, (reaction, user) => {
+        this.handleReaction(reaction, user).catch((err) =>
+          logger.error({ err }, 'Error handling Discord reaction'),
+        );
+      });
+
       this.client.on(Events.Error, (err) => {
         logger.error({ err }, 'Discord client error');
       });
 
-      this.client.login(this.token).catch(reject);
+      this.client.login(this.opts.token).catch(reject);
     });
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(jid: string, text: string): Promise<string | void> {
     const channelId = jidToChannelId(jid);
     if (!channelId) {
       logger.warn({ jid }, 'Cannot resolve Discord channel ID from JID');
@@ -83,10 +99,13 @@ export class DiscordChannel implements Channel {
       }
 
       const chunks = splitMessage(text, 2000);
+      let lastMessageId: string | undefined;
       for (const chunk of chunks) {
-        await (channel as TextChannel | DMChannel).send(chunk);
+        const sent = await (channel as TextChannel | DMChannel).send(chunk);
+        lastMessageId = sent.id;
       }
       logger.info({ jid, length: text.length }, 'Discord message sent');
+      return lastMessageId;
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Discord message');
     }
@@ -251,6 +270,43 @@ export class DiscordChannel implements Channel {
       'Discord message stored',
     );
   }
+  private async handleReaction(
+    reaction: MessageReaction | PartialMessageReaction,
+    user: DiscordUser | PartialUser,
+  ): Promise<void> {
+    // Ignore reactions from the bot itself
+    if (user.id === this.client.user?.id) return;
+
+    // Fetch partial reaction/message if needed
+    if (reaction.partial) {
+      try {
+        reaction = await reaction.fetch();
+      } catch (err) {
+        logger.debug({ err }, 'Failed to fetch partial reaction');
+        return;
+      }
+    }
+    if (reaction.message.partial) {
+      try {
+        await reaction.message.fetch();
+      } catch (err) {
+        logger.debug({ err }, 'Failed to fetch partial message for reaction');
+        return;
+      }
+    }
+
+    // Only handle reactions on bot messages
+    if (reaction.message.author?.id !== this.client.user?.id) return;
+
+    const isDM = reaction.message.channel.type === ChannelType.DM;
+    const chatJid = isDM
+      ? `dc:dm:${user.id}`
+      : `dc:${reaction.message.channelId}`;
+    const emoji = reaction.emoji.name || '';
+
+    this.opts.onReaction?.(chatJid, reaction.message.id, emoji);
+  }
+
   private cleanupOldMedia(folder: string): void {
     try {
       const mediaDir = path.join(GROUPS_DIR, folder, 'media');
