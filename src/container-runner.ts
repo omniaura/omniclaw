@@ -40,6 +40,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   discordGuildId?: string;
+  slackWorkspaceId?: string;
   serverFolder?: string;
 }
 

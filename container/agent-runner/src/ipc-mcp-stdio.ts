@@ -20,6 +20,7 @@ const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
 const discordGuildId = process.env.NANOCLAW_DISCORD_GUILD_ID || undefined;
+const slackWorkspaceId = process.env.NANOCLAW_SLACK_WORKSPACE_ID || undefined;
 const serverFolder = process.env.NANOCLAW_SERVER_FOLDER || undefined;
 
 function writeIpcFile(dir: string, data: object): string {
@@ -309,13 +310,14 @@ server.tool(
   'register_group',
   `Register a new group so the agent can respond to messages there. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat"). For Discord channels, provide the discord_guild_id to enable server-level shared context.`,
+Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat"). For Discord channels, provide the discord_guild_id; for Slack channels, provide the slack_workspace_id to enable server-level shared context.`,
   {
-    jid: z.string().describe('The group JID (e.g., "120363336345536173@g.us" for WhatsApp, "dc:123456" for Discord)'),
+    jid: z.string().describe('The group JID (e.g., "120363336345536173@g.us" for WhatsApp, "dc:123456" for Discord, "slack:C12345" for Slack)'),
     name: z.string().describe('Display name for the group'),
     folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
     discord_guild_id: z.string().optional().describe('Discord guild/server ID — enables server-level shared context across channels'),
+    slack_workspace_id: z.string().optional().describe('Slack workspace/team ID — enables server-level shared context across channels'),
   },
   async (args) => {
     if (!isMain) {
@@ -332,6 +334,7 @@ Use available_groups.json to find the JID for a group. The folder name should be
       folder: args.folder,
       trigger: args.trigger,
       discord_guild_id: args.discord_guild_id,
+      slack_workspace_id: (args as any).slack_workspace_id,
       timestamp: new Date().toISOString(),
     };
 
@@ -360,6 +363,7 @@ server.tool(
       chatJid,
       serverFolder,
       discordGuildId,
+      slackWorkspaceId,
       timestamp: new Date().toISOString(),
     });
 

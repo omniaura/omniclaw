@@ -210,6 +210,7 @@ export async function processTaskIpc(
     trigger?: string;
     containerConfig?: RegisteredGroup['containerConfig'];
     discord_guild_id?: string;
+    slack_workspace_id?: string;
     // For configure_heartbeat
     enabled?: boolean;
     interval?: string;
@@ -221,6 +222,7 @@ export async function processTaskIpc(
     scope?: string;
     serverFolder?: string;
     discordGuildId?: string;
+    slackWorkspaceId?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -425,6 +427,12 @@ export async function processTaskIpc(
           groupToRegister.serverFolder = `servers/${data.discord_guild_id}`;
         }
 
+        // If a Slack workspace ID is provided, set it and compute serverFolder
+        if (data.slack_workspace_id) {
+          groupToRegister.slackWorkspaceId = data.slack_workspace_id;
+          groupToRegister.serverFolder = `servers/${data.slack_workspace_id}`;
+        }
+
         deps.registerGroup(data.jid, groupToRegister);
       } else {
         logger.warn(
@@ -509,7 +517,7 @@ export async function processTaskIpc(
       const scope = data.scope || 'auto';
       let pathGuidance: string;
       if (serverFolder) {
-        pathGuidance = `\n\n*Where to write context:*\n• _Channel-specific:_ \`groups/${sourceGroup}/CLAUDE.md\`\n• _Server-wide (all Discord channels):_ \`groups/${serverFolder}/CLAUDE.md\``;
+        pathGuidance = `\n\n*Where to write context:*\n• _Channel-specific:_ \`groups/${sourceGroup}/CLAUDE.md\`\n• _Server-wide (all channels in this server):_ \`groups/${serverFolder}/CLAUDE.md\``;
         if (scope === 'server') {
           pathGuidance += ' ← requested';
         } else if (scope === 'channel') {

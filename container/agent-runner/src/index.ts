@@ -26,6 +26,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   discordGuildId?: string;
+  slackWorkspaceId?: string;
   serverFolder?: string;
 }
 
@@ -469,6 +470,7 @@ async function runQuery(
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
             ...(containerInput.discordGuildId ? { NANOCLAW_DISCORD_GUILD_ID: containerInput.discordGuildId } : {}),
+            ...(containerInput.slackWorkspaceId ? { NANOCLAW_SLACK_WORKSPACE_ID: containerInput.slackWorkspaceId } : {}),
             ...(containerInput.serverFolder ? { NANOCLAW_SERVER_FOLDER: containerInput.serverFolder } : {}),
           },
         },

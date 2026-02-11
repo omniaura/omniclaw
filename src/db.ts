@@ -104,6 +104,14 @@ function createSchema(database: Database): void {
   try {
     database.exec(`ALTER TABLE chats ADD COLUMN discord_guild_id TEXT`);
   } catch { /* column already exists */ }
+
+  // Add slack_workspace_id columns
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN slack_workspace_id TEXT`);
+  } catch { /* column already exists */ }
+  try {
+    database.exec(`ALTER TABLE chats ADD COLUMN slack_workspace_id TEXT`);
+  } catch { /* column already exists */ }
 }
 
 export function initDatabase(): void {
@@ -132,28 +140,31 @@ export function storeChatMetadata(
   timestamp: string,
   name?: string,
   discordGuildId?: string,
+  slackWorkspaceId?: string,
 ): void {
   if (name) {
     // Update with name, preserving existing timestamp if newer
     db.query(
       `
-      INSERT INTO chats (jid, name, last_message_time, discord_guild_id) VALUES (?, ?, ?, ?)
+      INSERT INTO chats (jid, name, last_message_time, discord_guild_id, slack_workspace_id) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(jid) DO UPDATE SET
         name = excluded.name,
         last_message_time = MAX(last_message_time, excluded.last_message_time),
-        discord_guild_id = COALESCE(excluded.discord_guild_id, discord_guild_id)
+        discord_guild_id = COALESCE(excluded.discord_guild_id, discord_guild_id),
+        slack_workspace_id = COALESCE(excluded.slack_workspace_id, slack_workspace_id)
     `,
-    ).run(chatJid, name, timestamp, discordGuildId || null);
+    ).run(chatJid, name, timestamp, discordGuildId || null, slackWorkspaceId || null);
   } else {
     // Update timestamp only, preserve existing name if any
     db.query(
       `
-      INSERT INTO chats (jid, name, last_message_time, discord_guild_id) VALUES (?, ?, ?, ?)
+      INSERT INTO chats (jid, name, last_message_time, discord_guild_id, slack_workspace_id) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(jid) DO UPDATE SET
         last_message_time = MAX(last_message_time, excluded.last_message_time),
-        discord_guild_id = COALESCE(excluded.discord_guild_id, discord_guild_id)
+        discord_guild_id = COALESCE(excluded.discord_guild_id, discord_guild_id),
+        slack_workspace_id = COALESCE(excluded.slack_workspace_id, slack_workspace_id)
     `,
-    ).run(chatJid, chatJid, timestamp, discordGuildId || null);
+    ).run(chatJid, chatJid, timestamp, discordGuildId || null, slackWorkspaceId || null);
   }
 }
 
@@ -200,6 +211,16 @@ export function getChatGuildId(chatJid: string): string | undefined {
     .prepare('SELECT discord_guild_id FROM chats WHERE jid = ?')
     .get(chatJid) as { discord_guild_id: string | null } | undefined;
   return row?.discord_guild_id || undefined;
+}
+
+/**
+ * Get the Slack workspace ID for a chat JID from stored metadata.
+ */
+export function getChatWorkspaceId(chatJid: string): string | undefined {
+  const row = db
+    .prepare('SELECT slack_workspace_id FROM chats WHERE jid = ?')
+    .get(chatJid) as { slack_workspace_id: string | null } | undefined;
+  return row?.slack_workspace_id || undefined;
 }
 
 /**
@@ -503,6 +524,7 @@ export function getRegisteredGroup(
         requires_trigger: number | null;
         heartbeat: string | null;
         discord_guild_id: string | null;
+        slack_workspace_id: string | null;
         server_folder: string | null;
       }
     | undefined;
@@ -521,6 +543,7 @@ export function getRegisteredGroup(
       ? (JSON.parse(row.heartbeat) as HeartbeatConfig)
       : undefined,
     discordGuildId: row.discord_guild_id || undefined,
+    slackWorkspaceId: row.slack_workspace_id || undefined,
     serverFolder: row.server_folder || undefined,
   };
 }
@@ -530,8 +553,8 @@ export function setRegisteredGroup(
   group: RegisteredGroup,
 ): void {
   db.query(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, heartbeat, discord_guild_id, server_folder)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, heartbeat, discord_guild_id, slack_workspace_id, server_folder)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -542,6 +565,7 @@ export function setRegisteredGroup(
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.heartbeat ? JSON.stringify(group.heartbeat) : null,
     group.discordGuildId || null,
+    group.slackWorkspaceId || null,
     group.serverFolder || null,
   );
 }
@@ -559,6 +583,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     requires_trigger: number | null;
     heartbeat: string | null;
     discord_guild_id: string | null;
+    slack_workspace_id: string | null;
     server_folder: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
@@ -576,6 +601,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         ? (JSON.parse(row.heartbeat) as HeartbeatConfig)
         : undefined,
       discordGuildId: row.discord_guild_id || undefined,
+      slackWorkspaceId: row.slack_workspace_id || undefined,
       serverFolder: row.server_folder || undefined,
     };
   }

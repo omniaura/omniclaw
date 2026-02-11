@@ -263,6 +263,7 @@ async function runTask(
         isMain,
         isScheduledTask: true,
         discordGuildId: group.discordGuildId,
+        slackWorkspaceId: group.slackWorkspaceId,
         serverFolder: group.serverFolder,
       },
       (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

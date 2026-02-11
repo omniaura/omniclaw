@@ -9,9 +9,12 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  SLACK_APP_TOKEN,
+  SLACK_BOT_TOKEN,
   TRIGGER_PATTERN,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
+import { SlackChannel } from './channels/slack.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -25,6 +28,7 @@ import {
   getAllSessions,
   getAllTasks,
   getChatGuildId,
+  getChatWorkspaceId,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -119,6 +123,37 @@ Then read the code directly — don't ask the admin to copy files for you.
     }
   }
 
+  // Seed CLAUDE.md for Slack groups with secondary-channel instructions
+  if (jid.startsWith('slack:')) {
+    const claudeMdPath = path.join(groupDir, 'CLAUDE.md');
+    if (!fs.existsSync(claudeMdPath)) {
+      fs.writeFileSync(
+        claudeMdPath,
+        `## Channel: Slack (Secondary)
+This group communicates via Slack, a secondary channel.
+You can freely answer questions and have conversations here.
+For significant actions (file changes, scheduled tasks, sending messages to other groups),
+check with the admin on WhatsApp first via the send_message tool to the main group.
+Over time, the admin will tell you which actions are always okay.
+
+## Getting Context You Don't Have
+When you need project context, repo access, credentials, or information that hasn't been shared with you:
+- **Use \`share_request\` immediately** — do NOT ask the user directly for info the admin should provide.
+- \`share_request\` sends your request to the admin on WhatsApp. They will share context and notify you when it's ready.
+- Be specific in your request: describe exactly what you need and why.
+
+## Working with Repos
+You have \`git\` and \`GITHUB_TOKEN\` available in your environment.
+When the admin shares a repo URL, clone it yourself:
+\`\`\`bash
+git clone https://github.com/org/repo.git /workspace/group/repos/repo
+\`\`\`
+Then read the code directly — don't ask the admin to copy files for you.
+`,
+      );
+    }
+  }
+
   // Create server-level directory for Discord groups with a serverFolder
   if (group.serverFolder) {
     ensureServerDirectory(group.serverFolder);
@@ -150,13 +185,13 @@ function ensureServerDirectory(serverFolder: string): void {
       claudeMdPath,
       `# Server Shared Context
 
-This file is shared across all channels in this Discord server.
+This file is shared across all channels in this server/workspace.
 Use it for team-level context: members, projects, repos, conventions.
 Channel-specific notes should go in the channel's own CLAUDE.md.
 
 ## Getting Context You Don't Have
 If you need project info, repo URLs, or credentials not listed here, use \`share_request\` to ask the admin.
-Don't ask users in Discord for info the admin should provide — use the tool and it will be routed to WhatsApp.
+Don't ask users for info the admin should provide — use the tool and it will be routed to WhatsApp.
 
 ## Working with Repos
 You have \`git\` and \`GITHUB_TOKEN\` available. When given a repo URL, clone it:
@@ -216,6 +251,50 @@ async function backfillDiscordGuildIds(discord: DiscordChannel): Promise<void> {
 }
 
 /**
+ * Backfill Slack workspace IDs and server folders for registered groups.
+ * Called once after Slack connects.
+ */
+async function backfillSlackWorkspaceIds(slack: SlackChannel): Promise<void> {
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (!jid.startsWith('slack:') || jid.startsWith('slack:dm:')) continue;
+    if (group.slackWorkspaceId && group.serverFolder) continue;
+
+    const channelId = jid.slice(6); // strip 'slack:'
+
+    // Try to get from group, then chat metadata, then API
+    let workspaceId = group.slackWorkspaceId || getChatWorkspaceId(jid);
+
+    if (!workspaceId) {
+      workspaceId = await slack.resolveWorkspaceId(channelId);
+    }
+
+    if (!workspaceId) {
+      logger.warn({ jid, name: group.name }, 'Could not resolve Slack workspace ID');
+      continue;
+    }
+
+    // Resolve workspace name for the server folder slug
+    let serverFolder = group.serverFolder;
+    if (!serverFolder) {
+      const workspaceName = await slack.resolveWorkspaceName(workspaceId);
+      const slug = workspaceName ? slugifyGuildName(workspaceName) : workspaceId;
+      serverFolder = `servers/${slug}`;
+    }
+
+    // Update the group
+    const updated: RegisteredGroup = { ...group, slackWorkspaceId: workspaceId, serverFolder };
+    registeredGroups[jid] = updated;
+    setRegisteredGroup(jid, updated);
+
+    ensureServerDirectory(serverFolder);
+    logger.info(
+      { jid, name: group.name, workspaceId, serverFolder },
+      'Backfilled Slack workspace ID and server folder',
+    );
+  }
+}
+
+/**
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
  */
@@ -230,6 +309,8 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
       if (c.jid.endsWith('@g.us')) return true;
       // Discord channels (not DMs)
       if (c.jid.startsWith('dc:') && !c.jid.startsWith('dc:dm:')) return true;
+      // Slack channels (not DMs)
+      if (c.jid.startsWith('slack:') && !c.jid.startsWith('slack:dm:')) return true;
       // Telegram groups
       if (c.jid.startsWith('tg:')) return true;
       return false;
@@ -402,6 +483,7 @@ async function runAgent(
         chatJid,
         isMain,
         discordGuildId: group.discordGuildId,
+        slackWorkspaceId: group.slackWorkspaceId,
         serverFolder: group.serverFolder,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -671,6 +753,20 @@ async function main(): Promise<void> {
       await backfillDiscordGuildIds(discord);
     } catch (err) {
       logger.error({ err }, 'Failed to connect Discord bot (continuing without Discord)');
+    }
+  }
+
+  // Conditionally connect Slack
+  if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
+    try {
+      const slack = new SlackChannel(SLACK_BOT_TOKEN, SLACK_APP_TOKEN);
+      await slack.connect();
+      channels.push(slack);
+
+      // Backfill workspace IDs for existing Slack groups
+      await backfillSlackWorkspaceIds(slack);
+    } catch (err) {
+      logger.error({ err }, 'Failed to connect Slack bot (continuing without Slack)');
     }
   }
 
