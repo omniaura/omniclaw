@@ -223,7 +223,7 @@ function buildVolumeMounts(
 function buildContainerArgs(mounts: VolumeMount[], containerName: string, memoryMb?: number): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
-  const memory = memoryMb || 2048;
+  const memory = memoryMb || 4096;
   args.push('--memory', `${memory}`);
 
   // Apple Container: --mount for readonly, -v for read-write

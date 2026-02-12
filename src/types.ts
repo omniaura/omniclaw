@@ -37,7 +37,7 @@ export interface ContainerProcess {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
-  memory?: number;  // Container memory in MB. Default: 2048
+  memory?: number;  // Container memory in MB. Default: 4096
 }
 
 export interface HeartbeatConfig {
