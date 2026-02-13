@@ -344,6 +344,78 @@ Use available_groups.json to find the JID for a group. The folder name should be
 );
 
 server.tool(
+  'configure_ditto_mcp',
+  `(Main only) Enable Ditto MCP (memory search) for another group. Requires DITTO_MCP_TOKEN env var on the host. Use when fulfilling share requests for Ditto memory access, or to give a group permanent access to search your Ditto memories.`,
+  {
+    target_group_folder: z.string().optional().describe('Folder name of the group (e.g. "dm-omar")'),
+    target_group_jid: z.string().optional().describe('JID of the group. Provide one of target_group_folder or target_group_jid.'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can configure Ditto MCP.' }],
+        isError: true,
+      };
+    }
+    if (!args.target_group_folder && !args.target_group_jid) {
+      return {
+        content: [{ type: 'text' as const, text: 'Provide either target_group_folder or target_group_jid.' }],
+        isError: true,
+      };
+    }
+    const data = {
+      type: 'configure_ditto_mcp',
+      target_group_folder: args.target_group_folder,
+      target_group_jid: args.target_group_jid,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return {
+      content: [{ type: 'text' as const, text: `Ditto MCP enabled for ${args.target_group_folder || args.target_group_jid}. Ensure DITTO_MCP_TOKEN is set in the host environment.` }],
+    };
+  },
+);
+
+server.tool(
+  'update_group_mounts',
+  `(Main only) Add or replace additional directory mounts for another group. Use when fulfilling share requests that ask for codebase access — e.g. when a Discord DM or other channel requests ditto-app, backend, etc. The target group will get these directories at /workspace/extra/{containerPath}. Paths must be in the host mount allowlist (~/.config/nanoclaw/mount-allowlist.json). Non-main groups get read-only mounts.`,
+  {
+    target_group_folder: z.string().optional().describe('Folder name of the group to update (e.g. "dm-omar")'),
+    target_group_jid: z.string().optional().describe('JID of the group (e.g. "dc:dm:271093458838618124"). Provide one of target_group_folder or target_group_jid.'),
+    additionalMounts: z.array(z.object({
+      hostPath: z.string().describe('Host path (e.g. "~/code/ditto-app")'),
+      containerPath: z.string().optional().describe('Name under /workspace/extra/ (defaults to basename of hostPath)'),
+      readonly: z.boolean().optional().describe('Default true for non-main groups'),
+    })).describe('List of mounts to add. Replaces any existing additionalMounts for that group.'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can update group mounts.' }],
+        isError: true,
+      };
+    }
+    if (!args.target_group_folder && !args.target_group_jid) {
+      return {
+        content: [{ type: 'text' as const, text: 'Provide either target_group_folder or target_group_jid.' }],
+        isError: true,
+      };
+    }
+    const data = {
+      type: 'update_group_mounts',
+      target_group_folder: args.target_group_folder,
+      target_group_jid: args.target_group_jid,
+      additionalMounts: args.additionalMounts,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return {
+      content: [{ type: 'text' as const, text: `Mounts queued for ${args.target_group_folder || args.target_group_jid}. The group will get them on next container spawn.` }],
+    };
+  },
+);
+
+server.tool(
   'share_request',
   'Request context or information from the admin. Use this when you need information that you don\'t have access to — for example, files from another project, context from a different group, credentials, or any data outside your workspace. The request is sent to the admin who can then share the relevant context with you.',
   {

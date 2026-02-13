@@ -221,6 +221,9 @@ export async function processTaskIpc(
     scope?: string;
     serverFolder?: string;
     discordGuildId?: string;
+    // For update_group_mounts
+    target_group_folder?: string;
+    additionalMounts?: Array<{ hostPath: string; containerPath?: string; readonly?: boolean }>;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -477,6 +480,75 @@ export async function processTaskIpc(
       logger.info(
         { targetJid, folder: targetGroup.folder, enabled: data.enabled },
         'Heartbeat configured via IPC',
+      );
+      break;
+    }
+
+    case 'configure_ditto_mcp': {
+      // Only main group can enable Ditto MCP for other groups
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized configure_ditto_mcp: only main can configure');
+        break;
+      }
+      const targetJid =
+        data.target_group_jid ||
+        data.targetJid ||
+        (data.target_group_folder
+          ? Object.entries(registeredGroups).find(([, g]) => g.folder === data.target_group_folder)?.[0]
+          : undefined);
+      if (!targetJid) {
+        logger.warn({ data }, 'configure_ditto_mcp missing target_group_jid or target_group_folder');
+        break;
+      }
+      const targetGroup = registeredGroups[targetJid];
+      if (!targetGroup) {
+        logger.warn({ targetJid }, 'configure_ditto_mcp: target group not found');
+        break;
+      }
+      const updatedGroup: RegisteredGroup = {
+        ...targetGroup,
+        containerConfig: {
+          ...targetGroup.containerConfig,
+          dittoMcpEnabled: true,
+        },
+      };
+      deps.updateGroup(targetJid, updatedGroup);
+      logger.info({ targetJid, folder: targetGroup.folder }, 'Ditto MCP enabled for group via IPC');
+      break;
+    }
+
+    case 'update_group_mounts': {
+      // Only main group can add mounts to other groups (e.g. when fulfilling share_request)
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized update_group_mounts: only main can update');
+        break;
+      }
+      const targetJid =
+        data.target_group_jid ||
+        data.targetJid ||
+        (data.target_group_folder
+          ? Object.entries(registeredGroups).find(([, g]) => g.folder === data.target_group_folder)?.[0]
+          : undefined);
+      if (!targetJid || !Array.isArray(data.additionalMounts)) {
+        logger.warn({ data }, 'update_group_mounts missing target_group_jid/target_group_folder or additionalMounts');
+        break;
+      }
+      const targetGroup = registeredGroups[targetJid];
+      if (!targetGroup) {
+        logger.warn({ targetJid }, 'update_group_mounts: target group not found');
+        break;
+      }
+      const updatedGroup: RegisteredGroup = {
+        ...targetGroup,
+        containerConfig: {
+          ...targetGroup.containerConfig,
+          additionalMounts: data.additionalMounts,
+        },
+      };
+      deps.updateGroup(targetJid, updatedGroup);
+      logger.info(
+        { targetJid, folder: targetGroup.folder, mountCount: data.additionalMounts.length },
+        'Group mounts updated via IPC',
       );
       break;
     }

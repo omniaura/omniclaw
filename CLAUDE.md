@@ -63,7 +63,7 @@ This repo is a **fork** (`omniaura/nanoclaw`) of the upstream (`qwibitai/nanocla
 - `origin` = `omniaura/nanoclaw` (our fork)
 - `upstream` = `qwibitai/nanoclaw` (the original)
 
-**NEVER open PRs directly against `qwibitai/nanoclaw` from our working branches.** Our fork has diverged (Bun runtime, Omni naming, custom integrations) — pushing fork-specific changes upstream is embarrassing and wrong.
+**NEVER open PRs directly against `qwibitai/nanoclaw` from our working branches.** Our fork has diverged (Bun runtime, OmarOmni naming, custom integrations) — pushing fork-specific changes upstream is embarrassing and wrong.
 
 When the user asks to "make a PR":
 1. **Default:** PR goes to `origin` (our fork). Merge to our `main`.

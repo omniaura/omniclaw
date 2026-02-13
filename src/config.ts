@@ -1,6 +1,6 @@
 import path from 'path';
 
-export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Omni';
+export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'OmarOmni';
 export const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || '';
 export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 export const TELEGRAM_ONLY = process.env.TELEGRAM_ONLY === 'true';

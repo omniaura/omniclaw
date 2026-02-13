@@ -64,6 +64,12 @@ export class WhatsAppChannel implements Channel {
       printQRInTerminal: false,
       logger,
       browser: ['NanoClaw', 'Chrome', '1.0.0'],
+      // Disable history sync — we only need new messages, not chat history.
+      // This avoids the AwaitingInitialSync timeout loop and connection churn.
+      shouldSyncHistoryMessage: () => false,
+      syncFullHistory: false,
+      keepAliveIntervalMs: 30_000,
+      connectTimeoutMs: 60_000,
     });
 
     this.sock.ev.on('connection.update', (update) => {
@@ -84,15 +90,19 @@ export class WhatsAppChannel implements Channel {
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          // 428 = Precondition Required — often server-side timeout; wait longer before retry
+          const delayMs = reason === 428 ? 15_000 : 2000;
+          logger.info({ delayMs }, 'Reconnecting...');
+          setTimeout(() => {
+            this.connectInternal().catch((err) => {
+              logger.error({ err }, 'Failed to reconnect, retrying in 10s');
+              setTimeout(() => {
+                this.connectInternal().catch((err2) => {
+                  logger.error({ err: err2 }, 'Reconnection retry failed');
+                });
+              }, 10_000);
+            });
+          }, delayMs);
         } else {
           logger.info('Logged out. Run /setup to re-authenticate.');
           process.exit(0);

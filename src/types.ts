@@ -1,3 +1,5 @@
+import { ChildProcess } from 'child_process';
+
 export interface AdditionalMount {
   hostPath: string; // Absolute path on host (supports ~ for home)
   containerPath?: string; // Optional — defaults to basename of hostPath. Mounted at /workspace/extra/{value}
@@ -27,16 +29,16 @@ export interface AllowedRoot {
   description?: string;
 }
 
-/** Minimal process interface compatible with Bun.spawn's Subprocess */
-export interface ContainerProcess {
-  readonly killed: boolean;
-  kill(signal?: number | string): void;
-  readonly pid: number;
-}
+/** Alias for container process (Apple Container uses Node's ChildProcess) */
+export type ContainerProcess = ChildProcess;
 
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  /** Mount the project root at /workspace/project (same as main group). For Discord/other channels that need code access. */
+  projectAccess?: boolean;
+  /** Enable Ditto MCP (memory search) for this group. Requires DITTO_MCP_TOKEN env var on host. */
+  dittoMcpEnabled?: boolean;
 }
 
 export interface HeartbeatConfig {

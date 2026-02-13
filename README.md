@@ -54,22 +54,23 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 - **Container isolation** - Agents sandboxed in Apple Container (macOS) or Docker (macOS/Linux)
 - **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks (first personal AI assistant to support this)
 - **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
+- **Ditto MCP** - Give specific groups (e.g. Discord DM) access to search your [Ditto](https://heyditto.ai) memories. Set `DITTO_MCP_TOKEN` in `.env` and run `just enable-ditto-mcp dm-omar` (or your group folder)
 
 ## Usage
 
-Talk to your assistant with the trigger word (default: `@Omni`):
+Talk to your assistant with the trigger word (default: `@OmarOmni`):
 
 ```
-@Omni send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
-@Omni review the git history for the past week each Friday and update the README if there's drift
-@Omni every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
+@OmarOmni send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
+@OmarOmni review the git history for the past week each Friday and update the README if there's drift
+@OmarOmni every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
 ```
 
 From the main channel (your self-chat), you can manage groups and tasks:
 ```
-@Omni list all scheduled tasks across groups
-@Omni pause the Monday briefing task
-@Omni join the Family Chat group
+@OmarOmni list all scheduled tasks across groups
+@OmarOmni pause the Monday briefing task
+@OmarOmni join the Family Chat group
 ```
 
 ## Customizing

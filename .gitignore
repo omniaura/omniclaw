@@ -9,18 +9,26 @@ store/
 data/
 logs/
 
-# Groups - track templates only, runtime CLAUDE.md files are agent-managed
+# Groups - track CLAUDE.md as canonical; omar-knowledge and group folders
 groups/*
 !groups/main/
 !groups/global/
+!groups/dm-omar/
+!groups/ditto-discord/
+!groups/omar-discord/
+groups/ditto-discord/repos/
 groups/main/*
 groups/global/*
-!groups/main/CLAUDE.md.template
-!groups/global/CLAUDE.md.template
+!groups/main/CLAUDE.md
+!groups/global/CLAUDE.md
 
-# Secrets
+# Secrets & local config
+.mcp.json
 *.keys.json
 .env
+
+# Knowledge packets (agent context - often personal/sensitive)
+groups/omar-knowledge/
 
 # SQLite databases
 *.db

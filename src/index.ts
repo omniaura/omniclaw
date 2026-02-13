@@ -1,6 +1,24 @@
-import { $ } from 'bun';
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+
+// Load .env for launchd (which doesn't inherit shell env). Must run before config imports.
+try {
+  const envPath = path.join(process.cwd(), '.env');
+  if (fs.existsSync(envPath)) {
+    const content = fs.readFileSync(envPath, 'utf-8');
+    for (const line of content.split('\n')) {
+      const match = line.match(/^([^#=]+)=(.*)$/);
+      if (match) {
+        const key = match[1].trim();
+        const val = match[2].trim();
+        if (!process.env[key]) process.env[key] = val;
+      }
+    }
+  }
+} catch {
+  /* ignore */
+}
 
 import {
   ASSISTANT_NAME,
@@ -49,6 +67,8 @@ let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
+/** Last message timestamp we piped to active container — only advance lastAgentTimestamp on result */
+let lastPipedTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 let whatsapp: WhatsAppChannel;
@@ -275,13 +295,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const prompt = formatMessages(missedMessages);
+  const lastMessageTimestamp = missedMessages[missedMessages.length - 1].timestamp;
 
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
-  // these messages. Save the old cursor so we can roll back on error.
+  // Don't advance cursor here — only advance when we get a successful result.
+  // This fixes "responds to one then stops": if container crashes before processing,
+  // we can retry. See DEBUG_CHECKLIST #3.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
 
   logger.info(
     { group: group.name, messageCount: missedMessages.length },
@@ -306,17 +325,49 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
+    logger.info(
+      {
+        group: group.name,
+        chatJid,
+        hasResult: !!result.result,
+        status: result.status,
+        resultType: typeof result.result,
+      },
+      'onOutput received',
+    );
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text && channel) {
-        const formatted = formatOutbound(channel, text);
-        if (formatted) {
-          await channel.sendMessage(chatJid, formatted);
-          outputSentToUser = true;
+
+      // Don't send API/internal errors to the user — treat as failure for cursor rollback
+      const isApiError =
+        /^API Error:\s*\d+|invalid_request_error|tool_use_id|tool_result/.test(text) ||
+        result.status === 'error';
+      if (isApiError) {
+        hadError = true;
+        logger.info({ group: group.name, textPreview: text.slice(0, 100) }, 'Skipping send: API error');
+      } else {
+        if (text && channel) {
+          const formatted = formatOutbound(channel, text);
+          if (formatted) {
+            logger.info({ group: group.name, chatJid, formattedLen: formatted.length }, 'Discord message sent');
+            await channel.sendMessage(chatJid, formatted);
+            outputSentToUser = true;
+          } else {
+            logger.info({ group: group.name }, 'Skipping send: formatOutbound returned empty');
+          }
+        } else {
+          logger.info(
+            { group: group.name, hasText: !!text, hasChannel: !!channel, textLen: text?.length ?? 0 },
+            'Skipping send: no text or channel',
+          );
         }
+        // Advance cursor only on successful result — enables retry if container crashes later
+        const advanceTo = lastPipedTimestamp[chatJid] || lastMessageTimestamp;
+        lastAgentTimestamp[chatJid] = advanceTo;
+        saveState();
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -329,6 +380,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (channel?.setTyping) await channel.setTyping(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  // Container is exiting — clear piped cursor for next run
+  delete lastPipedTimestamp[chatJid];
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -393,6 +447,19 @@ async function runAgent(
     : undefined;
 
   try {
+    const wantsDittoMcp = isMain || group.containerConfig?.dittoMcpEnabled;
+    const dittoMcpToken =
+      wantsDittoMcp && process.env.DITTO_MCP_TOKEN
+        ? process.env.DITTO_MCP_TOKEN
+        : undefined;
+
+    if (wantsDittoMcp && !dittoMcpToken) {
+      logger.warn(
+        { group: group.folder },
+        'Ditto MCP requested but DITTO_MCP_TOKEN not set — add to .env and restart',
+      );
+    }
+
     const output = await runContainerAgent(
       group,
       {
@@ -403,6 +470,7 @@ async function runAgent(
         isMain,
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
+        dittoMcpToken,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
@@ -490,19 +558,31 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend);
 
-          if (queue.sendMessage(chatJid, formatted)) {
-            logger.debug(
-              { chatJid, count: messagesToSend.length },
-              'Piped messages to active container',
-            );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
-          } else {
-            // No active container — enqueue for a new one
-            queue.enqueueMessageCheck(chatJid);
+          // Only pipe messages we haven't piped yet (avoid duplicates)
+          const pipedCursor = lastPipedTimestamp[chatJid] || '';
+          const toPipe = pipedCursor
+            ? messagesToSend.filter((m) => m.timestamp > pipedCursor)
+            : messagesToSend;
+
+          if (toPipe.length > 0) {
+            const piped = queue.sendMessage(chatJid, formatMessages(toPipe));
+            if (piped) {
+              lastPipedTimestamp[chatJid] =
+                toPipe[toPipe.length - 1].timestamp;
+              logger.info(
+                { group: group.name, chatJid, count: toPipe.length },
+                'Piped messages to active container',
+              );
+            } else {
+              // Had messages to pipe but no active container — enqueue for new one
+              delete lastPipedTimestamp[chatJid];
+              logger.info(
+                { group: group.name, chatJid, count: toPipe.length },
+                'No active container, enqueueing for new one',
+              );
+              queue.enqueueMessageCheck(chatJid);
+            }
           }
         }
       }
@@ -531,64 +611,45 @@ function recoverPendingMessages(): void {
   }
 }
 
-async function ensureContainerSystemRunning(): Promise<void> {
-  const status = await $`container system status`.quiet().nothrow();
-  if (status.exitCode !== 0) {
-    logger.info('Starting Apple Container system...');
-    const start = await $`container system start`.quiet().nothrow();
-    if (start.exitCode !== 0) {
-      logger.error({ stderr: start.stderr.toString() }, 'Failed to start Apple Container system');
-      console.error(
-        '\n╔════════════════════════════════════════════════════════════════╗',
-      );
-      console.error(
-        '║  FATAL: Apple Container system failed to start                 ║',
-      );
-      console.error(
-        '║                                                                ║',
-      );
-      console.error(
-        '║  Agents cannot run without Apple Container. To fix:           ║',
-      );
-      console.error(
-        '║  1. Install from: https://github.com/apple/container/releases ║',
-      );
-      console.error(
-        '║  2. Run: container system start                               ║',
-      );
-      console.error(
-        '║  3. Restart NanoClaw                                          ║',
-      );
-      console.error(
-        '╚════════════════════════════════════════════════════════════════╝\n',
-      );
-      throw new Error('Apple Container system is required but failed to start');
-    }
-    logger.info('Apple Container system started');
-  } else {
-    logger.debug('Apple Container system already running');
+async function ensureContainerReady(): Promise<void> {
+  try {
+    execSync('container --version', { stdio: 'pipe' });
+    logger.debug('Apple Container CLI is available');
+  } catch {
+    logger.error('Apple Container CLI is not available');
+    console.error(
+      '\n╔════════════════════════════════════════════════════════════════╗',
+    );
+    console.error(
+      '║  FATAL: Apple Container CLI is not installed or not in PATH    ║',
+    );
+    console.error(
+      '║                                                                ║',
+    );
+    console.error(
+      '║  Agents require Apple Container (macOS 15+). To fix:           ║',
+    );
+    console.error(
+      '║  brew install container                                       ║',
+    );
+    console.error(
+      '║                                                                ║',
+    );
+    console.error(
+      '║  See: https://developer.apple.com/documentation/virtualization ║',
+    );
+    console.error(
+      '╚════════════════════════════════════════════════════════════════╝\n',
+    );
+    throw new Error('Apple Container CLI is required but not available');
   }
 
-  // Kill and clean up orphaned NanoClaw containers from previous runs
-  try {
-    const lsResult = await $`container ls --format json`.quiet();
-    const containers: { status: string; configuration: { id: string } }[] = JSON.parse(lsResult.text() || '[]');
-    const orphans = containers
-      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
-      .map((c) => c.configuration.id);
-    for (const name of orphans) {
-      await $`container stop ${name}`.quiet().nothrow();
-    }
-    if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
-    }
-  } catch (err) {
-    logger.warn({ err }, 'Failed to clean up orphaned containers');
-  }
+  // Apple Container uses --rm so containers auto-remove on exit.
+  // No orphan cleanup needed.
 }
 
 async function main(): Promise<void> {
-  await ensureContainerSystemRunning();
+  await ensureContainerReady();
   initDatabase();
   logger.info('Database initialized');
   loadState();
@@ -638,6 +699,8 @@ async function main(): Promise<void> {
         `${request.description}`,
         ``,
         `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
+        `If sharing code repos (e.g. ditto-app, backend), use update_group_mounts with target_group_folder: "${request.sourceGroup}" and additionalMounts (e.g. hostPath: "~/code/ditto-app", containerPath: "ditto-app"). Paths must be in the mount allowlist.`,
+        `If the request is for Ditto MCP (memory search), use configure_ditto_mcp with target_group_folder: "${request.sourceGroup}". Ensure DITTO_MCP_TOKEN is set in the host environment.`,
         `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
       ].join('\n');
 
@@ -711,7 +774,7 @@ async function main(): Promise<void> {
         id: `notify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         chat_jid: jid,
         sender: 'system',
-        sender_name: 'Omni (Main)',
+        sender_name: 'OmarOmni (Main)',
         content: `${trigger} ${text}`,
         timestamp: new Date().toISOString(),
         is_from_me: false,

@@ -253,6 +253,11 @@ async function runTask(
   };
 
   try {
+    const dittoMcpToken =
+      (isMain || group.containerConfig?.dittoMcpEnabled) && process.env.DITTO_MCP_TOKEN
+        ? process.env.DITTO_MCP_TOKEN
+        : undefined;
+
     const output = await runContainerAgent(
       group,
       {
@@ -264,6 +269,7 @@ async function runTask(
         isScheduledTask: true,
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
+        dittoMcpToken,
       },
       (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {

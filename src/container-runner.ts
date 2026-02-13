@@ -67,7 +67,7 @@ function buildVolumeMounts(
   const homeDir = getHomeDir();
   const projectRoot = process.cwd();
 
-  const hasProjectAccess = isMain || group.containerConfig?.projectAccess === true;
+  const hasProjectAccess = isMain || !!group.containerConfig?.projectAccess;
 
   if (isMain) {
     // Main gets the entire project root mounted
@@ -368,6 +368,16 @@ export async function runContainerAgent(
 
           try {
             const parsed: ContainerOutput = JSON.parse(jsonStr);
+            logger.info(
+              {
+                group: group.name,
+                status: parsed.status,
+                hasResult: !!parsed.result,
+                resultLen: typeof parsed.result === 'string' ? parsed.result.length : 0,
+                resultPreview: typeof parsed.result === 'string' ? parsed.result.slice(0, 80) : String(parsed.result),
+              },
+              'Parsed container output',
+            );
             if (parsed.newSessionId) {
               newSessionId = parsed.newSessionId;
             }
