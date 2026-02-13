@@ -1,0 +1,3 @@
+[test]
+# Run this file before all tests to set up environment
+preload = ["./test-setup.ts"]
