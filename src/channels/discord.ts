@@ -69,22 +69,29 @@ export class DiscordChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    const channelId = jidToChannelId(jid);
-    if (!channelId) {
-      logger.warn({ jid }, 'Cannot resolve Discord channel ID from JID');
+    const isDM = jid.startsWith('dc:dm:');
+    const channelOrUserId = jidToChannelId(jid);
+    if (!channelOrUserId) {
+      logger.warn({ jid }, 'Cannot resolve Discord channel/user ID from JID');
       return;
     }
 
     try {
-      const channel = await this.client.channels.fetch(channelId);
-      if (!channel || !('send' in channel)) {
-        logger.warn({ jid, channelId }, 'Discord channel not found or not sendable');
-        return;
-      }
-
       const chunks = splitMessage(text, 2000);
-      for (const chunk of chunks) {
-        await (channel as TextChannel | DMChannel).send(chunk);
+      if (isDM) {
+        // For DMs, channelOrUserId is the user ID — use users.send (creates DM if needed)
+        for (const chunk of chunks) {
+          await this.client.users.send(channelOrUserId, chunk);
+        }
+      } else {
+        const channel = await this.client.channels.fetch(channelOrUserId);
+        if (!channel || !('send' in channel)) {
+          logger.warn({ jid, channelId: channelOrUserId }, 'Discord channel not found or not sendable');
+          return;
+        }
+        for (const chunk of chunks) {
+          await (channel as TextChannel | DMChannel).send(chunk);
+        }
       }
       logger.info({ jid, length: text.length }, 'Discord message sent');
     } catch (err) {
@@ -137,13 +144,18 @@ export class DiscordChannel implements Channel {
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!isTyping) return; // Discord typing auto-expires
-    const channelId = jidToChannelId(jid);
-    if (!channelId) return;
+    const channelOrUserId = jidToChannelId(jid);
+    if (!channelOrUserId) return;
 
     try {
-      const channel = await this.client.channels.fetch(channelId);
+      let channel: TextChannel | DMChannel | null;
+      if (jid.startsWith('dc:dm:')) {
+        channel = await this.client.users.createDM(channelOrUserId);
+      } else {
+        channel = (await this.client.channels.fetch(channelOrUserId)) as TextChannel | DMChannel | null;
+      }
       if (channel && 'sendTyping' in channel) {
-        await (channel as TextChannel | DMChannel).sendTyping();
+        await channel.sendTyping();
       }
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Discord typing indicator');
@@ -153,8 +165,12 @@ export class DiscordChannel implements Channel {
   private async handleMessage(message: Message): Promise<void> {
     // Ignore own messages
     if (message.author.id === this.client.user?.id) return;
-    // Ignore other bots
-    if (message.author.bot) return;
+
+    const botId = this.client.user?.id;
+    const mentionsUs = botId && message.content.includes(`<@${botId}>`);
+
+    // Ignore other bots unless they explicitly mention us (enables bot-to-bot @mentions)
+    if (message.author.bot && !mentionsUs) return;
 
     const isDM = message.channel.type === ChannelType.DM;
     const chatJid = isDM
@@ -169,7 +185,6 @@ export class DiscordChannel implements Channel {
     const msgId = message.id;
 
     // Translate @bot mention into trigger format
-    const botId = this.client.user?.id;
     if (botId && content.includes(`<@${botId}>`)) {
       content = content.replace(new RegExp(`<@${botId}>`, 'g'), '').trim();
       if (!TRIGGER_PATTERN.test(content)) {
