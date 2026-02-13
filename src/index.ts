@@ -1,28 +1,42 @@
-import { $ } from 'bun';
 import fs from 'fs';
 import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  B2_ACCESS_KEY_ID,
+  B2_BUCKET,
+  B2_ENDPOINT,
+  B2_REGION,
+  B2_SECRET_ACCESS_KEY,
   DATA_DIR,
   DISCORD_BOT_TOKEN,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  SESSION_MAX_AGE,
   SLACK_APP_TOKEN,
   SLACK_BOT_TOKEN,
+  TELEGRAM_BOT_TOKEN,
   TRIGGER_PATTERN,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
 import { SlackChannel } from './channels/slack.js';
+import { TelegramChannel } from './channels/telegram.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
-  ContainerOutput,
-  runContainerAgent,
+  initializeBackends,
+  resolveBackend,
+  shutdownBackends,
+} from './backends/index.js';
+import type { ContainerOutput } from './backends/types.js';
+import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  expireStaleSessions,
+  getAllAgents,
+  getAllChannelRoutes,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -33,17 +47,23 @@ import {
   getNewMessages,
   getRouterState,
   initDatabase,
+  setAgent,
+  setChannelRoute,
   setRegisteredGroup,
   setRouterState,
   setSession,
   storeChatMetadata,
   storeMessage,
 } from './db.js';
+import { getCloudAgentIds } from './agents.js';
+import { resolveAgentForChannel, buildAgentToChannelsMap } from './channel-routes.js';
 import { GroupQueue } from './group-queue.js';
 import { consumeShareRequest, startIpcWatcher } from './ipc.js';
+import { NanoClawS3 } from './s3/client.js';
+import { startS3IpcPoller } from './s3/ipc-poller.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { reconcileHeartbeats, startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { Agent, Channel, ChannelRoute, NewMessage, RegisteredGroup, registeredGroupToAgent, registeredGroupToRoute } from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -52,11 +72,14 @@ export { escapeXml, formatMessages } from './router.js';
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
+let agents: Record<string, Agent> = {};
+let channelRoutes: Record<string, ChannelRoute> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 let whatsapp: WhatsAppChannel;
 let channels: Channel[] = [];
+let s3: NanoClawS3 | null = null;
 const queue = new GroupQueue();
 
 function loadState(): void {
@@ -70,8 +93,17 @@ function loadState(): void {
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
+
+  // Load agent-channel decoupling state (auto-migrated from registered_groups)
+  agents = getAllAgents();
+  channelRoutes = getAllChannelRoutes();
+
   logger.info(
-    { groupCount: Object.keys(registeredGroups).length },
+    {
+      groupCount: Object.keys(registeredGroups).length,
+      agentCount: Object.keys(agents).length,
+      routeCount: Object.keys(channelRoutes).length,
+    },
     'State loaded',
   );
 }
@@ -158,6 +190,15 @@ Then read the code directly — don't ask the admin to copy files for you.
   if (group.serverFolder) {
     ensureServerDirectory(group.serverFolder);
   }
+
+  // Also create Agent and ChannelRoute entries
+  const agent = registeredGroupToAgent(jid, group);
+  agents[agent.id] = agent;
+  setAgent(agent);
+
+  const route = registeredGroupToRoute(jid, group);
+  channelRoutes[jid] = route;
+  setChannelRoute(route);
 
   logger.info(
     { jid, name: group.name, folder: group.folder, serverFolder: group.serverFolder },
@@ -435,6 +476,16 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
+
+  // Expire stale sessions before each run to prevent unbounded context growth
+  const expired = expireStaleSessions(SESSION_MAX_AGE);
+  if (expired.length > 0) {
+    for (const folder of expired) {
+      delete sessions[folder];
+    }
+    logger.info({ expired, trigger: group.folder }, 'Expired stale sessions before agent run');
+  }
+
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
@@ -462,6 +513,9 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
+  // Update agent registry for all groups
+  buildAgentRegistry();
+
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
@@ -474,7 +528,8 @@ async function runAgent(
     : undefined;
 
   try {
-    const output = await runContainerAgent(
+    const backend = resolveBackend(group);
+    const output = await backend.runAgent(
       group,
       {
         prompt,
@@ -486,7 +541,7 @@ async function runAgent(
         slackWorkspaceId: group.slackWorkspaceId,
         serverFolder: group.serverFolder,
       },
-      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
+      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder, backend),
       wrappedOnOutput,
     );
 
@@ -613,72 +668,100 @@ function recoverPendingMessages(): void {
   }
 }
 
-async function ensureContainerSystemRunning(): Promise<void> {
-  const status = await $`container system status`.quiet().nothrow();
-  if (status.exitCode !== 0) {
-    logger.info('Starting Apple Container system...');
-    const start = await $`container system start`.quiet().nothrow();
-    if (start.exitCode !== 0) {
-      logger.error({ stderr: start.stderr.toString() }, 'Failed to start Apple Container system');
-      console.error(
-        '\n╔════════════════════════════════════════════════════════════════╗',
-      );
-      console.error(
-        '║  FATAL: Apple Container system failed to start                 ║',
-      );
-      console.error(
-        '║                                                                ║',
-      );
-      console.error(
-        '║  Agents cannot run without Apple Container. To fix:           ║',
-      );
-      console.error(
-        '║  1. Install from: https://github.com/apple/container/releases ║',
-      );
-      console.error(
-        '║  2. Run: container system start                               ║',
-      );
-      console.error(
-        '║  3. Restart NanoClaw                                          ║',
-      );
-      console.error(
-        '╚════════════════════════════════════════════════════════════════╝\n',
-      );
-      throw new Error('Apple Container system is required but failed to start');
+/**
+ * Build agent registry and write it to all groups' IPC dirs.
+ * Every agent can discover every other agent's name, purpose, backend, and dev URL.
+ */
+function buildAgentRegistry(): void {
+  // Build registry from agents (new system) with channel route info
+  const agentToChannels = buildAgentToChannelsMap(channelRoutes);
+
+  const registry = Object.values(agents).map((agent) => {
+    const jids = agentToChannels.get(agent.id) || [];
+    // Get trigger from first route for backwards compat
+    const firstRoute = jids.length > 0 ? channelRoutes[jids[0]] : undefined;
+    return {
+      id: agent.id,
+      jid: jids[0] || agent.id, // Primary JID
+      jids, // All JIDs
+      name: agent.name,
+      description: agent.description || '',
+      backend: agent.backend,
+      isMain: agent.isAdmin,
+      isLocal: agent.isLocal,
+      trigger: firstRoute?.trigger || `@${ASSISTANT_NAME}`,
+    };
+  });
+
+  // Fallback: also include registered groups not yet in agents table
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (!agents[group.folder]) {
+      registry.push({
+        id: group.folder,
+        jid,
+        jids: [jid],
+        name: group.name,
+        description: group.description || '',
+        backend: group.backend || 'apple-container',
+        isMain: group.folder === MAIN_GROUP_FOLDER,
+        isLocal: !group.backend || group.backend === 'apple-container' || group.backend === 'docker',
+        trigger: group.trigger,
+      });
     }
-    logger.info('Apple Container system started');
-  } else {
-    logger.debug('Apple Container system already running');
   }
 
-  // Kill and clean up orphaned NanoClaw containers from previous runs
-  try {
-    const lsResult = await $`container ls --format json`.quiet();
-    const containers: { status: string; configuration: { id: string } }[] = JSON.parse(lsResult.text() || '[]');
-    const orphans = containers
-      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
-      .map((c) => c.configuration.id);
-    for (const name of orphans) {
-      await $`container stop ${name}`.quiet().nothrow();
-    }
-    if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
-    }
-  } catch (err) {
-    logger.warn({ err }, 'Failed to clean up orphaned containers');
+  const registryJson = JSON.stringify(registry, null, 2);
+
+  // Write to ALL agents' IPC dirs
+  const folders = new Set<string>();
+  for (const agent of Object.values(agents)) {
+    folders.add(agent.folder);
+  }
+  for (const group of Object.values(registeredGroups)) {
+    folders.add(group.folder);
+  }
+
+  for (const folder of folders) {
+    const groupIpcDir = path.join(DATA_DIR, 'ipc', folder);
+    fs.mkdirSync(groupIpcDir, { recursive: true });
+    fs.writeFileSync(path.join(groupIpcDir, 'agent_registry.json'), registryJson);
   }
 }
 
 async function main(): Promise<void> {
-  await ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
+
+  // Initialize S3 client if B2 is configured
+  if (B2_ENDPOINT) {
+    s3 = new NanoClawS3({
+      endpoint: B2_ENDPOINT,
+      accessKeyId: B2_ACCESS_KEY_ID,
+      secretAccessKey: B2_SECRET_ACCESS_KEY,
+      bucket: B2_BUCKET,
+      region: B2_REGION,
+    });
+    logger.info('B2 S3 client initialized');
+  }
+
+  // Initialize all backends needed by registered groups and agents
+  await initializeBackends(registeredGroups);
+
+  // Expire stale sessions on startup to prevent unbounded context growth
+  const expired = expireStaleSessions(SESSION_MAX_AGE);
+  if (expired.length > 0) {
+    for (const folder of expired) {
+      delete sessions[folder];
+    }
+    logger.info({ expired }, 'Expired stale sessions on startup');
+  }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
+    await shutdownBackends();
     for (const ch of channels) {
       await ch.disconnect();
     }
@@ -745,7 +828,85 @@ async function main(): Promise<void> {
   // Conditionally connect Discord
   if (DISCORD_BOT_TOKEN) {
     try {
-      const discord = new DiscordChannel(DISCORD_BOT_TOKEN);
+      const discord = new DiscordChannel({
+        token: DISCORD_BOT_TOKEN,
+        onReaction: (chatJid, messageId, emoji) => {
+          // Only handle approval emojis
+          if (!emoji.startsWith('👍') && emoji !== '❤️' && emoji !== '✅') return;
+
+          // 1. Check for share_request approval first
+          const request = consumeShareRequest(messageId);
+          if (request) {
+            const mainJid = Object.entries(registeredGroups).find(
+              ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+            )?.[0];
+            if (!mainJid) return;
+
+            logger.info(
+              { messageId, emoji, sourceGroup: request.sourceGroup, sourceName: request.sourceName },
+              'Share request approved via Discord reaction',
+            );
+
+            const writePaths = request.serverFolder
+              ? `groups/${request.sourceGroup}/CLAUDE.md and/or groups/${request.serverFolder}/CLAUDE.md`
+              : `groups/${request.sourceGroup}/CLAUDE.md`;
+            const syntheticContent = [
+              `Share request APPROVED from ${request.sourceName} (${request.sourceJid}):`,
+              '',
+              `${request.description}`,
+              '',
+              `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
+              `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
+            ].join('\n');
+
+            storeMessage({
+              id: `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              chat_jid: mainJid,
+              sender: 'system',
+              sender_name: 'System',
+              content: syntheticContent,
+              timestamp: new Date().toISOString(),
+              is_from_me: false,
+            });
+
+            queue.enqueueMessageCheck(mainJid);
+            return;
+          }
+
+          // 2. Generic approval: pipe to active container or store as synthetic message
+          const group = registeredGroups[chatJid];
+          if (!group) return;
+
+          logger.info(
+            { chatJid, messageId, emoji, group: group.name },
+            'Reaction approval on bot message in Discord',
+          );
+
+          const approvalContent = `@${ASSISTANT_NAME} [Approved via reaction] Proceed with the plan.`;
+
+          // Try to pipe directly to active container
+          if (!queue.sendMessage(chatJid, formatMessages([{
+            id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            chat_jid: chatJid,
+            sender: 'system',
+            sender_name: 'System',
+            content: approvalContent,
+            timestamp: new Date().toISOString(),
+          }]))) {
+            // No active container — store in DB and enqueue
+            storeMessage({
+              id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              chat_jid: chatJid,
+              sender: 'system',
+              sender_name: 'System',
+              content: approvalContent,
+              timestamp: new Date().toISOString(),
+              is_from_me: false,
+            });
+            queue.enqueueMessageCheck(chatJid);
+          }
+        },
+      });
       await discord.connect();
       channels.push(discord);
 
@@ -767,6 +928,21 @@ async function main(): Promise<void> {
       await backfillSlackWorkspaceIds(slack);
     } catch (err) {
       logger.error({ err }, 'Failed to connect Slack bot (continuing without Slack)');
+    }
+  }
+
+  // Conditionally connect Telegram
+  if (TELEGRAM_BOT_TOKEN) {
+    try {
+      const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, {
+        onMessage: (chatJid, msg) => storeMessage(msg),
+        onChatMetadata: (chatJid, timestamp, name) => storeChatMetadata(chatJid, timestamp, name),
+        registeredGroups: () => registeredGroups,
+      });
+      await telegram.connect();
+      channels.push(telegram);
+    } catch (err) {
+      logger.error({ err }, 'Failed to connect Telegram bot (continuing without Telegram)');
     }
   }
 
@@ -824,6 +1000,96 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
+  // Start S3 IPC poller for cloud agents (if B2 is configured)
+  if (s3) {
+    startS3IpcPoller({
+      s3,
+      getCloudAgentIds,
+      processOutput: async (agentId, output) => {
+        // Find the channel route(s) for this agent
+        const agentToChannels = buildAgentToChannelsMap(channelRoutes);
+        const jids = agentToChannels.get(agentId) || [];
+        const targetJid = output.targetChannelJid || jids[0];
+
+        if (targetJid && output.result) {
+          const ch = findChannel(channels, targetJid);
+          if (ch) {
+            const text = formatOutbound(ch, output.result);
+            if (text) await ch.sendMessage(targetJid, text);
+          }
+        }
+
+        if (output.newSessionId) {
+          sessions[agentId] = output.newSessionId;
+          setSession(agentId, output.newSessionId);
+        }
+      },
+      processMessage: async (sourceAgentId, data) => {
+        if (data.type === 'message' && data.chatJid && data.text) {
+          const targetGroup = registeredGroups[data.chatJid];
+          const isRegisteredTarget = !!targetGroup;
+          const isMain = sourceAgentId === MAIN_GROUP_FOLDER;
+          if (isMain || isRegisteredTarget) {
+            const ch = findChannel(channels, data.chatJid);
+            if (ch) {
+              const text = formatOutbound(ch, data.text);
+              if (text) await ch.sendMessage(data.chatJid, text);
+            }
+            // Cross-agent: wake up the target agent
+            if (targetGroup && targetGroup.folder !== sourceAgentId) {
+              const trigger = targetGroup.trigger || `@${ASSISTANT_NAME}`;
+              storeMessage({
+                id: `s3-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                chat_jid: data.chatJid,
+                sender: 'system',
+                sender_name: `${agents[sourceAgentId]?.name || sourceAgentId}`,
+                content: `${trigger} ${data.text}`,
+                timestamp: new Date().toISOString(),
+                is_from_me: false,
+              });
+              queue.enqueueMessageCheck(data.chatJid);
+            }
+          }
+        }
+      },
+      processTask: async (sourceAgentId, isAdmin, data) => {
+        const { processTaskIpc } = await import('./ipc.js');
+        await processTaskIpc(data, sourceAgentId, isAdmin, {
+          sendMessage: async (jid, rawText) => {
+            const ch = findChannel(channels, jid);
+            if (!ch) return;
+            const text = formatOutbound(ch, rawText);
+            if (text) return await ch.sendMessage(jid, text);
+          },
+          notifyGroup: (jid, text) => {
+            const group = registeredGroups[jid];
+            const trigger = group?.trigger || `@${ASSISTANT_NAME}`;
+            storeMessage({
+              id: `notify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              chat_jid: jid,
+              sender: 'system',
+              sender_name: `${agents[sourceAgentId]?.name || sourceAgentId}`,
+              content: `${trigger} ${text}`,
+              timestamp: new Date().toISOString(),
+              is_from_me: false,
+            });
+            queue.enqueueMessageCheck(jid);
+          },
+          registeredGroups: () => registeredGroups,
+          registerGroup,
+          updateGroup: (jid, group) => {
+            registeredGroups[jid] = group;
+            setRegisteredGroup(jid, group);
+          },
+          syncGroupMetadata: (force) => whatsapp.syncGroupMetadata(force),
+          getAvailableGroups,
+          writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+        });
+      },
+      isAdmin: (agentId) => agents[agentId]?.isAdmin ?? false,
+    });
+  }
+
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop();

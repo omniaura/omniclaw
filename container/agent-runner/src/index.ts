@@ -63,6 +63,59 @@ const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 
+// S3 mode detection: if NANOCLAW_S3_ENDPOINT is set, use S3 for output instead of stdout
+const S3_ENDPOINT = process.env.NANOCLAW_S3_ENDPOINT || '';
+const S3_ACCESS_KEY_ID = process.env.NANOCLAW_S3_ACCESS_KEY_ID || '';
+const S3_SECRET_ACCESS_KEY = process.env.NANOCLAW_S3_SECRET_ACCESS_KEY || '';
+const S3_BUCKET = process.env.NANOCLAW_S3_BUCKET || '';
+const S3_REGION = process.env.NANOCLAW_S3_REGION || '';
+const S3_AGENT_ID = process.env.NANOCLAW_AGENT_ID || '';
+const IS_S3_MODE = !!S3_ENDPOINT;
+
+let s3Client: any = null;
+
+function getS3Client() {
+  if (s3Client) return s3Client;
+  if (!IS_S3_MODE) return null;
+  // Use Bun.S3Client for S3 mode
+  s3Client = new (globalThis as any).Bun.S3Client({
+    endpoint: S3_ENDPOINT,
+    accessKeyId: S3_ACCESS_KEY_ID,
+    secretAccessKey: S3_SECRET_ACCESS_KEY,
+    bucket: S3_BUCKET,
+    region: S3_REGION || undefined,
+  });
+  return s3Client;
+}
+
+async function writeS3Output(output: ContainerOutput): Promise<void> {
+  const client = getS3Client();
+  if (!client) return;
+
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const key = `agents/${S3_AGENT_ID}/outbox/${new Date().toISOString()}-${id}.json`;
+  const data = JSON.stringify({
+    id,
+    timestamp: new Date().toISOString(),
+    agentId: S3_AGENT_ID,
+    status: output.status,
+    result: output.result,
+    newSessionId: output.newSessionId,
+    error: output.error,
+  });
+  await client.write(key, data);
+  log(`S3 output written: ${key}`);
+}
+
+async function writeS3Ipc(dir: string, data: object): Promise<void> {
+  const client = getS3Client();
+  if (!client) return;
+
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const key = `agents/${S3_AGENT_ID}/ipc/${dir}/${id}.json`;
+  await client.write(key, JSON.stringify(data));
+}
+
 /**
  * Push-based async iterable for streaming user messages to the SDK.
  * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
@@ -113,9 +166,21 @@ const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 function writeOutput(output: ContainerOutput): void {
-  console.log(OUTPUT_START_MARKER);
-  console.log(JSON.stringify(output));
-  console.log(OUTPUT_END_MARKER);
+  if (IS_S3_MODE) {
+    // S3 mode: write to S3 outbox instead of stdout
+    writeS3Output(output).catch((err) => {
+      log(`Failed to write S3 output: ${err instanceof Error ? err.message : String(err)}`);
+      // Fallback to stdout
+      console.log(OUTPUT_START_MARKER);
+      console.log(JSON.stringify(output));
+      console.log(OUTPUT_END_MARKER);
+    });
+  } else {
+    // Stdout mode: use markers (local/Daytona)
+    console.log(OUTPUT_START_MARKER);
+    console.log(JSON.stringify(output));
+    console.log(OUTPUT_END_MARKER);
+  }
 }
 
 function log(message: string): void {
@@ -482,7 +547,38 @@ async function runQuery(
   })) {
     messageCount++;
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
-    log(`[msg #${messageCount}] type=${msgType}`);
+    // Log tool calls from assistant messages for observability
+    if (message.type === 'assistant' && 'message' in message) {
+      const content = (message as any).message?.content;
+      if (Array.isArray(content)) {
+        const tools = content.filter((c: any) => c.type === 'tool_use');
+        const texts = content.filter((c: any) => c.type === 'text');
+        if (tools.length > 0) {
+          for (const tool of tools) {
+            const input = tool.input || {};
+            const summary = tool.name === 'Bash' ? (input.command || '').slice(0, 120)
+              : tool.name === 'Read' ? input.file_path
+              : tool.name === 'Write' ? input.file_path
+              : tool.name === 'Edit' ? input.file_path
+              : tool.name === 'Grep' ? `${input.pattern} ${input.path || ''}`
+              : tool.name === 'Glob' ? input.pattern
+              : tool.name === 'Task' ? input.description
+              : tool.name === 'WebFetch' ? input.url
+              : tool.name === 'WebSearch' ? input.query
+              : JSON.stringify(input).slice(0, 80);
+            log(`[msg #${messageCount}] tool=${tool.name} ${summary}`);
+          }
+        }
+        if (texts.length > 0) {
+          const textPreview = texts.map((t: any) => t.text).join('').slice(0, 120);
+          if (textPreview.trim()) {
+            log(`[msg #${messageCount}] text="${textPreview}"`);
+          }
+        }
+      }
+    } else {
+      log(`[msg #${messageCount}] type=${msgType}`);
+    }
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
@@ -501,7 +597,8 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      const rm = message as any;
+      log(`Result #${resultCount}: subtype=${message.subtype} turns=${rm.num_turns || '?'} duration=${rm.duration_ms || '?'}ms cost=$${rm.total_cost_usd?.toFixed(4) || '?'}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
         result: textResult || null,

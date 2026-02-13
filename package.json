@@ -16,7 +16,7 @@
     "test:watch": "bun test --watch"
   },
   "dependencies": {
-    "@slack/bolt": "^4.6.0",
+    "@daytonaio/sdk": "^0.142.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "cron-parser": "^5.5.0",
     "discord.js": "^14.16.0",
