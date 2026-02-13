@@ -276,6 +276,7 @@ export async function processTaskIpc(
     name?: string;
     folder?: string;
     trigger?: string;
+    requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
     discord_guild_id?: string;
     // For configure_heartbeat
@@ -495,6 +496,7 @@ export async function processTaskIpc(
           containerConfig: data.containerConfig,
           backend: data.backend,
           description: data.group_description,
+          requiresTrigger: data.requiresTrigger,
         };
 
         // If a Discord guild ID is provided, set it and compute serverFolder

@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import makeWASocket, {
+  Browsers,
   DisconnectReason,
   WASocket,
   makeCacheableSignalKeyStore,
@@ -63,7 +64,7 @@ export class WhatsAppChannel implements Channel {
       },
       printQRInTerminal: false,
       logger,
-      browser: ['NanoClaw', 'Chrome', '1.0.0'],
+      browser: Browsers.macOS('Chrome'),
     });
 
     this.sock.ev.on('connection.update', (update) => {
@@ -100,6 +101,9 @@ export class WhatsAppChannel implements Channel {
       } else if (connection === 'open') {
         this.connected = true;
         logger.info('Connected to WhatsApp');
+
+        // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
+        this.sock.sendPresenceUpdate('available').catch(() => {});
 
         // Build LID to phone mapping from auth state for self-chat translation
         if (this.sock.user) {
@@ -140,14 +144,14 @@ export class WhatsAppChannel implements Channel {
 
     this.sock.ev.on('creds.update', saveCreds);
 
-    this.sock.ev.on('messages.upsert', ({ messages }) => {
+    this.sock.ev.on('messages.upsert', async ({ messages }) => {
       for (const msg of messages) {
         if (!msg.message) continue;
         const rawJid = msg.key.remoteJid;
         if (!rawJid || rawJid === 'status@broadcast') continue;
 
         // Translate LID JID to phone JID if applicable
-        const chatJid = this.translateJid(rawJid);
+        const chatJid = await this.translateJid(rawJid);
 
         const timestamp = new Date(
           Number(msg.messageTimestamp) * 1000,
@@ -222,7 +226,7 @@ export class WhatsAppChannel implements Channel {
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     try {
-      await this.sock.sendPresenceUpdate(isTyping ? 'composing' : 'paused', jid);
+      await this.sock.sendPresenceUpdate(isTyping ? 'composing' : 'available', jid);
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to update typing status');
     }
@@ -264,14 +268,30 @@ export class WhatsAppChannel implements Channel {
     }
   }
 
-  private translateJid(jid: string): string {
+  private async translateJid(jid: string): Promise<string> {
     if (!jid.endsWith('@lid')) return jid;
     const lidUser = jid.split('@')[0].split(':')[0];
-    const phoneJid = this.lidToPhoneMap[lidUser];
-    if (phoneJid) {
-      logger.debug({ lidJid: jid, phoneJid }, 'Translated LID to phone JID');
-      return phoneJid;
+
+    // Check local cache first
+    const cached = this.lidToPhoneMap[lidUser];
+    if (cached) {
+      logger.debug({ lidJid: jid, phoneJid: cached }, 'Translated LID to phone JID (cached)');
+      return cached;
     }
+
+    // Query Baileys' signal repository for the mapping
+    try {
+      const pn = await this.sock.signalRepository?.lidMapping?.getPNForLID(jid);
+      if (pn) {
+        const phoneJid = `${pn.split('@')[0].split(':')[0]}@s.whatsapp.net`;
+        this.lidToPhoneMap[lidUser] = phoneJid;
+        logger.info({ lidJid: jid, phoneJid }, 'Translated LID to phone JID (signalRepository)');
+        return phoneJid;
+      }
+    } catch (err) {
+      logger.debug({ err, jid }, 'Failed to resolve LID via signalRepository');
+    }
+
     return jid;
   }
 
