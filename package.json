@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@daytonaio/sdk": "^0.142.0",
+    "@slack/bolt": "^4.6.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "cron-parser": "^5.5.0",
     "discord.js": "^14.16.0",
