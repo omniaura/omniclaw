@@ -44,6 +44,14 @@ export const IDLE_TIMEOUT = parseInt(
   process.env.IDLE_TIMEOUT || '1800000',
   10,
 ); // 30min default — how long to keep container alive after last result
+export const CONTAINER_STARTUP_TIMEOUT = parseInt(
+  process.env.CONTAINER_STARTUP_TIMEOUT || '120000',
+  10,
+); // 2min — kill container if zero stderr output (stuck initialization)
+export const SESSION_MAX_AGE = parseInt(
+  process.env.SESSION_MAX_AGE || '14400000',
+  10,
+); // 4 hours — rotate sessions to prevent unbounded context growth
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
@@ -62,3 +70,24 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Sprites cloud backend configuration
+export const SPRITES_TOKEN = process.env.SPRITES_TOKEN || '';
+export const SPRITES_ORG = process.env.SPRITES_ORG || '';
+export const SPRITES_REGION = process.env.SPRITES_REGION || '';
+export const SPRITES_RAM_MB = parseInt(process.env.SPRITES_RAM_MB || '0', 10) || 0;
+
+// Daytona cloud backend configuration
+export const DAYTONA_API_KEY = process.env.DAYTONA_API_KEY || '';
+export const DAYTONA_API_URL = process.env.DAYTONA_API_URL || '';
+export const DAYTONA_SNAPSHOT = process.env.DAYTONA_SNAPSHOT || '';
+
+// B2 (Backblaze S3) storage bus configuration
+export const B2_ENDPOINT = process.env.B2_ENDPOINT || '';
+export const B2_ACCESS_KEY_ID = process.env.B2_ACCESS_KEY_ID || '';
+export const B2_SECRET_ACCESS_KEY = process.env.B2_SECRET_ACCESS_KEY || '';
+export const B2_BUCKET = process.env.B2_BUCKET || '';
+export const B2_REGION = process.env.B2_REGION || '';
+
+// Railway cloud backend configuration
+export const RAILWAY_API_TOKEN = process.env.RAILWAY_API_TOKEN || '';
