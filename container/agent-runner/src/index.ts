@@ -2,11 +2,9 @@
  * NanoClaw Agent Runner
  * Runs inside a container, receives config via stdin, outputs result to stdout
  *
- * Input protocol:
- *   Stdin: Full ContainerInput JSON (read until EOF, like before)
- *   IPC:   Follow-up messages written as JSON files to /workspace/ipc/input/
- *          Files: {type:"message", text:"..."}.json — polled and consumed
- *          Sentinel: /workspace/ipc/input/_close — signals session end
+ * Input protocol (newline-delimited JSON over stdin):
+ *   Line 1: Full ContainerInput JSON
+ *   Line 2+: Follow-up messages as JSON: {type:"message", text:"..."} or {type:"close"}
  *
  * Stdout protocol:
  *   Each result is wrapped in OUTPUT_START_MARKER / OUTPUT_END_MARKER pairs.
@@ -16,6 +14,8 @@
 
 import fs from 'fs';
 import path from 'path';
+import { createInterface } from 'readline';
+import { fileURLToPath } from 'url';
 import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 
 interface ContainerInput {
@@ -27,6 +27,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   discordGuildId?: string;
   serverFolder?: string;
+  dittoMcpToken?: string;
 }
 
 interface ContainerOutput {
@@ -59,8 +60,73 @@ interface SDKUserMessage {
 }
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
-const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+/** Parsed stdin follow-up: message or close signal */
+type StdinFollowUp = { type: 'message'; text: string } | { type: 'close' };
+
+/**
+ * Reads newline-delimited JSON from stdin. Line 1 = ContainerInput.
+ * Subsequent lines = follow-up messages. Runs for the lifetime of the process.
+ */
+class StdinLineReader {
+  private lines: string[] = [];
+  private waiting: (() => void) | null = null;
+  private closed = false;
+
+  constructor() {
+    const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
+    rl.on('line', (line) => {
+      this.lines.push(line.trim());
+      this.waiting?.();
+    });
+    rl.on('close', () => {
+      this.closed = true;
+      this.waiting?.();
+    });
+  }
+
+  private async waitForLine(): Promise<void> {
+    while (this.lines.length === 0 && !this.closed) {
+      await new Promise<void>((r) => { this.waiting = r; });
+      this.waiting = null;
+    }
+  }
+
+  /** Read first line (ContainerInput). Must be called first. */
+  async readInitialInput(): Promise<string> {
+    await this.waitForLine();
+    return this.lines.shift() ?? '';
+  }
+
+  /** Check if close was received (for poll during query) */
+  hasClose(): boolean {
+    for (let i = 0; i < this.lines.length; i++) {
+      try {
+        const p = JSON.parse(this.lines[i]) as { type: string };
+        if (p.type === 'close') return true;
+      } catch { /* skip */ }
+    }
+    return false;
+  }
+
+  /** Get next follow-up or null if EOF. Blocks until one is available. */
+  async readNext(): Promise<StdinFollowUp | null> {
+    while (true) {
+      await this.waitForLine();
+      while (this.lines.length > 0) {
+        const line = this.lines.shift() ?? '';
+        if (!line) continue;
+        try {
+          const p = JSON.parse(line) as { type: string; text?: string };
+          if (p.type === 'close') return { type: 'close' };
+          if (p.type === 'message' && typeof p.text === 'string') return { type: 'message', text: p.text };
+        } catch { /* skip malformed */ }
+      }
+      if (this.closed) return null;
+    }
+  }
+}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -98,15 +164,6 @@ class MessageStream {
   }
 }
 
-async function readStdin(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => { data += chunk; });
-    process.stdin.on('end', () => resolve(data));
-    process.stdin.on('error', reject);
-  });
-}
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
@@ -325,68 +382,32 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
 }
 
 /**
- * Check for _close sentinel.
+ * Wait for next stdin follow-up. Returns message text or null if close/EOF.
  */
-function shouldClose(): boolean {
-  if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
-    try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
-    return true;
-  }
-  return false;
+async function waitForStdinMessage(reader: StdinLineReader): Promise<string | null> {
+  const msg = await reader.readNext();
+  if (!msg) return null;
+  if (msg.type === 'close') return null;
+  return msg.text;
 }
 
-/**
- * Drain all pending IPC input messages.
- * Returns messages found, or empty array.
- */
-function drainIpcInput(): string[] {
-  try {
-    fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-    const files = fs.readdirSync(IPC_INPUT_DIR)
-      .filter(f => f.endsWith('.json'))
-      .sort();
-
-    const messages: string[] = [];
-    for (const file of files) {
-      const filePath = path.join(IPC_INPUT_DIR, file);
-      try {
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        fs.unlinkSync(filePath);
-        if (data.type === 'message' && data.text) {
-          messages.push(data.text);
-        }
-      } catch (err) {
-        log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
-        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
-      }
-    }
-    return messages;
-  } catch (err) {
-    log(`IPC drain error: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
-  }
+/** Detect orphaned tool_result / tool_use_id API error (common after compaction) */
+function isOrphanedToolResultError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    msg.includes('tool_use_id') ||
+    msg.includes('tool_result') ||
+    msg.includes('invalid_request_error')
+  );
 }
 
-/**
- * Wait for a new IPC message or _close sentinel.
- * Returns the messages as a single string, or null if _close.
- */
-function waitForIpcMessage(): Promise<string | null> {
-  return new Promise((resolve) => {
-    const poll = () => {
-      if (shouldClose()) {
-        resolve(null);
-        return;
-      }
-      const messages = drainIpcInput();
-      if (messages.length > 0) {
-        resolve(messages.join('\n'));
-        return;
-      }
-      setTimeout(poll, IPC_POLL_MS);
-    };
-    poll();
-  });
+/** Check if result text is an API error (e.g. orphaned tool_result) - should retry without session */
+function isApiErrorResult(text: string | null): boolean {
+  if (!text) return false;
+  return (
+    text.includes('API Error') &&
+    (text.includes('tool_use_id') || text.includes('tool_result') || text.includes('invalid_request_error'))
+  );
 }
 
 /**
@@ -394,6 +415,7 @@ function waitForIpcMessage(): Promise<string | null> {
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
  * allowing agent teams subagents to run to completion.
  * Also pipes IPC messages into the stream during the query.
+ * On orphaned tool_result API error (compaction bug), retries once without session resume.
  */
 async function runQuery(
   prompt: string,
@@ -401,30 +423,27 @@ async function runQuery(
   mcpServerPath: string,
   containerInput: ContainerInput,
   resumeAt?: string,
+  isRetry = false,
+  stdinReader?: StdinLineReader,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
-  // Poll IPC for follow-up messages and _close sentinel during the query
+  // Poll stdin for close during the query. waitForStdinMessage handles follow-ups after each query ends.
   let ipcPolling = true;
   let closedDuringQuery = false;
-  const pollIpcDuringQuery = () => {
-    if (!ipcPolling) return;
-    if (shouldClose()) {
-      log('Close sentinel detected during query, ending stream');
+  const pollStdinDuringQuery = () => {
+    if (!ipcPolling || !stdinReader) return;
+    if (stdinReader.hasClose()) {
+      log('Close detected during query, ending stream');
       closedDuringQuery = true;
       stream.end();
       ipcPolling = false;
       return;
     }
-    const messages = drainIpcInput();
-    for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
-    }
-    setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+    setTimeout(pollStdinDuringQuery, IPC_POLL_MS);
   };
-  setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+  setTimeout(pollStdinDuringQuery, IPC_POLL_MS);
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
@@ -438,74 +457,109 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
-  for await (const message of query({
-    prompt: stream,
-    options: {
-      cwd: '/workspace/group',
-      resume: sessionId,
-      resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
-      allowedTools: [
-        'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*'
-      ],
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'bun',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-            ...(containerInput.discordGuildId ? { NANOCLAW_DISCORD_GUILD_ID: containerInput.discordGuildId } : {}),
-            ...(containerInput.serverFolder ? { NANOCLAW_SERVER_FOLDER: containerInput.serverFolder } : {}),
-          },
+  const allowedTools = [
+    'Bash',
+    'Read', 'Write', 'Edit', 'Glob', 'Grep',
+    'WebSearch', 'WebFetch',
+    'Task', 'TaskOutput', 'TaskStop',
+    'TeamCreate', 'TeamDelete', 'SendMessage',
+    'TodoWrite', 'ToolSearch', 'Skill',
+    'NotebookEdit',
+    'mcp__nanoclaw__*',
+    ...(containerInput.dittoMcpToken ? ['mcp__ditto__*' as const] : []),
+  ];
+
+  const mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> } | { type: 'http'; url: string; headers: Record<string, string> }> = {
+    nanoclaw: {
+      command: 'node',
+      args: [mcpServerPath],
+      env: {
+        NANOCLAW_CHAT_JID: containerInput.chatJid,
+        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+        ...(containerInput.discordGuildId ? { NANOCLAW_DISCORD_GUILD_ID: containerInput.discordGuildId } : {}),
+        ...(containerInput.serverFolder ? { NANOCLAW_SERVER_FOLDER: containerInput.serverFolder } : {}),
+      },
+    },
+  };
+  if (containerInput.dittoMcpToken) {
+    mcpServers.ditto = {
+      type: 'http',
+      url: 'https://api.heyditto.ai/mcp/sse',
+      headers: { Authorization: `Bearer ${containerInput.dittoMcpToken}` },
+    };
+  }
+
+  try {
+    for await (const message of query({
+      prompt: stream,
+      options: {
+        cwd: '/workspace/group',
+        resume: sessionId,
+        resumeSessionAt: resumeAt,
+        systemPrompt: globalClaudeMd
+          ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+          : undefined,
+        allowedTools,
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        settingSources: ['project', 'user'],
+        mcpServers,
+        hooks: {
+          PreCompact: [{ hooks: [createPreCompactHook()] }]
         },
-      },
-      hooks: {
-        PreCompact: [{ hooks: [createPreCompactHook()] }]
-      },
-    }
-  })) {
-    messageCount++;
-    const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
-    log(`[msg #${messageCount}] type=${msgType}`);
+      }
+    })) {
+      messageCount++;
+      const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
+      log(`[msg #${messageCount}] type=${msgType}`);
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
-    }
+      if (message.type === 'assistant' && 'uuid' in message) {
+        lastAssistantUuid = (message as { uuid: string }).uuid;
+      }
 
-    if (message.type === 'system' && message.subtype === 'init') {
-      newSessionId = message.session_id;
-      log(`Session initialized: ${newSessionId}`);
-    }
+      if (message.type === 'system' && message.subtype === 'init') {
+        newSessionId = message.session_id;
+        log(`Session initialized: ${newSessionId}`);
+      }
 
-    if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
-      const tn = message as { task_id: string; status: string; summary: string };
-      log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
-    }
+      if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
+        const tn = message as { task_id: string; status: string; summary: string };
+        log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
+      }
 
-    if (message.type === 'result') {
-      resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId
-      });
+      if (message.type === 'result') {
+        resultCount++;
+        const textResult = 'result' in message ? (message as { result?: string }).result : null;
+        log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+
+        // API errors (e.g. orphaned tool_result) come back as results - retry without session
+        if (isApiErrorResult(textResult ?? null) && sessionId && !isRetry) {
+          log(`Orphaned tool_result API error in result, retrying without session`);
+          throw new Error(textResult || 'Orphaned tool_result error');
+        }
+
+        writeOutput({
+          status: 'success',
+          result: textResult || null,
+          newSessionId
+        });
+        stream.end();
+        // Force exit — SDK iterator may not end on some setups; break so we reach waitForIpcMessage
+        log('Breaking out of query loop to process follow-ups');
+        break;
+      }
     }
+  } catch (err) {
+    const canRetry =
+      !isRetry &&
+      sessionId &&
+      isOrphanedToolResultError(err);
+    if (canRetry) {
+      log(`Orphaned tool_result error on session resume, retrying without session: ${err instanceof Error ? err.message : String(err)}`);
+      return runQuery(prompt, undefined, mcpServerPath, containerInput, undefined, true, stdinReader);
+    }
+    throw err;
   }
 
   ipcPolling = false;
@@ -514,11 +568,12 @@ async function runQuery(
 }
 
 async function main(): Promise<void> {
+  const stdinReader = new StdinLineReader();
   let containerInput: ContainerInput;
 
   try {
-    const stdinData = await readStdin();
-    containerInput = JSON.parse(stdinData);
+    const firstLine = await stdinReader.readInitialInput();
+    containerInput = JSON.parse(firstLine);
     log(`Received input for group: ${containerInput.groupFolder}`);
   } catch (err) {
     writeOutput({
@@ -529,32 +584,25 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const mcpServerPath = path.join(import.meta.dir, 'ipc-mcp-stdio.ts');
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
-  // Clean up stale _close sentinel from previous container runs
-  try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
-
-  // Build initial prompt (drain any pending IPC messages too)
+  // Build initial prompt
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
-  const pending = drainIpcInput();
-  if (pending.length > 0) {
-    log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + pending.join('\n');
-  }
 
-  // Query loop: run query → wait for IPC message → run new query → repeat
+  // Query loop: run query → wait for stdin message → run new query → repeat
   let resumeAt: string | undefined;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, resumeAt);
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, resumeAt, false, stdinReader);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
@@ -562,23 +610,20 @@ async function main(): Promise<void> {
         resumeAt = queryResult.lastAssistantUuid;
       }
 
-      // If _close was consumed during the query, exit immediately.
-      // Don't emit a session-update marker (it would reset the host's
-      // idle timer and cause a 30-min delay before the next _close).
+      // If close was consumed during the query, exit immediately.
       if (queryResult.closedDuringQuery) {
-        log('Close sentinel consumed during query, exiting');
+        log('Close received during query, exiting');
         break;
       }
 
       // Emit session update so host can track it
       writeOutput({ status: 'success', result: null, newSessionId: sessionId });
 
-      log('Query ended, waiting for next IPC message...');
+      log('Query ended, waiting for next stdin message...');
 
-      // Wait for the next message or _close sentinel
-      const nextMessage = await waitForIpcMessage();
+      const nextMessage = await waitForStdinMessage(stdinReader);
       if (nextMessage === null) {
-        log('Close sentinel received, exiting');
+        log('Close received, exiting');
         break;
       }
 

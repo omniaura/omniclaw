@@ -1,10 +1,11 @@
 # NanoClaw Agent Container
 # Runs Claude Agent SDK in isolated Linux VM with browser automation
 
-FROM oven/bun:slim
+FROM node:22-slim
 
-# Install system dependencies for Chromium (libs needed by agent-browser's bundled Chromium)
+# Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \
+    chromium \
     fonts-liberation \
     fonts-noto-color-emoji \
     libgbm1 \
@@ -24,47 +25,42 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install GitHub CLI for PR creation and git authentication
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update && apt-get install -y gh \
-    && rm -rf /var/lib/apt/lists/*
+# Set Chromium path for agent-browser
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser and claude-code globally, then download Chromium via bunx
-# (agent-browser install hardcodes npx in its native binary, so we bypass it)
-RUN bun install -g agent-browser @anthropic-ai/claude-code \
-    && bunx playwright install chromium
+# Install agent-browser and claude-code globally
+RUN npm install -g agent-browser @anthropic-ai/claude-code
 
 # Create app directory
 WORKDIR /app
 
 # Copy package files first for better caching
-COPY agent-runner/package.json agent-runner/bun.lock* ./
+COPY agent-runner/package*.json ./
 
 # Install dependencies
-RUN bun install
+RUN npm install
 
 # Copy source code
 COPY agent-runner/ ./
 
-# Create workspace directories
+# Build TypeScript
+RUN npm run build
+
+# Create workspace directories (including server for Discord)
 RUN mkdir -p /workspace/group /workspace/global /workspace/server /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
 # Create entrypoint script
 # Sources env from mounted /workspace/env-dir/env if it exists (workaround for Apple Container -i bug)
-# Stdin is buffered to /tmp then piped (Apple Container requires EOF to flush stdin pipe)
-# Follow-up messages arrive via IPC files in /workspace/ipc/input/
-# No build step needed — Bun runs TypeScript directly
-RUN printf '#!/bin/bash\nset -e\n[ -f /workspace/env-dir/env ] && export $(cat /workspace/env-dir/env | xargs)\nif [ -n "$GITHUB_TOKEN" ]; then\n  gh auth setup-git 2>/dev/null || true\n  git config --global user.name "${GIT_AUTHOR_NAME:-NanoClaw Agent}"\n  git config --global user.email "${GIT_AUTHOR_EMAIL:-nanoclaw@users.noreply.github.com}"\nfi\ncat > /tmp/input.json\nbun /app/src/index.ts < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# Stdin is piped directly to node (line 1 = initial config, subsequent lines = follow-up messages)
+# Git config for GITHUB_TOKEN when present (fork addition)
+RUN printf '#!/bin/bash\nset -e\n[ -f /workspace/env-dir/env ] && export $(cat /workspace/env-dir/env | xargs)\nif [ -n "$GITHUB_TOKEN" ]; then\n  git config --global user.name "${GIT_AUTHOR_NAME:-NanoClaw Agent}"\n  git config --global user.email "${GIT_AUTHOR_EMAIL:-nanoclaw@users.noreply.github.com}"\nfi\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\nexec node /tmp/dist/index.js\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
-RUN chown -R bun:bun /workspace
+RUN chown -R node:node /workspace
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
-USER bun
+USER node
 
 # Set working directory to group workspace
 WORKDIR /workspace/group

@@ -1,7 +1,4 @@
-import fs from 'fs';
-import path from 'path';
-
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
 import { ContainerProcess } from './types.js';
 
@@ -120,21 +117,17 @@ export class GroupQueue {
   }
 
   /**
-   * Send a follow-up message to the active container via IPC file.
+   * Send a follow-up message to the active container via stdin.
+   * Uses newline-delimited JSON over the pipe (bypasses VirtioFS mount issues).
    * Returns true if the message was written, false if no active container.
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder) return false;
+    if (!state.active || !state.process?.stdin?.writable) return false;
 
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
-      fs.mkdirSync(inputDir, { recursive: true });
-      const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
-      const filepath = path.join(inputDir, filename);
-      const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
-      fs.renameSync(tempPath, filepath);
+      state.process.stdin.write(JSON.stringify({ type: 'message', text }) + '\n');
+      logger.info({ groupJid }, 'Wrote IPC via stdin');
       return true;
     } catch {
       return false;
@@ -142,18 +135,17 @@ export class GroupQueue {
   }
 
   /**
-   * Signal the active container to wind down by writing a close sentinel.
+   * Signal the active container to wind down by writing close marker and ending stdin.
    */
   closeStdin(groupJid: string): void {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder) return;
+    if (!state.active || !state.process?.stdin?.writable) return;
 
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
-      fs.mkdirSync(inputDir, { recursive: true });
-      fs.writeFileSync(path.join(inputDir, '_close'), '');
+      state.process.stdin.write(JSON.stringify({ type: 'close' }) + '\n');
+      state.process.stdin.end();
     } catch {
-      // ignore
+      /* ignore */
     }
   }
 
