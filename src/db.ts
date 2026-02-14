@@ -7,7 +7,10 @@ import { Agent, ChannelRoute, HeartbeatConfig, NewMessage, RegisteredGroup, Sche
 
 let db: Database;
 
-function createSchema(database: Database): void {
+/**
+ * Schema builder: Core message and chat tables
+ */
+function createChatTables(database: Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
       jid TEXT PRIMARY KEY,
@@ -26,7 +29,14 @@ function createSchema(database: Database): void {
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
+  `);
+}
 
+/**
+ * Schema builder: Scheduled tasks and task logs
+ */
+function createScheduledTaskTables(database: Database): void {
+  database.exec(`
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
       group_folder TEXT NOT NULL,
@@ -54,7 +64,14 @@ function createSchema(database: Database): void {
       FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id)
     );
     CREATE INDEX IF NOT EXISTS idx_task_run_logs ON task_run_logs(task_id, run_at);
+  `);
+}
 
+/**
+ * Schema builder: Router state and session tracking
+ */
+function createStateTables(database: Database): void {
+  database.exec(`
     CREATE TABLE IF NOT EXISTS router_state (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -64,6 +81,14 @@ function createSchema(database: Database): void {
       session_id TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+  `);
+}
+
+/**
+ * Schema builder: Legacy registered_groups table (for backward compatibility)
+ */
+function createLegacyGroupsTable(database: Database): void {
+  database.exec(`
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -74,62 +99,12 @@ function createSchema(database: Database): void {
       requires_trigger INTEGER DEFAULT 1
     );
   `);
+}
 
-  // Add context_mode column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
-    );
-  } catch {
-    /* column already exists */
-  }
-
-  // Add heartbeat column to registered_groups (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN heartbeat TEXT`,
-    );
-  } catch {
-    /* column already exists */
-  }
-
-  // Add discord_guild_id and server_folder columns to registered_groups
-  try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN discord_guild_id TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN server_folder TEXT`);
-  } catch { /* column already exists */ }
-
-  // Add discord_guild_id column to chats table
-  try {
-    database.exec(`ALTER TABLE chats ADD COLUMN discord_guild_id TEXT`);
-  } catch { /* column already exists */ }
-
-  // Add created_at column to sessions table
-  // Note: SQLite ALTER TABLE requires constant defaults, so we use a fixed epoch.
-  // New sessions get datetime('now') via INSERT in setSession().
-  try {
-    database.exec(`ALTER TABLE sessions ADD COLUMN created_at TEXT NOT NULL DEFAULT '1970-01-01 00:00:00'`);
-  } catch { /* column already exists */ }
-
-  // Add backend and description columns to registered_groups (sprites backend support)
-  try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN backend TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN description TEXT`);
-  } catch { /* column already exists */ }
-
-  // Add auto-respond columns to registered_groups
-  try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN auto_respond_to_questions INTEGER DEFAULT 0`);
-  } catch { /* column already exists */ }
-  try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN auto_respond_keywords TEXT`);
-  } catch { /* column already exists */ }
-
-  // --- Agent-Channel Decoupling tables ---
+/**
+ * Schema builder: Agent-channel decoupling tables
+ */
+function createAgentTables(database: Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
@@ -155,6 +130,57 @@ function createSchema(database: Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_channel_routes_agent ON channel_routes(agent_id);
   `);
+}
+
+/**
+ * Helper: Add column if it doesn't exist (silent migration)
+ */
+function addColumnIfNotExists(database: Database, table: string, column: string, definition: string): void {
+  try {
+    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  } catch {
+    /* column already exists */
+  }
+}
+
+/**
+ * Apply schema migrations for existing databases
+ */
+function applyMigrations(database: Database): void {
+  // Scheduled tasks migrations
+  addColumnIfNotExists(database, 'scheduled_tasks', 'context_mode', `TEXT DEFAULT 'isolated'`);
+
+  // Registered groups migrations (legacy table)
+  addColumnIfNotExists(database, 'registered_groups', 'heartbeat', 'TEXT');
+  addColumnIfNotExists(database, 'registered_groups', 'discord_guild_id', 'TEXT');
+  addColumnIfNotExists(database, 'registered_groups', 'server_folder', 'TEXT');
+  addColumnIfNotExists(database, 'registered_groups', 'backend', 'TEXT');
+  addColumnIfNotExists(database, 'registered_groups', 'description', 'TEXT');
+  addColumnIfNotExists(database, 'registered_groups', 'auto_respond_to_questions', 'INTEGER DEFAULT 0');
+  addColumnIfNotExists(database, 'registered_groups', 'auto_respond_keywords', 'TEXT');
+
+  // Chats migrations
+  addColumnIfNotExists(database, 'chats', 'discord_guild_id', 'TEXT');
+
+  // Sessions migrations
+  // Note: SQLite ALTER TABLE requires constant defaults, so we use a fixed epoch.
+  // New sessions get datetime('now') via INSERT in setSession().
+  addColumnIfNotExists(database, 'sessions', 'created_at', `TEXT NOT NULL DEFAULT '1970-01-01 00:00:00'`);
+}
+
+/**
+ * Create all database tables and apply migrations
+ */
+function createSchema(database: Database): void {
+  // Create core tables
+  createChatTables(database);
+  createScheduledTaskTables(database);
+  createStateTables(database);
+  createLegacyGroupsTable(database);
+  createAgentTables(database);
+
+  // Apply migrations for existing databases
+  applyMigrations(database);
 
   // Auto-migrate from registered_groups → agents + channel_routes
   migrateRegisteredGroupsToAgents(database);
