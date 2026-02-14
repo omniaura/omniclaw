@@ -47,6 +47,7 @@ export class DiscordChannel implements Channel {
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.GuildMembers, // Required for guild.members.fetch() in @AllAgents feature
       ],
       partials: [Partials.Channel, Partials.Message, Partials.Reaction],
     });
@@ -197,6 +198,40 @@ export class DiscordChannel implements Channel {
     if (message.author.id === this.client.user?.id) return;
 
     let content = message.content;
+
+    // **NEW**: @AllAgents shortcut - pings all Discord agent bots in the server
+    if (content.includes('@AllAgents') || content.includes('@allagents')) {
+      const registeredGroups = getAllRegisteredGroups();
+      const agentMentions: string[] = [];
+
+      // Find all Discord agents (dc: or dc:dm: JIDs)
+      for (const [jid, group] of Object.entries(registeredGroups)) {
+        if (jid.startsWith('dc:') && !jid.includes(':dm:')) {
+          // Get channel and fetch bot members
+          try {
+            const channelId = jidToChannelId(jid);
+            if (channelId && message.guildId) {
+              const guild = message.client.guilds.cache.get(message.guildId);
+              const members = await guild?.members.fetch();
+              const botMembers = members?.filter(m => m.user.bot && m.user.id !== this.client.user?.id);
+
+              botMembers?.forEach(bot => {
+                agentMentions.push(`<@${bot.user.id}>`);
+              });
+            }
+          } catch (err) {
+            logger.warn({ jid, err }, 'Failed to fetch bot members for @AllAgents');
+          }
+        }
+      }
+
+      // Replace @AllAgents with actual mentions
+      const uniqueMentions = [...new Set(agentMentions)];
+      const mentionString = uniqueMentions.join(' ');
+      content = content.replace(/@AllAgents|@allagents/gi, mentionString);
+
+      logger.info({ agentCount: uniqueMentions.length }, 'Expanded @AllAgents shortcut');
+    }
 
     // Translate @bot mention into trigger format
     const botId = this.client.user?.id;
