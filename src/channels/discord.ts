@@ -234,11 +234,20 @@ export class DiscordChannel implements Channel {
     }
 
     // Translate @bot mention into trigger format
+    // FIX: Determine agent name from the channel's registered group, not global ASSISTANT_NAME
     const botId = this.client.user?.id;
     if (botId && content.includes(`<@${botId}>`)) {
       content = content.replace(new RegExp(`<@${botId}>`, 'g'), '').trim();
       if (!TRIGGER_PATTERN.test(content)) {
-        content = `@${ASSISTANT_NAME} ${content}`;
+        // Get agent name from the group's trigger (e.g., "@OmarOmni" → "OmarOmni")
+        const isDM = message.channel.type === ChannelType.DM;
+        const chatJid = isDM
+          ? `dc:dm:${message.author.id}`
+          : `dc:${message.channelId}`;
+        const registeredGroups = getAllRegisteredGroups();
+        const group = registeredGroups[chatJid];
+        const agentName = group?.trigger?.replace(/^@/, '') || ASSISTANT_NAME;
+        content = `@${agentName} ${content}`;
       }
     }
 
