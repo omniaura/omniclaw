@@ -10,8 +10,8 @@ export const s3Client = new S3Client({
   endpoint: 'https://s3.us-east-005.backblazeb2.com',
   region: 'us-east-005',
   credentials: {
-    accessKeyId: '005f1542e777e830000000010',
-    secretAccessKey: 'K005XMskvE9Y7nRJfZm0o9zYvvCAzGo',
+    accessKeyId: process.env.S3_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
   },
 });
 

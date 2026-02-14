@@ -73,22 +73,30 @@ export interface TimeSeriesMetrics {
  * Fetch all timeseries files from S3
  */
 export async function listTimeseriesFiles(): Promise<string[]> {
-  const command = new ListObjectsV2Command({
-    Bucket: BUCKET_NAME,
-    Prefix: TIMESERIES_PREFIX,
-  });
+  const allKeys: string[] = [];
+  let continuationToken: string | undefined;
 
-  const response = await s3Client.send(command);
+  // Paginate through all objects (max 1000 per request)
+  do {
+    const command = new ListObjectsV2Command({
+      Bucket: BUCKET_NAME,
+      Prefix: TIMESERIES_PREFIX,
+      ContinuationToken: continuationToken,
+    });
 
-  if (!response.Contents) {
-    return [];
-  }
+    const response = await s3Client.send(command);
 
-  // Filter for userstats files and extract dates
-  return response.Contents
-    .filter((item) => item.Key?.includes('userstats-') && item.Key.endsWith('.json'))
-    .map((item) => item.Key!)
-    .sort(); // Chronological order (YYYY-MM-DD sorts naturally)
+    if (response.Contents) {
+      const keys = response.Contents
+        .filter((item) => item.Key?.includes('userstats-') && item.Key.endsWith('.json'))
+        .map((item) => item.Key!);
+      allKeys.push(...keys);
+    }
+
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return allKeys.sort(); // Chronological order (YYYY-MM-DD sorts naturally)
 }
 
 /**
