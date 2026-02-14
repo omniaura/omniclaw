@@ -25,7 +25,7 @@ Add these optional fields to your group config in `~/.claude/groups/{group-name}
 When `true`, the bot will automatically respond to any message ending with `?` (question mark).
 
 **Example:**
-```
+```text
 User: "What's the weather like today?"
 Bot: *responds automatically without @mention*
 ```
@@ -42,7 +42,7 @@ Array of keywords that trigger an automatic response when mentioned in a message
 ```
 
 With this config:
-```
+```text
 User: "Can someone help me with this code?"
 Bot: *responds automatically because "help" keyword was detected*
 

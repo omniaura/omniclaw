@@ -23,7 +23,7 @@ import {
   storeMessageDirect,
 } from '../db.js';
 import { logger } from '../logger.js';
-import { Channel } from '../types.js';
+import { Channel, RegisteredGroup } from '../types.js';
 
 export interface DiscordChannelOpts {
   token: string;
@@ -172,18 +172,21 @@ export class DiscordChannel implements Channel {
   /**
    * Check if message should auto-respond based on group config
    */
-  private shouldAutoRespond(content: string, group: any): boolean {
+  private shouldAutoRespond(content: string, group: RegisteredGroup): boolean {
     // Check for question ending with '?'
     if (group.autoRespondToQuestions && content.trim().endsWith('?')) {
       return true;
     }
 
-    // Check for keywords (case-insensitive)
-    if (group.autoRespondKeywords && Array.isArray(group.autoRespondKeywords)) {
-      const lowerContent = content.toLowerCase();
-      return group.autoRespondKeywords.some((keyword: string) =>
-        lowerContent.includes(keyword.toLowerCase())
-      );
+    // Check for keywords with word-boundary matching (case-insensitive)
+    // Uses \b to avoid matching substrings (e.g., "help" won't match "helper")
+    if (group.autoRespondKeywords) {
+      return group.autoRespondKeywords.some((keyword: string) => {
+        // Escape special regex characters in the keyword
+        const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = new RegExp(`\\b${escaped}\\b`, 'i');
+        return pattern.test(content);
+      });
     }
 
     return false;
