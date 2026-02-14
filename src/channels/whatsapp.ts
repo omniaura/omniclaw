@@ -185,10 +185,10 @@ export class WhatsAppChannel implements Channel {
       }
     });
 
-    this.sock.ev.on('messages.reaction', (reactions) => {
+    this.sock.ev.on('messages.reaction', async (reactions) => {
       for (const { key, reaction } of reactions) {
         if (!reaction?.text || !key.id || !key.remoteJid) continue;
-        const chatJid = this.translateJid(key.remoteJid);
+        const chatJid = await this.translateJid(key.remoteJid);
         this.opts.onReaction?.(chatJid, key.id, reaction.text);
       }
     });

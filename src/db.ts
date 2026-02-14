@@ -121,6 +121,14 @@ function createSchema(database: Database): void {
     database.exec(`ALTER TABLE registered_groups ADD COLUMN description TEXT`);
   } catch { /* column already exists */ }
 
+  // Add auto-respond columns to registered_groups
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN auto_respond_to_questions INTEGER DEFAULT 0`);
+  } catch { /* column already exists */ }
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN auto_respond_keywords TEXT`);
+  } catch { /* column already exists */ }
+
   // --- Agent-Channel Decoupling tables ---
   database.exec(`
     CREATE TABLE IF NOT EXISTS agents (
@@ -575,6 +583,8 @@ export function getRegisteredGroup(
         server_folder: string | null;
         backend: string | null;
         description: string | null;
+        auto_respond_to_questions: number | null;
+        auto_respond_keywords: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -595,6 +605,8 @@ export function getRegisteredGroup(
     serverFolder: row.server_folder || undefined,
     backend: (row.backend as any) || undefined,
     description: row.description || undefined,
+    autoRespondToQuestions: row.auto_respond_to_questions === 1 || undefined,
+    autoRespondKeywords: row.auto_respond_keywords ? JSON.parse(row.auto_respond_keywords) : undefined,
   };
 }
 
@@ -603,8 +615,8 @@ export function setRegisteredGroup(
   group: RegisteredGroup,
 ): void {
   db.query(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, heartbeat, discord_guild_id, server_folder, backend, description)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, heartbeat, discord_guild_id, server_folder, backend, description, auto_respond_to_questions, auto_respond_keywords)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -618,6 +630,8 @@ export function setRegisteredGroup(
     group.serverFolder || null,
     group.backend || null,
     group.description || null,
+    group.autoRespondToQuestions ? 1 : 0,
+    group.autoRespondKeywords ? JSON.stringify(group.autoRespondKeywords) : null,
   );
 }
 
@@ -637,6 +651,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     server_folder: string | null;
     backend: string | null;
     description: string | null;
+    auto_respond_to_questions: number | null;
+    auto_respond_keywords: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -656,6 +672,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       serverFolder: row.server_folder || undefined,
       backend: (row.backend as any) || undefined,
       description: row.description || undefined,
+      autoRespondToQuestions: row.auto_respond_to_questions === 1 || undefined,
+      autoRespondKeywords: row.auto_respond_keywords ? JSON.parse(row.auto_respond_keywords) : undefined,
     };
   }
   return result;
