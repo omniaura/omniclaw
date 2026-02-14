@@ -437,7 +437,10 @@ Ask the user:
 > Provide your Discord bot token. If you don't have one:
 > 1. Go to https://discord.com/developers/applications
 > 2. Create a new application → Bot → Reset Token → Copy it
-> 3. Enable **Message Content Intent** under Bot → Privileged Gateway Intents
+> 3. Under **Bot → Privileged Gateway Intents**, enable ALL THREE:
+>    - **Presence Intent**
+>    - **Server Members Intent** (required for `@AllAgents` feature)
+>    - **Message Content Intent** (required to read message text)
 > 4. Invite the bot to your server using OAuth2 → URL Generator (scopes: `bot`, permissions: `Send Messages`, `Read Message History`)
 
 If they paste the token, use the Write tool or a text editor to append `DISCORD_BOT_TOKEN=<token>` to `.env`. Do **not** echo the token via shell command, as it would leak into shell history.
