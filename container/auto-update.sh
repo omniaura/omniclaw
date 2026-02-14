@@ -6,6 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
+LOCKFILE="/tmp/nanoclaw-update.lock"
 
 echo "🔄 NanoClaw Auto-Update Starting..."
 echo "Repository: $REPO_DIR"
@@ -15,6 +16,14 @@ if [ -f /.dockerenv ]; then
     echo "⚠️  This script should be run on the host, not inside the container"
     exit 1
 fi
+
+# Acquire lock to prevent concurrent updates
+exec 200>"$LOCKFILE"
+if ! flock -n 200; then
+    echo "⚠️  Another update is already running (lock: $LOCKFILE)"
+    exit 1
+fi
+trap 'rm -f "$LOCKFILE"' EXIT
 
 # Navigate to repo directory
 cd "$REPO_DIR"
@@ -58,10 +67,6 @@ echo "   Remote: ${REMOTE_COMMIT:0:8}"
 # Pull latest changes
 echo "⬇️  Pulling latest code..."
 git pull origin "$CURRENT_BRANCH"
-
-# Find the container image name
-CONTAINER_IMAGE=$(grep -E "^FROM " container/Dockerfile | head -1 | awk '{print $2}' || echo "nanoclaw")
-echo "🐳 Container base: $CONTAINER_IMAGE"
 
 # Rebuild container
 echo "🔨 Rebuilding container..."

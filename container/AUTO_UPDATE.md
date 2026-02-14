@@ -138,10 +138,27 @@ If an update causes issues, rollback to the previous version:
 
 ```bash
 cd /path/to/nanoclaw
-git log --oneline -5  # Find previous commit
+
+# Find the previous working commit
+git log --oneline -5
+
+# Revert to previous commit
 git reset --hard <previous-commit>
-./container/auto-update.sh  # Rebuild with previous version
+
+# Rebuild container with rolled-back code
+cd container
+./build.sh latest
+
+# Or use auto-update.sh (will detect "no updates" but rebuild anyway)
+# cd ..
+# ./container/auto-update.sh
+
+# Restart instances manually or via docker-compose/systemd
 ```
+
+The auto-update script will detect that there are no remote updates (since you've
+rolled back locally), but the container will still be rebuilt with the current
+(rolled-back) code state.
 
 ## Monitoring
 
