@@ -47,6 +47,7 @@ export class DiscordChannel implements Channel {
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.GuildMembers, // Required for guild.members.fetch() in @AllAgents feature
       ],
       partials: [Partials.Channel, Partials.Message, Partials.Reaction],
     });
