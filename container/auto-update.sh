@@ -106,6 +106,39 @@ else
     log "No container build method found, skipping container rebuild"
 fi
 
+# Wait for agents to be idle before restarting
+# Check for recent [agent-runner] activity in the log
+IDLE_THRESHOLD="${NANOCLAW_IDLE_THRESHOLD:-120}"
+MAX_WAIT="${NANOCLAW_MAX_WAIT:-600}"
+LOG_FILE="$REPO_DIR/logs/nanoclaw.log"
+WAITED=0
+
+while [ "$WAITED" -lt "$MAX_WAIT" ] && [ -f "$LOG_FILE" ]; do
+    LAST_AGENT_LINE=$(tail -500 "$LOG_FILE" | grep -a '\[agent-runner\]' | tail -1)
+    if [ -z "$LAST_AGENT_LINE" ]; then
+        break  # No agent activity in recent logs, safe to restart
+    fi
+    # Extract epoch timestamp from structured log ("time":1234567890123)
+    LAST_TS=$(echo "$LAST_AGENT_LINE" | sed -n 's/.*"time":\([0-9]*\).*/\1/p')
+    if [ -z "$LAST_TS" ]; then
+        break  # Can't parse timestamp, proceed
+    fi
+    LAST_TS_SEC=$((LAST_TS / 1000))
+    NOW_SEC=$(date +%s)
+    AGE=$((NOW_SEC - LAST_TS_SEC))
+    if [ "$AGE" -ge "$IDLE_THRESHOLD" ]; then
+        log "Agents idle (last activity ${AGE}s ago)"
+        break
+    fi
+    log "Agents active (last activity ${AGE}s ago). Waiting..."
+    sleep 30
+    WAITED=$((WAITED + 30))
+done
+
+if [ "$WAITED" -ge "$MAX_WAIT" ]; then
+    log "WARNING: Agents still active after ${MAX_WAIT}s wait. Restarting anyway."
+fi
+
 # Restart service
 log "Restarting service..."
 if [ -f "docker-compose.yml" ]; then
