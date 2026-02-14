@@ -105,10 +105,31 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'get_quarter_plan',
-      description: 'Get the current quarter plan',
+      description: 'Get the current quarter plan with ALL initiatives (use list_initiatives for lighter queries)',
       inputSchema: {
         type: 'object',
         properties: { status: { type: 'string', enum: ['planning', 'in-progress', 'completed', 'blocked'] } },
+      },
+    },
+    {
+      name: 'list_initiatives',
+      description: 'List initiatives with minimal detail (id, title, owner, status) - use this for browsing, then get_initiative for full details',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['planning', 'in-progress', 'completed', 'blocked', 'archived'] },
+          owner: { type: 'string' },
+          tags: { type: 'array', items: { type: 'string' } },
+        },
+      },
+    },
+    {
+      name: 'get_initiative',
+      description: 'Get full details for a single initiative by ID',
+      inputSchema: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+        required: ['id'],
       },
     },
     {
@@ -245,6 +266,71 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         let initiatives = plan.initiatives;
         if (args.status) initiatives = initiatives.filter((i) => i.status === args.status);
         return { content: [{ type: 'text', text: JSON.stringify({ ...plan, initiatives }, null, 2) }] };
+      }
+      case 'list_initiatives': {
+        const listEffect = pipe(
+          getQuarterPlanWithRetry,
+          Effect.map(plan => {
+            let filtered = plan.initiatives;
+
+            // Apply filters
+            if (args.status) {
+              filtered = filtered.filter(i => i.status === args.status);
+            }
+            if (args.owner) {
+              filtered = filtered.filter(i => i.owner === args.owner);
+            }
+            if (args.tags && Array.isArray(args.tags)) {
+              filtered = filtered.filter(i =>
+                i.tags?.some(tag => (args.tags as string[]).includes(tag))
+              );
+            }
+
+            // Return minimal data (id, title, owner, status only)
+            return filtered.map(i => ({
+              id: i.id,
+              title: i.title,
+              owner: i.owner,
+              status: i.status,
+              target_date: i.target_date,
+            }));
+          })
+        );
+
+        const initiatives = await Effect.runPromise(listEffect);
+        const summary = `Found ${initiatives.length} initiative(s)\n\n` +
+                       initiatives.map(i => `• ${i.id}: "${i.title}" (${i.owner}, ${i.status})`).join('\n');
+        return {
+          content: [{
+            type: 'text',
+            text: summary + '\n\nUse get_initiative(id) for full details.'
+          }]
+        };
+      }
+      case 'get_initiative': {
+        const getEffect = pipe(
+          getQuarterPlanWithRetry,
+          Effect.flatMap(plan => {
+            const initiative = plan.initiatives.find(i => i.id === args.id);
+            if (!initiative) {
+              const availableIds = plan.initiatives.map(i => `${i.id}: ${i.title}`).join('\n');
+              return Effect.fail({
+                type: 'text',
+                text: `Error: Initiative "${args.id}" not found.\n\nAvailable initiatives:\n${availableIds || 'No initiatives exist yet'}\n\nTip: Use list_initiatives() to browse.`
+              });
+            }
+            return Effect.succeed(initiative);
+          })
+        );
+
+        const result = await Effect.runPromise(getEffect).catch(error => ({
+          content: [error],
+          isError: true
+        }));
+
+        if ('isError' in result) return result;
+
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       }
       case 'add_update': {
         await quarterplan.addUpdate(args.initiative_id as string, args.update as string, args.author as string);
