@@ -8,14 +8,23 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { SharedS3Client, QuarterPlanSync } from '../../../src/shared/index.js';
+import { SharedS3Client, QuarterPlanSync, type Initiative } from '../../../src/shared/index.js';
+
+// Validate required environment variables
+const requiredEnvVars = ['S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'];
+for (const varName of requiredEnvVars) {
+  if (!process.env[varName]) {
+    console.error(`Error: Required environment variable ${varName} is not set`);
+    process.exit(1);
+  }
+}
 
 // Initialize S3 client from environment
 const s3 = new SharedS3Client({
   endpoint: process.env.S3_ENDPOINT || 's3.us-east-005.backblazeb2.com',
   bucket: process.env.S3_BUCKET || 'omniaura-agents',
-  accessKeyId: process.env.S3_ACCESS_KEY_ID!,
-  secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
+  accessKeyId: process.env.S3_ACCESS_KEY_ID,
+  secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
   region: process.env.S3_REGION,
 });
 
@@ -103,8 +112,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       case 'create_initiative': {
         const plan = await quarterplan.getQuarterPlan();
-        const initiative: any = {
-          id: `init-${Date.now()}`,
+        const initiative: Initiative = {
+          id: `init-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           title: args.title,
           description: args.description,
           owner: args.owner,
@@ -166,7 +175,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
     }
   } catch (error) {
-    return { content: [{ type: 'text', text: `Error: ${error}` }], isError: true };
+    console.error('Tool execution error:', error);
+    return { content: [{ type: 'text', text: `Error executing tool: ${name}` }], isError: true };
   }
 });
 
