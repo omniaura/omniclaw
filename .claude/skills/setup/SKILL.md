@@ -447,9 +447,13 @@ If they paste the token, use the Write tool or a text editor to append `DISCORD_
 The Discord channel JID format is `dc:<channel_id>`. Ask the user for the Discord channel ID:
 > Right-click the channel in Discord → **Copy Channel ID** (enable Developer Mode in Discord Settings → Advanced if you don't see this option).
 
-Register the group in the database:
+Register the group in the database. First derive the backend value (fallback to runtime choice if table is empty):
 ```bash
-sqlite3 store/messages.db "INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, requires_trigger, backend, added_at) VALUES ('dc:<CHANNEL_ID>', '<AGENT_NAME>', '<FOLDER_NAME>', '@<TRIGGER>', 1, (SELECT backend FROM registered_groups LIMIT 1), datetime('now'))"
+BACKEND=$(sqlite3 store/messages.db "SELECT backend FROM registered_groups LIMIT 1")
+[ -z "$BACKEND" ] && BACKEND="<apple-container|docker>"
+```
+```bash
+sqlite3 store/messages.db "INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, requires_trigger, backend, added_at) VALUES ('dc:<CHANNEL_ID>', '<AGENT_NAME>', '<FOLDER_NAME>', '@<TRIGGER>', 1, '$BACKEND', datetime('now'))"
 ```
 
 Create the group folder:
