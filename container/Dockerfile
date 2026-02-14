@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     wget \
     openssh-client \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Go (latest stable version) - cross-platform support
