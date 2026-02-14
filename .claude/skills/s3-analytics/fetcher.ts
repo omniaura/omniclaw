@@ -135,6 +135,7 @@ export function extractDateFromFilename(key: string): string {
 /**
  * Fetch all timeseries data and build chart-ready metrics
  * Extracts key metrics: subscribers, MRR, DAU, MAU, conversion_rate over time
+ * Uses parallel fetching with batching for improved performance
  */
 export async function fetchTimeSeriesMetrics(): Promise<TimeSeriesMetrics> {
   const files = await listTimeseriesFiles();
@@ -154,21 +155,38 @@ export async function fetchTimeSeriesMetrics(): Promise<TimeSeriesMetrics> {
     monthly_margin: [],
   };
 
-  // Fetch and parse each file
-  for (const file of files) {
-    const date = extractDateFromFilename(file);
-    if (!date) {
-      console.warn(`Skipping file with invalid name: ${file}`);
-      continue;
-    }
+  // Fetch files in parallel batches of 10 for optimal performance
+  const BATCH_SIZE = 10;
+  const results: Array<{ date: string; stats: UserStats }> = [];
 
-    const stats = await fetchUserStats(file);
-    if (!stats) {
-      console.warn(`Skipping file with no data: ${file}`);
-      continue;
-    }
+  for (let i = 0; i < files.length; i += BATCH_SIZE) {
+    const batch = files.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(async (file) => {
+        const date = extractDateFromFilename(file);
+        if (!date) {
+          console.warn(`Skipping file with invalid name: ${file}`);
+          return null;
+        }
 
-    // Build data points for each metric
+        const stats = await fetchUserStats(file);
+        if (!stats) {
+          console.warn(`Skipping file with no data: ${file}`);
+          return null;
+        }
+
+        return { date, stats };
+      })
+    );
+
+    results.push(...batchResults.filter((r): r is NonNullable<typeof r> => r !== null));
+  }
+
+  // Sort by date to ensure chronological order
+  results.sort((a, b) => a.date.localeCompare(b.date));
+
+  // Build data points for each metric from sorted results
+  for (const { date, stats } of results) {
     metrics.subscribers.push({
       date,
       value: stats.stripe_active_subscribers || 0,
@@ -277,4 +295,43 @@ export async function getDataDateRange(): Promise<{ start: string; end: string }
   const lastDate = extractDateFromFilename(files[files.length - 1]);
 
   return { start: firstDate, end: lastDate };
+}
+
+/**
+ * Get the most recent N days of data from a timeline
+ */
+export function getRecentDays(data: TimeSeriesDataPoint[], n: number): TimeSeriesDataPoint[] {
+  if (n >= data.length) {
+    return data;
+  }
+  return data.slice(-n);
+}
+
+/**
+ * Calculate rolling average for smoothing noisy data
+ * Returns a new array with the same length, with averaged values
+ */
+export function calculateRollingAverage(
+  data: TimeSeriesDataPoint[],
+  window: number
+): TimeSeriesDataPoint[] {
+  if (data.length === 0) {
+    return [];
+  }
+
+  const result: TimeSeriesDataPoint[] = [];
+
+  for (let i = 0; i < data.length; i++) {
+    const start = Math.max(0, i - Math.floor(window / 2));
+    const end = Math.min(data.length, i + Math.ceil(window / 2));
+    const windowData = data.slice(start, end);
+    const average = windowData.reduce((sum, point) => sum + point.value, 0) / windowData.length;
+
+    result.push({
+      date: data[i].date,
+      value: average,
+    });
+  }
+
+  return result;
 }

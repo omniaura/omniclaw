@@ -57,9 +57,8 @@ export const s3Client = new S3Client({
 
 ## File Structure
 
-- `fetcher.ts` - Main data fetching and parsing logic
+- `fetcher.ts` - Main data fetching, parsing logic, and TypeScript interfaces
 - `s3-client.ts` - S3 client configuration
-- `types.ts` - TypeScript interfaces for metrics
 
 ## Data Format
 
