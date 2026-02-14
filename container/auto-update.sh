@@ -19,10 +19,19 @@ fi
 # Navigate to repo directory
 cd "$REPO_DIR"
 
-# Stash any local changes
+# Check for uncommitted changes and warn user
+STASH_CREATED=false
 if ! git diff-index --quiet HEAD --; then
-    echo "📦 Stashing local changes..."
-    git stash push -m "Auto-update stash $(date +%Y%m%d-%H%M%S)"
+    echo ""
+    echo "⚠️  WARNING: You have uncommitted changes in your working directory."
+    echo "   Auto-update will not proceed with dirty state."
+    echo ""
+    echo "   Please commit or stash your changes first:"
+    echo "     git stash push -m 'Manual stash before update'"
+    echo "     # or"
+    echo "     git add . && git commit -m 'Your commit message'"
+    echo ""
+    exit 1
 fi
 
 # Get current branch
@@ -35,7 +44,7 @@ git fetch origin
 
 # Get current and remote commit hashes
 LOCAL_COMMIT=$(git rev-parse HEAD)
-REMOTE_COMMIT=$(git rev-parse origin/$CURRENT_BRANCH)
+REMOTE_COMMIT=$(git rev-parse "origin/$CURRENT_BRANCH")
 
 if [ "$LOCAL_COMMIT" = "$REMOTE_COMMIT" ]; then
     echo "✅ Already up to date (commit: ${LOCAL_COMMIT:0:8})"
@@ -48,7 +57,7 @@ echo "   Remote: ${REMOTE_COMMIT:0:8}"
 
 # Pull latest changes
 echo "⬇️  Pulling latest code..."
-git pull origin $CURRENT_BRANCH
+git pull origin "$CURRENT_BRANCH"
 
 # Find the container image name
 CONTAINER_IMAGE=$(grep -E "^FROM " container/Dockerfile | head -1 | awk '{print $2}' || echo "nanoclaw")
@@ -58,7 +67,12 @@ echo "🐳 Container base: $CONTAINER_IMAGE"
 echo "🔨 Rebuilding container..."
 if [ -f "docker-compose.yml" ]; then
     echo "   Using docker-compose..."
-    docker-compose build
+    # Support both legacy and new docker compose commands
+    if command -v docker-compose &> /dev/null; then
+        docker-compose build
+    else
+        docker compose build
+    fi
 elif [ -f "container/build.sh" ]; then
     echo "   Using build script..."
     bash container/build.sh
@@ -70,8 +84,13 @@ fi
 # Restart service
 echo "♻️  Restarting service..."
 if [ -f "docker-compose.yml" ]; then
-    docker-compose down
-    docker-compose up -d
+    if command -v docker-compose &> /dev/null; then
+        docker-compose down
+        docker-compose up -d
+    else
+        docker compose down
+        docker compose up -d
+    fi
 elif command -v systemctl &> /dev/null; then
     # Try systemd service restart
     SERVICE_NAME="${NANOCLAW_SERVICE:-nanoclaw}"
