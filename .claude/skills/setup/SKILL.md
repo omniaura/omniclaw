@@ -440,10 +440,7 @@ Ask the user:
 > 3. Enable **Message Content Intent** under Bot → Privileged Gateway Intents
 > 4. Invite the bot to your server using OAuth2 → URL Generator (scopes: `bot`, permissions: `Send Messages`, `Read Message History`)
 
-If they paste the token, append to `.env`:
-```bash
-echo "DISCORD_BOT_TOKEN=<token>" >> .env
-```
+If they paste the token, use the Write tool or a text editor to append `DISCORD_BOT_TOKEN=<token>` to `.env`. Do **not** echo the token via shell command, as it would leak into shell history.
 
 ### 8b. Register the Discord Channel
 
@@ -452,7 +449,7 @@ The Discord channel JID format is `dc:<channel_id>`. Ask the user for the Discor
 
 Register the group in the database:
 ```bash
-sqlite3 store/messages.db "INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, requires_trigger, backend, added_at) VALUES ('dc:<CHANNEL_ID>', '<AGENT_NAME>', '<FOLDER_NAME>', '@<TRIGGER>', 1, 'apple-container', datetime('now'))"
+sqlite3 store/messages.db "INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, requires_trigger, backend, added_at) VALUES ('dc:<CHANNEL_ID>', '<AGENT_NAME>', '<FOLDER_NAME>', '@<TRIGGER>', 1, (SELECT backend FROM registered_groups LIMIT 1), datetime('now'))"
 ```
 
 Create the group folder:
@@ -472,7 +469,7 @@ If **yes**, ask for the keywords (comma-separated list of names/words):
 sqlite3 store/messages.db "UPDATE registered_groups SET auto_respond_keywords = '<JSON_ARRAY>', auto_respond_to_questions = 1 WHERE folder = '<FOLDER_NAME>'"
 ```
 
-The `auto_respond_keywords` value must be a JSON array string, e.g. `'[\"omni\",\"peyton\",\"help\"]'`.
+The `auto_respond_keywords` value must be a JSON array string, e.g. `'[\"assistant\",\"support\",\"help\"]'`.
 
 ### 8d. Configure MCP Servers (Optional)
 
