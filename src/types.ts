@@ -55,6 +55,8 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
+  autoRespondToQuestions?: boolean; // Respond to messages ending with '?' (default: false)
+  autoRespondKeywords?: string[]; // Keywords that trigger response without mention (e.g., ["omni", "help"])
   heartbeat?: HeartbeatConfig;
   discordGuildId?: string;  // Discord guild/server ID (for server-level context)
   serverFolder?: string;    // e.g., "servers/omniaura-discord" (shared across channels in same server)

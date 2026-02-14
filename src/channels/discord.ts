@@ -169,6 +169,26 @@ export class DiscordChannel implements Channel {
     }
   }
 
+  /**
+   * Check if message should auto-respond based on group config
+   */
+  private shouldAutoRespond(content: string, group: any): boolean {
+    // Check for question ending with '?'
+    if (group.autoRespondToQuestions && content.trim().endsWith('?')) {
+      return true;
+    }
+
+    // Check for keywords (case-insensitive)
+    if (group.autoRespondKeywords && Array.isArray(group.autoRespondKeywords)) {
+      const lowerContent = content.toLowerCase();
+      return group.autoRespondKeywords.some((keyword: string) =>
+        lowerContent.includes(keyword.toLowerCase())
+      );
+    }
+
+    return false;
+  }
+
   private async handleMessage(message: Message): Promise<void> {
     // Ignore own messages
     if (message.author.id === this.client.user?.id) return;
@@ -253,6 +273,20 @@ export class DiscordChannel implements Channel {
     }
 
     if (!content) return;
+
+    // Smart auto-respond: check if we should respond without explicit mention
+    const hasTrigger = TRIGGER_PATTERN.test(content);
+    if (!hasTrigger && !isDM) {
+      // Not a DM and no trigger — check if auto-respond is enabled
+      if (this.shouldAutoRespond(content, group)) {
+        logger.debug(
+          { chatJid, autoRespondToQuestions: group.autoRespondToQuestions, autoRespondKeywords: group.autoRespondKeywords },
+          'Auto-responding based on group config',
+        );
+        // Prepend trigger so message gets processed
+        content = `@${ASSISTANT_NAME} ${content}`;
+      }
+    }
 
     // Clean up media files older than 24 hours
     this.cleanupOldMedia(group.folder);
