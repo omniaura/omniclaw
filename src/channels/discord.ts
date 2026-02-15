@@ -88,19 +88,13 @@ export class DiscordChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<string | void> {
-    const channelId = jidToChannelId(jid);
-    if (!channelId) {
-      logger.warn({ jid }, 'Cannot resolve Discord channel ID from JID');
+    const channel = await resolveChannel(this.client, jid);
+    if (!channel || !('send' in channel)) {
+      logger.warn({ jid }, 'Discord channel not found or not sendable');
       return;
     }
 
     try {
-      const channel = await this.client.channels.fetch(channelId);
-      if (!channel || !('send' in channel)) {
-        logger.warn({ jid, channelId }, 'Discord channel not found or not sendable');
-        return;
-      }
-
       const chunks = splitMessage(text, 2000);
       let lastMessageId: string | undefined;
       for (const chunk of chunks) {
@@ -159,20 +153,20 @@ export class DiscordChannel implements Channel {
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!isTyping) return; // Discord typing auto-expires
-    const channelId = jidToChannelId(jid);
-    if (!channelId) return;
+    const channel = await resolveChannel(this.client, jid);
+    if (!channel || !('sendTyping' in channel)) return;
 
     try {
-      const channel = await this.client.channels.fetch(channelId);
-      if (channel && 'sendTyping' in channel) {
-        await (channel as TextChannel | DMChannel).sendTyping();
-      }
+      await (channel as TextChannel | DMChannel).sendTyping();
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Discord typing indicator');
     }
   }
 
   async createThread(jid: string, messageId: string, name: string): Promise<ThreadChannel | null> {
+    // DMs don't support threads
+    if (jid.startsWith('dc:dm:')) return null;
+
     const channelId = jidToChannelId(jid);
     if (!channelId) return null;
 
@@ -350,6 +344,10 @@ export class DiscordChannel implements Channel {
     if (message.author.bot && !TRIGGER_PATTERN.test(content)) return;
 
     const isDM = message.channel.type === ChannelType.DM;
+    // In guild channels, only process messages that mention THIS bot. Prevents responding
+    // when another agent (e.g. @PeytonOmni) is mentioned instead.
+    if (!isDM && botId && !message.mentions.users.has(botId)) return;
+
     const chatJid = isDM
       ? `dc:dm:${message.author.id}`
       : `dc:${message.channelId}`;
@@ -507,10 +505,40 @@ export class DiscordChannel implements Channel {
   }
 }
 
-/** Convert a dc: JID to a Discord channel/user ID */
+/** Convert a dc: JID to a Discord channel ID (guild channels only) */
 function jidToChannelId(jid: string): string | null {
-  if (jid.startsWith('dc:dm:')) return jid.slice(6);
+  if (jid.startsWith('dc:dm:')) return null; // DMs use user ID, not channel ID
   if (jid.startsWith('dc:')) return jid.slice(3);
+  return null;
+}
+
+/** Resolve a JID to a sendable Discord channel. For DMs (dc:dm:userId), fetches/creates DM channel. */
+async function resolveChannel(
+  client: Client,
+  jid: string,
+): Promise<TextChannel | DMChannel | null> {
+  if (jid.startsWith('dc:dm:')) {
+    const userId = jid.slice(6);
+    try {
+      const dmChannel = await client.users.createDM(userId);
+      return dmChannel;
+    } catch (err) {
+      logger.warn({ jid, userId, err }, 'Failed to get Discord DM channel');
+      return null;
+    }
+  }
+  if (jid.startsWith('dc:')) {
+    const channelId = jid.slice(3);
+    try {
+      const channel = await client.channels.fetch(channelId);
+      if (channel && ('send' in channel || 'sendTyping' in channel)) {
+        return channel as TextChannel | DMChannel;
+      }
+    } catch (err) {
+      logger.warn({ jid, channelId, err }, 'Failed to fetch Discord channel');
+    }
+    return null;
+  }
   return null;
 }
 
