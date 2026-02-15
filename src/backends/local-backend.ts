@@ -231,7 +231,7 @@ function buildVolumeMounts(
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  const args: string[] = ['run', '-i', '--rm', '--memory', '4G', '--name', containerName];
 
   for (const mount of mounts) {
     if (mount.readonly) {

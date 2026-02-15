@@ -7,6 +7,11 @@ set -e
 # Cap JS heap to prevent OOM
 export NODE_OPTIONS="--max-old-space-size=2048"
 
+# Cap Go heap for tsgo (TypeScript native compiler) — Go doesn't auto-detect
+# container memory limits, so without this tsgo allocates unbounded memory and hangs.
+# See: https://github.com/microsoft/typescript-go/issues/2125
+export GOMEMLIMIT=3GiB
+
 # Configure git with GitHub token
 if [ -n "$GITHUB_TOKEN" ]; then
   gh auth setup-git 2>/dev/null || true
