@@ -84,6 +84,20 @@ done
 log "Pulling latest code..."
 git pull --ff-only origin "$BRANCH"
 
+# Write update info for container to read
+UPDATE_INFO_FILE="$REPO_DIR/data/.nanoclaw-update-info.json"
+mkdir -p "$(dirname "$UPDATE_INFO_FILE")"
+cat > "$UPDATE_INFO_FILE" <<EOF
+{
+  "updated": true,
+  "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "oldCommit": "${LOCAL_COMMIT}",
+  "newCommit": "${REMOTE_COMMIT}",
+  "commitLog": $(git log --format='{"hash":"%H","short":"%h","subject":"%s","author":"%an","date":"%aI"}' "${LOCAL_COMMIT}..${REMOTE_COMMIT}" | jq -s '.')
+}
+EOF
+log "Wrote update info to $UPDATE_INFO_FILE"
+
 # Build host-side TypeScript
 log "Building host code..."
 if command -v bun &> /dev/null; then

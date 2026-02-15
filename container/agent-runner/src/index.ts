@@ -750,6 +750,47 @@ async function main(): Promise<void> {
   // Clean up stale _close sentinel from previous container runs
   try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
 
+  // Check for auto-update notification
+  let updateNotification = '';
+  const updateInfoPath = '/workspace/data/.nanoclaw-update-info.json';
+  try {
+    if (fs.existsSync(updateInfoPath)) {
+      const updateInfo = JSON.parse(fs.readFileSync(updateInfoPath, 'utf-8'));
+      if (updateInfo.updated) {
+        log('Auto-update detected, preparing notification');
+
+        // Build commit log
+        const commits = (updateInfo.commitLog || [])
+          .map((c: { short: string; subject: string }) => `- ${c.short}: ${c.subject}`)
+          .join('\n');
+
+        updateNotification = `
+🔄 NanoClaw Auto-Update Complete
+
+You've been updated to commit ${updateInfo.newCommit.substring(0, 8)} (from ${updateInfo.oldCommit.substring(0, 8)}).
+
+Recent commits:
+${commits || '(No commit details available)'}
+
+Please review these changes to understand your new capabilities and fixes.
+
+---
+
+`.trim() + '\n\n';
+
+        // Delete the update info file so we don't show this notification again
+        try {
+          fs.unlinkSync(updateInfoPath);
+          log('Consumed update notification file');
+        } catch (err) {
+          log(`Failed to delete update info file: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+  } catch (err) {
+    log(`Failed to read update info: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
@@ -759,6 +800,11 @@ async function main(): Promise<void> {
   if (pending.length > 0) {
     log(`Draining ${pending.length} pending IPC messages into initial prompt`);
     prompt += '\n' + pending.join('\n');
+  }
+
+  // Prepend update notification if present
+  if (updateNotification) {
+    prompt = updateNotification + prompt;
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
