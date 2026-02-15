@@ -9,8 +9,10 @@ export NODE_OPTIONS="--max-old-space-size=2048"
 
 # Cap Go heap for tsgo (TypeScript native compiler) — Go doesn't auto-detect
 # container memory limits, so without this tsgo allocates unbounded memory and hangs.
+# Set to 75% of available RAM, leaving headroom for OS + other processes.
 # See: https://github.com/microsoft/typescript-go/issues/2125
-export GOMEMLIMIT=3GiB
+TOTAL_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+export GOMEMLIMIT=$(( TOTAL_KB * 3 / 4 / 1024 ))MiB
 
 # Configure git with GitHub token
 if [ -n "$GITHUB_TOKEN" ]; then
