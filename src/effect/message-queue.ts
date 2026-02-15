@@ -3,7 +3,7 @@
  * Provides retry logic, timeout protection, and type-safe error handling
  */
 
-import { Effect, Layer, Queue, Ref, Schedule } from 'effect';
+import { Effect, Layer, Ref, Schedule } from 'effect';
 import * as S from '@effect/schema/Schema';
 import { logger } from '../logger.js';
 import type { AgentBackend } from '../backends/types.js';
@@ -21,14 +21,6 @@ export class MessageSendError extends S.TaggedError<MessageSendError>()(
   },
 ) {}
 
-export class QueueFullError extends S.TaggedError<QueueFullError>()(
-  'QueueFullError',
-  {
-    groupJid: S.String,
-    queueSize: S.Number,
-  },
-) {}
-
 export class ConcurrencyLimitError extends S.TaggedError<ConcurrencyLimitError>()(
   'ConcurrencyLimitError',
   {
@@ -40,14 +32,6 @@ export class ConcurrencyLimitError extends S.TaggedError<ConcurrencyLimitError>(
 // ============================================================================
 // Domain Types
 // ============================================================================
-
-export const MessageTask = S.Struct({
-  id: S.String,
-  groupJid: S.String,
-  text: S.String,
-  createdAt: S.Number,
-});
-export type MessageTask = S.Schema.Type<typeof MessageTask>;
 
 export const GroupState = S.Struct({
   groupJid: S.String,
@@ -148,12 +132,11 @@ export const makeMessageQueue = (
     );
     const activeCount = yield* _(Ref.make(0));
 
-    // Helper: Get or create group state
+    // Helper: Get or create group state (atomic to prevent race conditions)
     const getGroupState = (
       groupJid: string,
     ): Effect.Effect<InternalGroupState> =>
-      Effect.gen(function* (_) {
-        const states = yield* _(Ref.get(groupStates));
+      Ref.modify(groupStates, (states) => {
         let state = states.get(groupJid);
         if (!state) {
           state = {
@@ -162,11 +145,11 @@ export const makeMessageQueue = (
             backend: null,
             groupFolder: null,
           };
-          yield* _(
-            Ref.update(groupStates, (s) => new Map(s).set(groupJid, state!)),
-          );
+          const newStates = new Map(states);
+          newStates.set(groupJid, state);
+          return [state, newStates] as const;
         }
-        return state;
+        return [state, states] as const;
       });
 
     // Helper: Update group state
@@ -244,25 +227,43 @@ export const makeMessageQueue = (
       groupFolder?: string,
     ): Effect.Effect<void, MessageSendError | ConcurrencyLimitError> =>
       Effect.gen(function* (_) {
-        // Check concurrency limit
-        const current = yield* _(Ref.get(activeCount));
-        if (current >= config.maxConcurrent) {
-          return yield* _(
-            Effect.fail(
-              new ConcurrencyLimitError({
-                activeCount: current,
-                maxConcurrent: config.maxConcurrent,
-              }),
-            ),
-          );
-        }
+        // Atomic check-and-increment for concurrency limit
+        const incrementResult = yield* _(
+          Ref.modify(activeCount, (current) => {
+            if (current >= config.maxConcurrent) {
+              return [
+                Effect.fail(
+                  new ConcurrencyLimitError({
+                    activeCount: current,
+                    maxConcurrent: config.maxConcurrent,
+                  }),
+                ),
+                current,
+              ] as const;
+            }
+            return [Effect.succeed(undefined), current + 1] as const;
+          }),
+        );
 
-        // Increment active count
-        yield* _(Ref.update(activeCount, (n) => n + 1));
+        // If concurrency limit exceeded, fail early
+        yield* _(incrementResult);
 
         // Send with retry and timeout
         const result = yield* _(
           sendMessageCore(groupJid, text, backend, groupFolder).pipe(
+            // Only retry if error is retryable
+            Effect.catchAll((error) => {
+              if (error._tag === 'MessageSendError' && !error.retryable) {
+                // Non-retryable errors should fail immediately
+                logger.error(
+                  { groupJid, error: error.reason },
+                  'Message send failed (non-retryable)',
+                );
+                return Effect.fail(error);
+              }
+              // Retryable errors get retried
+              return Effect.fail(error);
+            }),
             Effect.retry(retrySchedule),
             Effect.timeout(config.sendTimeoutMs),
             Effect.catchAll((error) => {
