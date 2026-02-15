@@ -38,6 +38,9 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private messageCache = new Map<string, { msg: any; ts: number }>();
+  private static readonly MESSAGE_CACHE_MAX = 500;
+  private static readonly MESSAGE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
   // Store event handlers so they can be removed on reconnect
   private messageHandler: ((data: any) => Promise<void>) | null = null;
@@ -190,7 +193,14 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
-          const content =
+          // Cache raw message for outbound quoting
+          const msgId = msg.key.id || '';
+          if (msgId) {
+            this.messageCache.set(msgId, { msg, ts: Date.now() });
+            this.pruneMessageCache();
+          }
+
+          let content =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
@@ -199,8 +209,20 @@ export class WhatsAppChannel implements Channel {
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
 
+          // Prepend reply context so the agent knows what's being replied to
+          const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
+          if (contextInfo?.quotedMessage) {
+            const quotedText = contextInfo.quotedMessage.conversation
+              || contextInfo.quotedMessage.extendedTextMessage?.text || '';
+            if (quotedText) {
+              const truncated = quotedText.length > 200 ? quotedText.slice(0, 200) + '…' : quotedText;
+              const quotedSender = contextInfo.participant?.split('@')[0] || 'someone';
+              content = `[Replying to ${quotedSender}: "${truncated}"]\n${content}`;
+            }
+          }
+
           this.opts.onMessage(chatJid, {
-            id: msg.key.id || '',
+            id: msgId,
             chat_jid: chatJid,
             sender,
             sender_name: senderName,
@@ -224,14 +246,16 @@ export class WhatsAppChannel implements Channel {
     this.sock.ev.on('messages.reaction', this.reactionHandler);
   }
 
-  async sendMessage(jid: string, text: string): Promise<string | void> {
+  async sendMessage(jid: string, text: string, replyToMessageId?: string): Promise<string | void> {
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text });
       logger.info({ jid, length: text.length, queueSize: this.outgoingQueue.length }, 'WA disconnected, message queued');
       return;
     }
     try {
-      const sent = await this.sock.sendMessage(jid, { text });
+      const cached = replyToMessageId ? this.messageCache.get(replyToMessageId) : undefined;
+      const opts = cached ? { quoted: cached.msg } : undefined;
+      const sent = await this.sock.sendMessage(jid, { text }, opts);
       logger.info({ jid, length: text.length }, 'Message sent');
       return sent?.key?.id ?? undefined;
     } catch (err) {
@@ -338,6 +362,24 @@ export class WhatsAppChannel implements Channel {
       }
     } finally {
       this.flushing = false;
+    }
+  }
+
+  private pruneMessageCache(): void {
+    const now = Date.now();
+    // Evict expired entries
+    for (const [id, entry] of this.messageCache) {
+      if (now - entry.ts > WhatsAppChannel.MESSAGE_CACHE_TTL) {
+        this.messageCache.delete(id);
+      }
+    }
+    // Cap at max size — evict oldest
+    if (this.messageCache.size > WhatsAppChannel.MESSAGE_CACHE_MAX) {
+      const entries = [...this.messageCache.entries()].sort((a, b) => a[1].ts - b[1].ts);
+      const toRemove = entries.length - WhatsAppChannel.MESSAGE_CACHE_MAX;
+      for (let i = 0; i < toRemove; i++) {
+        this.messageCache.delete(entries[i][0]);
+      }
     }
   }
 }

@@ -88,6 +88,14 @@ export class TelegramChannel implements Channel {
         }
       }
 
+      // Prepend reply context so the agent knows what's being replied to
+      const replyTo = ctx.message.reply_to_message;
+      if (replyTo && 'text' in replyTo && replyTo.text) {
+        const truncated = replyTo.text.length > 200 ? replyTo.text.slice(0, 200) + '…' : replyTo.text;
+        const replyAuthor = replyTo.from?.first_name || replyTo.from?.username || 'someone';
+        content = `[Replying to ${replyAuthor}: "${truncated}"]\n${content}`;
+      }
+
       // Store chat metadata for discovery
       this.opts.onChatMetadata(chatJid, timestamp, chatName);
 
@@ -179,7 +187,7 @@ export class TelegramChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(jid: string, text: string, replyToMessageId?: string): Promise<void> {
     if (!this.bot) {
       logger.warn('Telegram bot not initialized');
       return;
@@ -187,14 +195,18 @@ export class TelegramChannel implements Channel {
 
     try {
       const numericId = jid.replace(/^tg:/, '');
+      const replyParams = replyToMessageId
+        ? { reply_parameters: { message_id: parseInt(replyToMessageId, 10) } }
+        : {};
 
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
       if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text);
+        await this.bot.api.sendMessage(numericId, text, replyParams);
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await this.bot.api.sendMessage(numericId, text.slice(i, i + MAX_LENGTH));
+          const opts = i === 0 ? replyParams : {};
+          await this.bot.api.sendMessage(numericId, text.slice(i, i + MAX_LENGTH), opts);
         }
       }
       logger.info({ jid, length: text.length }, 'Telegram message sent');

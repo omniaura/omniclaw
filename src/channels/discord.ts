@@ -87,7 +87,7 @@ export class DiscordChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string): Promise<string | void> {
+  async sendMessage(jid: string, text: string, replyToMessageId?: string): Promise<string | void> {
     const channel = await resolveChannel(this.client, jid);
     if (!channel || !('send' in channel)) {
       logger.warn({ jid }, 'Discord channel not found or not sendable');
@@ -97,8 +97,11 @@ export class DiscordChannel implements Channel {
     try {
       const chunks = splitMessage(text, 2000);
       let lastMessageId: string | undefined;
-      for (const chunk of chunks) {
-        const sent = await (channel as TextChannel | DMChannel).send(chunk);
+      for (let i = 0; i < chunks.length; i++) {
+        const opts = i === 0 && replyToMessageId
+          ? { content: chunks[i], reply: { messageReference: replyToMessageId } }
+          : chunks[i];
+        const sent = await (channel as TextChannel | DMChannel).send(opts);
         lastMessageId = sent.id;
       }
       logger.info({ jid, length: text.length }, 'Discord message sent');
@@ -355,6 +358,19 @@ export class DiscordChannel implements Channel {
     if (!isDM && botId && mentionsOtherUsersOnly) {
       logger.debug({ chatJid: `dc:${message.channelId}`, sender: message.author.username }, 'Ignoring message mentioning other users');
       return;
+    }
+
+    // Prepend reply context so the agent knows what's being replied to
+    if (message.reference?.messageId) {
+      try {
+        const refMsg = await message.channel.messages.fetch(message.reference.messageId);
+        const refAuthor = refMsg.member?.displayName || refMsg.author.displayName || refMsg.author.username;
+        const refContent = refMsg.content.length > 200
+          ? refMsg.content.slice(0, 200) + '…' : refMsg.content;
+        if (refContent) {
+          content = `[Replying to ${refAuthor}: "${refContent}"]\n${content}`;
+        }
+      } catch { /* deleted message — continue without context */ }
     }
 
     const chatJid = isDM

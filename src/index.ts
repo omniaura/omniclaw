@@ -407,7 +407,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text && channel) {
         const formatted = formatOutbound(channel, text);
         if (formatted) {
-          await channel.sendMessage(chatJid, formatted);
+          await channel.sendMessage(chatJid, formatted, triggeringMessageId || undefined);
           outputSentToUser = true;
         }
       }
