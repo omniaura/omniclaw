@@ -37,6 +37,19 @@ install:
 restart:
     launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 
+# Build the host/orchestrator (dist/index.js)
+build:
+    bun run build
+
+# Build host + container (use after code changes to either)
+build-all:
+    just build
+    just build-container
+
+# Tail NanoClaw logs (follow mode)
+tail:
+    tail -f logs/nanoclaw.log
+
 # Build the agent container image. Usage: just build-container [tag]  (default tag: latest)
 build-container tag="latest":
     ./container/build.sh {{tag}}
