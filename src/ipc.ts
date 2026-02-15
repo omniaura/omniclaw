@@ -127,6 +127,16 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 fs.unlinkSync(filePath);
                 continue;
               }
+              if (data.type === 'format_mention' && data.userName && data.platform) {
+                // TODO: Implement user registry lookup
+                // For now, just log the request and clean up the file
+                logger.info(
+                  { userName: data.userName, platform: data.platform, chatJid: data.chatJid, sourceGroup },
+                  'IPC format_mention request (user registry lookup not yet implemented)',
+                );
+                fs.unlinkSync(filePath);
+                continue;
+              }
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: any registered agent can message any other registered agent
                 const targetGroup = registeredGroups[data.chatJid];

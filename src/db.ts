@@ -311,7 +311,12 @@ export function storeMessageDirect(msg: {
   content: string;
   timestamp: string;
   is_from_me: boolean;
+  sender_user_id?: string; // Platform-specific user ID (Issue #66)
+  mentions?: Array<{ id: string; name: string; platform: string }>; // User mentions (Issue #66)
 }): void {
+  // For now, store core fields only. Metadata (sender_user_id, mentions) will be
+  // used by in-memory user registry but not persisted to DB until schema migration.
+  // TODO: Add DB migration to persist user metadata fields
   db.query(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
