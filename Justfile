@@ -70,10 +70,12 @@ disable-project-access group="main":
         echo "Database not found at $DB"
         exit 1
     fi
+    # Escape single quotes for SQL safety
+    ESCAPED_GROUP=$(echo "{{group}}" | sed "s/'/''/g")
     ROWS=$(sqlite3 "$DB" "
     UPDATE registered_groups
     SET container_config = json_remove(COALESCE(container_config, '{}'), '$.projectAccess')
-    WHERE folder = '{{group}}';
+    WHERE folder = '$ESCAPED_GROUP';
     SELECT changes();
     ")
     if [ "$ROWS" -gt 0 ]; then
@@ -84,7 +86,7 @@ disable-project-access group="main":
     fi
 
 # Unmount additional workspaces (additionalMounts) for a group.
-# Removes host paths like ~/code/ditto-app from container_config so agents
+# Removes host paths like ~/code/PROJECT from container_config so agents
 # no longer see them at /workspace/extra/*. Agents can clone their own repos instead.
 # Usage: just unmount-workspaces [group_folder]  (default: main)
 unmount-workspaces group="main":
@@ -95,10 +97,12 @@ unmount-workspaces group="main":
         echo "Database not found at $DB"
         exit 1
     fi
+    # Escape single quotes for SQL safety
+    ESCAPED_GROUP=$(echo "{{group}}" | sed "s/'/''/g")
     ROWS=$(sqlite3 "$DB" "
     UPDATE registered_groups
     SET container_config = json_remove(COALESCE(container_config, '{}'), '$.additionalMounts')
-    WHERE folder = '{{group}}';
+    WHERE folder = '$ESCAPED_GROUP';
     SELECT changes();
     ")
     if [ "$ROWS" -gt 0 ]; then
