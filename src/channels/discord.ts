@@ -313,11 +313,15 @@ export class DiscordChannel implements Channel {
 
     // Resolve all remaining <@USER_ID> mentions to display names so the agent
     // knows who is being referenced. Uses server nickname > global display name > username.
+    // Also collect mention metadata for user registry (Issue #66)
+    const mentions: Array<{ id: string; name: string; platform: 'discord' }> = [];
+
     if (message.mentions.members?.size) {
       for (const [id, member] of message.mentions.members) {
         if (id === botId) continue; // Already handled above
         const name = member.displayName || member.user.displayName || member.user.username;
         content = content.replace(new RegExp(`<@!?${id}>`, 'g'), `@${name}`);
+        mentions.push({ id, name, platform: 'discord' });
       }
     } else if (message.mentions.users?.size) {
       // Fallback for DMs or when member data isn't available
@@ -325,6 +329,7 @@ export class DiscordChannel implements Channel {
         if (id === botId) continue;
         const name = user.displayName || user.username;
         content = content.replace(new RegExp(`<@!?${id}>`, 'g'), `@${name}`);
+        mentions.push({ id, name, platform: 'discord' });
       }
     }
     // Resolve <@&ROLE_ID> role mentions and <#CHANNEL_ID> channel mentions
@@ -436,6 +441,8 @@ export class DiscordChannel implements Channel {
       content,
       timestamp,
       is_from_me: false,
+      sender_user_id: sender, // Discord user ID
+      mentions: mentions.length > 0 ? mentions : undefined,
     });
 
     logger.info(

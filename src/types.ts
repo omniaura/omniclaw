@@ -74,6 +74,14 @@ export interface NewMessage {
   content: string;
   timestamp: string;
   is_from_me?: boolean;
+  /** Platform-specific sender ID (e.g., Discord user ID, WhatsApp JID) */
+  sender_user_id?: string;
+  /** Array of mentioned users with their IDs and display names */
+  mentions?: Array<{
+    id: string;
+    name: string;
+    platform: 'discord' | 'whatsapp' | 'telegram';
+  }>;
 }
 
 export interface ScheduledTask {
