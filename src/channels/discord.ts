@@ -344,9 +344,10 @@ export class DiscordChannel implements Channel {
     if (message.author.bot && !TRIGGER_PATTERN.test(content)) return;
 
     const isDM = message.channel.type === ChannelType.DM;
-    // In guild channels, only process messages that mention THIS bot. Prevents responding
-    // when another agent (e.g. @PeytonOmni) is mentioned instead.
-    if (!isDM && botId && !message.mentions.users.has(botId)) return;
+    // In guild channels, only process messages that mention THIS bot OR reply to the bot.
+    // Prevents responding when another agent (e.g. @PeytonOmni) is mentioned instead.
+    const isReplyToBot = message.mentions.repliedUser?.id === botId;
+    if (!isDM && botId && !message.mentions.users.has(botId) && !isReplyToBot) return;
 
     const chatJid = isDM
       ? `dc:dm:${message.author.id}`
