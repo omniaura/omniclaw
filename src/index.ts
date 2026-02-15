@@ -373,7 +373,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let outputSentToUser = false;
 
   // Thread streaming via shared helper
-  const triggeringMessageId = missedMessages[missedMessages.length - 1]?.id || null;
+  // Synthetic IDs (synth-*, react-*, notify-*, s3-*) aren't real channel message IDs
+  // and will cause Discord/Telegram API failures if passed as reply references.
+  const rawMessageId = missedMessages[missedMessages.length - 1]?.id || null;
+  const triggeringMessageId = rawMessageId && /^(synth|react|notify|s3)-/.test(rawMessageId) ? null : rawMessageId;
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
   const threadName = lastContent
     .replace(TRIGGER_PATTERN, '').trim().slice(0, 80) || 'Agent working...';
