@@ -145,8 +145,16 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'input-task'), { recursive: true });
 
   if (isScheduledTask) {
-    // Task containers get input-task/ mounted as their /workspace/ipc/input
-    // so follow-up messages don't cross lanes
+    // Mount IPC root first so agent_registry.json, tasks.json, groups.json are available.
+    // Apple Container does not support single-file bind mounts (apple/container#44),
+    // so we must mount the parent directory.
+    mounts.push({
+      hostPath: groupIpcDir,
+      containerPath: '/workspace/ipc',
+      readonly: false,
+    });
+    // Override with specific dirs so input-task appears at /workspace/ipc/input
+    // (agent-runner expects /workspace/ipc/input, not /workspace/ipc/input-task)
     mounts.push({
       hostPath: path.join(groupIpcDir, 'messages'),
       containerPath: '/workspace/ipc/messages',
@@ -162,19 +170,6 @@ function buildVolumeMounts(
       containerPath: '/workspace/ipc/input',
       readonly: false,
     });
-    // Mount IPC root for agent_registry.json and other top-level files
-    // Use a separate mount point so agent-runner can still find them
-    const ipcFiles = ['agent_registry.json', 'tasks.json', 'groups.json'];
-    for (const file of ipcFiles) {
-      const filePath = path.join(groupIpcDir, file);
-      if (fs.existsSync(filePath)) {
-        mounts.push({
-          hostPath: filePath,
-          containerPath: `/workspace/ipc/${file}`,
-          readonly: true,
-        });
-      }
-    }
   } else {
     mounts.push({
       hostPath: groupIpcDir,
