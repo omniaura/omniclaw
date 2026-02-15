@@ -601,8 +601,8 @@ async function startMessageLoop(): Promise<void> {
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend);
 
-          if (queue.sendMessage(chatJid, formatted)) {
-            logger.debug(
+          if (await queue.sendMessage(chatJid, formatted)) {
+            logger.info(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
@@ -614,6 +614,7 @@ async function startMessageLoop(): Promise<void> {
             if (typingCh?.setTyping) typingCh.setTyping(chatJid, true);
           } else {
             // No active container — enqueue for a new one
+            logger.info({ chatJid, count: messagesToSend.length }, 'No active container, enqueuing for new one');
             queue.enqueueMessageCheck(chatJid);
           }
         }
@@ -812,7 +813,7 @@ async function main(): Promise<void> {
     try {
       const discord = new DiscordChannel({
         token: DISCORD_BOT_TOKEN,
-        onReaction: (chatJid, messageId, emoji, userName) => {
+        onReaction: async (chatJid, messageId, emoji, userName) => {
           // 1. Check for share_request approval first (only approval emojis)
           if (emoji.startsWith('👍') || emoji === '❤️' || emoji === '✅') {
             const request = consumeShareRequest(messageId);
@@ -866,14 +867,15 @@ async function main(): Promise<void> {
           const reactionContent = `@${ASSISTANT_NAME} [${userName} reacted with ${emoji}]`;
 
           // Try to pipe directly to active container
-          if (!queue.sendMessage(chatJid, formatMessages([{
+          const piped = await queue.sendMessage(chatJid, formatMessages([{
             id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             chat_jid: chatJid,
             sender: 'system',
             sender_name: 'System',
             content: reactionContent,
             timestamp: new Date().toISOString(),
-          }]))) {
+          }]));
+          if (!piped) {
             // No active container — store in DB and enqueue
             storeMessage({
               id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

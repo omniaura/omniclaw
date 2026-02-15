@@ -100,14 +100,17 @@ export class GroupQueue {
   }
 
   enqueueMessageCheck(groupJid: string): void {
-    if (this.shuttingDown) return;
+    if (this.shuttingDown) {
+      logger.info({ groupJid }, 'enqueueMessageCheck: shutting down, skipping');
+      return;
+    }
 
     const state = this.getGroup(groupJid);
 
     // Only check the message lane — task lane is independent
     if (state.messageActive) {
       state.messagePendingMessages = true;
-      logger.debug({ groupJid }, 'Message container active, message queued');
+      logger.info({ groupJid }, 'Message container active, message queued');
       return;
     }
 
@@ -116,13 +119,14 @@ export class GroupQueue {
       if (!this.waitingMessageGroups.includes(groupJid)) {
         this.waitingMessageGroups.push(groupJid);
       }
-      logger.debug(
+      logger.info(
         { groupJid, activeCount: this.activeCount },
         'At concurrency limit, message queued',
       );
       return;
     }
 
+    logger.info({ groupJid, activeCount: this.activeCount }, 'Launching container for group');
     this.runForGroup(groupJid, 'messages');
   }
 
