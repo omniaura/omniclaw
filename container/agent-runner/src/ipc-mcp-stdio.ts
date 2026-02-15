@@ -14,6 +14,7 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const USER_REGISTRY_PATH = path.join(IPC_DIR, 'user_registry.json');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -32,6 +33,31 @@ const S3_AGENT_ID = process.env.NANOCLAW_AGENT_ID || groupFolder;
 const IS_S3_MODE = !!S3_ENDPOINT;
 
 let s3Client: any = null;
+
+// User registry for mention formatting (Issue #66)
+interface UserInfo {
+  id: string;
+  name: string;
+  platform: 'discord' | 'whatsapp' | 'telegram';
+  lastSeen: string;
+}
+
+type UserRegistry = Record<string, UserInfo>;
+
+function loadUserRegistry(): UserRegistry {
+  try {
+    if (fs.existsSync(USER_REGISTRY_PATH)) {
+      const data = fs.readFileSync(USER_REGISTRY_PATH, 'utf-8');
+      return JSON.parse(data) as UserRegistry;
+    }
+  } catch (error) {
+    console.error('Failed to load user registry:', error);
+  }
+  return {};
+}
+
+// Load registry on startup
+const userRegistry = loadUserRegistry();
 
 function getS3Client() {
   if (s3Client) return s3Client;
@@ -689,25 +715,30 @@ if (chatJid.startsWith('dc:')) {
 
   server.tool(
     'format_mention',
-    'Format a user mention for Discord using their display name. Returns the proper <@USER_ID> format.',
+    'Format a user mention for Discord using their display name. Returns the proper <@USER_ID> format for Discord mentions.',
     {
       user_name: z.string().describe('Display name of the user to mention (e.g. "OmarOmni", "PeytonOmni")'),
     },
     async (args) => {
-      writeIpcFile(MESSAGES_DIR, {
-        type: 'format_mention',
-        chatJid,
-        userName: args.user_name,
-        platform: 'discord',
-        groupFolder,
-        timestamp: new Date().toISOString(),
-      });
-      // User registry lookup happens on the host side
-      // For now, return the plain @mention as fallback
+      // Look up user in registry (case-insensitive)
+      const key = args.user_name.toLowerCase().trim();
+      const user = userRegistry[key];
+
+      if (user && user.platform === 'discord') {
+        // Return properly formatted Discord mention
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `<@${user.id}>`
+          }]
+        };
+      }
+
+      // User not found - return plain @mention as fallback
       return {
         content: [{
           type: 'text' as const,
-          text: `Looking up user ID for @${args.user_name}... Use <@USER_ID> format in your message.`
+          text: `@${args.user_name}`
         }]
       };
     },
