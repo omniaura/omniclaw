@@ -85,7 +85,8 @@ log "Pulling latest code..."
 git pull --ff-only origin "$BRANCH"
 
 # Write update info for container to read
-UPDATE_INFO_FILE="$REPO_DIR/data/.nanoclaw-update-info.json"
+UPDATE_INFO_FILENAME="${UPDATE_INFO_FILENAME:-.nanoclaw-update-info.json}"
+UPDATE_INFO_FILE="$REPO_DIR/data/$UPDATE_INFO_FILENAME"
 mkdir -p "$(dirname "$UPDATE_INFO_FILE")"
 
 # Generate commit log JSON safely
