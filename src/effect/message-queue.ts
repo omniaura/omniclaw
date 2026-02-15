@@ -195,10 +195,20 @@ export const makeMessageQueue = (
           );
         }
 
-        // Attempt to send via backend
-        const success = targetBackend.sendMessage(targetFolder, text);
+        // Attempt to send via backend (wrap in try to catch sync exceptions)
+        const sendResult = yield* _(
+          Effect.try({
+            try: () => targetBackend.sendMessage(targetFolder, text),
+            catch: (error) =>
+              new MessageSendError({
+                groupJid,
+                reason: `Backend sendMessage threw: ${error}`,
+                retryable: true,
+              }),
+          }),
+        );
 
-        if (!success) {
+        if (!sendResult) {
           return yield* _(
             Effect.fail(
               new MessageSendError({

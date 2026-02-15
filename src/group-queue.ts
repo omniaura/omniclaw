@@ -193,27 +193,29 @@ export class GroupQueue {
    *
    * Now uses Effect-based queue for automatic retries and timeout protection.
    */
-  sendMessage(groupJid: string, text: string): boolean {
+  async sendMessage(groupJid: string, text: string): Promise<boolean> {
     const state = this.getGroup(groupJid);
     if (!state.messageActive || !state.messageGroupFolder) return false;
 
     // Use Effect-based queue if available
     if (this.effectQueue && state.messageBackend) {
-      // Fire-and-forget Effect call (async, with retries)
-      Effect.runPromise(
-        this.effectQueue.sendMessage(
-          groupJid,
-          text,
-          state.messageBackend,
-          state.messageGroupFolder,
-        ),
-      ).catch((err) => {
+      try {
+        await Effect.runPromise(
+          this.effectQueue.sendMessage(
+            groupJid,
+            text,
+            state.messageBackend,
+            state.messageGroupFolder,
+          ),
+        );
+        return true;
+      } catch (err) {
         logger.error(
           { groupJid, error: err },
-          'Effect message send failed after retries',
+          'Effect message send failed after retries, falling back to direct send',
         );
-      });
-      return true; // Optimistically return true (Effect handles retries)
+        // Fall through to backup methods
+      }
     }
 
     // Fallback: delegate to backend directly
