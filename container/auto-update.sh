@@ -87,13 +87,29 @@ git pull --ff-only origin "$BRANCH"
 # Write update info for container to read
 UPDATE_INFO_FILE="$REPO_DIR/data/.nanoclaw-update-info.json"
 mkdir -p "$(dirname "$UPDATE_INFO_FILE")"
+
+# Generate commit log JSON safely
+if command -v jq &> /dev/null; then
+  # Use jq for safe JSON generation
+  COMMIT_LOG=$(git log --format='%H%x1e%h%x1e%s%x1e%an%x1e%aI' "${LOCAL_COMMIT}..${REMOTE_COMMIT}" | \
+    jq -Rs 'split("\n") | map(select(length > 0) | split("\u001e") | {hash: .[0], short: .[1], subject: .[2], author: .[3], date: .[4]})')
+elif command -v python3 &> /dev/null; then
+  # Fallback to python3 if jq not available
+  COMMIT_LOG=$(git log --format='%H%x1e%h%x1e%s%x1e%an%x1e%aI' "${LOCAL_COMMIT}..${REMOTE_COMMIT}" | \
+    python3 -c "import sys, json; commits = [dict(zip(['hash','short','subject','author','date'], line.strip().split('\x1e'))) for line in sys.stdin if line.strip()]; print(json.dumps(commits))")
+else
+  # Minimal fallback - just use empty array
+  log "Warning: Neither jq nor python3 available, commit log will be empty"
+  COMMIT_LOG="[]"
+fi
+
 cat > "$UPDATE_INFO_FILE" <<EOF
 {
   "updated": true,
   "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
   "oldCommit": "${LOCAL_COMMIT}",
   "newCommit": "${REMOTE_COMMIT}",
-  "commitLog": $(git log --format='{"hash":"%H","short":"%h","subject":"%s","author":"%an","date":"%aI"}' "${LOCAL_COMMIT}..${REMOTE_COMMIT}" | jq -s '.')
+  "commitLog": ${COMMIT_LOG}
 }
 EOF
 log "Wrote update info to $UPDATE_INFO_FILE"
