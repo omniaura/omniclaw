@@ -209,9 +209,10 @@ describe('getNewMessages', () => {
       '2024-01-01T00:00:02.000Z',
       'Andy',
     );
-    // Only g1 msg2 (after ts, not bot)
-    expect(messages).toHaveLength(1);
-    expect(messages[0].content).toBe('g1 msg2');
+    // Messages at or after timestamp (g2 msg1 at 00:00:02, g1 msg2 at 00:00:04)
+    expect(messages).toHaveLength(2);
+    expect(messages[0].content).toBe('g2 msg1');
+    expect(messages[1].content).toBe('g1 msg2');
   });
 
   it('returns empty for no registered groups', () => {

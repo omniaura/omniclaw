@@ -75,6 +75,7 @@ let agents: Record<string, Agent> = {};
 let channelRoutes: Record<string, ChannelRoute> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+let processedIds = new Set<string>(); // Deduplication for timestamp boundary messages
 
 let whatsapp: WhatsAppChannel;
 let channels: Channel[] = [];
@@ -558,8 +559,20 @@ async function startMessageLoop(): Promise<void> {
         ASSISTANT_NAME,
       );
 
-      if (messages.length > 0) {
-        logger.info({ count: messages.length }, 'New messages');
+      // Clear processedIds when timestamp advances (prevents memory growth)
+      if (newTimestamp > lastTimestamp) {
+        processedIds.clear();
+      }
+
+      // Filter out already-processed messages (deduplication at timestamp boundaries)
+      const uniqueMessages = messages.filter((msg) => {
+        if (processedIds.has(msg.id)) return false;
+        processedIds.add(msg.id);
+        return true;
+      });
+
+      if (uniqueMessages.length > 0) {
+        logger.info({ count: uniqueMessages.length }, 'New messages');
 
         // Advance the "seen" cursor for all messages immediately
         lastTimestamp = newTimestamp;
@@ -567,7 +580,7 @@ async function startMessageLoop(): Promise<void> {
 
         // Deduplicate by group
         const messagesByGroup = new Map<string, NewMessage[]>();
-        for (const msg of messages) {
+        for (const msg of uniqueMessages) {
           const existing = messagesByGroup.get(msg.chat_jid);
           if (existing) {
             existing.push(msg);
