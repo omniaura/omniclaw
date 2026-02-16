@@ -638,9 +638,7 @@ export class LocalBackend implements AgentBackend {
       const orphans = containers
         .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
         .map((c) => c.configuration.id);
-      for (const name of orphans) {
-        await $`container stop ${name}`.quiet().nothrow();
-      }
+      await Promise.all(orphans.map((name) => $`container stop ${name}`.quiet().nothrow()));
       if (orphans.length > 0) {
         logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
       }
