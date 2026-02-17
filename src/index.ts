@@ -1045,7 +1045,8 @@ async function main(): Promise<void> {
         if (targetJid && output.result) {
           const ch = findChannel(channels, targetJid);
           if (ch) {
-            const text = formatOutbound(ch, output.result);
+            const agent = agents[agentId];
+            const text = formatOutbound(ch, output.result, agent?.name);
             if (text) await ch.sendMessage(targetJid, text);
           }
         }
@@ -1063,7 +1064,8 @@ async function main(): Promise<void> {
           if (isMain || isRegisteredTarget) {
             const ch = findChannel(channels, data.chatJid);
             if (ch) {
-              const text = formatOutbound(ch, data.text);
+              const agent = agents[sourceAgentId];
+              const text = formatOutbound(ch, data.text, agent?.name);
               if (text) await ch.sendMessage(data.chatJid, text);
             }
             // Cross-agent: wake up the target agent
@@ -1089,7 +1091,8 @@ async function main(): Promise<void> {
           sendMessage: async (jid, rawText) => {
             const ch = findChannel(channels, jid);
             if (!ch) return;
-            const text = formatOutbound(ch, rawText);
+            const agent = agents[sourceAgentId];
+            const text = formatOutbound(ch, rawText, agent?.name);
             if (text) return await ch.sendMessage(jid, text);
           },
           notifyGroup: (jid, text) => {
