@@ -1,6 +1,6 @@
 import { Effect, Ref, Layer, Context } from 'effect';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 
 import { DATA_DIR } from '../config.js';
@@ -104,15 +104,20 @@ export const makeUserRegistryService = Effect.gen(function* (_) {
   ): Effect.Effect<UserInfo[], UserRegistryError> =>
     Effect.gen(function* (_) {
       const registry = yield* _(Ref.get(registryRef));
-      return Object.values(registry).filter(
-        (user) => user.platform === platform,
-      );
+      const seen = new Set<string>();
+      return Object.values(registry).filter((user) => {
+        if (user.platform !== platform) return false;
+        const key = `${user.platform}:${user.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     });
 
   const load = (): Effect.Effect<void, UserRegistryError> =>
     Effect.gen(function* (_) {
       // Ensure directory exists
-      const dir = join(REGISTRY_PATH, '..');
+      const dir = dirname(REGISTRY_PATH);
       if (!existsSync(dir)) {
         yield* _(
           Effect.tryPromise({
@@ -146,7 +151,7 @@ export const makeUserRegistryService = Effect.gen(function* (_) {
   const save = (): Effect.Effect<void, UserRegistryError> =>
     Effect.gen(function* (_) {
       // Ensure directory exists
-      const dir = join(REGISTRY_PATH, '..');
+      const dir = dirname(REGISTRY_PATH);
       yield* _(
         Effect.tryPromise({
           try: () => mkdir(dir, { recursive: true }),
