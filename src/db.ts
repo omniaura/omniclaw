@@ -354,17 +354,17 @@ export function getNewMessages(
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
   const placeholders = jids.map(() => '?').join(',');
-  // Filter out bot's own messages by checking content prefix (not is_from_me, since user shares the account)
+  // Filter out bot's own messages using is_bot_message column
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
-    WHERE timestamp >= ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ?
+    WHERE timestamp >= ? AND chat_jid IN (${placeholders}) AND is_bot_message = 0
     ORDER BY timestamp
   `;
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`) as NewMessage[];
+    .all(lastTimestamp, ...jids) as NewMessage[];
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
@@ -379,16 +379,16 @@ export function getMessagesSince(
   sinceTimestamp: string,
   botPrefix: string,
 ): NewMessage[] {
-  // Filter out bot's own messages by checking content prefix
+  // Filter out bot's own messages using is_bot_message column
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
-    WHERE chat_jid = ? AND timestamp > ? AND content NOT LIKE ?
+    WHERE chat_jid = ? AND timestamp > ? AND is_bot_message = 0
     ORDER BY timestamp
   `;
   return db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+    .all(chatJid, sinceTimestamp) as NewMessage[];
 }
 
 export function createTask(
