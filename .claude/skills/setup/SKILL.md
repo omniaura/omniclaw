@@ -46,9 +46,9 @@ Only ask the user for help if multiple retries fail with the same error.
 Use the environment check results from step 1 to decide which runtime to use:
 
 - PLATFORM=linux → Docker
-- PLATFORM=macos + APPLE_CONTAINER=installed → apple-container
-- PLATFORM=macos + DOCKER=running + APPLE_CONTAINER=not_found → Docker
-- PLATFORM=macos + DOCKER=installed_not_running → start Docker: `open -a Docker`. Wait 15s, re-check with `docker info`. If still not running, tell the user Docker is starting up and poll a few more times.
+- PLATFORM=macOS + APPLE_CONTAINER=installed → apple-container
+- PLATFORM=macOS + DOCKER=running + APPLE_CONTAINER=not_found → Docker
+- PLATFORM=macOS + DOCKER=installed_not_running → start Docker: `open -a Docker`. Wait 15s, re-check with `docker info`. If still not running, tell the user Docker is starting up and poll a few more times.
 - Neither available → AskUserQuestion: Apple Container (recommended for macOS) vs Docker?
   - Apple Container: tell user to download from https://github.com/apple/container/releases and install the .pkg. Wait for confirmation, then verify with `container --version`.
   - Docker on macOS: install via `brew install --cask docker`, then `open -a Docker` and wait for it to start. If brew not available, direct to Docker Desktop download.
@@ -59,15 +59,17 @@ Use the environment check results from step 1 to decide which runtime to use:
 **If the chosen runtime is Docker**, you MUST check whether the source code has already been converted from Apple Container to Docker. Do NOT skip this step. Run:
 
 ```bash
-grep -q 'container system status' src/index.ts && echo "NEEDS_CONVERSION" || echo "ALREADY_CONVERTED"
+(grep -q 'container system status\|ensureContainerSystemRunning' src/index.ts || \
+ grep -q "spawn('container'" src/container-runner.ts || \
+ grep -q 'container build' container/build.sh) && echo "NEEDS_CONVERSION" || echo "ALREADY_CONVERTED"
 ```
 
-Check these three files for Apple Container references:
-- `src/index.ts` — look for `container system status` or `ensureContainerSystemRunning`
-- `src/container-runner.ts` — look for `spawn('container'`
-- `container/build.sh` — look for `container build`
+This checks all three files for Apple Container references:
+- `src/index.ts` — `container system status` or `ensureContainerSystemRunning`
+- `src/container-runner.ts` — `spawn('container'`
+- `container/build.sh` — `container build`
 
-**If ANY of those Apple Container references exist**, the source code has NOT been converted. You MUST run the `/convert-to-docker` skill NOW, before proceeding to the build step. Do not attempt to build the container image until the conversion is complete.
+**If ANY of those Apple Container references exist** (NEEDS_CONVERSION), the source code has NOT been converted. You MUST run the `/convert-to-docker` skill NOW, before proceeding to the build step. Do not attempt to build the container image until the conversion is complete.
 
 **If none of those references exist** (i.e. the code already uses `docker info`, `spawn('docker'`, `docker build`), the conversion has already been done. Continue to 3c.
 
