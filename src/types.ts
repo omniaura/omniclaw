@@ -82,6 +82,7 @@ export interface NewMessage {
     name: string;
     platform: 'discord' | 'whatsapp' | 'telegram';
   }>;
+  is_bot_message?: boolean;
 }
 
 export interface ScheduledTask {

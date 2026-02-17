@@ -142,7 +142,7 @@ docker exec "$CONTAINER" gt auth status
 ```
 
 Expected output:
-```
+```text
 @withgraphite/graphite-cli@1.7.x
 ✓ Authenticated as <your-github-username>
 ```
