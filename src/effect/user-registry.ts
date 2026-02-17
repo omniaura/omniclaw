@@ -102,12 +102,21 @@ export const makeUserRegistryService = Effect.gen(function* (_) {
     Effect.gen(function* (_) {
       const updated = { ...user, lastSeen: new Date().toISOString() };
       yield* _(
-        Ref.update(registryRef, (registry) => ({
-          ...registry,
+        Ref.update(registryRef, (registry) => {
+          const existing = registry[idKey(user)];
+          const newRegistry = { ...registry };
+
+          // If user's name changed, remove the old name-based key
+          if (existing && existing.name !== user.name) {
+            delete newRegistry[nameKey(existing)];
+          }
+
           // Store both keys: platform:id (primary) and platform:name:... (secondary)
-          [idKey(user)]: updated,
-          [nameKey(user)]: updated,
-        })),
+          newRegistry[idKey(user)] = updated;
+          newRegistry[nameKey(user)] = updated;
+
+          return newRegistry;
+        }),
       );
     });
 
