@@ -132,13 +132,29 @@ export const makeUserRegistryService = Effect.gen(function* (_) {
               new UserRegistryError('Failed to load user registry', error),
           }),
         );
-        const registry = JSON.parse(data) as UserRegistry;
+        const registry = yield* _(
+          Effect.try({
+            try: () => JSON.parse(data) as UserRegistry,
+            catch: (error) =>
+              new UserRegistryError('Failed to parse user registry', error),
+          }),
+        );
         yield* _(Ref.set(registryRef, registry));
       }
     });
 
   const save = (): Effect.Effect<void, UserRegistryError> =>
     Effect.gen(function* (_) {
+      // Ensure directory exists
+      const dir = join(REGISTRY_PATH, '..');
+      yield* _(
+        Effect.tryPromise({
+          try: () => mkdir(dir, { recursive: true }),
+          catch: (error) =>
+            new UserRegistryError('Failed to create registry directory', error),
+        }),
+      );
+
       const registry = yield* _(Ref.get(registryRef));
       const data = JSON.stringify(registry, null, 2);
       yield* _(
