@@ -17,7 +17,11 @@ interface SpritesIpcPollerDeps {
   /** Process an IPC message file's contents */
   processMessage: (sourceGroup: string, data: any) => Promise<void>;
   /** Process an IPC task file's contents */
-  processTask: (sourceGroup: string, isMain: boolean, data: any) => Promise<void>;
+  processTask: (
+    sourceGroup: string,
+    isMain: boolean,
+    data: any,
+  ) => Promise<void>;
 }
 
 let pollerRunning = false;
@@ -106,7 +110,7 @@ async function pollDirectory(
   // List directory via filesystem API
   const listResp = await fetch(
     `${API_BASE}/sprites/${spriteName}/fs/list?path=${encodeURIComponent(dirPath)}`,
-    { headers: { 'Authorization': `Bearer ${token}` } },
+    { headers: { Authorization: `Bearer ${token}` } },
   );
 
   if (!listResp.ok) {
@@ -114,9 +118,13 @@ async function pollDirectory(
     throw new Error(`List failed: ${listResp.status}`);
   }
 
-  const body = await listResp.json() as { entries: Array<{ name: string; type: string }> | null };
+  const body = (await listResp.json()) as {
+    entries: Array<{ name: string; type: string }> | null;
+  };
   const entries = body.entries || [];
-  const jsonFiles = entries.filter((e) => e.type === 'file' && e.name.endsWith('.json'));
+  const jsonFiles = entries.filter(
+    (e) => e.type === 'file' && e.name.endsWith('.json'),
+  );
 
   for (const entry of jsonFiles) {
     const filePath = `${dirPath}/${entry.name}`;
@@ -125,7 +133,7 @@ async function pollDirectory(
       // Read file
       const readResp = await fetch(
         `${API_BASE}/sprites/${spriteName}/fs/read?path=${encodeURIComponent(filePath)}`,
-        { headers: { 'Authorization': `Bearer ${token}` } },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
       if (!readResp.ok) continue;
@@ -138,7 +146,7 @@ async function pollDirectory(
       await fetch(`${API_BASE}/sprites/${spriteName}/fs/delete`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ path: filePath }),

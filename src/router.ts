@@ -11,8 +11,9 @@ export function escapeXml(s: string): string {
 }
 
 export function formatMessages(messages: NewMessage[]): string {
-  const lines = messages.map((m) =>
-    `<message id="${m.id}" sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
+  const lines = messages.map(
+    (m) =>
+      `<message id="${m.id}" sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
   );
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }
@@ -26,12 +27,15 @@ export function getAgentName(group: RegisteredGroup): string {
   return group.trigger?.replace(/^@/, '') || ASSISTANT_NAME;
 }
 
-export function formatOutbound(channel: Channel, rawText: string, agentName?: string): string {
+export function formatOutbound(
+  channel: Channel,
+  rawText: string,
+  agentName?: string,
+): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
   const name = agentName || ASSISTANT_NAME;
-  const prefix =
-    channel.prefixAssistantName !== false ? `${name}: ` : '';
+  const prefix = channel.prefixAssistantName !== false ? `${name}: ` : '';
   return `${prefix}${text}`;
 }
 

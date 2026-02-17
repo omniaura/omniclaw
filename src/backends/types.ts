@@ -5,7 +5,13 @@
 
 import { Agent, ContainerProcess, RegisteredGroup } from '../types.js';
 
-export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona' | 'railway' | 'hetzner';
+export type BackendType =
+  | 'apple-container'
+  | 'docker'
+  | 'sprites'
+  | 'daytona'
+  | 'railway'
+  | 'hetzner';
 
 /**
  * Unified group-or-agent type for backwards compatibility.
@@ -29,7 +35,9 @@ export function isAgent(entity: AgentOrGroup): entity is Agent {
 }
 
 /** Get containerConfig from either type. */
-export function getContainerConfig(entity: AgentOrGroup): RegisteredGroup['containerConfig'] {
+export function getContainerConfig(
+  entity: AgentOrGroup,
+): RegisteredGroup['containerConfig'] {
   return entity.containerConfig;
 }
 
@@ -100,7 +108,11 @@ export interface AgentBackend {
   readFile(groupFolder: string, relativePath: string): Promise<Buffer | null>;
 
   /** Write a file to a group's workspace. Path is relative to /workspace/group/. */
-  writeFile(groupFolder: string, relativePath: string, content: Buffer | string): Promise<void>;
+  writeFile(
+    groupFolder: string,
+    relativePath: string,
+    content: Buffer | string,
+  ): Promise<void>;
 
   /** Initialize the backend (called once at startup). */
   initialize(): Promise<void>;

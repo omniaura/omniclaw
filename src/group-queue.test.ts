@@ -71,8 +71,13 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(processMessages);
 
     // Start a task (occupies task lane)
-    queue.enqueueTask('group1@g.us', 'task-1', () =>
-      new Promise<void>((resolve) => { taskResolve = resolve; }),
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-1',
+      () =>
+        new Promise<void>((resolve) => {
+          taskResolve = resolve;
+        }),
       'Test task',
     );
     await Bun.sleep(10);
@@ -97,7 +102,9 @@ describe('GroupQueue', () => {
     let taskRan = false;
 
     const processMessages = mock(async () => {
-      await new Promise<void>((resolve) => { messageResolve = resolve; });
+      await new Promise<void>((resolve) => {
+        messageResolve = resolve;
+      });
       return true;
     });
 
@@ -110,7 +117,14 @@ describe('GroupQueue', () => {
     expect(queue.isActive('group1@g.us', 'message')).toBe(true);
 
     // Enqueue a task — should run immediately on task lane
-    queue.enqueueTask('group1@g.us', 'task-1', async () => { taskRan = true; }, 'Test task');
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-1',
+      async () => {
+        taskRan = true;
+      },
+      'Test task',
+    );
     await Bun.sleep(10);
 
     expect(taskRan).toBe(true);
@@ -127,7 +141,9 @@ describe('GroupQueue', () => {
     let taskResolve: () => void;
 
     const processMessages = mock(async () => {
-      await new Promise<void>((resolve) => { messageResolve = resolve; });
+      await new Promise<void>((resolve) => {
+        messageResolve = resolve;
+      });
       return true;
     });
 
@@ -136,8 +152,13 @@ describe('GroupQueue', () => {
     queue.enqueueMessageCheck('group1@g.us');
     await Bun.sleep(10);
 
-    queue.enqueueTask('group1@g.us', 'task-1', () =>
-      new Promise<void>((resolve) => { taskResolve = resolve; }),
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-1',
+      () =>
+        new Promise<void>((resolve) => {
+          taskResolve = resolve;
+        }),
       'Test task',
     );
     await Bun.sleep(10);
@@ -165,8 +186,10 @@ describe('GroupQueue', () => {
 
     // Fill all 3 slots (MAX_CONCURRENT_CONTAINERS = 3)
     queue.enqueueMessageCheck('group1@g.us');
-    queue.enqueueTask('group2@g.us', 'task-1', () =>
-      new Promise<void>((resolve) => resolvers.push(resolve)),
+    queue.enqueueTask(
+      'group2@g.us',
+      'task-1',
+      () => new Promise<void>((resolve) => resolvers.push(resolve)),
       'Task 1',
     );
     queue.enqueueMessageCheck('group3@g.us');
@@ -176,7 +199,14 @@ describe('GroupQueue', () => {
 
     // 4th should be queued (over global limit)
     let fourthStarted = false;
-    queue.enqueueTask('group4@g.us', 'task-2', async () => { fourthStarted = true; }, 'Task 2');
+    queue.enqueueTask(
+      'group4@g.us',
+      'task-2',
+      async () => {
+        fourthStarted = true;
+      },
+      'Task 2',
+    );
     await Bun.sleep(10);
     expect(fourthStarted).toBe(false);
 
@@ -198,12 +228,16 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(mock(async () => true));
 
     // Start 2 tasks (MAX_TASK_CONTAINERS = 2)
-    queue.enqueueTask('group1@g.us', 'task-1', () =>
-      new Promise<void>((resolve) => resolvers.push(resolve)),
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-1',
+      () => new Promise<void>((resolve) => resolvers.push(resolve)),
       'Task 1',
     );
-    queue.enqueueTask('group2@g.us', 'task-2', () =>
-      new Promise<void>((resolve) => resolvers.push(resolve)),
+    queue.enqueueTask(
+      'group2@g.us',
+      'task-2',
+      () => new Promise<void>((resolve) => resolvers.push(resolve)),
       'Task 2',
     );
     await Bun.sleep(10);
@@ -212,13 +246,25 @@ describe('GroupQueue', () => {
 
     // 3rd task should be queued
     let thirdStarted = false;
-    queue.enqueueTask('group3@g.us', 'task-3', async () => { thirdStarted = true; }, 'Task 3');
+    queue.enqueueTask(
+      'group3@g.us',
+      'task-3',
+      async () => {
+        thirdStarted = true;
+      },
+      'Task 3',
+    );
     await Bun.sleep(10);
     expect(thirdStarted).toBe(false);
 
     // But a message should still get through
     let messageStarted = false;
-    queue.setProcessMessagesFn(mock(async () => { messageStarted = true; return true; }));
+    queue.setProcessMessagesFn(
+      mock(async () => {
+        messageStarted = true;
+        return true;
+      }),
+    );
     queue.enqueueMessageCheck('group3@g.us');
     await Bun.sleep(10);
     expect(messageStarted).toBe(true);
@@ -242,8 +288,13 @@ describe('GroupQueue', () => {
 
     expect(queue.getActiveTaskInfo('group1@g.us')).toBeNull();
 
-    queue.enqueueTask('group1@g.us', 'task-42', () =>
-      new Promise<void>((resolve) => { taskResolve = resolve; }),
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-42',
+      () =>
+        new Promise<void>((resolve) => {
+          taskResolve = resolve;
+        }),
       'Run daily report',
     );
     await Bun.sleep(10);
@@ -319,7 +370,9 @@ describe('GroupQueue', () => {
     let taskResolve: () => void;
 
     const processMessages = mock(async () => {
-      await new Promise<void>((resolve) => { messageResolve = resolve; });
+      await new Promise<void>((resolve) => {
+        messageResolve = resolve;
+      });
       return true;
     });
 
@@ -336,8 +389,13 @@ describe('GroupQueue', () => {
     expect(queue.isActive('group1@g.us', 'message')).toBe(true);
     expect(queue.isActive('group1@g.us', 'task')).toBe(false);
 
-    queue.enqueueTask('group1@g.us', 'task-1', () =>
-      new Promise<void>((resolve) => { taskResolve = resolve; }),
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-1',
+      () =>
+        new Promise<void>((resolve) => {
+          taskResolve = resolve;
+        }),
       'Test',
     );
     await Bun.sleep(10);
@@ -364,15 +422,34 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(mock(async () => true));
 
     // Start a task to occupy the lane
-    queue.enqueueTask('group1@g.us', 'task-blocker', () =>
-      new Promise<void>((resolve) => { taskResolve = resolve; }),
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-blocker',
+      () =>
+        new Promise<void>((resolve) => {
+          taskResolve = resolve;
+        }),
       'Blocker',
     );
     await Bun.sleep(10);
 
     // Try to enqueue the same task twice while lane is occupied
-    queue.enqueueTask('group1@g.us', 'task-dup', async () => { taskRunCount++; }, 'Dup');
-    queue.enqueueTask('group1@g.us', 'task-dup', async () => { taskRunCount++; }, 'Dup');
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-dup',
+      async () => {
+        taskRunCount++;
+      },
+      'Dup',
+    );
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-dup',
+      async () => {
+        taskRunCount++;
+      },
+      'Dup',
+    );
 
     // Release the blocker
     taskResolve!();

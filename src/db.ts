@@ -3,7 +3,17 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, STORE_DIR } from './config.js';
-import { Agent, ChannelRoute, HeartbeatConfig, NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog, registeredGroupToAgent, registeredGroupToRoute } from './types.js';
+import {
+  Agent,
+  ChannelRoute,
+  HeartbeatConfig,
+  NewMessage,
+  RegisteredGroup,
+  ScheduledTask,
+  TaskRunLog,
+  registeredGroupToAgent,
+  registeredGroupToRoute,
+} from './types.js';
 
 let db: Database;
 
@@ -86,53 +96,81 @@ function createSchema(database: Database): void {
 
   // Add heartbeat column to registered_groups (migration for existing DBs)
   try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN heartbeat TEXT`,
-    );
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN heartbeat TEXT`);
   } catch {
     /* column already exists */
   }
 
   // Add discord_guild_id and server_folder columns to registered_groups
   try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN discord_guild_id TEXT`);
-  } catch { /* column already exists */ }
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN discord_guild_id TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
   try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN server_folder TEXT`);
-  } catch { /* column already exists */ }
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN server_folder TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
 
   // Add discord_guild_id column to chats table
   try {
     database.exec(`ALTER TABLE chats ADD COLUMN discord_guild_id TEXT`);
-  } catch { /* column already exists */ }
+  } catch {
+    /* column already exists */
+  }
 
   // Add created_at column to sessions table
   // Note: SQLite ALTER TABLE requires constant defaults, so we use a fixed epoch.
   // New sessions get datetime('now') via INSERT in setSession().
   try {
-    database.exec(`ALTER TABLE sessions ADD COLUMN created_at TEXT NOT NULL DEFAULT '1970-01-01 00:00:00'`);
-  } catch { /* column already exists */ }
+    database.exec(
+      `ALTER TABLE sessions ADD COLUMN created_at TEXT NOT NULL DEFAULT '1970-01-01 00:00:00'`,
+    );
+  } catch {
+    /* column already exists */
+  }
 
   // Add backend and description columns to registered_groups (sprites backend support)
   try {
     database.exec(`ALTER TABLE registered_groups ADD COLUMN backend TEXT`);
-  } catch { /* column already exists */ }
+  } catch {
+    /* column already exists */
+  }
   try {
     database.exec(`ALTER TABLE registered_groups ADD COLUMN description TEXT`);
-  } catch { /* column already exists */ }
+  } catch {
+    /* column already exists */
+  }
 
   // Add auto-respond columns to registered_groups
   try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN auto_respond_to_questions INTEGER DEFAULT 0`);
-  } catch { /* column already exists */ }
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN auto_respond_to_questions INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
   try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN auto_respond_keywords TEXT`);
-  } catch { /* column already exists */ }
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN auto_respond_keywords TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
 
   // Add stream_intermediates column to registered_groups (off by default)
   try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN stream_intermediates INTEGER DEFAULT 0`);
-  } catch { /* column already exists */ }
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN stream_intermediates INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
 
   // --- Agent-Channel Decoupling tables ---
   database.exec(`
@@ -456,9 +494,9 @@ export function updateTask(
   if (fields.length === 0) return;
 
   values.push(id);
-  db.query(
-    `UPDATE scheduled_tasks SET ${fields.join(', ')} WHERE id = ?`,
-  ).run(...values);
+  db.query(`UPDATE scheduled_tasks SET ${fields.join(', ')} WHERE id = ?`).run(
+    ...values,
+  );
 }
 
 export function deleteTask(id: string): void {
@@ -558,7 +596,7 @@ export function setSession(groupFolder: string, sessionId: string): void {
   }
 
   db.query(
-    'INSERT OR REPLACE INTO sessions (group_folder, session_id, created_at) VALUES (?, ?, datetime(\'now\'))',
+    "INSERT OR REPLACE INTO sessions (group_folder, session_id, created_at) VALUES (?, ?, datetime('now'))",
   ).run(groupFolder, sessionId);
 }
 
@@ -623,7 +661,8 @@ export function getRegisteredGroup(
     containerConfig: row.container_config
       ? JSON.parse(row.container_config)
       : undefined,
-    requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    requiresTrigger:
+      row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     heartbeat: row.heartbeat
       ? (JSON.parse(row.heartbeat) as HeartbeatConfig)
       : undefined,
@@ -632,15 +671,14 @@ export function getRegisteredGroup(
     backend: (row.backend as any) || undefined,
     description: row.description || undefined,
     autoRespondToQuestions: row.auto_respond_to_questions === 1 || undefined,
-    autoRespondKeywords: row.auto_respond_keywords ? JSON.parse(row.auto_respond_keywords) : undefined,
+    autoRespondKeywords: row.auto_respond_keywords
+      ? JSON.parse(row.auto_respond_keywords)
+      : undefined,
     streamIntermediates: row.stream_intermediates === 1 || undefined,
   };
 }
 
-export function setRegisteredGroup(
-  jid: string,
-  group: RegisteredGroup,
-): void {
+export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   db.query(
     `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, heartbeat, discord_guild_id, server_folder, backend, description, auto_respond_to_questions, auto_respond_keywords, stream_intermediates)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -658,15 +696,15 @@ export function setRegisteredGroup(
     group.backend || null,
     group.description || null,
     group.autoRespondToQuestions ? 1 : 0,
-    group.autoRespondKeywords ? JSON.stringify(group.autoRespondKeywords) : null,
+    group.autoRespondKeywords
+      ? JSON.stringify(group.autoRespondKeywords)
+      : null,
     group.streamIntermediates ? 1 : 0,
   );
 }
 
 export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
-  const rows = db
-    .prepare('SELECT * FROM registered_groups')
-    .all() as Array<{
+  const rows = db.prepare('SELECT * FROM registered_groups').all() as Array<{
     jid: string;
     name: string;
     folder: string;
@@ -693,7 +731,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       containerConfig: row.container_config
         ? JSON.parse(row.container_config)
         : undefined,
-      requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+      requiresTrigger:
+        row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       heartbeat: row.heartbeat
         ? (JSON.parse(row.heartbeat) as HeartbeatConfig)
         : undefined,
@@ -702,7 +741,9 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       backend: (row.backend as any) || undefined,
       description: row.description || undefined,
       autoRespondToQuestions: row.auto_respond_to_questions === 1 || undefined,
-      autoRespondKeywords: row.auto_respond_keywords ? JSON.parse(row.auto_respond_keywords) : undefined,
+      autoRespondKeywords: row.auto_respond_keywords
+        ? JSON.parse(row.auto_respond_keywords)
+        : undefined,
       streamIntermediates: row.stream_intermediates === 1 || undefined,
     };
   }
@@ -713,11 +754,15 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
 
 function migrateRegisteredGroupsToAgents(database: Database): void {
   // Check if migration already happened (agents table has data)
-  const agentCount = database.prepare('SELECT COUNT(*) as cnt FROM agents').get() as { cnt: number };
+  const agentCount = database
+    .prepare('SELECT COUNT(*) as cnt FROM agents')
+    .get() as { cnt: number };
   if (agentCount.cnt > 0) return;
 
   // Read all registered_groups
-  const rows = database.prepare('SELECT * FROM registered_groups').all() as Array<{
+  const rows = database
+    .prepare('SELECT * FROM registered_groups')
+    .all() as Array<{
     jid: string;
     name: string;
     folder: string;
@@ -735,7 +780,7 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
   if (rows.length === 0) return;
 
   // Group rows by folder to deduplicate (multiple JIDs can map to same folder)
-  const agentsByFolder = new Map<string, typeof rows[0]>();
+  const agentsByFolder = new Map<string, (typeof rows)[0]>();
   for (const row of rows) {
     if (!agentsByFolder.has(row.folder)) {
       agentsByFolder.set(row.folder, row);
@@ -758,15 +803,15 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
     const isLocal = backend === 'apple-container' || backend === 'docker';
 
     insertAgent.run(
-      folder,              // id
+      folder, // id
       row.name,
       row.description,
       folder,
       backend,
       row.container_config,
       row.heartbeat,
-      isMain ? 1 : 0,     // is_admin
-      isLocal ? 1 : 0,    // is_local
+      isMain ? 1 : 0, // is_admin
+      isLocal ? 1 : 0, // is_local
       row.server_folder,
       row.added_at,
     );
@@ -776,7 +821,7 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
   for (const row of rows) {
     insertRoute.run(
       row.jid,
-      row.folder,          // agent_id = folder
+      row.folder, // agent_id = folder
       row.trigger_pattern,
       row.requires_trigger === null ? 1 : row.requires_trigger,
       row.discord_guild_id,
@@ -786,19 +831,21 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
 }
 
 export function getAgent(id: string): Agent | undefined {
-  const row = db.prepare('SELECT * FROM agents WHERE id = ?').get(id) as {
-    id: string;
-    name: string;
-    description: string | null;
-    folder: string;
-    backend: string;
-    container_config: string | null;
-    heartbeat: string | null;
-    is_admin: number;
-    is_local: number;
-    server_folder: string | null;
-    created_at: string;
-  } | undefined;
+  const row = db.prepare('SELECT * FROM agents WHERE id = ?').get(id) as
+    | {
+        id: string;
+        name: string;
+        description: string | null;
+        folder: string;
+        backend: string;
+        container_config: string | null;
+        heartbeat: string | null;
+        is_admin: number;
+        is_local: number;
+        server_folder: string | null;
+        created_at: string;
+      }
+    | undefined;
   if (!row) return undefined;
   return {
     id: row.id,
@@ -806,8 +853,12 @@ export function getAgent(id: string): Agent | undefined {
     description: row.description || undefined,
     folder: row.folder,
     backend: row.backend as Agent['backend'],
-    containerConfig: row.container_config ? JSON.parse(row.container_config) : undefined,
-    heartbeat: row.heartbeat ? JSON.parse(row.heartbeat) as HeartbeatConfig : undefined,
+    containerConfig: row.container_config
+      ? JSON.parse(row.container_config)
+      : undefined,
+    heartbeat: row.heartbeat
+      ? (JSON.parse(row.heartbeat) as HeartbeatConfig)
+      : undefined,
     isAdmin: row.is_admin === 1,
     isLocal: row.is_local === 1,
     serverFolder: row.server_folder || undefined,
@@ -837,8 +888,12 @@ export function getAllAgents(): Record<string, Agent> {
       description: row.description || undefined,
       folder: row.folder,
       backend: row.backend as Agent['backend'],
-      containerConfig: row.container_config ? JSON.parse(row.container_config) : undefined,
-      heartbeat: row.heartbeat ? JSON.parse(row.heartbeat) as HeartbeatConfig : undefined,
+      containerConfig: row.container_config
+        ? JSON.parse(row.container_config)
+        : undefined,
+      heartbeat: row.heartbeat
+        ? (JSON.parse(row.heartbeat) as HeartbeatConfig)
+        : undefined,
       isAdmin: row.is_admin === 1,
       isLocal: row.is_local === 1,
       serverFolder: row.server_folder || undefined,
@@ -849,10 +904,12 @@ export function getAllAgents(): Record<string, Agent> {
 }
 
 export function setAgent(agent: Agent): void {
-  db.query(`
+  db.query(
+    `
     INSERT OR REPLACE INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, is_local, server_folder, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `,
+  ).run(
     agent.id,
     agent.name,
     agent.description || null,
@@ -868,14 +925,18 @@ export function setAgent(agent: Agent): void {
 }
 
 export function getChannelRoute(channelJid: string): ChannelRoute | undefined {
-  const row = db.prepare('SELECT * FROM channel_routes WHERE channel_jid = ?').get(channelJid) as {
-    channel_jid: string;
-    agent_id: string;
-    trigger_pattern: string;
-    requires_trigger: number;
-    discord_guild_id: string | null;
-    created_at: string;
-  } | undefined;
+  const row = db
+    .prepare('SELECT * FROM channel_routes WHERE channel_jid = ?')
+    .get(channelJid) as
+    | {
+        channel_jid: string;
+        agent_id: string;
+        trigger_pattern: string;
+        requires_trigger: number;
+        discord_guild_id: string | null;
+        created_at: string;
+      }
+    | undefined;
   if (!row) return undefined;
   return {
     channelJid: row.channel_jid,
@@ -911,10 +972,12 @@ export function getAllChannelRoutes(): Record<string, ChannelRoute> {
 }
 
 export function setChannelRoute(route: ChannelRoute): void {
-  db.query(`
+  db.query(
+    `
     INSERT OR REPLACE INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_guild_id, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(
+  `,
+  ).run(
     route.channelJid,
     route.agentId,
     route.trigger,
@@ -925,7 +988,9 @@ export function setChannelRoute(route: ChannelRoute): void {
 }
 
 export function getRoutesForAgent(agentId: string): ChannelRoute[] {
-  const rows = db.prepare('SELECT * FROM channel_routes WHERE agent_id = ?').all(agentId) as Array<{
+  const rows = db
+    .prepare('SELECT * FROM channel_routes WHERE agent_id = ?')
+    .all(agentId) as Array<{
     channel_jid: string;
     agent_id: string;
     trigger_pattern: string;

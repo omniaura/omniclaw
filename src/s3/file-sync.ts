@@ -63,7 +63,15 @@ export async function syncFilesToS3(
   const groupClaudeMd = path.join(GROUPS_DIR, opts.agentFolder, 'CLAUDE.md');
   if (fs.existsSync(groupClaudeMd)) {
     const content = fs.readFileSync(groupClaudeMd, 'utf-8');
-    syncOps.push(syncFileToS3(s3, opts.agentId, 'claude-md', content, `${opts.agentId}:CLAUDE.md`));
+    syncOps.push(
+      syncFileToS3(
+        s3,
+        opts.agentId,
+        'claude-md',
+        content,
+        `${opts.agentId}:CLAUDE.md`,
+      ),
+    );
   }
 
   // Global CLAUDE.md (non-main only)
@@ -71,16 +79,36 @@ export async function syncFilesToS3(
     const globalClaudeMd = path.join(GROUPS_DIR, 'global', 'CLAUDE.md');
     if (fs.existsSync(globalClaudeMd)) {
       const content = fs.readFileSync(globalClaudeMd, 'utf-8');
-      syncOps.push(syncFileToS3(s3, opts.agentId, 'global-claude-md', content, `${opts.agentId}:global-CLAUDE.md`));
+      syncOps.push(
+        syncFileToS3(
+          s3,
+          opts.agentId,
+          'global-claude-md',
+          content,
+          `${opts.agentId}:global-CLAUDE.md`,
+        ),
+      );
     }
   }
 
   // Server CLAUDE.md (if applicable)
   if (opts.serverFolder) {
-    const serverClaudeMd = path.join(GROUPS_DIR, opts.serverFolder, 'CLAUDE.md');
+    const serverClaudeMd = path.join(
+      GROUPS_DIR,
+      opts.serverFolder,
+      'CLAUDE.md',
+    );
     if (fs.existsSync(serverClaudeMd)) {
       const content = fs.readFileSync(serverClaudeMd, 'utf-8');
-      syncOps.push(syncFileToS3(s3, opts.agentId, 'server-claude-md', content, `${opts.agentId}:server-CLAUDE.md`));
+      syncOps.push(
+        syncFileToS3(
+          s3,
+          opts.agentId,
+          'server-claude-md',
+          content,
+          `${opts.agentId}:server-CLAUDE.md`,
+        ),
+      );
     }
   }
 
@@ -88,31 +116,67 @@ export async function syncFilesToS3(
   const envFile = path.join(DATA_DIR, 'env', 'env');
   if (fs.existsSync(envFile)) {
     const content = fs.readFileSync(envFile, 'utf-8');
-    syncOps.push(syncFileToS3(s3, opts.agentId, 'env', content, `${opts.agentId}:env`));
+    syncOps.push(
+      syncFileToS3(s3, opts.agentId, 'env', content, `${opts.agentId}:env`),
+    );
   }
 
   // Agent-runner source files
-  const agentRunnerDir = path.join(projectRoot, 'container', 'agent-runner', 'src');
+  const agentRunnerDir = path.join(
+    projectRoot,
+    'container',
+    'agent-runner',
+    'src',
+  );
   if (fs.existsSync(agentRunnerDir)) {
     for (const file of fs.readdirSync(agentRunnerDir)) {
       if (!file.endsWith('.ts')) continue;
       const content = fs.readFileSync(path.join(agentRunnerDir, file), 'utf-8');
-      syncOps.push(syncFileToS3(s3, opts.agentId, `agent-runner/src/${file}`, content, `${opts.agentId}:agent-runner:${file}`));
+      syncOps.push(
+        syncFileToS3(
+          s3,
+          opts.agentId,
+          `agent-runner/src/${file}`,
+          content,
+          `${opts.agentId}:agent-runner:${file}`,
+        ),
+      );
     }
   }
 
   // Agent-runner package.json
-  const agentPkgJson = path.join(projectRoot, 'container', 'agent-runner', 'package.json');
+  const agentPkgJson = path.join(
+    projectRoot,
+    'container',
+    'agent-runner',
+    'package.json',
+  );
   if (fs.existsSync(agentPkgJson)) {
     const content = fs.readFileSync(agentPkgJson, 'utf-8');
-    syncOps.push(syncFileToS3(s3, opts.agentId, 'agent-runner/package.json', content, `${opts.agentId}:agent-runner:package.json`));
+    syncOps.push(
+      syncFileToS3(
+        s3,
+        opts.agentId,
+        'agent-runner/package.json',
+        content,
+        `${opts.agentId}:agent-runner:package.json`,
+      ),
+    );
   }
 
   // Entrypoint
   const entrypoint = path.join(projectRoot, 'container', 'entrypoint.sh');
   if (fs.existsSync(entrypoint)) {
     const content = fs.readFileSync(entrypoint, 'utf-8');
-    syncOps.push(syncFileToS3(s3, opts.agentId, 'entrypoint.sh', content, `${opts.agentId}:entrypoint`));
+    syncOps.push(
+      syncFileToS3(
+        s3,
+        opts.agentId,
+        'entrypoint.sh',
+        content,
+        `${opts.agentId}:entrypoint`,
+      ),
+    );
   }
 
   // Skills
@@ -123,7 +187,15 @@ export async function syncFilesToS3(
       if (!fs.statSync(srcDir).isDirectory()) continue;
       for (const file of fs.readdirSync(srcDir)) {
         const content = fs.readFileSync(path.join(srcDir, file), 'utf-8');
-        syncOps.push(syncFileToS3(s3, opts.agentId, `skills/${skillDir}/${file}`, content, `${opts.agentId}:skills:${skillDir}/${file}`));
+        syncOps.push(
+          syncFileToS3(
+            s3,
+            opts.agentId,
+            `skills/${skillDir}/${file}`,
+            content,
+            `${opts.agentId}:skills:${skillDir}/${file}`,
+          ),
+        );
       }
     }
   }
@@ -131,17 +203,31 @@ export async function syncFilesToS3(
   // SSH key (if configured)
   const sshKeyPath = path.join(
     process.env.HOME || '/Users/user',
-    '.config', 'nanoclaw', 'ssh', 'id_ed25519',
+    '.config',
+    'nanoclaw',
+    'ssh',
+    'id_ed25519',
   );
   if (fs.existsSync(sshKeyPath)) {
     const content = fs.readFileSync(sshKeyPath);
-    syncOps.push(syncFileToS3(s3, opts.agentId, 'ssh/id_ed25519', content, `${opts.agentId}:ssh-key`));
+    syncOps.push(
+      syncFileToS3(
+        s3,
+        opts.agentId,
+        'ssh/id_ed25519',
+        content,
+        `${opts.agentId}:ssh-key`,
+      ),
+    );
   }
 
   const results = await Promise.all(syncOps);
   const uploaded = results.filter(Boolean).length;
   if (uploaded > 0) {
-    logger.debug({ agentId: opts.agentId, uploaded, total: results.length }, 'Synced files to S3');
+    logger.debug(
+      { agentId: opts.agentId, uploaded, total: results.length },
+      'Synced files to S3',
+    );
   }
   return uploaded;
 }
@@ -161,7 +247,9 @@ export async function downloadChangedFileFromS3(
     const content = await s3.readSync(agentId, syncKey);
     if (!content) return false;
 
-    const localContent = fs.existsSync(localPath) ? fs.readFileSync(localPath) : null;
+    const localContent = fs.existsSync(localPath)
+      ? fs.readFileSync(localPath)
+      : null;
     if (!localContent || !content.equals(localContent)) {
       fs.mkdirSync(path.dirname(localPath), { recursive: true });
       fs.writeFileSync(localPath, content);
@@ -170,7 +258,10 @@ export async function downloadChangedFileFromS3(
       return true;
     }
   } catch (err) {
-    logger.warn({ agentId, syncKey, error: err }, 'Failed to download file from S3');
+    logger.warn(
+      { agentId, syncKey, error: err },
+      'Failed to download file from S3',
+    );
   }
   return false;
 }

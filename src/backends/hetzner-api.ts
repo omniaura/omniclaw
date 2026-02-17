@@ -9,11 +9,22 @@ import { logger } from '../logger.js';
 const HETZNER_API_URL = 'https://api.hetzner.cloud/v1';
 
 /** Hetzner API responses use endpoint-specific shapes. */
-interface SSHKeyResponse { ssh_key: HetznerSSHKey; }
-interface ServerResponse { server: HetznerServer; action: HetznerAction; }
-interface ServerGetResponse { server: HetznerServer; }
-interface ActionResponse { action: HetznerAction; }
-interface DeleteResponse { action: HetznerAction; }
+interface SSHKeyResponse {
+  ssh_key: HetznerSSHKey;
+}
+interface ServerResponse {
+  server: HetznerServer;
+  action: HetznerAction;
+}
+interface ServerGetResponse {
+  server: HetznerServer;
+}
+interface ActionResponse {
+  action: HetznerAction;
+}
+interface DeleteResponse {
+  action: HetznerAction;
+}
 
 interface HetznerError {
   error: {
@@ -35,7 +46,7 @@ async function hetznerApi<T>(
   const options: RequestInit = {
     method,
     headers: {
-      'Authorization': `Bearer ${HETZNER_API_TOKEN}`,
+      Authorization: `Bearer ${HETZNER_API_TOKEN}`,
       'Content-Type': 'application/json',
     },
   };
@@ -62,7 +73,9 @@ async function hetznerApi<T>(
 
   if (!resp.ok) {
     const error = json as HetznerError;
-    throw new Error(`Hetzner API error: ${error.error?.message || resp.statusText}`);
+    throw new Error(
+      `Hetzner API error: ${error.error?.message || resp.statusText}`,
+    );
   }
 
   return json as T;
@@ -71,7 +84,16 @@ async function hetznerApi<T>(
 export interface HetznerServer {
   id: number;
   name: string;
-  status: 'running' | 'initializing' | 'starting' | 'stopping' | 'off' | 'deleting' | 'migrating' | 'rebuilding' | 'unknown';
+  status:
+    | 'running'
+    | 'initializing'
+    | 'starting'
+    | 'stopping'
+    | 'off'
+    | 'deleting'
+    | 'migrating'
+    | 'rebuilding'
+    | 'unknown';
   public_net: {
     ipv4: { ip: string };
     ipv6: { ip: string };
@@ -97,7 +119,10 @@ export interface HetznerAction {
 }
 
 /** Create a new SSH key. */
-export async function createSSHKey(name: string, publicKey: string): Promise<HetznerSSHKey> {
+export async function createSSHKey(
+  name: string,
+  publicKey: string,
+): Promise<HetznerSSHKey> {
   const data = await hetznerApi<SSHKeyResponse>('POST', '/ssh_keys', {
     name,
     public_key: publicKey,
@@ -139,13 +164,19 @@ export async function createServer(
 
 /** Get server status. */
 export async function getServer(serverId: number): Promise<HetznerServer> {
-  const data = await hetznerApi<ServerGetResponse>('GET', `/servers/${serverId}`);
+  const data = await hetznerApi<ServerGetResponse>(
+    'GET',
+    `/servers/${serverId}`,
+  );
   return data.server;
 }
 
 /** Delete a server. */
 export async function deleteServer(serverId: number): Promise<HetznerAction> {
-  const data = await hetznerApi<DeleteResponse>('DELETE', `/servers/${serverId}`);
+  const data = await hetznerApi<DeleteResponse>(
+    'DELETE',
+    `/servers/${serverId}`,
+  );
   logger.info({ serverId }, 'Deleted Hetzner server');
   return data.action;
 }
@@ -157,7 +188,10 @@ export async function getAction(actionId: number): Promise<HetznerAction> {
 }
 
 /** Wait for an action to complete. */
-export async function waitForAction(actionId: number, maxWaitMs = 300000): Promise<void> {
+export async function waitForAction(
+  actionId: number,
+  maxWaitMs = 300000,
+): Promise<void> {
   const startTime = Date.now();
   const pollInterval = 2000;
 
@@ -165,12 +199,17 @@ export async function waitForAction(actionId: number, maxWaitMs = 300000): Promi
     const action = await getAction(actionId);
 
     if (action.status === 'success') {
-      logger.info({ actionId, duration: Date.now() - startTime }, 'Hetzner action completed');
+      logger.info(
+        { actionId, duration: Date.now() - startTime },
+        'Hetzner action completed',
+      );
       return;
     }
 
     if (action.status === 'error') {
-      throw new Error(`Hetzner action failed: ${action.error?.message || 'unknown error'}`);
+      throw new Error(
+        `Hetzner action failed: ${action.error?.message || 'unknown error'}`,
+      );
     }
 
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
@@ -180,7 +219,10 @@ export async function waitForAction(actionId: number, maxWaitMs = 300000): Promi
 }
 
 /** Wait for server to reach running state. */
-export async function waitForServerRunning(serverId: number, maxWaitMs = 300000): Promise<void> {
+export async function waitForServerRunning(
+  serverId: number,
+  maxWaitMs = 300000,
+): Promise<void> {
   const startTime = Date.now();
   const pollInterval = 2000;
 
@@ -188,12 +230,17 @@ export async function waitForServerRunning(serverId: number, maxWaitMs = 300000)
     const server = await getServer(serverId);
 
     if (server.status === 'running') {
-      logger.info({ serverId, duration: Date.now() - startTime }, 'Hetzner server is running');
+      logger.info(
+        { serverId, duration: Date.now() - startTime },
+        'Hetzner server is running',
+      );
       return;
     }
 
     if (server.status === 'off' || server.status === 'deleting') {
-      throw new Error(`Hetzner server entered unexpected state: ${server.status}`);
+      throw new Error(
+        `Hetzner server entered unexpected state: ${server.status}`,
+      );
     }
 
     await new Promise((resolve) => setTimeout(resolve, pollInterval));

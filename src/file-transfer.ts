@@ -23,7 +23,9 @@ export interface FileTransferRequest {
  * Transfer files between two agents, potentially across different backends.
  * Files are placed at /workspace/shared/{sourceFolder}/{basename} on the target.
  */
-export async function transferFiles(req: FileTransferRequest): Promise<{ transferred: number; errors: string[] }> {
+export async function transferFiles(
+  req: FileTransferRequest,
+): Promise<{ transferred: number; errors: string[] }> {
   const sourceBackend = resolveBackend(req.sourceGroup);
   const targetBackend = resolveBackend(req.targetGroup);
 
@@ -60,7 +62,10 @@ export async function transferFiles(req: FileTransferRequest): Promise<{ transfe
     } catch (err) {
       const msg = `Failed to transfer ${file}: ${err instanceof Error ? err.message : String(err)}`;
       errors.push(msg);
-      logger.warn({ file, from: from.folder, to: to.folder, error: err }, 'File transfer failed');
+      logger.warn(
+        { file, from: from.folder, to: to.folder, error: err },
+        'File transfer failed',
+      );
     }
   }
 

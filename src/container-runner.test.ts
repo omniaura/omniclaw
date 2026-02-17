@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach, mock, jest } from 'bun:test';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  mock,
+  jest,
+} from 'bun:test';
 import { mock as mockModule } from 'bun:test';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
@@ -67,10 +75,12 @@ let fakeProc: ReturnType<typeof createFakeProcess>;
 // Mock child_process.spawn
 mockModule.module('child_process', () => ({
   spawn: mock(() => fakeProc),
-  exec: mock((_cmd: string, _opts: unknown, cb?: (err: Error | null) => void) => {
-    if (cb) cb(null);
-    return new EventEmitter();
-  }),
+  exec: mock(
+    (_cmd: string, _opts: unknown, cb?: (err: Error | null) => void) => {
+      if (cb) cb(null);
+      return new EventEmitter();
+    },
+  ),
 }));
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
@@ -90,7 +100,10 @@ const testInput = {
   isMain: false,
 };
 
-function emitOutputMarker(proc: ReturnType<typeof createFakeProcess>, output: ContainerOutput) {
+function emitOutputMarker(
+  proc: ReturnType<typeof createFakeProcess>,
+  output: ContainerOutput,
+) {
   const json = JSON.stringify(output);
   proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
 }

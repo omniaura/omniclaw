@@ -50,7 +50,11 @@ export function createThreadStreamer(
       if (!threadCreationAttempted) {
         threadCreationAttempted = true;
         try {
-          thread = await ctx.channel!.createThread!(ctx.chatJid, parentMessageId!, threadName);
+          thread = await ctx.channel!.createThread!(
+            ctx.chatJid,
+            parentMessageId!,
+            threadName,
+          );
         } catch {
           // Thread creation failed — silently degrade to thought-log only
         }
@@ -71,7 +75,11 @@ export function createThreadStreamer(
       try {
         const now = new Date();
         const date = now.toISOString().split('T')[0];
-        const time = now.toISOString().split('T')[1].slice(0, 5).replace(':', '');
+        const time = now
+          .toISOString()
+          .split('T')[1]
+          .slice(0, 5)
+          .replace(':', '');
         const slug =
           ctx.label
             .trim()
@@ -79,13 +87,24 @@ export function createThreadStreamer(
             .replace(/[^a-z0-9]+/gi, '-')
             .toLowerCase() || 'query';
         const filename = `${date}-${time}-${slug}.md`;
-        const dir = path.join(GROUPS_DIR, 'global', 'thoughts', ctx.groupFolder);
+        const dir = path.join(
+          GROUPS_DIR,
+          'global',
+          'thoughts',
+          ctx.groupFolder,
+        );
         fs.mkdirSync(dir, { recursive: true });
         const header = `# ${ctx.groupName} — ${now.toLocaleString()}\n\n`;
-        fs.writeFileSync(path.join(dir, filename), header + thoughtLogBuffer.join('\n\n---\n\n'));
+        fs.writeFileSync(
+          path.join(dir, filename),
+          header + thoughtLogBuffer.join('\n\n---\n\n'),
+        );
         logger.debug({ group: ctx.groupName, filename }, 'Thought log written');
       } catch (err) {
-        logger.warn({ group: ctx.groupName, err }, 'Failed to write thought log');
+        logger.warn(
+          { group: ctx.groupName, err },
+          'Failed to write thought log',
+        );
       }
     },
   };

@@ -35,22 +35,24 @@ describe('Effect Message Queue', () => {
 
   beforeEach(async () => {
     mockBackend = new MockBackend();
-    queue = await Effect.runPromise(makeMessageQueue({
-      maxConcurrent: 2,
-      maxRetries: 3,
-      baseRetryDelayMs: 10, // Fast retries for tests
-      sendTimeoutMs: 1000,
-    }));
+    queue = await Effect.runPromise(
+      makeMessageQueue({
+        maxConcurrent: 2,
+        maxRetries: 3,
+        baseRetryDelayMs: 10, // Fast retries for tests
+        sendTimeoutMs: 1000,
+      }),
+    );
   });
 
   it('should send a message successfully', async () => {
-    await queue.registerBackend('group1', mockBackend as AgentBackend, 'folder1')
+    await queue
+      .registerBackend('group1', mockBackend as AgentBackend, 'folder1')
       .pipe(Effect.runPromise);
 
-    const result = await queue.sendMessage('group1', 'Hello world')
-      .pipe(
-        Effect.runPromiseExit,
-      );
+    const result = await queue
+      .sendMessage('group1', 'Hello world')
+      .pipe(Effect.runPromiseExit);
 
     expect(Exit.isSuccess(result)).toBe(true);
     expect(mockBackend.sendMessageCalls).toHaveLength(1);
@@ -61,7 +63,8 @@ describe('Effect Message Queue', () => {
   });
 
   it('should retry on failure and eventually succeed', async () => {
-    await queue.registerBackend('group1', mockBackend as AgentBackend, 'folder1')
+    await queue
+      .registerBackend('group1', mockBackend as AgentBackend, 'folder1')
       .pipe(Effect.runPromise);
 
     let callCount = 0;
@@ -75,7 +78,8 @@ describe('Effect Message Queue', () => {
       return originalSendMessage(groupFolder, text);
     };
 
-    const result = await queue.sendMessage('group1', 'Retry test')
+    const result = await queue
+      .sendMessage('group1', 'Retry test')
       .pipe(Effect.runPromiseExit);
 
     expect(Exit.isSuccess(result)).toBe(true);
@@ -83,12 +87,14 @@ describe('Effect Message Queue', () => {
   });
 
   it('should fail after max retries', async () => {
-    await queue.registerBackend('group1', mockBackend as AgentBackend, 'folder1')
+    await queue
+      .registerBackend('group1', mockBackend as AgentBackend, 'folder1')
       .pipe(Effect.runPromise);
 
     mockBackend.shouldSucceed = false;
 
-    const result = await queue.sendMessage('group1', 'Will fail')
+    const result = await queue
+      .sendMessage('group1', 'Will fail')
       .pipe(Effect.runPromiseExit);
 
     expect(Exit.isFailure(result)).toBe(true);
@@ -101,7 +107,8 @@ describe('Effect Message Queue', () => {
   });
 
   it('should fail if no backend registered', async () => {
-    const result = await queue.sendMessage('group1', 'No backend')
+    const result = await queue
+      .sendMessage('group1', 'No backend')
       .pipe(Effect.runPromiseExit);
 
     expect(Exit.isFailure(result)).toBe(true);
@@ -123,18 +130,26 @@ describe('Effect Message Queue', () => {
       return originalSend(groupFolder, text);
     };
 
-    await queue.registerBackend('group1', slowBackend as AgentBackend, 'folder1')
+    await queue
+      .registerBackend('group1', slowBackend as AgentBackend, 'folder1')
       .pipe(Effect.runPromise);
 
     // Start 3 concurrent sends (limit is 2)
-    const send1 = queue.sendMessage('group1', 'Message 1')
+    const send1 = queue
+      .sendMessage('group1', 'Message 1')
       .pipe(Effect.runPromiseExit);
-    const send2 = queue.sendMessage('group1', 'Message 2')
+    const send2 = queue
+      .sendMessage('group1', 'Message 2')
       .pipe(Effect.runPromiseExit);
-    const send3 = queue.sendMessage('group1', 'Message 3')
+    const send3 = queue
+      .sendMessage('group1', 'Message 3')
       .pipe(Effect.runPromiseExit);
 
-    const [result1, result2, result3] = await Promise.all([send1, send2, send3]);
+    const [result1, result2, result3] = await Promise.all([
+      send1,
+      send2,
+      send3,
+    ]);
 
     // At least one should hit the concurrency limit
     const failures = [result1, result2, result3].filter(Exit.isFailure);
@@ -151,13 +166,14 @@ describe('Effect Message Queue', () => {
   });
 
   it('should track stats correctly', async () => {
-    await queue.registerBackend('group1', mockBackend as AgentBackend, 'folder1')
+    await queue
+      .registerBackend('group1', mockBackend as AgentBackend, 'folder1')
       .pipe(Effect.runPromise);
-    await queue.registerBackend('group2', mockBackend as AgentBackend, 'folder2')
+    await queue
+      .registerBackend('group2', mockBackend as AgentBackend, 'folder2')
       .pipe(Effect.runPromise);
 
-    const stats = await queue.getStats()
-      .pipe(Effect.runPromise);
+    const stats = await queue.getStats().pipe(Effect.runPromise);
 
     expect(stats.totalGroups).toBe(2);
     expect(stats.activeCount).toBe(0);
@@ -167,11 +183,18 @@ describe('Effect Message Queue', () => {
     const backend1 = new MockBackend();
     const backend2 = new MockBackend();
 
-    await queue.registerBackend('group1', backend1 as AgentBackend, 'folder1')
+    await queue
+      .registerBackend('group1', backend1 as AgentBackend, 'folder1')
       .pipe(Effect.runPromise);
 
     // Send with explicit backend (should override registered one)
-    await queue.sendMessage('group1', 'Override test', backend2 as AgentBackend, 'folder2')
+    await queue
+      .sendMessage(
+        'group1',
+        'Override test',
+        backend2 as AgentBackend,
+        'folder2',
+      )
       .pipe(Effect.runPromise);
 
     expect(backend1.sendMessageCalls).toHaveLength(0);

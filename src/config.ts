@@ -39,10 +39,7 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   10,
 ); // 10MB default
 export const IPC_POLL_INTERVAL = 1000;
-export const IDLE_TIMEOUT = parseInt(
-  process.env.IDLE_TIMEOUT || '1800000',
-  10,
-); // 30min default — how long to keep container alive after last result
+export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const CONTAINER_STARTUP_TIMEOUT = parseInt(
   process.env.CONTAINER_STARTUP_TIMEOUT || '120000',
   10,
@@ -57,7 +54,10 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
 );
 export const MAX_TASK_CONTAINERS = Math.max(
   1,
-  parseInt(process.env.MAX_TASK_CONTAINERS || String(MAX_CONCURRENT_CONTAINERS - 1), 10),
+  parseInt(
+    process.env.MAX_TASK_CONTAINERS || String(MAX_CONCURRENT_CONTAINERS - 1),
+    10,
+  ),
 );
 
 function escapeRegex(str: string): string {
@@ -78,7 +78,8 @@ export const TIMEZONE =
 export const SPRITES_TOKEN = process.env.SPRITES_TOKEN || '';
 export const SPRITES_ORG = process.env.SPRITES_ORG || '';
 export const SPRITES_REGION = process.env.SPRITES_REGION || '';
-export const SPRITES_RAM_MB = parseInt(process.env.SPRITES_RAM_MB || '0', 10) || 0;
+export const SPRITES_RAM_MB =
+  parseInt(process.env.SPRITES_RAM_MB || '0', 10) || 0;
 
 // Daytona cloud backend configuration
 export const DAYTONA_API_KEY = process.env.DAYTONA_API_KEY || '';

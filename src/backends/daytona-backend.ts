@@ -50,7 +50,11 @@ function hashContent(content: string | Buffer): string {
  * Upload a file via FS API using a relative path (resolved from workdir).
  * Creates parent directories on failure and retries.
  */
-async function uploadFile(sandbox: Sandbox, relativePath: string, content: string | Buffer): Promise<void> {
+async function uploadFile(
+  sandbox: Sandbox,
+  relativePath: string,
+  content: string | Buffer,
+): Promise<void> {
   const buf = typeof content === 'string' ? Buffer.from(content) : content;
   try {
     await sandbox.fs.uploadFile(buf, relativePath);
@@ -67,7 +71,10 @@ async function uploadFile(sandbox: Sandbox, relativePath: string, content: strin
 /**
  * Download a file via FS API using a relative path.
  */
-async function downloadFile(sandbox: Sandbox, relativePath: string): Promise<Buffer | null> {
+async function downloadFile(
+  sandbox: Sandbox,
+  relativePath: string,
+): Promise<Buffer | null> {
   try {
     return await sandbox.fs.downloadFile(relativePath);
   } catch {
@@ -147,7 +154,10 @@ export class DaytonaBackend implements AgentBackend {
       if (cached.sandbox.state === 'started') return cached;
 
       // Recover from stopped/archived
-      logger.info({ group: groupFolder, state: cached.sandbox.state }, 'Daytona sandbox not running, starting...');
+      logger.info(
+        { group: groupFolder, state: cached.sandbox.state },
+        'Daytona sandbox not running, starting...',
+      );
       await cached.sandbox.start(120);
       return cached;
     }
@@ -159,23 +169,32 @@ export class DaytonaBackend implements AgentBackend {
     try {
       sandbox = await this.daytona.get(sandboxName);
       if (sandbox.state !== 'started') {
-        logger.info({ group: groupFolder, state: sandbox.state }, 'Recovering Daytona sandbox...');
+        logger.info(
+          { group: groupFolder, state: sandbox.state },
+          'Recovering Daytona sandbox...',
+        );
         await sandbox.start(120);
       }
     } catch {
       // Not found — create new
-      logger.info({ group: groupFolder, sandbox: sandboxName }, 'Creating new Daytona sandbox');
-      sandbox = await this.daytona.create({
-        name: sandboxName,
-        ...(DAYTONA_SNAPSHOT ? { snapshot: DAYTONA_SNAPSHOT } : {}),
-        language: 'typescript',
-        autoStopInterval: 0, // Don't auto-stop (we manage lifecycle)
-        labels: { project: 'nanoclaw', group: groupFolder },
-      }, { timeout: 120 });
+      logger.info(
+        { group: groupFolder, sandbox: sandboxName },
+        'Creating new Daytona sandbox',
+      );
+      sandbox = await this.daytona.create(
+        {
+          name: sandboxName,
+          ...(DAYTONA_SNAPSHOT ? { snapshot: DAYTONA_SNAPSHOT } : {}),
+          language: 'typescript',
+          autoStopInterval: 0, // Don't auto-stop (we manage lifecycle)
+          labels: { project: 'nanoclaw', group: groupFolder },
+        },
+        { timeout: 120 },
+      );
     }
 
     // Discover home directory
-    const homeDir = await sandbox.getUserHomeDir() || '/home/daytona';
+    const homeDir = (await sandbox.getUserHomeDir()) || '/home/daytona';
     const meta: SandboxMeta = { sandbox, homeDir };
     this.sandboxes.set(groupFolder, meta);
     return meta;
@@ -218,7 +237,9 @@ export class DaytonaBackend implements AgentBackend {
     // Clean up stale close sentinel
     try {
       await sandbox.process.executeCommand('rm -f /workspace/ipc/input/_close');
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
@@ -232,7 +253,10 @@ export class DaytonaBackend implements AgentBackend {
     onProcess(processWrapper, sandboxName);
 
     const killOnTimeout = () => {
-      logger.error({ group: group.name, sandbox: sandboxName }, 'Daytona agent timeout, killing');
+      logger.error(
+        { group: group.name, sandbox: sandboxName },
+        'Daytona agent timeout, killing',
+      );
       processWrapper.kill();
     };
 
@@ -249,10 +273,13 @@ export class DaytonaBackend implements AgentBackend {
     // Execute command async in session
     let exitCode = 1;
     try {
-      const execResult = await sandbox.process.executeSessionCommand(sessionId, {
-        command: 'bash /app/entrypoint.sh < /tmp/input.json',
-        runAsync: true,
-      });
+      const execResult = await sandbox.process.executeSessionCommand(
+        sessionId,
+        {
+          command: 'bash /app/entrypoint.sh < /tmp/input.json',
+          runAsync: true,
+        },
+      );
 
       // Stream logs via callback — clean stdout/stderr separation
       await sandbox.process.getSessionCommandLogs(
@@ -267,11 +294,17 @@ export class DaytonaBackend implements AgentBackend {
       );
 
       // After streaming completes, get final exit code
-      const cmd = await sandbox.process.getSessionCommand(sessionId, execResult.cmdId!);
+      const cmd = await sandbox.process.getSessionCommand(
+        sessionId,
+        execResult.cmdId!,
+      );
       exitCode = cmd.exitCode ?? 0;
     } catch (err) {
       if (!processWrapper.killed) {
-        logger.error({ group: group.name, error: err }, 'Daytona session execution error');
+        logger.error(
+          { group: group.name, error: err },
+          'Daytona session execution error',
+        );
       }
     }
 
@@ -280,7 +313,9 @@ export class DaytonaBackend implements AgentBackend {
     // Clean up session
     try {
       await sandbox.process.deleteSession(sessionId);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     const duration = Date.now() - startTime;
     const state = parser.getState();
@@ -291,9 +326,17 @@ export class DaytonaBackend implements AgentBackend {
     if (state.timedOut) {
       if (state.hadStreamingOutput) {
         await state.outputChain;
-        return { status: 'success', result: null, newSessionId: state.newSessionId };
+        return {
+          status: 'success',
+          result: null,
+          newSessionId: state.newSessionId,
+        };
       }
-      return { status: 'error', result: null, error: `Daytona agent timed out after ${configTimeout}ms` };
+      return {
+        status: 'error',
+        result: null,
+        error: `Daytona agent timed out after ${configTimeout}ms`,
+      };
     }
 
     if (exitCode !== 0 && !state.hadStreamingOutput) {
@@ -315,7 +358,11 @@ export class DaytonaBackend implements AgentBackend {
         { group: group.name, duration, newSessionId: state.newSessionId },
         'Daytona agent completed (streaming mode)',
       );
-      return { status: 'success', result: null, newSessionId: state.newSessionId };
+      return {
+        status: 'success',
+        result: null,
+        newSessionId: state.newSessionId,
+      };
     }
 
     // Legacy mode
@@ -344,7 +391,12 @@ export class DaytonaBackend implements AgentBackend {
    * Only uploads files whose content has changed (via SHA-256 hash).
    * Uses relative paths for the FS API (resolved from sandbox workdir).
    */
-  private async syncFiles(sandbox: Sandbox, group: AgentOrGroup, isMain: boolean, homeDir: string): Promise<void> {
+  private async syncFiles(
+    sandbox: Sandbox,
+    group: AgentOrGroup,
+    isMain: boolean,
+    homeDir: string,
+  ): Promise<void> {
     const projectRoot = process.cwd();
     const syncOps: Promise<boolean>[] = [];
 
@@ -352,7 +404,14 @@ export class DaytonaBackend implements AgentBackend {
     const groupClaudeMd = path.join(GROUPS_DIR, group.folder, 'CLAUDE.md');
     if (fs.existsSync(groupClaudeMd)) {
       const content = fs.readFileSync(groupClaudeMd, 'utf-8');
-      syncOps.push(syncFile(sandbox, 'workspace/group/CLAUDE.md', content, `${group.folder}:CLAUDE.md`));
+      syncOps.push(
+        syncFile(
+          sandbox,
+          'workspace/group/CLAUDE.md',
+          content,
+          `${group.folder}:CLAUDE.md`,
+        ),
+      );
     }
 
     // Global CLAUDE.md (non-main only)
@@ -360,7 +419,14 @@ export class DaytonaBackend implements AgentBackend {
       const globalClaudeMd = path.join(GROUPS_DIR, 'global', 'CLAUDE.md');
       if (fs.existsSync(globalClaudeMd)) {
         const content = fs.readFileSync(globalClaudeMd, 'utf-8');
-        syncOps.push(syncFile(sandbox, 'workspace/global/CLAUDE.md', content, 'global:CLAUDE.md'));
+        syncOps.push(
+          syncFile(
+            sandbox,
+            'workspace/global/CLAUDE.md',
+            content,
+            'global:CLAUDE.md',
+          ),
+        );
       }
     }
 
@@ -372,27 +438,51 @@ export class DaytonaBackend implements AgentBackend {
     }
 
     // Agent-runner source files
-    const agentRunnerDir = path.join(projectRoot, 'container', 'agent-runner', 'src');
+    const agentRunnerDir = path.join(
+      projectRoot,
+      'container',
+      'agent-runner',
+      'src',
+    );
     if (fs.existsSync(agentRunnerDir)) {
       for (const file of fs.readdirSync(agentRunnerDir)) {
         if (!file.endsWith('.ts')) continue;
-        const content = fs.readFileSync(path.join(agentRunnerDir, file), 'utf-8');
-        syncOps.push(syncFile(sandbox, `app/src/${file}`, content, `agent-runner:${file}`));
+        const content = fs.readFileSync(
+          path.join(agentRunnerDir, file),
+          'utf-8',
+        );
+        syncOps.push(
+          syncFile(sandbox, `app/src/${file}`, content, `agent-runner:${file}`),
+        );
       }
     }
 
     // Agent-runner package.json
-    const agentPkgJson = path.join(projectRoot, 'container', 'agent-runner', 'package.json');
+    const agentPkgJson = path.join(
+      projectRoot,
+      'container',
+      'agent-runner',
+      'package.json',
+    );
     if (fs.existsSync(agentPkgJson)) {
       const content = fs.readFileSync(agentPkgJson, 'utf-8');
-      syncOps.push(syncFile(sandbox, 'app/package.json', content, 'agent-runner:package.json'));
+      syncOps.push(
+        syncFile(
+          sandbox,
+          'app/package.json',
+          content,
+          'agent-runner:package.json',
+        ),
+      );
     }
 
     // Entrypoint
     const entrypoint = path.join(projectRoot, 'container', 'entrypoint.sh');
     if (fs.existsSync(entrypoint)) {
       const content = fs.readFileSync(entrypoint, 'utf-8');
-      syncOps.push(syncFile(sandbox, 'app/entrypoint.sh', content, 'entrypoint'));
+      syncOps.push(
+        syncFile(sandbox, 'app/entrypoint.sh', content, 'entrypoint'),
+      );
     }
 
     // Skills — use discovered home dir for .claude path
@@ -412,12 +502,14 @@ export class DaytonaBackend implements AgentBackend {
           if (fileHashCache.get(cacheKey) !== hash) {
             const b64 = Buffer.from(content).toString('base64');
             syncOps.push(
-              sandbox.process.executeCommand(
-                `mkdir -p ${homeDir}/.claude/skills/${skillDir} && echo '${b64}' | base64 -d > ${homeDir}/.claude/skills/${skillDir}/${file}`,
-              ).then(() => {
-                fileHashCache.set(cacheKey, hash);
-                return true;
-              }),
+              sandbox.process
+                .executeCommand(
+                  `mkdir -p ${homeDir}/.claude/skills/${skillDir} && echo '${b64}' | base64 -d > ${homeDir}/.claude/skills/${skillDir}/${file}`,
+                )
+                .then(() => {
+                  fileHashCache.set(cacheKey, hash);
+                  return true;
+                }),
             );
           }
         }
@@ -427,19 +519,33 @@ export class DaytonaBackend implements AgentBackend {
     const results = await Promise.all(syncOps);
     const uploaded = results.filter(Boolean).length;
     if (uploaded > 0) {
-      logger.debug({ group: group.folder, uploaded, total: results.length }, 'Synced files to Daytona sandbox');
+      logger.debug(
+        { group: group.folder, uploaded, total: results.length },
+        'Synced files to Daytona sandbox',
+      );
     }
 
     // Run bun install if package.json was uploaded (new/changed deps)
-    if (fileHashCache.get('agent-runner:package.json:installed') !== fileHashCache.get('agent-runner:package.json')) {
+    if (
+      fileHashCache.get('agent-runner:package.json:installed') !==
+      fileHashCache.get('agent-runner:package.json')
+    ) {
       try {
         await sandbox.process.executeCommand(
           'export PATH="$HOME/.bun/bin:$PATH" && cd /app && bun install',
-          undefined, undefined, 60,
+          undefined,
+          undefined,
+          60,
         );
-        fileHashCache.set('agent-runner:package.json:installed', fileHashCache.get('agent-runner:package.json') || '');
+        fileHashCache.set(
+          'agent-runner:package.json:installed',
+          fileHashCache.get('agent-runner:package.json') || '',
+        );
       } catch (err) {
-        logger.warn({ group: group.folder, error: err }, 'Failed to install agent-runner deps on Daytona sandbox');
+        logger.warn(
+          { group: group.folder, error: err },
+          'Failed to install agent-runner deps on Daytona sandbox',
+        );
       }
     }
   }
@@ -447,20 +553,31 @@ export class DaytonaBackend implements AgentBackend {
   /**
    * Download files that may have changed during agent execution.
    */
-  private async downloadChangedFiles(sandbox: Sandbox, group: AgentOrGroup): Promise<void> {
+  private async downloadChangedFiles(
+    sandbox: Sandbox,
+    group: AgentOrGroup,
+  ): Promise<void> {
     try {
       const claudeMd = await downloadFile(sandbox, 'workspace/group/CLAUDE.md');
       if (claudeMd) {
         const localPath = path.join(GROUPS_DIR, group.folder, 'CLAUDE.md');
-        const localContent = fs.existsSync(localPath) ? fs.readFileSync(localPath) : null;
+        const localContent = fs.existsSync(localPath)
+          ? fs.readFileSync(localPath)
+          : null;
         if (!localContent || !claudeMd.equals(localContent)) {
           fs.writeFileSync(localPath, claudeMd);
           fileHashCache.set(`${group.folder}:CLAUDE.md`, hashContent(claudeMd));
-          logger.debug({ group: group.folder }, 'Downloaded updated CLAUDE.md from Daytona sandbox');
+          logger.debug(
+            { group: group.folder },
+            'Downloaded updated CLAUDE.md from Daytona sandbox',
+          );
         }
       }
     } catch (err) {
-      logger.warn({ group: group.folder, error: err }, 'Failed to download files from Daytona sandbox');
+      logger.warn(
+        { group: group.folder, error: err },
+        'Failed to download files from Daytona sandbox',
+      );
     }
   }
 
@@ -474,7 +591,10 @@ export class DaytonaBackend implements AgentBackend {
       `workspace/ipc/input/${filename}`,
       JSON.stringify({ type: 'message', text }),
     ).catch((err) => {
-      logger.warn({ groupFolder, error: err }, 'Failed to send message to Daytona IPC');
+      logger.warn(
+        { groupFolder, error: err },
+        'Failed to send message to Daytona IPC',
+      );
     });
     return true;
   }
@@ -483,9 +603,14 @@ export class DaytonaBackend implements AgentBackend {
     const meta = this.sandboxes.get(groupFolder);
     if (!meta) return;
 
-    uploadFile(meta.sandbox, `workspace/ipc/${inputSubdir}/_close`, '').catch((err) => {
-      logger.warn({ groupFolder, error: err }, 'Failed to write close sentinel to Daytona sandbox');
-    });
+    uploadFile(meta.sandbox, `workspace/ipc/${inputSubdir}/_close`, '').catch(
+      (err) => {
+        logger.warn(
+          { groupFolder, error: err },
+          'Failed to write close sentinel to Daytona sandbox',
+        );
+      },
+    );
   }
 
   writeIpcData(groupFolder: string, filename: string, data: string): void {
@@ -493,18 +618,28 @@ export class DaytonaBackend implements AgentBackend {
     if (!meta) return;
 
     uploadFile(meta.sandbox, `workspace/ipc/${filename}`, data).catch((err) => {
-      logger.warn({ groupFolder, filename, error: err }, 'Failed to write IPC data to Daytona sandbox');
+      logger.warn(
+        { groupFolder, filename, error: err },
+        'Failed to write IPC data to Daytona sandbox',
+      );
     });
   }
 
-  async readFile(groupFolder: string, relativePath: string): Promise<Buffer | null> {
+  async readFile(
+    groupFolder: string,
+    relativePath: string,
+  ): Promise<Buffer | null> {
     const meta = this.sandboxes.get(groupFolder);
     if (!meta) return null;
 
     return downloadFile(meta.sandbox, `workspace/group/${relativePath}`);
   }
 
-  async writeFile(groupFolder: string, relativePath: string, content: Buffer | string): Promise<void> {
+  async writeFile(
+    groupFolder: string,
+    relativePath: string,
+    content: Buffer | string,
+  ): Promise<void> {
     const meta = this.sandboxes.get(groupFolder);
     if (!meta) throw new Error(`No Daytona sandbox for group ${groupFolder}`);
 
@@ -513,7 +648,9 @@ export class DaytonaBackend implements AgentBackend {
 
   async initialize(): Promise<void> {
     if (!DAYTONA_API_KEY) {
-      logger.warn('DAYTONA_API_KEY not set — Daytona backend will not function');
+      logger.warn(
+        'DAYTONA_API_KEY not set — Daytona backend will not function',
+      );
       return;
     }
 

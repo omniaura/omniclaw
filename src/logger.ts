@@ -4,7 +4,9 @@ const isTTY = process.stdout.isTTY;
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
-  ...(isTTY ? { transport: { target: 'pino-pretty', options: { colorize: true } } } : {}),
+  ...(isTTY
+    ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
+    : {}),
 });
 
 // Route uncaught errors through pino so they get timestamps in stderr

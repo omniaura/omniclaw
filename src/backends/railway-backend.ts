@@ -38,9 +38,15 @@ import {
 class RailwayProcessWrapper implements ContainerProcess {
   private _killed = false;
 
-  get killed(): boolean { return this._killed; }
-  kill(): void { this._killed = true; }
-  get pid(): number { return 0; }
+  get killed(): boolean {
+    return this._killed;
+  }
+  kill(): void {
+    this._killed = true;
+  }
+  get pid(): number {
+    return 0;
+  }
 }
 
 export class RailwayBackend implements AgentBackend {
@@ -58,7 +64,10 @@ export class RailwayBackend implements AgentBackend {
     const containerCfg = getContainerConfig(group);
     const serverFolder = getServerFolder(group);
 
-    logger.info({ group: groupName, folder, isMain: input.isMain }, 'Running agent on Railway (S3 mode)');
+    logger.info(
+      { group: groupName, folder, isMain: input.isMain },
+      'Running agent on Railway (S3 mode)',
+    );
 
     // 1. Sync files to S3
     await syncFilesToS3(this.s3, {
@@ -119,7 +128,11 @@ export class RailwayBackend implements AgentBackend {
         // If we got a real result (not just a session update), we're done
         if (output.result !== null || output.status === 'error') {
           logger.info(
-            { group: groupName, duration: Date.now() - startTime, status: output.status },
+            {
+              group: groupName,
+              duration: Date.now() - startTime,
+              status: output.status,
+            },
             'Railway agent completed',
           );
           return containerOutput;
@@ -133,7 +146,10 @@ export class RailwayBackend implements AgentBackend {
       return { status: 'error', result: null, error: 'Agent was killed' };
     }
 
-    logger.warn({ group: groupName, timeout: configTimeout }, 'Railway agent timed out waiting for S3 outbox');
+    logger.warn(
+      { group: groupName, timeout: configTimeout },
+      'Railway agent timed out waiting for S3 outbox',
+    );
     return lastOutput;
   }
 
@@ -150,7 +166,10 @@ export class RailwayBackend implements AgentBackend {
     };
 
     this.s3.writeInbox(groupFolder, message).catch((err) => {
-      logger.warn({ groupFolder, error: err }, 'Failed to send message to Railway agent via S3');
+      logger.warn(
+        { groupFolder, error: err },
+        'Failed to send message to Railway agent via S3',
+      );
     });
     return true;
   }
@@ -168,7 +187,10 @@ export class RailwayBackend implements AgentBackend {
     };
 
     this.s3.writeInbox(groupFolder, message).catch((err) => {
-      logger.warn({ groupFolder, error: err }, 'Failed to write close signal to Railway agent');
+      logger.warn(
+        { groupFolder, error: err },
+        'Failed to write close signal to Railway agent',
+      );
     });
   }
 
@@ -176,23 +198,35 @@ export class RailwayBackend implements AgentBackend {
     if (!this.s3) return;
 
     this.s3.writeSync(groupFolder, `ipc/${filename}`, data).catch((err) => {
-      logger.warn({ groupFolder, filename, error: err }, 'Failed to write IPC data to S3');
+      logger.warn(
+        { groupFolder, filename, error: err },
+        'Failed to write IPC data to S3',
+      );
     });
   }
 
-  async readFile(groupFolder: string, relativePath: string): Promise<Buffer | null> {
+  async readFile(
+    groupFolder: string,
+    relativePath: string,
+  ): Promise<Buffer | null> {
     if (!this.s3) return null;
     return this.s3.readSync(groupFolder, `workspace/${relativePath}`);
   }
 
-  async writeFile(groupFolder: string, relativePath: string, content: Buffer | string): Promise<void> {
+  async writeFile(
+    groupFolder: string,
+    relativePath: string,
+    content: Buffer | string,
+  ): Promise<void> {
     if (!this.s3) throw new Error('Railway backend not initialized');
     await this.s3.writeSync(groupFolder, `workspace/${relativePath}`, content);
   }
 
   async initialize(): Promise<void> {
     if (!RAILWAY_API_TOKEN) {
-      logger.warn('RAILWAY_API_TOKEN not set — Railway backend will not function');
+      logger.warn(
+        'RAILWAY_API_TOKEN not set — Railway backend will not function',
+      );
       return;
     }
     if (!B2_ENDPOINT) {

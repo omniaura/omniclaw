@@ -87,17 +87,26 @@ async function listObjects(
   const scope = `${shortDate}/${region}/s3/aws4_request`;
   const stringToSign = `AWS4-HMAC-SHA256\n${dateStamp}\n${scope}\n${crypto.createHash('sha256').update(canonicalRequest).digest('hex')}`;
 
-  const kDate = crypto.createHmac('sha256', `AWS4${config.secretAccessKey}`).update(shortDate).digest();
+  const kDate = crypto
+    .createHmac('sha256', `AWS4${config.secretAccessKey}`)
+    .update(shortDate)
+    .digest();
   const kRegion = crypto.createHmac('sha256', kDate).update(region).digest();
   const kService = crypto.createHmac('sha256', kRegion).update('s3').digest();
-  const kSigning = crypto.createHmac('sha256', kService).update('aws4_request').digest();
-  const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex');
+  const kSigning = crypto
+    .createHmac('sha256', kService)
+    .update('aws4_request')
+    .digest();
+  const signature = crypto
+    .createHmac('sha256', kSigning)
+    .update(stringToSign)
+    .digest('hex');
 
   const authorization = `AWS4-HMAC-SHA256 Credential=${config.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
 
   const resp = await fetch(url, {
     headers: {
-      'Authorization': authorization,
+      Authorization: authorization,
       'x-amz-content-sha256': 'UNSIGNED-PAYLOAD',
       'x-amz-date': dateStamp,
     },
@@ -156,7 +165,10 @@ export class NanoClawS3 {
         messages.push(JSON.parse(text) as S3Message);
         await this.client.delete(key);
       } catch (err) {
-        logger.warn({ key, error: err }, 'Failed to read/delete S3 inbox message');
+        logger.warn(
+          { key, error: err },
+          'Failed to read/delete S3 inbox message',
+        );
       }
     }
 
@@ -187,7 +199,10 @@ export class NanoClawS3 {
         outputs.push(JSON.parse(text) as S3Output);
         await this.client.delete(key);
       } catch (err) {
-        logger.warn({ key, error: err }, 'Failed to read/delete S3 outbox message');
+        logger.warn(
+          { key, error: err },
+          'Failed to read/delete S3 outbox message',
+        );
       }
     }
 
@@ -198,7 +213,11 @@ export class NanoClawS3 {
   // --- Context Operations ---
 
   /** Write a context file for an agent. */
-  async writeContext(agentId: string, topic: string, content: string): Promise<void> {
+  async writeContext(
+    agentId: string,
+    topic: string,
+    content: string,
+  ): Promise<void> {
     const key = `agents/${agentId}/context/${topic}.md`;
     await this.client.write(key, content);
   }
@@ -228,13 +247,20 @@ export class NanoClawS3 {
   // --- Sync Operations (host writes, agent reads on startup) ---
 
   /** Upload a sync file for an agent. */
-  async writeSync(agentId: string, relativePath: string, content: string | Buffer): Promise<void> {
+  async writeSync(
+    agentId: string,
+    relativePath: string,
+    content: string | Buffer,
+  ): Promise<void> {
     const key = `agents/${agentId}/sync/${relativePath}`;
     await this.client.write(key, content);
   }
 
   /** Read a sync file for an agent. */
-  async readSync(agentId: string, relativePath: string): Promise<Buffer | null> {
+  async readSync(
+    agentId: string,
+    relativePath: string,
+  ): Promise<Buffer | null> {
     const key = `agents/${agentId}/sync/${relativePath}`;
     try {
       const exists = await this.client.file(key).exists();
@@ -256,19 +282,28 @@ export class NanoClawS3 {
   // --- File Transfer Operations ---
 
   /** Upload a file to a transfer. */
-  async uploadTransferFile(transferId: string, filename: string, content: Buffer | string): Promise<void> {
+  async uploadTransferFile(
+    transferId: string,
+    filename: string,
+    content: Buffer | string,
+  ): Promise<void> {
     const key = `files/${transferId}/${filename}`;
     await this.client.write(key, content);
   }
 
   /** Write a transfer manifest. */
-  async writeTransferManifest(transferId: string, manifest: FileTransferManifest): Promise<void> {
+  async writeTransferManifest(
+    transferId: string,
+    manifest: FileTransferManifest,
+  ): Promise<void> {
     const key = `files/${transferId}/manifest.json`;
     await this.client.write(key, JSON.stringify(manifest));
   }
 
   /** Read a transfer manifest. */
-  async readTransferManifest(transferId: string): Promise<FileTransferManifest | null> {
+  async readTransferManifest(
+    transferId: string,
+  ): Promise<FileTransferManifest | null> {
     const key = `files/${transferId}/manifest.json`;
     try {
       const exists = await this.client.file(key).exists();
@@ -281,7 +316,10 @@ export class NanoClawS3 {
   }
 
   /** Download a file from a transfer. */
-  async downloadTransferFile(transferId: string, filename: string): Promise<Buffer | null> {
+  async downloadTransferFile(
+    transferId: string,
+    filename: string,
+  ): Promise<Buffer | null> {
     const key = `files/${transferId}/${filename}`;
     try {
       const exists = await this.client.file(key).exists();

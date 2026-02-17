@@ -25,13 +25,24 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
-import { Channel, ContainerProcess, RegisteredGroup, ScheduledTask } from './types.js';
+import {
+  Channel,
+  ContainerProcess,
+  RegisteredGroup,
+  ScheduledTask,
+} from './types.js';
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
-  onProcess: (groupJid: string, proc: ContainerProcess, containerName: string, groupFolder: string, lane: 'task') => void;
+  onProcess: (
+    groupJid: string,
+    proc: ContainerProcess,
+    containerName: string,
+    groupFolder: string,
+    lane: 'task',
+  ) => void;
   sendMessage: (jid: string, text: string) => Promise<string | void>;
   findChannel: (jid: string) => Channel | undefined;
 }
@@ -101,16 +112,25 @@ export function reconcileHeartbeats(
         let nextRun: string | null = null;
         if (group.heartbeat.scheduleType === 'cron') {
           try {
-            const interval = CronExpressionParser.parse(group.heartbeat.interval, { tz: TIMEZONE });
+            const interval = CronExpressionParser.parse(
+              group.heartbeat.interval,
+              { tz: TIMEZONE },
+            );
             nextRun = interval.next().toISOString();
           } catch {
-            logger.warn({ groupFolder: group.folder, interval: group.heartbeat.interval }, 'Invalid heartbeat cron expression');
+            logger.warn(
+              { groupFolder: group.folder, interval: group.heartbeat.interval },
+              'Invalid heartbeat cron expression',
+            );
             continue;
           }
         } else {
           const ms = parseInt(group.heartbeat.interval, 10);
           if (isNaN(ms) || ms <= 0) {
-            logger.warn({ groupFolder: group.folder, interval: group.heartbeat.interval }, 'Invalid heartbeat interval');
+            logger.warn(
+              { groupFolder: group.folder, interval: group.heartbeat.interval },
+              'Invalid heartbeat interval',
+            );
             continue;
           }
           nextRun = new Date(Date.now() + ms).toISOString();
@@ -128,7 +148,10 @@ export function reconcileHeartbeats(
           status: 'active',
           created_at: new Date().toISOString(),
         });
-        logger.info({ taskId, groupFolder: group.folder }, 'Heartbeat task created');
+        logger.info(
+          { taskId, groupFolder: group.folder },
+          'Heartbeat task created',
+        );
       } else {
         // Update schedule if it changed
         if (
@@ -140,10 +163,16 @@ export function reconcileHeartbeats(
           let nextRun: string | null = null;
           if (group.heartbeat.scheduleType === 'cron') {
             try {
-              const interval = CronExpressionParser.parse(group.heartbeat.interval, { tz: TIMEZONE });
+              const interval = CronExpressionParser.parse(
+                group.heartbeat.interval,
+                { tz: TIMEZONE },
+              );
               nextRun = interval.next().toISOString();
             } catch {
-              logger.warn({ groupFolder: group.folder }, 'Invalid heartbeat cron on update');
+              logger.warn(
+                { groupFolder: group.folder },
+                'Invalid heartbeat cron on update',
+              );
               continue;
             }
           } else {
@@ -162,14 +191,20 @@ export function reconcileHeartbeats(
             status: 'active',
             created_at: new Date().toISOString(),
           });
-          logger.info({ taskId, groupFolder: group.folder }, 'Heartbeat task updated');
+          logger.info(
+            { taskId, groupFolder: group.folder },
+            'Heartbeat task updated',
+          );
         }
       }
       heartbeatTasks.delete(taskId);
     } else if (existing) {
       // Heartbeat disabled or removed — delete the task
       deleteTask(taskId);
-      logger.info({ taskId, groupFolder: group.folder }, 'Heartbeat task removed');
+      logger.info(
+        { taskId, groupFolder: group.folder },
+        'Heartbeat task removed',
+      );
       heartbeatTasks.delete(taskId);
     }
   }
@@ -251,7 +286,10 @@ async function runTask(
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      logger.debug({ taskId: task.id }, 'Scheduled task idle timeout, closing container stdin');
+      logger.debug(
+        { taskId: task.id },
+        'Scheduled task idle timeout, closing container stdin',
+      );
       deps.queue.closeStdin(task.chat_jid, 'task');
     }, IDLE_TIMEOUT);
   };
@@ -264,7 +302,10 @@ async function runTask(
   if (!isHeartbeat && group.streamIntermediates && channel?.createThread) {
     const preview = prompt.slice(0, 80).replace(/\n/g, ' ');
     try {
-      const msgId = await deps.sendMessage(task.chat_jid, `Running scheduled task: ${preview}...`);
+      const msgId = await deps.sendMessage(
+        task.chat_jid,
+        `Running scheduled task: ${preview}...`,
+      );
       parentMessageId = msgId ? String(msgId) : null;
     } catch {
       // Announcement failed — continue without thread
@@ -299,12 +340,20 @@ async function runTask(
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
       },
-      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder, 'task'),
+      (proc, containerName) =>
+        deps.onProcess(
+          task.chat_jid,
+          proc,
+          containerName,
+          task.group_folder,
+          'task',
+        ),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.intermediate && streamedOutput.result) {
-          const raw = typeof streamedOutput.result === 'string'
-            ? streamedOutput.result
-            : JSON.stringify(streamedOutput.result);
+          const raw =
+            typeof streamedOutput.result === 'string'
+              ? streamedOutput.result
+              : JSON.stringify(streamedOutput.result);
           await streamer.handleIntermediate(raw);
           return;
         }
@@ -402,7 +451,10 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         let nextRun: string | null = null;
         if (currentTask.schedule_type === 'cron') {
           try {
-            const interval = CronExpressionParser.parse(currentTask.schedule_value, { tz: TIMEZONE });
+            const interval = CronExpressionParser.parse(
+              currentTask.schedule_value,
+              { tz: TIMEZONE },
+            );
             nextRun = interval.next().toISOString();
           } catch {
             // Invalid cron — leave null so it completes as a one-shot

@@ -18,7 +18,12 @@ import {
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, DATA_DIR, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
+import {
+  ASSISTANT_NAME,
+  DATA_DIR,
+  GROUPS_DIR,
+  TRIGGER_PATTERN,
+} from '../config.js';
 import {
   getAllRegisteredGroups,
   storeChatMetadata,
@@ -29,15 +34,21 @@ import { Channel, RegisteredGroup } from '../types.js';
 
 /**
  * Merge Discord user mention data into the shared user registry JSON.
- * Keyed by lowercase display name so the format_mention MCP tool can look users up.
+ * Uses platform:id as primary key to prevent collisions when users share display names.
+ * Also adds platform:name:... lookup entries for case-insensitive name-based lookups.
  * Writes atomically (temp file + rename) to avoid partial reads.
  */
-function updateUserRegistry(mentions: Array<{ id: string; name: string; platform: 'discord' }>): void {
+function updateUserRegistry(
+  mentions: Array<{ id: string; name: string; platform: 'discord' }>,
+): void {
   if (mentions.length === 0) return;
   const registryPath = path.join(DATA_DIR, 'ipc', 'user_registry.json');
   try {
     // Read existing registry or start fresh
-    let registry: Record<string, { id: string; name: string; platform: string; lastSeen: string }> = {};
+    let registry: Record<
+      string,
+      { id: string; name: string; platform: string; lastSeen: string }
+    > = {};
     if (fs.existsSync(registryPath)) {
       try {
         registry = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
@@ -49,8 +60,16 @@ function updateUserRegistry(mentions: Array<{ id: string; name: string; platform
 
     const now = new Date().toISOString();
     for (const { id, name, platform } of mentions) {
-      const key = name.toLowerCase().trim();
-      registry[key] = { id, name, platform, lastSeen: now };
+      // Primary entry: platform:id (stable, unique)
+      const idKey = `${platform}:${id}`;
+      registry[idKey] = { id, name, platform, lastSeen: now };
+
+      // Secondary entry: platform:name:... (for name-based lookups)
+      // Only add if name is non-empty to avoid empty-string collisions
+      if (name && name.trim()) {
+        const nameKey = `${platform}:name:${name.toLowerCase().trim()}`;
+        registry[nameKey] = { id, name, platform, lastSeen: now };
+      }
     }
 
     // Atomic write: temp file then rename
@@ -59,13 +78,21 @@ function updateUserRegistry(mentions: Array<{ id: string; name: string; platform
     fs.writeFileSync(tempPath, JSON.stringify(registry, null, 2), 'utf-8');
     fs.renameSync(tempPath, registryPath);
   } catch (err) {
-    logger.warn({ err }, 'Failed to update user registry from Discord mentions');
+    logger.warn(
+      { err },
+      'Failed to update user registry from Discord mentions',
+    );
   }
 }
 
 export interface DiscordChannelOpts {
   token: string;
-  onReaction?: (chatJid: string, messageId: string, emoji: string, userName: string) => void;
+  onReaction?: (
+    chatJid: string,
+    messageId: string,
+    emoji: string,
+    userName: string,
+  ) => void;
 }
 
 export class DiscordChannel implements Channel {
@@ -123,7 +150,11 @@ export class DiscordChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string, replyToMessageId?: string): Promise<string | void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    replyToMessageId?: string,
+  ): Promise<string | void> {
     const channel = await resolveChannel(this.client, jid);
     if (!channel || !('send' in channel)) {
       logger.warn({ jid }, 'Discord channel not found or not sendable');
@@ -134,9 +165,13 @@ export class DiscordChannel implements Channel {
       const chunks = splitMessage(text, 2000);
       let lastMessageId: string | undefined;
       for (let i = 0; i < chunks.length; i++) {
-        const opts = i === 0 && replyToMessageId
-          ? { content: chunks[i], reply: { messageReference: replyToMessageId } }
-          : chunks[i];
+        const opts =
+          i === 0 && replyToMessageId
+            ? {
+                content: chunks[i],
+                reply: { messageReference: replyToMessageId },
+              }
+            : chunks[i];
         const sent = await (channel as TextChannel | DMChannel).send(opts);
         lastMessageId = sent.id;
       }
@@ -202,7 +237,11 @@ export class DiscordChannel implements Channel {
     }
   }
 
-  async createThread(jid: string, messageId: string, name: string): Promise<ThreadChannel | null> {
+  async createThread(
+    jid: string,
+    messageId: string,
+    name: string,
+  ): Promise<ThreadChannel | null> {
     // DMs don't support threads
     if (jid.startsWith('dc:dm:')) return null;
 
@@ -232,11 +271,18 @@ export class DiscordChannel implements Channel {
         await thread.send(chunk);
       }
     } catch (err) {
-      logger.warn({ threadId: thread.id, err }, 'Failed to send to Discord thread');
+      logger.warn(
+        { threadId: thread.id, err },
+        'Failed to send to Discord thread',
+      );
     }
   }
 
-  async addReaction(jid: string, messageId: string, emoji: string): Promise<void> {
+  async addReaction(
+    jid: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void> {
     const channelId = jidToChannelId(jid);
     if (!channelId) return;
     try {
@@ -245,21 +291,33 @@ export class DiscordChannel implements Channel {
       const message = await (channel as TextChannel).messages.fetch(messageId);
       await message.react(emoji);
     } catch (err) {
-      logger.warn({ jid, messageId, emoji, err }, 'Failed to add Discord reaction');
+      logger.warn(
+        { jid, messageId, emoji, err },
+        'Failed to add Discord reaction',
+      );
     }
   }
 
-  async removeReaction(jid: string, messageId: string, emoji: string): Promise<void> {
+  async removeReaction(
+    jid: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void> {
     const channelId = jidToChannelId(jid);
     if (!channelId) return;
     try {
       const channel = await this.client.channels.fetch(channelId);
       if (!channel || !('messages' in channel)) return;
       const message = await (channel as TextChannel).messages.fetch(messageId);
-      const botReaction = message.reactions.cache.find(r => r.emoji.name === emoji);
+      const botReaction = message.reactions.cache.find(
+        (r) => r.emoji.name === emoji,
+      );
       if (botReaction) await botReaction.users.remove(this.client.user!.id);
     } catch (err) {
-      logger.warn({ jid, messageId, emoji, err }, 'Failed to remove Discord reaction');
+      logger.warn(
+        { jid, messageId, emoji, err },
+        'Failed to remove Discord reaction',
+      );
     }
   }
 
@@ -306,14 +364,19 @@ export class DiscordChannel implements Channel {
             if (channelId && message.guildId) {
               const guild = message.client.guilds.cache.get(message.guildId);
               const members = await guild?.members.fetch();
-              const botMembers = members?.filter(m => m.user.bot && m.user.id !== this.client.user?.id);
+              const botMembers = members?.filter(
+                (m) => m.user.bot && m.user.id !== this.client.user?.id,
+              );
 
-              botMembers?.forEach(bot => {
+              botMembers?.forEach((bot) => {
                 agentMentions.push(`<@${bot.user.id}>`);
               });
             }
           } catch (err) {
-            logger.warn({ jid, err }, 'Failed to fetch bot members for @AllAgents');
+            logger.warn(
+              { jid, err },
+              'Failed to fetch bot members for @AllAgents',
+            );
           }
         }
       }
@@ -323,7 +386,10 @@ export class DiscordChannel implements Channel {
       const mentionString = uniqueMentions.join(' ');
       content = content.replace(/@AllAgents|@allagents/gi, mentionString);
 
-      logger.info({ agentCount: uniqueMentions.length }, 'Expanded @AllAgents shortcut');
+      logger.info(
+        { agentCount: uniqueMentions.length },
+        'Expanded @AllAgents shortcut',
+      );
     }
 
     // Translate @bot mention into trigger format
@@ -347,12 +413,14 @@ export class DiscordChannel implements Channel {
     // Resolve all remaining <@USER_ID> mentions to display names so the agent
     // knows who is being referenced. Uses server nickname > global display name > username.
     // Also collect mention metadata for user registry (Issue #66)
-    const mentions: Array<{ id: string; name: string; platform: 'discord' }> = [];
+    const mentions: Array<{ id: string; name: string; platform: 'discord' }> =
+      [];
 
     if (message.mentions.members?.size) {
       for (const [id, member] of message.mentions.members) {
         if (id === botId) continue; // Already handled above
-        const name = member.displayName || member.user.displayName || member.user.username;
+        const name =
+          member.displayName || member.user.displayName || member.user.username;
         content = content.replace(new RegExp(`<@!?${id}>`, 'g'), `@${name}`);
         mentions.push({ id, name, platform: 'discord' });
       }
@@ -370,7 +438,10 @@ export class DiscordChannel implements Channel {
     // Resolve <@&ROLE_ID> role mentions and <#CHANNEL_ID> channel mentions
     if (message.mentions.roles?.size) {
       for (const [id, role] of message.mentions.roles) {
-        content = content.replace(new RegExp(`<@&${id}>`, 'g'), `@${role.name}`);
+        content = content.replace(
+          new RegExp(`<@&${id}>`, 'g'),
+          `@${role.name}`,
+        );
       }
     }
     if (message.mentions.channels?.size) {
@@ -390,25 +461,38 @@ export class DiscordChannel implements Channel {
     const isReplyToBot = message.mentions.repliedUser?.id === botId;
     // Only block if message mentions other users but NOT this bot.
     // Messages with NO mentions pass through to auto-respond check below.
-    const mentionsOtherUsersOnly = message.mentions.users.size > 0
-      && !message.mentions.users.has(botId)
-      && !isReplyToBot;
+    const mentionsOtherUsersOnly =
+      message.mentions.users.size > 0 &&
+      !message.mentions.users.has(botId) &&
+      !isReplyToBot;
     if (!isDM && botId && mentionsOtherUsersOnly) {
-      logger.debug({ chatJid: `dc:${message.channelId}`, sender: message.author.username }, 'Ignoring message mentioning other users');
+      logger.debug(
+        { chatJid: `dc:${message.channelId}`, sender: message.author.username },
+        'Ignoring message mentioning other users',
+      );
       return;
     }
 
     // Prepend reply context so the agent knows what's being replied to
     if (message.reference?.messageId) {
       try {
-        const refMsg = await message.channel.messages.fetch(message.reference.messageId);
-        const refAuthor = refMsg.member?.displayName || refMsg.author.displayName || refMsg.author.username;
-        const refContent = refMsg.content.length > 200
-          ? refMsg.content.slice(0, 200) + '…' : refMsg.content;
+        const refMsg = await message.channel.messages.fetch(
+          message.reference.messageId,
+        );
+        const refAuthor =
+          refMsg.member?.displayName ||
+          refMsg.author.displayName ||
+          refMsg.author.username;
+        const refContent =
+          refMsg.content.length > 200
+            ? refMsg.content.slice(0, 200) + '…'
+            : refMsg.content;
         if (refContent) {
           content = `[Replying to ${refAuthor}: "${refContent}"]\n${content}`;
         }
-      } catch { /* deleted message — continue without context */ }
+      } catch {
+        /* deleted message — continue without context */
+      }
     }
 
     const chatJid = isDM
@@ -417,7 +501,9 @@ export class DiscordChannel implements Channel {
 
     const timestamp = message.createdAt.toISOString();
     const senderName =
-      message.member?.displayName || message.author.displayName || message.author.username;
+      message.member?.displayName ||
+      message.author.displayName ||
+      message.author.username;
     const sender = message.author.id;
     const msgId = message.id;
 
@@ -432,7 +518,12 @@ export class DiscordChannel implements Channel {
       : (message.channel as TextChannel).name || chatJid;
 
     // Store chat metadata for discovery (include guild ID for server-level context)
-    storeChatMetadata(chatJid, timestamp, chatName, message.guildId || undefined);
+    storeChatMetadata(
+      chatJid,
+      timestamp,
+      chatName,
+      message.guildId || undefined,
+    );
 
     // Check if this chat is registered
     const registeredGroups = getAllRegisteredGroups();
@@ -456,10 +547,16 @@ export class DiscordChannel implements Channel {
             fs.mkdirSync(mediaDir, { recursive: true });
             const filename = `${msgId}-${a.name || 'image.png'}`;
             const resp = await fetch(a.url);
-            fs.writeFileSync(path.join(mediaDir, filename), Buffer.from(await resp.arrayBuffer()));
+            fs.writeFileSync(
+              path.join(mediaDir, filename),
+              Buffer.from(await resp.arrayBuffer()),
+            );
             parts.push(`[attachment:image file=${filename}]`);
           } catch (err) {
-            logger.error({ err, url: a.url }, 'Failed to download Discord image');
+            logger.error(
+              { err, url: a.url },
+              'Failed to download Discord image',
+            );
             parts.push('[Image]');
           }
         } else if (a.contentType?.startsWith('video/')) {
@@ -481,11 +578,18 @@ export class DiscordChannel implements Channel {
     if (!hasTrigger && !isDM) {
       if (isReplyToBot) {
         // Reply to bot = treat as triggered
-        logger.info({ chatJid, sender: senderName }, 'Reply to bot — treating as triggered');
+        logger.info(
+          { chatJid, sender: senderName },
+          'Reply to bot — treating as triggered',
+        );
         content = `@${ASSISTANT_NAME} ${content}`;
       } else if (this.shouldAutoRespond(content, group)) {
         logger.debug(
-          { chatJid, autoRespondToQuestions: group.autoRespondToQuestions, autoRespondKeywords: group.autoRespondKeywords },
+          {
+            chatJid,
+            autoRespondToQuestions: group.autoRespondToQuestions,
+            autoRespondKeywords: group.autoRespondKeywords,
+          },
           'Auto-responding based on group config',
         );
         // Prepend trigger so message gets processed

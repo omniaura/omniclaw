@@ -53,7 +53,10 @@ export class QuarterPlanSync {
 
   async saveQuarterPlan(data: QuarterPlanData): Promise<void> {
     const toSave = { ...data, lastUpdated: new Date().toISOString() };
-    await this.s3.write('quarterplan/initiatives.json', JSON.stringify(toSave, null, 2));
+    await this.s3.write(
+      'quarterplan/initiatives.json',
+      JSON.stringify(toSave, null, 2),
+    );
   }
 
   async getARRData(): Promise<ARRData> {
@@ -67,10 +70,17 @@ export class QuarterPlanSync {
 
   async saveARRData(data: ARRData): Promise<void> {
     const toSave = { ...data, updated: new Date().toISOString() };
-    await this.s3.write('quarterplan/arr-data.json', JSON.stringify(toSave, null, 2));
+    await this.s3.write(
+      'quarterplan/arr-data.json',
+      JSON.stringify(toSave, null, 2),
+    );
   }
 
-  async addUpdate(initiativeId: string, update: string, author: string): Promise<void> {
+  async addUpdate(
+    initiativeId: string,
+    update: string,
+    author: string,
+  ): Promise<void> {
     const updateData = {
       initiative_id: initiativeId,
       update,

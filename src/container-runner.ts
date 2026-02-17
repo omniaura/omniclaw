@@ -23,7 +23,9 @@ export async function runContainerAgent(
   group: AgentOrGroup,
   input: import('./backends/types.js').ContainerInput,
   onProcess: (proc: ContainerProcess, containerName: string) => void,
-  onOutput?: (output: import('./backends/types.js').ContainerOutput) => Promise<void>,
+  onOutput?: (
+    output: import('./backends/types.js').ContainerOutput,
+  ) => Promise<void>,
 ): Promise<import('./backends/types.js').ContainerOutput> {
   const backend = resolveBackend(group);
   return backend.runAgent(group, input, onProcess, onOutput);

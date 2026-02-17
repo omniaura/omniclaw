@@ -1,8 +1,5 @@
 import { Api, Bot } from 'grammy';
-import {
-  ASSISTANT_NAME,
-  TRIGGER_PATTERN,
-} from './config.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
 import {
   getAllRegisteredGroups,
   storeChatMetadata,
@@ -21,7 +18,6 @@ const senderBotMap = new Map<string, number>();
 // Tracks which pool indices are already claimed this session
 const assignedIndices = new Set<number>();
 
-
 /** Store a placeholder message for non-text content (photos, voice, etc.) */
 function storeNonTextMessage(ctx: any, placeholder: string): void {
   const chatId = `tg:${ctx.chat.id}`;
@@ -30,7 +26,10 @@ function storeNonTextMessage(ctx: any, placeholder: string): void {
 
   const timestamp = new Date(ctx.message.date * 1000).toISOString();
   const senderName =
-    ctx.from?.first_name || ctx.from?.username || ctx.from?.id?.toString() || 'Unknown';
+    ctx.from?.first_name ||
+    ctx.from?.username ||
+    ctx.from?.id?.toString() ||
+    'Unknown';
   const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
 
   storeChatMetadata(chatId, timestamp);
@@ -226,7 +225,12 @@ export async function initBotPool(tokens: string[]): Promise<void> {
       poolApis.push(api);
       poolBotNames.push(me.first_name);
       logger.info(
-        { username: me.username, name: me.first_name, id: me.id, poolSize: poolApis.length },
+        {
+          username: me.username,
+          name: me.first_name,
+          id: me.id,
+          poolSize: poolApis.length,
+        },
         'Pool bot initialized',
       );
     } catch (err) {
@@ -234,7 +238,10 @@ export async function initBotPool(tokens: string[]): Promise<void> {
     }
   }
   if (poolApis.length > 0) {
-    logger.info({ count: poolApis.length, names: poolBotNames }, 'Telegram bot pool ready');
+    logger.info(
+      { count: poolApis.length, names: poolBotNames },
+      'Telegram bot pool ready',
+    );
   }
 }
 
@@ -269,7 +276,10 @@ export async function sendPoolMessage(
       idx = nameMatch;
       assignedIndices.add(idx);
       senderBotMap.set(key, idx);
-      logger.info({ sender, groupFolder, poolIndex: idx }, 'Matched pool bot by name');
+      logger.info(
+        { sender, groupFolder, poolIndex: idx },
+        'Matched pool bot by name',
+      );
     } else {
       // 2. Pick first unassigned bot
       let freeIdx = -1;
@@ -290,9 +300,15 @@ export async function sendPoolMessage(
         await poolApis[idx].setMyName(sender);
         poolBotNames[idx] = sender;
         await new Promise((r) => setTimeout(r, 2000));
-        logger.info({ sender, groupFolder, poolIndex: idx }, 'Assigned and renamed pool bot');
+        logger.info(
+          { sender, groupFolder, poolIndex: idx },
+          'Assigned and renamed pool bot',
+        );
       } catch (err) {
-        logger.warn({ sender, err }, 'Failed to rename pool bot (sending anyway)');
+        logger.warn(
+          { sender, err },
+          'Failed to rename pool bot (sending anyway)',
+        );
       }
     }
   }
@@ -308,7 +324,10 @@ export async function sendPoolMessage(
         await api.sendMessage(numericId, text.slice(i, i + MAX_LENGTH));
       }
     }
-    logger.info({ chatId, sender, poolIndex: idx, length: text.length }, 'Pool message sent');
+    logger.info(
+      { chatId, sender, poolIndex: idx, length: text.length },
+      'Pool message sent',
+    );
   } catch (err) {
     logger.error({ chatId, sender, err }, 'Failed to send pool message');
   }

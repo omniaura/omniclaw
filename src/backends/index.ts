@@ -8,7 +8,12 @@ import { Agent, RegisteredGroup } from '../types.js';
 import { DaytonaBackend } from './daytona-backend.js';
 import { LocalBackend } from './local-backend.js';
 import { SpritesBackend } from './sprites-backend.js';
-import { AgentBackend, AgentOrGroup, BackendType, getBackendType } from './types.js';
+import {
+  AgentBackend,
+  AgentOrGroup,
+  BackendType,
+  getBackendType,
+} from './types.js';
 
 const DEFAULT_BACKEND: BackendType = 'apple-container';
 
@@ -105,4 +110,10 @@ export async function shutdownBackends(): Promise<void> {
 }
 
 // Re-export types for convenience
-export type { AgentBackend, AgentOrGroup, BackendType, ContainerInput, ContainerOutput } from './types.js';
+export type {
+  AgentBackend,
+  AgentOrGroup,
+  BackendType,
+  ContainerInput,
+  ContainerOutput,
+} from './types.js';

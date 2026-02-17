@@ -48,7 +48,7 @@ class SpriteClient {
 
   private headers(): Record<string, string> {
     return {
-      'Authorization': `Bearer ${this.token}`,
+      Authorization: `Bearer ${this.token}`,
       'Content-Type': 'application/json',
     };
   }
@@ -65,7 +65,9 @@ class SpriteClient {
     }
 
     if (getResp.status !== 404) {
-      throw new Error(`Failed to check sprite: ${getResp.status} ${await getResp.text()}`);
+      throw new Error(
+        `Failed to check sprite: ${getResp.status} ${await getResp.text()}`,
+      );
     }
 
     // Create sprite
@@ -80,16 +82,32 @@ class SpriteClient {
     });
 
     if (!createResp.ok) {
-      throw new Error(`Failed to create sprite: ${createResp.status} ${await createResp.text()}`);
+      throw new Error(
+        `Failed to create sprite: ${createResp.status} ${await createResp.text()}`,
+      );
     }
 
     return true;
   }
 
   /** Execute a command and return stdout/stderr via the sprite CLI. */
-  async exec(cmd: string, opts?: { timeout?: number }): Promise<{ stdout: string; stderr: string }> {
+  async exec(
+    cmd: string,
+    opts?: { timeout?: number },
+  ): Promise<{ stdout: string; stderr: string }> {
     const proc = Bun.spawn(
-      ['sprite', 'exec', '-o', SPRITES_ORG, '-s', this.spriteName, '--', 'bash', '-c', cmd],
+      [
+        'sprite',
+        'exec',
+        '-o',
+        SPRITES_ORG,
+        '-s',
+        this.spriteName,
+        '--',
+        'bash',
+        '-c',
+        cmd,
+      ],
       { stdout: 'pipe', stderr: 'pipe' },
     );
 
@@ -106,7 +124,9 @@ class SpriteClient {
           if (done) break;
           stdout += decoder.decode(value, { stream: true });
         }
-      } catch { /* stream closed */ }
+      } catch {
+        /* stream closed */
+      }
     }
 
     // Read stderr
@@ -119,12 +139,16 @@ class SpriteClient {
           if (done) break;
           stderr += decoder.decode(value, { stream: true });
         }
-      } catch { /* stream closed */ }
+      } catch {
+        /* stream closed */
+      }
     }
 
     const exitCode = await proc.exited;
     if (exitCode !== 0) {
-      const err = new Error(`Command failed with exit code ${exitCode}: ${stderr}`);
+      const err = new Error(
+        `Command failed with exit code ${exitCode}: ${stderr}`,
+      );
       (err as any).exitCode = exitCode;
       (err as any).stdout = stdout;
       (err as any).stderr = stderr;
@@ -137,7 +161,7 @@ class SpriteClient {
   async readFile(remotePath: string): Promise<Buffer | null> {
     const resp = await fetch(
       `${API_BASE}/sprites/${this.spriteName}/fs/read?path=${encodeURIComponent(remotePath)}`,
-      { headers: { 'Authorization': `Bearer ${this.token}` } },
+      { headers: { Authorization: `Bearer ${this.token}` } },
     );
 
     if (resp.status === 404) return null;
@@ -149,7 +173,11 @@ class SpriteClient {
   }
 
   /** Write a file to the Sprite filesystem. */
-  async writeFile(remotePath: string, content: Buffer | string, opts?: { mkdir?: boolean }): Promise<void> {
+  async writeFile(
+    remotePath: string,
+    content: Buffer | string,
+    opts?: { mkdir?: boolean },
+  ): Promise<void> {
     const params = new URLSearchParams({ path: remotePath });
     if (opts?.mkdir) params.set('mkdir', 'true');
 
@@ -157,13 +185,18 @@ class SpriteClient {
       `${API_BASE}/sprites/${this.spriteName}/fs/write?${params}`,
       {
         method: 'PUT',
-        headers: { 'Authorization': `Bearer ${this.token}` },
-        body: typeof content === 'string' ? new TextEncoder().encode(content) : content,
+        headers: { Authorization: `Bearer ${this.token}` },
+        body:
+          typeof content === 'string'
+            ? new TextEncoder().encode(content)
+            : content,
       },
     );
 
     if (!resp.ok) {
-      throw new Error(`Failed to write file ${remotePath}: ${resp.status} ${await resp.text()}`);
+      throw new Error(
+        `Failed to write file ${remotePath}: ${resp.status} ${await resp.text()}`,
+      );
     }
   }
 
@@ -173,7 +206,7 @@ class SpriteClient {
       headers: this.headers(),
     });
     if (!resp.ok) return undefined;
-    const data = await resp.json() as { url?: string };
+    const data = (await resp.json()) as { url?: string };
     return data.url;
   }
 
@@ -246,10 +279,16 @@ export class SpritesBackend implements AgentBackend {
     await this.syncFiles(sprite, group, input.isMain);
 
     // Write input JSON via filesystem API
-    await sprite.writeFile('/tmp/input.json', JSON.stringify(input), { mkdir: true });
+    await sprite.writeFile('/tmp/input.json', JSON.stringify(input), {
+      mkdir: true,
+    });
 
     // Clean up any stale close sentinel
-    try { await sprite.exec('rm -f /workspace/ipc/input/_close'); } catch { /* ignore */ }
+    try {
+      await sprite.exec('rm -f /workspace/ipc/input/_close');
+    } catch {
+      /* ignore */
+    }
 
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
@@ -257,8 +296,15 @@ export class SpritesBackend implements AgentBackend {
     // Spawn the agent via `sprite exec` CLI (uses WebSocket for real-time streaming)
     const proc = Bun.spawn(
       [
-        'sprite', 'exec', '-o', SPRITES_ORG, '-s', sprite.name,
-        '--', 'bash', '-c',
+        'sprite',
+        'exec',
+        '-o',
+        SPRITES_ORG,
+        '-s',
+        sprite.name,
+        '--',
+        'bash',
+        '-c',
         'bash /app/entrypoint.sh < /tmp/input.json',
       ],
       { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
@@ -273,7 +319,10 @@ export class SpritesBackend implements AgentBackend {
     }
 
     const killOnTimeout = () => {
-      logger.error({ group: group.name, sprite: sprite.name }, 'Sprites agent timeout, killing');
+      logger.error(
+        { group: group.name, sprite: sprite.name },
+        'Sprites agent timeout, killing',
+      );
       proc.kill(9);
     };
 
@@ -298,7 +347,9 @@ export class SpritesBackend implements AgentBackend {
           if (done) break;
           parser.feedStderr(decoder.decode(value, { stream: true }));
         }
-      } catch { /* stream closed */ }
+      } catch {
+        /* stream closed */
+      }
     })();
 
     // Read stdout (streaming output markers)
@@ -311,7 +362,9 @@ export class SpritesBackend implements AgentBackend {
           if (done) break;
           parser.feedStdout(decoder.decode(value, { stream: true }));
         }
-      } catch { /* stream closed */ }
+      } catch {
+        /* stream closed */
+      }
     }
 
     const exitCode = await proc.exited;
@@ -327,9 +380,17 @@ export class SpritesBackend implements AgentBackend {
     if (state.timedOut) {
       if (state.hadStreamingOutput) {
         await state.outputChain;
-        return { status: 'success', result: null, newSessionId: state.newSessionId };
+        return {
+          status: 'success',
+          result: null,
+          newSessionId: state.newSessionId,
+        };
       }
-      return { status: 'error', result: null, error: `Sprites agent timed out after ${configTimeout}ms` };
+      return {
+        status: 'error',
+        result: null,
+        error: `Sprites agent timed out after ${configTimeout}ms`,
+      };
     }
 
     if (exitCode !== 0 && !state.hadStreamingOutput) {
@@ -351,7 +412,11 @@ export class SpritesBackend implements AgentBackend {
         { group: group.name, duration, newSessionId: state.newSessionId },
         'Sprites agent completed (streaming mode)',
       );
-      return { status: 'success', result: null, newSessionId: state.newSessionId };
+      return {
+        status: 'success',
+        result: null,
+        newSessionId: state.newSessionId,
+      };
     }
 
     // Legacy mode
@@ -379,7 +444,11 @@ export class SpritesBackend implements AgentBackend {
    * Sync host-side files to the Sprite before each invocation.
    * Only uploads files whose content has changed (via SHA-256 hash).
    */
-  private async syncFiles(sprite: SpriteClient, group: AgentOrGroup, isMain: boolean): Promise<void> {
+  private async syncFiles(
+    sprite: SpriteClient,
+    group: AgentOrGroup,
+    isMain: boolean,
+  ): Promise<void> {
     const projectRoot = process.cwd();
     const syncOps: Promise<boolean>[] = [];
 
@@ -387,7 +456,14 @@ export class SpritesBackend implements AgentBackend {
     const groupClaudeMd = path.join(GROUPS_DIR, group.folder, 'CLAUDE.md');
     if (fs.existsSync(groupClaudeMd)) {
       const content = fs.readFileSync(groupClaudeMd, 'utf-8');
-      syncOps.push(syncFile(sprite, '/workspace/group/CLAUDE.md', content, `${group.folder}:CLAUDE.md`));
+      syncOps.push(
+        syncFile(
+          sprite,
+          '/workspace/group/CLAUDE.md',
+          content,
+          `${group.folder}:CLAUDE.md`,
+        ),
+      );
     }
 
     // Global CLAUDE.md (non-main only)
@@ -395,7 +471,14 @@ export class SpritesBackend implements AgentBackend {
       const globalClaudeMd = path.join(GROUPS_DIR, 'global', 'CLAUDE.md');
       if (fs.existsSync(globalClaudeMd)) {
         const content = fs.readFileSync(globalClaudeMd, 'utf-8');
-        syncOps.push(syncFile(sprite, '/workspace/global/CLAUDE.md', content, 'global:CLAUDE.md'));
+        syncOps.push(
+          syncFile(
+            sprite,
+            '/workspace/global/CLAUDE.md',
+            content,
+            'global:CLAUDE.md',
+          ),
+        );
       }
     }
 
@@ -407,27 +490,51 @@ export class SpritesBackend implements AgentBackend {
     }
 
     // Agent-runner source files
-    const agentRunnerDir = path.join(projectRoot, 'container', 'agent-runner', 'src');
+    const agentRunnerDir = path.join(
+      projectRoot,
+      'container',
+      'agent-runner',
+      'src',
+    );
     if (fs.existsSync(agentRunnerDir)) {
       for (const file of fs.readdirSync(agentRunnerDir)) {
         if (!file.endsWith('.ts')) continue;
-        const content = fs.readFileSync(path.join(agentRunnerDir, file), 'utf-8');
-        syncOps.push(syncFile(sprite, `/app/src/${file}`, content, `agent-runner:${file}`));
+        const content = fs.readFileSync(
+          path.join(agentRunnerDir, file),
+          'utf-8',
+        );
+        syncOps.push(
+          syncFile(sprite, `/app/src/${file}`, content, `agent-runner:${file}`),
+        );
       }
     }
 
     // Agent-runner package.json
-    const agentPkgJson = path.join(projectRoot, 'container', 'agent-runner', 'package.json');
+    const agentPkgJson = path.join(
+      projectRoot,
+      'container',
+      'agent-runner',
+      'package.json',
+    );
     if (fs.existsSync(agentPkgJson)) {
       const content = fs.readFileSync(agentPkgJson, 'utf-8');
-      syncOps.push(syncFile(sprite, '/app/package.json', content, 'agent-runner:package.json'));
+      syncOps.push(
+        syncFile(
+          sprite,
+          '/app/package.json',
+          content,
+          'agent-runner:package.json',
+        ),
+      );
     }
 
     // Entrypoint
     const entrypoint = path.join(projectRoot, 'container', 'entrypoint.sh');
     if (fs.existsSync(entrypoint)) {
       const content = fs.readFileSync(entrypoint, 'utf-8');
-      syncOps.push(syncFile(sprite, '/app/entrypoint.sh', content, 'entrypoint'));
+      syncOps.push(
+        syncFile(sprite, '/app/entrypoint.sh', content, 'entrypoint'),
+      );
     }
 
     // Skills
@@ -438,12 +545,14 @@ export class SpritesBackend implements AgentBackend {
         if (!fs.statSync(srcDir).isDirectory()) continue;
         for (const file of fs.readdirSync(srcDir)) {
           const content = fs.readFileSync(path.join(srcDir, file), 'utf-8');
-          syncOps.push(syncFile(
-            sprite,
-            `/home/user/.claude/skills/${skillDir}/${file}`,
-            content,
-            `skills:${skillDir}/${file}`,
-          ));
+          syncOps.push(
+            syncFile(
+              sprite,
+              `/home/user/.claude/skills/${skillDir}/${file}`,
+              content,
+              `skills:${skillDir}/${file}`,
+            ),
+          );
         }
       }
     }
@@ -451,16 +560,31 @@ export class SpritesBackend implements AgentBackend {
     const results = await Promise.all(syncOps);
     const uploaded = results.filter(Boolean).length;
     if (uploaded > 0) {
-      logger.debug({ group: group.folder, uploaded, total: results.length }, 'Synced files to Sprite');
+      logger.debug(
+        { group: group.folder, uploaded, total: results.length },
+        'Synced files to Sprite',
+      );
     }
 
     // Run bun install if package.json was uploaded (new/changed deps)
-    if (fileHashCache.get('agent-runner:package.json:installed') !== fileHashCache.get('agent-runner:package.json')) {
+    if (
+      fileHashCache.get('agent-runner:package.json:installed') !==
+      fileHashCache.get('agent-runner:package.json')
+    ) {
       try {
-        await sprite.exec('export PATH="$HOME/.bun/bin:$PATH" && cd /app && bun install', { timeout: 60_000 });
-        fileHashCache.set('agent-runner:package.json:installed', fileHashCache.get('agent-runner:package.json') || '');
+        await sprite.exec(
+          'export PATH="$HOME/.bun/bin:$PATH" && cd /app && bun install',
+          { timeout: 60_000 },
+        );
+        fileHashCache.set(
+          'agent-runner:package.json:installed',
+          fileHashCache.get('agent-runner:package.json') || '',
+        );
       } catch (err) {
-        logger.warn({ group: group.folder, error: err }, 'Failed to install agent-runner deps on Sprite');
+        logger.warn(
+          { group: group.folder, error: err },
+          'Failed to install agent-runner deps on Sprite',
+        );
       }
     }
   }
@@ -469,60 +593,95 @@ export class SpritesBackend implements AgentBackend {
    * Download files that may have changed during agent execution.
    * Agent may update CLAUDE.md (memory) and conversation files.
    */
-  private async downloadChangedFiles(sprite: SpriteClient, group: AgentOrGroup): Promise<void> {
+  private async downloadChangedFiles(
+    sprite: SpriteClient,
+    group: AgentOrGroup,
+  ): Promise<void> {
     try {
       // Download updated CLAUDE.md
       const claudeMd = await sprite.readFile('/workspace/group/CLAUDE.md');
       if (claudeMd) {
         const localPath = path.join(GROUPS_DIR, group.folder, 'CLAUDE.md');
-        const localContent = fs.existsSync(localPath) ? fs.readFileSync(localPath) : null;
+        const localContent = fs.existsSync(localPath)
+          ? fs.readFileSync(localPath)
+          : null;
         if (!localContent || !claudeMd.equals(localContent)) {
           fs.writeFileSync(localPath, claudeMd);
           // Update hash cache so next sync doesn't re-upload our own download
           fileHashCache.set(`${group.folder}:CLAUDE.md`, hashContent(claudeMd));
-          logger.debug({ group: group.folder }, 'Downloaded updated CLAUDE.md from Sprite');
+          logger.debug(
+            { group: group.folder },
+            'Downloaded updated CLAUDE.md from Sprite',
+          );
         }
       }
     } catch (err) {
-      logger.warn({ group: group.folder, error: err }, 'Failed to download files from Sprite');
+      logger.warn(
+        { group: group.folder, error: err },
+        'Failed to download files from Sprite',
+      );
     }
   }
 
   sendMessage(groupFolder: string, text: string): boolean {
     const sprite = this.getSpriteClient(groupFolder);
     // Write IPC input file asynchronously — fire and forget
-    sprite.writeFile(
-      `/workspace/ipc/input/${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`,
-      JSON.stringify({ type: 'message', text }),
-      { mkdir: true },
-    ).catch((err) => {
-      logger.warn({ groupFolder, error: err }, 'Failed to send message to Sprite IPC');
-    });
+    sprite
+      .writeFile(
+        `/workspace/ipc/input/${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`,
+        JSON.stringify({ type: 'message', text }),
+        { mkdir: true },
+      )
+      .catch((err) => {
+        logger.warn(
+          { groupFolder, error: err },
+          'Failed to send message to Sprite IPC',
+        );
+      });
     return true;
   }
 
   closeStdin(groupFolder: string, inputSubdir: string = 'input'): void {
     const sprite = this.getSpriteClient(groupFolder);
-    sprite.writeFile(`/workspace/ipc/${inputSubdir}/_close`, '').catch((err) => {
-      logger.warn({ groupFolder, error: err }, 'Failed to write close sentinel to Sprite');
-    });
+    sprite
+      .writeFile(`/workspace/ipc/${inputSubdir}/_close`, '')
+      .catch((err) => {
+        logger.warn(
+          { groupFolder, error: err },
+          'Failed to write close sentinel to Sprite',
+        );
+      });
   }
 
   writeIpcData(groupFolder: string, filename: string, data: string): void {
     const sprite = this.getSpriteClient(groupFolder);
-    sprite.writeFile(`/workspace/ipc/${filename}`, data, { mkdir: true }).catch((err) => {
-      logger.warn({ groupFolder, filename, error: err }, 'Failed to write IPC data to Sprite');
-    });
+    sprite
+      .writeFile(`/workspace/ipc/${filename}`, data, { mkdir: true })
+      .catch((err) => {
+        logger.warn(
+          { groupFolder, filename, error: err },
+          'Failed to write IPC data to Sprite',
+        );
+      });
   }
 
-  async readFile(groupFolder: string, relativePath: string): Promise<Buffer | null> {
+  async readFile(
+    groupFolder: string,
+    relativePath: string,
+  ): Promise<Buffer | null> {
     const sprite = this.getSpriteClient(groupFolder);
     return sprite.readFile(`/workspace/group/${relativePath}`);
   }
 
-  async writeFile(groupFolder: string, relativePath: string, content: Buffer | string): Promise<void> {
+  async writeFile(
+    groupFolder: string,
+    relativePath: string,
+    content: Buffer | string,
+  ): Promise<void> {
     const sprite = this.getSpriteClient(groupFolder);
-    await sprite.writeFile(`/workspace/group/${relativePath}`, content, { mkdir: true });
+    await sprite.writeFile(`/workspace/group/${relativePath}`, content, {
+      mkdir: true,
+    });
   }
 
   /** Get the Sprite's dev URL for a group. */

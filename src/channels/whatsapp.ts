@@ -11,13 +11,14 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 
 import { STORE_DIR } from '../config.js';
-import {
-  getLastGroupSync,
-  setLastGroupSync,
-  updateChatName,
-} from '../db.js';
+import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -100,7 +101,9 @@ export class WhatsAppChannel implements Channel {
         const msg =
           'WhatsApp authentication required. Run /setup in Claude Code.';
         logger.error(msg);
-        $`osascript -e ${`display notification "${msg}" with title "NanoClaw" sound name "Basso"`}`.quiet().nothrow();
+        $`osascript -e ${`display notification "${msg}" with title "NanoClaw" sound name "Basso"`}`
+          .quiet()
+          .nothrow();
         setTimeout(() => process.exit(1), 1000);
       }
 
@@ -108,7 +111,14 @@ export class WhatsAppChannel implements Channel {
         this.connected = false;
         const reason = (lastDisconnect?.error as any)?.output?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
-        logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
+        logger.info(
+          {
+            reason,
+            shouldReconnect,
+            queuedMessages: this.outgoingQueue.length,
+          },
+          'Connection closed',
+        );
 
         if (shouldReconnect) {
           logger.info('Reconnecting...');
@@ -212,11 +222,17 @@ export class WhatsAppChannel implements Channel {
           // Prepend reply context so the agent knows what's being replied to
           const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
           if (contextInfo?.quotedMessage) {
-            const quotedText = contextInfo.quotedMessage.conversation
-              || contextInfo.quotedMessage.extendedTextMessage?.text || '';
+            const quotedText =
+              contextInfo.quotedMessage.conversation ||
+              contextInfo.quotedMessage.extendedTextMessage?.text ||
+              '';
             if (quotedText) {
-              const truncated = quotedText.length > 200 ? quotedText.slice(0, 200) + '…' : quotedText;
-              const quotedSender = contextInfo.participant?.split('@')[0] || 'someone';
+              const truncated =
+                quotedText.length > 200
+                  ? quotedText.slice(0, 200) + '…'
+                  : quotedText;
+              const quotedSender =
+                contextInfo.participant?.split('@')[0] || 'someone';
               content = `[Replying to ${quotedSender}: "${truncated}"]\n${content}`;
             }
           }
@@ -246,14 +262,23 @@ export class WhatsAppChannel implements Channel {
     this.sock.ev.on('messages.reaction', this.reactionHandler);
   }
 
-  async sendMessage(jid: string, text: string, replyToMessageId?: string): Promise<string | void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    replyToMessageId?: string,
+  ): Promise<string | void> {
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text });
-      logger.info({ jid, length: text.length, queueSize: this.outgoingQueue.length }, 'WA disconnected, message queued');
+      logger.info(
+        { jid, length: text.length, queueSize: this.outgoingQueue.length },
+        'WA disconnected, message queued',
+      );
       return;
     }
     try {
-      const cached = replyToMessageId ? this.messageCache.get(replyToMessageId) : undefined;
+      const cached = replyToMessageId
+        ? this.messageCache.get(replyToMessageId)
+        : undefined;
       const opts = cached ? { quoted: cached.msg } : undefined;
       const sent = await this.sock.sendMessage(jid, { text }, opts);
       logger.info({ jid, length: text.length }, 'Message sent');
@@ -261,7 +286,10 @@ export class WhatsAppChannel implements Channel {
     } catch (err) {
       // If send fails, queue it for retry on reconnect
       this.outgoingQueue.push({ jid, text });
-      logger.warn({ jid, err, queueSize: this.outgoingQueue.length }, 'Failed to send, message queued');
+      logger.warn(
+        { jid, err, queueSize: this.outgoingQueue.length },
+        'Failed to send, message queued',
+      );
     }
   }
 
@@ -331,7 +359,10 @@ export class WhatsAppChannel implements Channel {
     // Check local cache first
     const cached = this.lidToPhoneMap[lidUser];
     if (cached) {
-      logger.debug({ lidJid: jid, phoneJid: cached }, 'Translated LID to phone JID (cached)');
+      logger.debug(
+        { lidJid: jid, phoneJid: cached },
+        'Translated LID to phone JID (cached)',
+      );
       return cached;
     }
 
@@ -341,7 +372,10 @@ export class WhatsAppChannel implements Channel {
       if (pn) {
         const phoneJid = `${pn.split('@')[0].split(':')[0]}@s.whatsapp.net`;
         this.lidToPhoneMap[lidUser] = phoneJid;
-        logger.info({ lidJid: jid, phoneJid }, 'Translated LID to phone JID (signalRepository)');
+        logger.info(
+          { lidJid: jid, phoneJid },
+          'Translated LID to phone JID (signalRepository)',
+        );
         return phoneJid;
       }
     } catch (err) {
@@ -355,7 +389,10 @@ export class WhatsAppChannel implements Channel {
     if (this.flushing || this.outgoingQueue.length === 0) return;
     this.flushing = true;
     try {
-      logger.info({ count: this.outgoingQueue.length }, 'Flushing outgoing message queue');
+      logger.info(
+        { count: this.outgoingQueue.length },
+        'Flushing outgoing message queue',
+      );
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
         await this.sendMessage(item.jid, item.text);
@@ -375,7 +412,9 @@ export class WhatsAppChannel implements Channel {
     }
     // Cap at max size — evict oldest
     if (this.messageCache.size > WhatsAppChannel.MESSAGE_CACHE_MAX) {
-      const entries = [...this.messageCache.entries()].sort((a, b) => a[1].ts - b[1].ts);
+      const entries = [...this.messageCache.entries()].sort(
+        (a, b) => a[1].ts - b[1].ts,
+      );
       const toRemove = entries.length - WhatsAppChannel.MESSAGE_CACHE_MAX;
       for (let i = 0; i < toRemove; i++) {
         this.messageCache.delete(entries[i][0]);

@@ -17,7 +17,11 @@ interface DaytonaIpcPollerDeps {
   daytonaBackend: DaytonaBackend;
   registeredGroups: () => Record<string, RegisteredGroup>;
   processMessage: (sourceGroup: string, data: any) => Promise<void>;
-  processTask: (sourceGroup: string, isMain: boolean, data: any) => Promise<void>;
+  processTask: (
+    sourceGroup: string,
+    isMain: boolean,
+    data: any,
+  ) => Promise<void>;
 }
 
 let pollerRunning = false;
@@ -50,16 +54,24 @@ export function startDaytonaIpcPoller(deps: DaytonaIpcPollerDeps): void {
 
       try {
         // Poll messages directory (relative path)
-        await pollDirectory(sandbox, 'workspace/ipc/messages', async (filename, content) => {
-          const data = JSON.parse(content);
-          await deps.processMessage(group.folder, data);
-        });
+        await pollDirectory(
+          sandbox,
+          'workspace/ipc/messages',
+          async (filename, content) => {
+            const data = JSON.parse(content);
+            await deps.processMessage(group.folder, data);
+          },
+        );
 
         // Poll tasks directory (relative path)
-        await pollDirectory(sandbox, 'workspace/ipc/tasks', async (filename, content) => {
-          const data = JSON.parse(content);
-          await deps.processTask(group.folder, isMain, data);
-        });
+        await pollDirectory(
+          sandbox,
+          'workspace/ipc/tasks',
+          async (filename, content) => {
+            const data = JSON.parse(content);
+            await deps.processTask(group.folder, isMain, data);
+          },
+        );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (!msg.includes('404') && !msg.includes('not found')) {
@@ -93,7 +105,9 @@ async function pollDirectory(
     return; // Directory doesn't exist yet
   }
 
-  const jsonFiles = entries.filter((e: any) => !e.isDir && e.name.endsWith('.json'));
+  const jsonFiles = entries.filter(
+    (e: any) => !e.isDir && e.name.endsWith('.json'),
+  );
 
   for (const entry of jsonFiles) {
     const filePath = `${dirPath}/${entry.name}`;

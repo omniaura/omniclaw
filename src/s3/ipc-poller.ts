@@ -21,7 +21,11 @@ export interface S3IpcPollerDeps {
   /** Process an IPC message file's contents (from agent's IPC messages dir). */
   processMessage: (sourceAgentId: string, data: any) => Promise<void>;
   /** Process an IPC task file's contents. */
-  processTask: (sourceAgentId: string, isAdmin: boolean, data: any) => Promise<void>;
+  processTask: (
+    sourceAgentId: string,
+    isAdmin: boolean,
+    data: any,
+  ) => Promise<void>;
   /** Check if an agent is admin. */
   isAdmin: (agentId: string) => boolean;
 }
@@ -51,13 +55,18 @@ export function startS3IpcPoller(deps: S3IpcPollerDeps): void {
           try {
             await deps.processOutput(agentId, output);
           } catch (err) {
-            logger.warn({ agentId, outputId: output.id, error: err }, 'Error processing S3 outbox output');
+            logger.warn(
+              { agentId, outputId: output.id, error: err },
+              'Error processing S3 outbox output',
+            );
           }
         }
 
         // 2. Check for IPC messages (agent→host communication)
         //    These are in agents/{agentId}/ipc/messages/ prefix
-        const messageKeys = await deps.s3.list(`agents/${agentId}/ipc/messages/`);
+        const messageKeys = await deps.s3.list(
+          `agents/${agentId}/ipc/messages/`,
+        );
         for (const key of messageKeys) {
           try {
             const text = await deps.s3.read(key);
@@ -67,7 +76,10 @@ export function startS3IpcPoller(deps: S3IpcPollerDeps): void {
               await deps.s3.delete(key);
             }
           } catch (err) {
-            logger.warn({ agentId, key, error: err }, 'Error processing S3 IPC message');
+            logger.warn(
+              { agentId, key, error: err },
+              'Error processing S3 IPC message',
+            );
           }
         }
 
@@ -82,7 +94,10 @@ export function startS3IpcPoller(deps: S3IpcPollerDeps): void {
               await deps.s3.delete(key);
             }
           } catch (err) {
-            logger.warn({ agentId, key, error: err }, 'Error processing S3 IPC task');
+            logger.warn(
+              { agentId, key, error: err },
+              'Error processing S3 IPC task',
+            );
           }
         }
       } catch (err) {

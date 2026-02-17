@@ -44,9 +44,15 @@ import * as HetznerAPI from './hetzner-api.js';
 class HetznerProcessWrapper implements ContainerProcess {
   private _killed = false;
 
-  get killed(): boolean { return this._killed; }
-  kill(): void { this._killed = true; }
-  get pid(): number { return 0; }
+  get killed(): boolean {
+    return this._killed;
+  }
+  kill(): void {
+    this._killed = true;
+  }
+  get pid(): number {
+    return 0;
+  }
 }
 
 interface HetznerServerContext {
@@ -65,7 +71,11 @@ export class HetznerBackend implements AgentBackend {
     onOutput?: (output: ContainerOutput) => Promise<void>,
   ): Promise<ContainerOutput> {
     if (!this.s3) {
-      return { status: 'error', result: null, error: 'Hetzner backend not initialized (missing credentials)' };
+      return {
+        status: 'error',
+        result: null,
+        error: 'Hetzner backend not initialized (missing credentials)',
+      };
     }
 
     const folder = getFolder(group);
@@ -73,7 +83,10 @@ export class HetznerBackend implements AgentBackend {
     const containerCfg = getContainerConfig(group);
     const serverFolder = getServerFolder(group);
 
-    logger.info({ group: groupName, folder, isMain: input.isMain }, 'Running agent on Hetzner (S3 mode)');
+    logger.info(
+      { group: groupName, folder, isMain: input.isMain },
+      'Running agent on Hetzner (S3 mode)',
+    );
 
     // 1. Sync files to S3
     await syncFilesToS3(this.s3, {
@@ -139,7 +152,11 @@ export class HetznerBackend implements AgentBackend {
           // If we got a real result (not just a session update), we're done
           if (output.result !== null || output.status === 'error') {
             logger.info(
-              { group: groupName, duration: Date.now() - startTime, status: output.status },
+              {
+                group: groupName,
+                duration: Date.now() - startTime,
+                status: output.status,
+              },
               'Hetzner agent completed',
             );
             return containerOutput;
@@ -153,8 +170,15 @@ export class HetznerBackend implements AgentBackend {
         return { status: 'error', result: null, error: 'Agent was killed' };
       }
 
-      logger.warn({ group: groupName, timeout: configTimeout }, 'Hetzner agent timed out waiting for S3 outbox');
-      return { status: 'error', result: lastOutput.result, error: `Agent timed out after ${configTimeout}ms` };
+      logger.warn(
+        { group: groupName, timeout: configTimeout },
+        'Hetzner agent timed out waiting for S3 outbox',
+      );
+      return {
+        status: 'error',
+        result: lastOutput.result,
+        error: `Agent timed out after ${configTimeout}ms`,
+      };
     } finally {
       // 6. Always destroy VM (ephemeral!)
       await this.destroyEphemeralServer(folder);
@@ -162,12 +186,21 @@ export class HetznerBackend implements AgentBackend {
   }
 
   private sanitizeName(name: string): string {
-    return name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'agent';
+    return (
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '') || 'agent'
+    );
   }
 
-  private async createEphemeralServer(agentId: string): Promise<HetznerServerContext> {
+  private async createEphemeralServer(
+    agentId: string,
+  ): Promise<HetznerServerContext> {
     const appName = this.sanitizeName(ASSISTANT_NAME);
-    const serverName = `${appName}-${this.sanitizeName(agentId)}-${Date.now()}`.slice(0, 63);
+    const serverName =
+      `${appName}-${this.sanitizeName(agentId)}-${Date.now()}`.slice(0, 63);
 
     // No host-side SSH key needed — VMs are fully managed via cloud-init + S3.
     // If the agent needs git SSH keys, cloud-init generates them on the VM
@@ -191,7 +224,10 @@ export class HetznerBackend implements AgentBackend {
       try {
         await HetznerAPI.deleteServer(server.id);
       } catch (cleanupErr) {
-        logger.warn({ serverId: server.id, error: cleanupErr }, 'Failed to cleanup server after create failure');
+        logger.warn(
+          { serverId: server.id, error: cleanupErr },
+          'Failed to cleanup server after create failure',
+        );
       }
       throw err;
     }
@@ -213,9 +249,15 @@ export class HetznerBackend implements AgentBackend {
 
     try {
       await HetznerAPI.deleteServer(serverCtx.serverId);
-      logger.info({ serverId: serverCtx.serverId }, 'Destroyed Hetzner ephemeral server');
+      logger.info(
+        { serverId: serverCtx.serverId },
+        'Destroyed Hetzner ephemeral server',
+      );
     } catch (err) {
-      logger.warn({ serverId: serverCtx.serverId, error: err }, 'Failed to destroy Hetzner server');
+      logger.warn(
+        { serverId: serverCtx.serverId, error: err },
+        'Failed to destroy Hetzner server',
+      );
     } finally {
       this.servers.delete(agentId);
     }
@@ -275,7 +317,10 @@ runcmd:
     };
 
     this.s3.writeInbox(groupFolder, message).catch((err) => {
-      logger.warn({ groupFolder, error: err }, 'Failed to send message to Hetzner agent via S3');
+      logger.warn(
+        { groupFolder, error: err },
+        'Failed to send message to Hetzner agent via S3',
+      );
     });
     return true;
   }
@@ -293,7 +338,10 @@ runcmd:
     };
 
     this.s3.writeInbox(groupFolder, message).catch((err) => {
-      logger.warn({ groupFolder, error: err }, 'Failed to write close signal to Hetzner agent');
+      logger.warn(
+        { groupFolder, error: err },
+        'Failed to write close signal to Hetzner agent',
+      );
     });
   }
 
@@ -301,23 +349,35 @@ runcmd:
     if (!this.s3) return;
 
     this.s3.writeSync(groupFolder, `ipc/${filename}`, data).catch((err) => {
-      logger.warn({ groupFolder, filename, error: err }, 'Failed to write IPC data to S3');
+      logger.warn(
+        { groupFolder, filename, error: err },
+        'Failed to write IPC data to S3',
+      );
     });
   }
 
-  async readFile(groupFolder: string, relativePath: string): Promise<Buffer | null> {
+  async readFile(
+    groupFolder: string,
+    relativePath: string,
+  ): Promise<Buffer | null> {
     if (!this.s3) return null;
     return this.s3.readSync(groupFolder, `workspace/${relativePath}`);
   }
 
-  async writeFile(groupFolder: string, relativePath: string, content: Buffer | string): Promise<void> {
+  async writeFile(
+    groupFolder: string,
+    relativePath: string,
+    content: Buffer | string,
+  ): Promise<void> {
     if (!this.s3) throw new Error('Hetzner backend not initialized');
     await this.s3.writeSync(groupFolder, `workspace/${relativePath}`, content);
   }
 
   async initialize(): Promise<void> {
     if (!HETZNER_API_TOKEN) {
-      logger.warn('HETZNER_API_TOKEN not set — Hetzner backend will not function');
+      logger.warn(
+        'HETZNER_API_TOKEN not set — Hetzner backend will not function',
+      );
       return;
     }
     if (!B2_ENDPOINT) {
@@ -325,7 +385,9 @@ runcmd:
       return;
     }
     if (!B2_ACCESS_KEY_ID || !B2_SECRET_ACCESS_KEY || !B2_BUCKET) {
-      logger.warn('B2 credentials incomplete — Hetzner backend requires S3 storage');
+      logger.warn(
+        'B2 credentials incomplete — Hetzner backend requires S3 storage',
+      );
       return;
     }
 
@@ -344,9 +406,15 @@ runcmd:
     for (const [agentId, serverCtx] of this.servers) {
       try {
         await HetznerAPI.deleteServer(serverCtx.serverId);
-        logger.info({ serverId: serverCtx.serverId }, 'Cleaned up Hetzner server during shutdown');
+        logger.info(
+          { serverId: serverCtx.serverId },
+          'Cleaned up Hetzner server during shutdown',
+        );
       } catch (err) {
-        logger.warn({ serverId: serverCtx.serverId, error: err }, 'Failed to cleanup Hetzner server during shutdown');
+        logger.warn(
+          { serverId: serverCtx.serverId, error: err },
+          'Failed to cleanup Hetzner server during shutdown',
+        );
       }
     }
     this.servers.clear();

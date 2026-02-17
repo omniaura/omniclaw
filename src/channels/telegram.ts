@@ -1,11 +1,13 @@
 import { Bot } from 'grammy';
 
-import {
-  ASSISTANT_NAME,
-  TRIGGER_PATTERN,
-} from '../config.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
 
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
@@ -91,8 +93,12 @@ export class TelegramChannel implements Channel {
       // Prepend reply context so the agent knows what's being replied to
       const replyTo = ctx.message.reply_to_message;
       if (replyTo && 'text' in replyTo && replyTo.text) {
-        const truncated = replyTo.text.length > 200 ? replyTo.text.slice(0, 200) + '…' : replyTo.text;
-        const replyAuthor = replyTo.from?.first_name || replyTo.from?.username || 'someone';
+        const truncated =
+          replyTo.text.length > 200
+            ? replyTo.text.slice(0, 200) + '…'
+            : replyTo.text;
+        const replyAuthor =
+          replyTo.from?.first_name || replyTo.from?.username || 'someone';
         content = `[Replying to ${replyAuthor}: "${truncated}"]\n${content}`;
       }
 
@@ -134,7 +140,10 @@ export class TelegramChannel implements Channel {
 
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
       const senderName =
-        ctx.from?.first_name || ctx.from?.username || ctx.from?.id?.toString() || 'Unknown';
+        ctx.from?.first_name ||
+        ctx.from?.username ||
+        ctx.from?.id?.toString() ||
+        'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
 
       this.opts.onChatMetadata(chatJid, timestamp);
@@ -187,7 +196,11 @@ export class TelegramChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string, replyToMessageId?: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    replyToMessageId?: string,
+  ): Promise<void> {
     if (!this.bot) {
       logger.warn('Telegram bot not initialized');
       return;
@@ -206,7 +219,11 @@ export class TelegramChannel implements Channel {
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
           const opts = i === 0 ? replyParams : {};
-          await this.bot.api.sendMessage(numericId, text.slice(i, i + MAX_LENGTH), opts);
+          await this.bot.api.sendMessage(
+            numericId,
+            text.slice(i, i + MAX_LENGTH),
+            opts,
+          );
         }
       }
       logger.info({ jid, length: text.length }, 'Telegram message sent');
