@@ -1,8 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 
-import { CronExpressionParser } from 'cron-parser';
-
 import {
   DATA_DIR,
   IPC_POLL_INTERVAL,
