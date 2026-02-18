@@ -102,6 +102,14 @@ function createSchema(database: Database): void {
     database.exec(`ALTER TABLE registered_groups ADD COLUMN server_folder TEXT`);
   } catch { /* column already exists */ }
 
+  // Add sender_user_id and mentions columns to messages table (Issue #66)
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN sender_user_id TEXT`);
+  } catch { /* column already exists */ }
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN mentions TEXT`);
+  } catch { /* column already exists */ }
+
   // Add discord_guild_id column to chats table
   try {
     database.exec(`ALTER TABLE chats ADD COLUMN discord_guild_id TEXT`);
@@ -289,7 +297,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.query(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, sender_user_id, mentions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -298,6 +306,8 @@ export function storeMessage(msg: NewMessage): void {
     msg.content,
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
+    msg.sender_user_id ?? null,
+    msg.mentions ? JSON.stringify(msg.mentions) : null,
   );
 }
 
@@ -315,11 +325,8 @@ export function storeMessageDirect(msg: {
   sender_user_id?: string; // Platform-specific user ID (Issue #66)
   mentions?: Array<{ id: string; name: string; platform: string }>; // User mentions (Issue #66)
 }): void {
-  // For now, store core fields only. Metadata (sender_user_id, mentions) will be
-  // used by in-memory user registry but not persisted to DB until schema migration.
-  // TODO: Add DB migration to persist user metadata fields
   db.query(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, sender_user_id, mentions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -328,6 +335,8 @@ export function storeMessageDirect(msg: {
     msg.content,
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
+    msg.sender_user_id ?? null,
+    msg.mentions ? JSON.stringify(msg.mentions) : null,
   );
 }
 
@@ -340,7 +349,7 @@ export function getNewMessages(
   const placeholders = jids.map(() => '?').join(',');
   // Filter out bot's own messages using is_from_me field
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, sender_user_id, mentions
     FROM messages
     WHERE timestamp >= ? AND chat_jid IN (${placeholders}) AND (is_from_me IS NULL OR is_from_me = 0)
     ORDER BY timestamp
@@ -348,14 +357,19 @@ export function getNewMessages(
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids) as NewMessage[];
+    .all(lastTimestamp, ...jids) as Array<NewMessage & { mentions: string | null; sender_user_id: string | null }>;
 
   let newTimestamp = lastTimestamp;
-  for (const row of rows) {
+  const messages: NewMessage[] = rows.map((row) => {
     if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
-  }
+    return {
+      ...row,
+      sender_user_id: row.sender_user_id ?? undefined,
+      mentions: row.mentions ? JSON.parse(row.mentions) : undefined,
+    };
+  });
 
-  return { messages: rows, newTimestamp };
+  return { messages, newTimestamp };
 }
 
 export function getMessagesSince(
@@ -364,14 +378,19 @@ export function getMessagesSince(
 ): NewMessage[] {
   // Filter out bot's own messages using is_from_me field
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, sender_user_id, mentions
     FROM messages
     WHERE chat_jid = ? AND timestamp > ? AND (is_from_me IS NULL OR is_from_me = 0)
     ORDER BY timestamp
   `;
-  return db
+  const rows = db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp) as NewMessage[];
+    .all(chatJid, sinceTimestamp) as Array<NewMessage & { mentions: string | null; sender_user_id: string | null }>;
+  return rows.map((row) => ({
+    ...row,
+    sender_user_id: row.sender_user_id ?? undefined,
+    mentions: row.mentions ? JSON.parse(row.mentions) : undefined,
+  }));
 }
 
 export function createTask(

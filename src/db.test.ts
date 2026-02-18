@@ -10,6 +10,7 @@ import {
   getTaskById,
   storeChatMetadata,
   storeMessage,
+  storeMessageDirect,
   updateTask,
 } from './db.js';
 
@@ -133,6 +134,75 @@ describe('storeMessage', () => {
     const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z');
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('updated');
+  });
+});
+
+// --- storeMessageDirect (sender_user_id + mentions) ---
+
+describe('storeMessageDirect', () => {
+  it('persists sender_user_id and mentions', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessageDirect({
+      id: 'dc-msg-1',
+      chat_jid: 'group@g.us',
+      sender: 'discord:user123',
+      sender_name: 'Alice',
+      content: 'hey @Bob',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+      sender_user_id: 'user123',
+      mentions: [{ id: 'user456', name: 'Bob', platform: 'discord' }],
+    });
+
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'BotName');
+    expect(messages).toHaveLength(1);
+    expect(messages[0].sender_user_id).toBe('user123');
+    expect(messages[0].mentions).toEqual([{ id: 'user456', name: 'Bob', platform: 'discord' }]);
+  });
+
+  it('stores null sender_user_id and mentions when not provided', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessageDirect({
+      id: 'dc-msg-2',
+      chat_jid: 'group@g.us',
+      sender: 'discord:user789',
+      sender_name: 'Carol',
+      content: 'plain message',
+      timestamp: '2024-01-01T00:00:02.000Z',
+      is_from_me: false,
+    });
+
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'BotName');
+    expect(messages).toHaveLength(1);
+    expect(messages[0].sender_user_id).toBeUndefined();
+    expect(messages[0].mentions).toBeUndefined();
+  });
+});
+
+// --- storeMessage (sender_user_id + mentions via NewMessage) ---
+
+describe('storeMessage with sender_user_id and mentions', () => {
+  it('persists sender_user_id and mentions from NewMessage', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'nm-msg-1',
+      chat_jid: 'group@g.us',
+      sender: 'discord:user111',
+      sender_name: 'Dave',
+      content: 'hello @Eve',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+      sender_user_id: 'user111',
+      mentions: [{ id: 'user222', name: 'Eve', platform: 'discord' }],
+    });
+
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'BotName');
+    expect(messages).toHaveLength(1);
+    expect(messages[0].sender_user_id).toBe('user111');
+    expect(messages[0].mentions).toEqual([{ id: 'user222', name: 'Eve', platform: 'discord' }]);
   });
 });
 
