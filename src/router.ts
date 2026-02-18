@@ -1,4 +1,4 @@
-import { ASSISTANT_NAME } from './config.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 
 export function escapeXml(s: string): string {
@@ -24,6 +24,18 @@ export function stripInternalTags(text: string): string {
 export function getAgentName(group: RegisteredGroup): string {
   // Extract agent name from trigger (e.g., "@OmarOmni" → "OmarOmni")
   return group.trigger?.replace(/^@/, '') || ASSISTANT_NAME;
+}
+
+/**
+ * Build a trigger-detection regex for the given group.
+ * Uses the group's own trigger (e.g. "@OmarOmni", "@PeytonOmni") so that
+ * agent-to-agent messages addressed to the right bot are correctly identified.
+ * Falls back to the global TRIGGER_PATTERN when no per-group trigger is set.
+ */
+export function getTriggerPattern(group: RegisteredGroup): RegExp {
+  if (!group.trigger) return TRIGGER_PATTERN;
+  const escaped = group.trigger.replace(/^@/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^@${escaped}\\b`, 'i');
 }
 
 export function formatOutbound(channel: Channel, rawText: string, agentName?: string): string {

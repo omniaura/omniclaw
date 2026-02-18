@@ -61,7 +61,7 @@ import { GroupQueue } from './group-queue.js';
 import { consumeShareRequest, startIpcWatcher } from './ipc.js';
 import { NanoClawS3 } from './s3/client.js';
 import { startS3IpcPoller } from './s3/ipc-poller.js';
-import { findChannel, formatMessages, formatOutbound, getAgentName } from './router.js';
+import { findChannel, formatMessages, formatOutbound, getAgentName, getTriggerPattern } from './router.js';
 import { reconcileHeartbeats, startSchedulerLoop } from './task-scheduler.js';
 import { createThreadStreamer } from './thread-streaming.js';
 import { Agent, Channel, ChannelRoute, NewMessage, RegisteredGroup, registeredGroupToAgent, registeredGroupToRoute } from './types.js';
@@ -337,10 +337,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // For non-main groups, check if trigger is required and present
+  // For non-main groups, check if trigger is required and present.
+  // Use the per-group trigger pattern so @OmarOmni / @PeytonOmni etc. are
+  // correctly recognised instead of only matching the global @Omni fallback.
   if (!isMainGroup && group.requiresTrigger !== false) {
+    const groupTriggerPattern = getTriggerPattern(group);
     const hasTrigger = missedMessages.some((m) =>
-      TRIGGER_PATTERN.test(m.content.trim()),
+      groupTriggerPattern.test(m.content.trim()),
     );
     if (!hasTrigger) return true;
   }
@@ -402,8 +405,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const rawMessageId = missedMessages[missedMessages.length - 1]?.id || null;
   const triggeringMessageId = rawMessageId && /^(synth|react|notify|s3)-/.test(rawMessageId) ? null : rawMessageId;
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
+  // Strip the per-group trigger prefix (e.g. "@OmarOmni") when building the
+  // thread name so we don't end up with "@OmarOmni " as a prefix in thread titles.
+  const groupTriggerPattern = getTriggerPattern(group);
   const threadName = lastContent
-    .replace(TRIGGER_PATTERN, '').trim().slice(0, 80) || 'Agent working...';
+    .replace(groupTriggerPattern, '').trim().slice(0, 80) || 'Agent working...';
 
   const streamer = createThreadStreamer(
     {
@@ -412,7 +418,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       streamIntermediates: !!group.streamIntermediates,
       groupName: group.name,
       groupFolder: group.folder,
-      label: lastContent.replace(TRIGGER_PATTERN, '').trim(),
+      label: lastContent.replace(groupTriggerPattern, '').trim(),
     },
     triggeringMessageId,
     threadName,
@@ -641,9 +647,12 @@ async function startMessageLoop(): Promise<void> {
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
+          // Use the per-group trigger pattern so each bot's own trigger name
+          // (e.g. "@OmarOmni", "@PeytonOmni") is matched correctly.
           if (needsTrigger) {
+            const groupTriggerPattern = getTriggerPattern(group);
             const hasTrigger = groupMessages.some((m) =>
-              TRIGGER_PATTERN.test(m.content.trim()),
+              groupTriggerPattern.test(m.content.trim()),
             );
             if (!hasTrigger) continue;
           }

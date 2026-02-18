@@ -5,6 +5,8 @@ import {
   escapeXml,
   formatMessages,
   formatOutbound,
+  getAgentName,
+  getTriggerPattern,
   stripInternalTags,
 } from './router.js';
 import { Channel, NewMessage } from './types.js';
@@ -242,5 +244,70 @@ describe('trigger gating (requiresTrigger interaction)', () => {
   it('non-main group with requiresTrigger=false always processes (no trigger needed)', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
     expect(shouldProcess(false, false, msgs)).toBe(true);
+  });
+});
+
+// --- getTriggerPattern / getAgentName — per-group trigger parsing ---
+
+describe('getTriggerPattern', () => {
+  const makeGroup = (trigger?: string) =>
+    ({ trigger } as import('./types.js').RegisteredGroup);
+
+  it('falls back to global TRIGGER_PATTERN when no trigger is set', () => {
+    const pattern = getTriggerPattern(makeGroup(undefined));
+    // Global pattern matches the global ASSISTANT_NAME
+    expect(pattern.test(`@${ASSISTANT_NAME} hello`)).toBe(true);
+  });
+
+  it('matches the per-group trigger (e.g. @OmarOmni)', () => {
+    const pattern = getTriggerPattern(makeGroup('@OmarOmni'));
+    expect(pattern.test('@OmarOmni hello')).toBe(true);
+  });
+
+  it('matches per-group trigger case-insensitively', () => {
+    const pattern = getTriggerPattern(makeGroup('@OmarOmni'));
+    expect(pattern.test('@omaromni hello')).toBe(true);
+    expect(pattern.test('@OMAROMNI hello')).toBe(true);
+  });
+
+  it('does NOT match a different agent trigger', () => {
+    const pattern = getTriggerPattern(makeGroup('@OmarOmni'));
+    expect(pattern.test('@PeytonOmni hello')).toBe(false);
+  });
+
+  it('does not match the global @Omni fallback when a specific trigger is set', () => {
+    // Critical: @OmarOmni group must not fire on bare @Omni messages
+    const pattern = getTriggerPattern(makeGroup('@OmarOmni'));
+    expect(pattern.test('@Omni hello')).toBe(false);
+  });
+
+  it('requires trigger at the start of the string', () => {
+    const pattern = getTriggerPattern(makeGroup('@OmarOmni'));
+    expect(pattern.test('hello @OmarOmni')).toBe(false);
+  });
+
+  it('respects word boundary — @OmarOmniExtra does NOT match @OmarOmni pattern', () => {
+    const pattern = getTriggerPattern(makeGroup('@OmarOmni'));
+    expect(pattern.test('@OmarOmniExtra hello')).toBe(false);
+  });
+
+  it('matches @PeytonOmni trigger for PeytonOmni group', () => {
+    const pattern = getTriggerPattern(makeGroup('@PeytonOmni'));
+    expect(pattern.test('@PeytonOmni do something')).toBe(true);
+    expect(pattern.test('@OmarOmni do something')).toBe(false);
+  });
+});
+
+describe('getAgentName', () => {
+  const makeGroup = (trigger?: string) =>
+    ({ trigger } as import('./types.js').RegisteredGroup);
+
+  it('extracts agent name from trigger by stripping leading @', () => {
+    expect(getAgentName(makeGroup('@OmarOmni'))).toBe('OmarOmni');
+    expect(getAgentName(makeGroup('@PeytonOmni'))).toBe('PeytonOmni');
+  });
+
+  it('falls back to global ASSISTANT_NAME when trigger is undefined', () => {
+    expect(getAgentName(makeGroup(undefined))).toBe(ASSISTANT_NAME);
   });
 });
