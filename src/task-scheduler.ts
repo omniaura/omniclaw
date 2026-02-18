@@ -1,4 +1,3 @@
-import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 import path from 'path';
 
@@ -9,6 +8,7 @@ import {
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
+import { calculateNextRun } from './schedule-utils.js';
 import { resolveBackend } from './backends/index.js';
 import type { ContainerOutput } from './backends/types.js';
 import { writeTasksSnapshot } from './container-runner.js';
@@ -98,22 +98,10 @@ export function reconcileHeartbeats(
     if (group.heartbeat?.enabled) {
       if (!existing) {
         // Create heartbeat task
-        let nextRun: string | null = null;
-        if (group.heartbeat.scheduleType === 'cron') {
-          try {
-            const interval = CronExpressionParser.parse(group.heartbeat.interval, { tz: TIMEZONE });
-            nextRun = interval.next().toISOString();
-          } catch {
-            logger.warn({ groupFolder: group.folder, interval: group.heartbeat.interval }, 'Invalid heartbeat cron expression');
-            continue;
-          }
-        } else {
-          const ms = parseInt(group.heartbeat.interval, 10);
-          if (isNaN(ms) || ms <= 0) {
-            logger.warn({ groupFolder: group.folder, interval: group.heartbeat.interval }, 'Invalid heartbeat interval');
-            continue;
-          }
-          nextRun = new Date(Date.now() + ms).toISOString();
+        const nextRun = calculateNextRun(group.heartbeat.scheduleType, group.heartbeat.interval);
+        if (!nextRun) {
+          logger.warn({ groupFolder: group.folder, interval: group.heartbeat.interval }, 'Invalid heartbeat schedule');
+          continue;
         }
 
         createTask({
@@ -137,18 +125,10 @@ export function reconcileHeartbeats(
         ) {
           // Delete and recreate with new schedule
           deleteTask(taskId);
-          let nextRun: string | null = null;
-          if (group.heartbeat.scheduleType === 'cron') {
-            try {
-              const interval = CronExpressionParser.parse(group.heartbeat.interval, { tz: TIMEZONE });
-              nextRun = interval.next().toISOString();
-            } catch {
-              logger.warn({ groupFolder: group.folder }, 'Invalid heartbeat cron on update');
-              continue;
-            }
-          } else {
-            const ms = parseInt(group.heartbeat.interval, 10);
-            nextRun = new Date(Date.now() + ms).toISOString();
+          const nextRun = calculateNextRun(group.heartbeat.scheduleType, group.heartbeat.interval);
+          if (!nextRun) {
+            logger.warn({ groupFolder: group.folder }, 'Invalid heartbeat schedule on update');
+            continue;
           }
           createTask({
             id: taskId,
@@ -351,17 +331,10 @@ async function runTask(
     error,
   });
 
-  let nextRun: string | null = null;
-  if (task.schedule_type === 'cron') {
-    const interval = CronExpressionParser.parse(task.schedule_value, {
-      tz: TIMEZONE,
-    });
-    nextRun = interval.next().toISOString();
-  } else if (task.schedule_type === 'interval') {
-    const ms = parseInt(task.schedule_value, 10);
-    nextRun = new Date(Date.now() + ms).toISOString();
-  }
-  // 'once' tasks have no next run
+  // Calculate next run time (null for one-shot 'once' tasks)
+  const nextRun = task.schedule_type === 'once'
+    ? null
+    : calculateNextRun(task.schedule_type, task.schedule_value);
 
   const resultSummary = error
     ? `Error: ${error}`
@@ -399,20 +372,9 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         // re-discovered on subsequent ticks while it's running/queued.
         // 'once' tasks (no recurrence) get next_run set to null which
         // also removes them from getDueTasks results.
-        let nextRun: string | null = null;
-        if (currentTask.schedule_type === 'cron') {
-          try {
-            const interval = CronExpressionParser.parse(currentTask.schedule_value, { tz: TIMEZONE });
-            nextRun = interval.next().toISOString();
-          } catch {
-            // Invalid cron — leave null so it completes as a one-shot
-          }
-        } else if (currentTask.schedule_type === 'interval') {
-          const ms = parseInt(currentTask.schedule_value, 10);
-          if (!isNaN(ms) && ms > 0) {
-            nextRun = new Date(Date.now() + ms).toISOString();
-          }
-        }
+        const nextRun = currentTask.schedule_type === 'once'
+          ? null
+          : calculateNextRun(currentTask.schedule_type, currentTask.schedule_value);
         advanceTaskNextRun(currentTask.id, nextRun);
 
         const promptPreview = currentTask.id.startsWith('heartbeat-')
