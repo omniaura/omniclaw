@@ -443,20 +443,29 @@ export class DiscordChannel implements Channel {
       }
     }
 
+    const isDM = message.channel.type === ChannelType.DM;
+
+    // Detect thread messages: route via parent channel for group lookup
+    const isThread = !isDM && message.channel.isThread();
+    const threadParentId = isThread && message.channel.parent
+      ? message.channel.parent.id
+      : null;
+
     // Allow bot messages through only if they contain our trigger (agent-to-agent comms).
     // This prevents infinite loops — bots must explicitly @mention us.
     // Use per-channel trigger so agent-to-agent comms work across multi-agent servers.
+    // For threads, resolve the parent channel's group for the trigger pattern.
     {
-      const _isDM = message.channel.type === ChannelType.DM;
-      const _chatJid = _isDM
+      const _chatJid = isDM
         ? `dc:dm:${message.author.id}`
-        : `dc:${message.channelId}`;
+        : isThread && threadParentId
+          ? `dc:${threadParentId}`
+          : `dc:${message.channelId}`;
       const _group = getAllRegisteredGroups()[_chatJid];
       const _triggerPattern = buildTriggerPattern(_group?.trigger);
       if (message.author.bot && !_triggerPattern.test(content)) return;
     }
 
-    const isDM = message.channel.type === ChannelType.DM;
     // In guild channels, only process messages that mention THIS bot OR reply to the bot.
     // Prevents responding when another agent (e.g. @PeytonOmni) is mentioned instead.
     const isReplyToBot = message.mentions.repliedUser?.id === botId;
@@ -498,9 +507,13 @@ export class DiscordChannel implements Channel {
       }
     }
 
+    // For thread messages, route via parent channel JID so we find the registered group.
+    // Responses go to the parent channel (thread-reply routing is a future enhancement).
     const chatJid = isDM
       ? `dc:dm:${message.author.id}`
-      : `dc:${message.channelId}`;
+      : isThread && threadParentId
+        ? `dc:${threadParentId}`
+        : `dc:${message.channelId}`;
 
     const timestamp = message.createdAt.toISOString();
     const senderName =
@@ -631,6 +644,14 @@ export class DiscordChannel implements Channel {
           'Reply to bot — treating as triggered',
         );
         content = `@${ASSISTANT_NAME} ${content}`;
+      } else if (isThread && message.channel.ownerId === botId) {
+        // Auto-trigger in threads created by this bot — no @mention needed
+        const threadName = message.channel.name || 'thread';
+        logger.info({ chatJid, threadId: message.channelId, threadName, sender: senderName }, 'Auto-triggering in bot-created thread');
+        content = `[In thread: ${threadName}] ${content}`;
+        if (!TRIGGER_PATTERN.test(content)) {
+          content = `@${ASSISTANT_NAME} ${content}`;
+        }
       } else if (this.shouldAutoRespond(content, group)) {
         logger.debug(
           {
