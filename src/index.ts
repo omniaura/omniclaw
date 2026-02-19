@@ -8,6 +8,7 @@ import {
   B2_ENDPOINT,
   B2_REGION,
   B2_SECRET_ACCESS_KEY,
+  buildTriggerPattern,
   DATA_DIR,
   DISCORD_BOT_TOKEN,
   GROUPS_DIR,
@@ -745,8 +746,11 @@ async function startMessageLoop(): Promise<void> {
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
+            // Use per-group trigger pattern so @PeytonOmni channels aren't
+            // silently dropped by the global @Omni TRIGGER_PATTERN.
+            const groupTriggerPattern = buildTriggerPattern(group.trigger);
             const hasTrigger = groupMessages.some((m) =>
-              TRIGGER_PATTERN.test(m.content.trim()),
+              groupTriggerPattern.test(m.content.trim()),
             );
             if (!hasTrigger) continue;
           }

@@ -18,7 +18,7 @@ import {
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, DATA_DIR, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, buildTriggerPattern, DATA_DIR, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
 import {
   getAllRegisteredGroups,
   storeChatMetadata,
@@ -382,7 +382,14 @@ export class DiscordChannel implements Channel {
 
     // Allow bot messages through only if they contain our trigger (agent-to-agent comms).
     // This prevents infinite loops — bots must explicitly @mention us.
-    if (message.author.bot && !TRIGGER_PATTERN.test(content)) return;
+    // Use per-channel trigger so agent-to-agent comms work across multi-agent servers.
+    {
+      const _isDM = message.channel.type === ChannelType.DM;
+      const _chatJid = _isDM ? `dc:dm:${message.author.id}` : `dc:${message.channelId}`;
+      const _group = getAllRegisteredGroups()[_chatJid];
+      const _triggerPattern = buildTriggerPattern(_group?.trigger);
+      if (message.author.bot && !_triggerPattern.test(content)) return;
+    }
 
     const isDM = message.channel.type === ChannelType.DM;
     // In guild channels, only process messages that mention THIS bot OR reply to the bot.

@@ -69,6 +69,16 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
+/**
+ * Build a trigger regex for a specific group's trigger string (e.g. "@OmarOmni").
+ * Falls back to the global TRIGGER_PATTERN if no trigger is provided.
+ */
+export function buildTriggerPattern(trigger?: string): RegExp {
+  if (!trigger) return TRIGGER_PATTERN;
+  const name = trigger.replace(/^@/, '');
+  return new RegExp(`^@${escapeRegex(name)}\\b`, 'i');
+}
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =
