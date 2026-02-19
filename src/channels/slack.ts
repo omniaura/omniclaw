@@ -13,6 +13,8 @@ function jidToChannelId(jid: string): string | null {
   return jid.slice('slack:'.length);
 }
 
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 function channelIdToJid(channelId: string): string {
   return `slack:${channelId}`;
 }
@@ -287,7 +289,7 @@ export class SlackChannel implements Channel {
       !TRIGGER_PATTERN.test(content)
     ) {
       // Strip the existing @AssistantName occurrence and prepend it at the start
-      content = `@${ASSISTANT_NAME} ${content.replace(new RegExp(`@${ASSISTANT_NAME}`, 'i'), '').trim()}`;
+      content = `@${ASSISTANT_NAME} ${content.replace(new RegExp(`@${escapeRegExp(ASSISTANT_NAME)}`, 'i'), '').trim()}`;
     }
 
     // Prepend thread context if this is a threaded reply
