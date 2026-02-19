@@ -13,8 +13,6 @@ function jidToChannelId(jid: string): string | null {
   return jid.slice('slack:'.length);
 }
 
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
 function channelIdToJid(channelId: string): string {
   return `slack:${channelId}`;
 }
