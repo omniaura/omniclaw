@@ -411,8 +411,8 @@ export function createSanitizeReadHook(): HookCallback {
       /^\/proc\/self\/environ$/,      // Current process env
       /^\/tmp\/input\.json$/,         // Stdin buffer
       /^\/workspace\/env-dir\//,      // Mounted env directory
-      /^\/proc\/self\/mountinfo$/,    // Mount enumeration (Issue #79 comment)
-      /^\/proc\/self\/mounts$/,       // Mount list
+      /^\/proc\/(\d+|self)\/mountinfo$/,  // Mount enumeration for any PID (Issue #79)
+      /^\/proc\/(\d+|self)\/mounts$/,    // Mount list for any PID
       /^\/etc\/mtab$/,                // Mount table
       /^\/etc\/fstab$/,               // Filesystem table
     ];

@@ -164,10 +164,10 @@ describe('Security Hooks - Issue #79', () => {
 
     it('should block path traversal attempts to environ', async () => {
       const hook = createSanitizeReadHook();
-      // path.resolve normalizes these, so /proc/1/../../proc/self/environ -> /proc/self/environ
       const input = {
         tool_name: 'Read',
-        tool_input: { file_path: '/proc/self/environ' },
+        // path.resolve normalizes /proc/1/../../proc/self/environ -> /proc/self/environ
+        tool_input: { file_path: '/proc/1/../../proc/self/environ' },
       };
       await expect(hook(input as any, 'id', {} as any)).rejects.toThrow(/not allowed.*security/i);
     });
