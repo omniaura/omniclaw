@@ -143,6 +143,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
                         case 'whatsapp':
                           formattedMention = `@${user.id}`;
                           break;
+                        case 'slack':
+                          formattedMention = `<@${user.id}>`;
+                          break;
                         default:
                           formattedMention = `@${user.name}`;
                       }
@@ -153,11 +156,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 }
                 // Write response back so the agent can read the result
                 if (data.requestId) {
+                  const safeRequestId = String(data.requestId).replace(/[^a-zA-Z0-9_-]/g, '');
                   const responseDir = path.join(ipcBaseDir, sourceGroup, 'responses');
                   fs.mkdirSync(responseDir, { recursive: true });
-                  const responseFile = path.join(responseDir, `${data.requestId}.json`);
+                  const responseFile = path.join(responseDir, `${safeRequestId}.json`);
                   const tempPath = `${responseFile}.tmp`;
-                  fs.writeFileSync(tempPath, JSON.stringify({ type: 'format_mention_response', requestId: data.requestId, result: formattedMention }, null, 2));
+                  fs.writeFileSync(tempPath, JSON.stringify({ type: 'format_mention_response', requestId: safeRequestId, result: formattedMention }, null, 2));
                   fs.renameSync(tempPath, responseFile);
                 }
                 logger.info(

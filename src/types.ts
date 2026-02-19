@@ -80,7 +80,7 @@ export interface NewMessage {
   mentions?: Array<{
     id: string;
     name: string;
-    platform: 'discord' | 'whatsapp' | 'telegram';
+    platform: 'discord' | 'whatsapp' | 'telegram' | 'slack';
   }>;
 }
 

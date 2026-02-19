@@ -321,7 +321,7 @@ export class SlackChannel implements Channel {
       timestamp,
       is_from_me: false,
       sender_user_id: senderUserId,
-      mentions: mentions.map((m) => ({ ...m, platform: 'discord' as const })), // platform field closest match
+      mentions: mentions.map((m) => ({ ...m, platform: 'slack' as const })),
     });
 
     logger.info({ chatJid, channelName, sender: senderName }, 'Slack message stored');
