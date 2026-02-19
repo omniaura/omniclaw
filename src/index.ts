@@ -466,14 +466,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Thread streaming via shared helper
   // Synthetic IDs (synth-*, react-*, notify-*, s3-*) aren't real channel message IDs
   // and will cause Discord/Telegram API failures if passed as reply references.
-  // Find the LAST message with a trigger (the most recent mention that triggered the agent).
-  // Messages are ordered oldest-first, so findLast() gives us the newest @mention.
-  // Use the per-group trigger string (e.g. "@OmarOmni") so groups with custom triggers
-  // don't fall back to the last message in the batch when TRIGGER_PATTERN doesn't match.
-  const groupTriggerRe = group.trigger
-    ? new RegExp(`^${group.trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
-    : TRIGGER_PATTERN;
-  const triggeringMessage = missedMessages.findLast((m) => groupTriggerRe.test(m.content.trim()));
+  // Find the LAST message that triggered the agent (most recent @mention or reply-to-bot).
+  // Messages are ordered oldest-first, so findLast() gives us the newest trigger.
+  //
+  // Two ways a message can be a trigger:
+  // 1. mentions[] contains this bot's name — catches reply-to-bot messages where
+  //    "[Replying to ...]" is prepended and ^-anchored regex won't match the start.
+  // 2. content contains the trigger pattern anywhere — catches explicit @mentions
+  //    and DM/auto-respond messages where "@Omni" is prepended to content.
+  const agentName = (group.trigger ?? `@${ASSISTANT_NAME}`).replace(/^@/, '');
+  const groupTriggerRe = new RegExp(`@${agentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+  // Bot names to match in the mentions array: the per-group agent name AND the global
+  // assistant name. Replies-to-bot store the bot's display name (ASSISTANT_NAME) in mentions.
+  const botNames = new Set([agentName.toLowerCase(), ASSISTANT_NAME.toLowerCase()]);
+  const isTriggerMessage = (m: { content: string; mentions?: Array<{ name: string }> }): boolean =>
+    groupTriggerRe.test(m.content) ||
+    TRIGGER_PATTERN.test(m.content) ||
+    (m.mentions?.some((mention) => botNames.has(mention.name.toLowerCase())) ?? false);
+  const triggeringMessage = missedMessages.findLast(isTriggerMessage);
   const rawMessageId = triggeringMessage?.id || missedMessages[missedMessages.length - 1]?.id || null;
   const triggeringMessageId = rawMessageId && /^(synth|react|notify|s3)-/.test(rawMessageId) ? null : rawMessageId;
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
