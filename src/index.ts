@@ -466,13 +466,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Thread streaming via shared helper
   // Synthetic IDs (synth-*, react-*, notify-*, s3-*) aren't real channel message IDs
   // and will cause Discord/Telegram API failures if passed as reply references.
-  // Find the first message with a trigger (the one that actually triggered the agent).
+  // Find the LAST message with a trigger (the most recent mention that triggered the agent).
+  // Messages are ordered oldest-first, so findLast() gives us the newest @mention.
   // Use the per-group trigger string (e.g. "@OmarOmni") so groups with custom triggers
   // don't fall back to the last message in the batch when TRIGGER_PATTERN doesn't match.
   const groupTriggerRe = group.trigger
     ? new RegExp(`^${group.trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
     : TRIGGER_PATTERN;
-  const triggeringMessage = missedMessages.find((m) => groupTriggerRe.test(m.content.trim()));
+  const triggeringMessage = missedMessages.findLast((m) => groupTriggerRe.test(m.content.trim()));
   const rawMessageId = triggeringMessage?.id || missedMessages[missedMessages.length - 1]?.id || null;
   const triggeringMessageId = rawMessageId && /^(synth|react|notify|s3)-/.test(rawMessageId) ? null : rawMessageId;
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
