@@ -253,7 +253,10 @@ export class WhatsAppChannel implements Channel {
             sender_name: senderName,
             content,
             timestamp,
-            is_from_me: msg.key.fromMe || false,
+            // Always false here: bot echoes were already filtered by sentMessageIds above.
+            // WhatsApp's fromMe is true for ALL self-chat messages (protocol quirk),
+            // which would cause the DB query to drop real user messages.
+            is_from_me: false,
           });
         }
       }
