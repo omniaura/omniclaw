@@ -18,6 +18,8 @@ import fs from 'fs';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 
+// Intentionally duplicated from src/backends/types.ts — this container process runs in
+// an isolated environment and cannot import from the host's source tree at runtime.
 interface ChannelInfo {
   id: string;
   jid: string;
@@ -592,7 +594,9 @@ function getChannelNameLookup(): Map<string, string> {
       for (const ch of channels) {
         lookup.set(ch.jid, ch.name);
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error(`[nanoclaw] Failed to parse NANOCLAW_CHANNELS: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
   return lookup;
 }

@@ -24,6 +24,8 @@ const discordGuildId = process.env.NANOCLAW_DISCORD_GUILD_ID || undefined;
 const serverFolder = process.env.NANOCLAW_SERVER_FOLDER || undefined;
 
 // Multi-channel support: parse NANOCLAW_CHANNELS if set
+// Intentionally duplicated from src/backends/types.ts — this stdio MCP server runs in
+// an isolated container environment and cannot import from the host's source tree at runtime.
 interface ChannelInfo { id: string; jid: string; name: string; }
 const channelsEnv = process.env.NANOCLAW_CHANNELS;
 const channels: ChannelInfo[] = channelsEnv ? (() => {
@@ -275,7 +277,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     }
 
     // Non-main groups can only schedule for themselves
-    const targetJid = isMain && args.target_group_jid ? args.target_group_jid : chatJid;
+    const targetJid = isMain && args.target_group_jid ? args.target_group_jid : getCurrentChatJid();
 
     const data = {
       type: 'schedule_task',
@@ -402,7 +404,7 @@ After enabling, edit your CLAUDE.md to add/update the ## Heartbeat and ## Goals 
   },
   async (args) => {
     // Non-main groups can only configure themselves
-    const targetJid = isMain && args.target_group_jid ? args.target_group_jid : chatJid;
+    const targetJid = isMain && args.target_group_jid ? args.target_group_jid : getCurrentChatJid();
 
     if (args.enabled && args.schedule_type === 'cron') {
       try {
@@ -520,7 +522,7 @@ The request is sent to the target agent (or admin if no target specified) who ca
       files: args.files,
       request_files: args.request_files,
       sourceGroup: groupFolder,
-      chatJid,
+      chatJid: getCurrentChatJid(),
       serverFolder,
       discordGuildId,
       timestamp: new Date().toISOString(),
@@ -556,7 +558,7 @@ and notify you when results are available via context storage.`,
       callbackAgentId: args.callback_agent_id || groupFolder,
       files: args.files,
       sourceGroup: groupFolder,
-      chatJid,
+      chatJid: getCurrentChatJid(),
       timestamp: new Date().toISOString(),
     });
 
@@ -581,7 +583,7 @@ The request goes to the admin for approval, then the local agent writes the cont
       description: args.description,
       requestedTopics: args.requested_topics,
       sourceGroup: groupFolder,
-      chatJid,
+      chatJid: getCurrentChatJid(),
       timestamp: new Date().toISOString(),
     });
 
