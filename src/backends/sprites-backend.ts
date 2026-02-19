@@ -488,12 +488,12 @@ export class SpritesBackend implements AgentBackend {
     }
   }
 
-  sendMessage(groupFolder: string, text: string): boolean {
+  sendMessage(groupFolder: string, text: string, opts?: { chatJid?: string }): boolean {
     const sprite = this.getSpriteClient(groupFolder);
     // Write IPC input file asynchronously — fire and forget
     sprite.writeFile(
       `/workspace/ipc/input/${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`,
-      JSON.stringify({ type: 'message', text }),
+      JSON.stringify({ type: 'message', text, ...(opts?.chatJid ? { chatJid: opts.chatJid } : {}) }),
       { mkdir: true },
     ).catch((err) => {
       logger.warn({ groupFolder, error: err }, 'Failed to send message to Sprite IPC');

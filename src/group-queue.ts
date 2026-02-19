@@ -29,7 +29,8 @@ interface ActiveTaskInfo {
 interface GroupState {
   // Message lane
   messageActive: boolean;
-  messagePendingMessages: boolean;
+  /** JIDs with pending messages. Multiple JIDs can share one GroupState (folder). */
+  pendingMessageJids: string[];
   messageProcess: ContainerProcess | null;
   messageContainerName: string | null;
   messageGroupFolder: string | null;
@@ -59,6 +60,9 @@ export class GroupQueue {
   private shuttingDown = false;
   private effectQueue: MessageQueueService | null = null;
 
+  // JID→folder mapping: multiple JIDs can share one folder (agent)
+  private jidToFolder = new Map<string, string>();
+
   constructor() {
     // Initialize Effect-based message queue
     Effect.runPromise(makeMessageQueue()).then((queue) => {
@@ -69,12 +73,28 @@ export class GroupQueue {
     });
   }
 
+  /**
+   * Register a JID→folder mapping so multiple JIDs share one GroupState.
+   */
+  registerJidMapping(jid: string, folder: string): void {
+    this.jidToFolder.set(jid, folder);
+  }
+
+  /**
+   * Resolve a JID to its folder key for GroupState lookup.
+   * Falls back to the JID itself for backwards compatibility.
+   */
+  private resolveFolder(jid: string): string {
+    return this.jidToFolder.get(jid) || jid;
+  }
+
   private getGroup(groupJid: string): GroupState {
-    let state = this.groups.get(groupJid);
+    const key = this.resolveFolder(groupJid);
+    let state = this.groups.get(key);
     if (!state) {
       state = {
         messageActive: false,
-        messagePendingMessages: false,
+        pendingMessageJids: [],
         messageProcess: null,
         messageContainerName: null,
         messageGroupFolder: null,
@@ -90,7 +110,7 @@ export class GroupQueue {
 
         activeTaskInfo: null,
       };
-      this.groups.set(groupJid, state);
+      this.groups.set(key, state);
     }
     return state;
   }
@@ -105,28 +125,33 @@ export class GroupQueue {
       return;
     }
 
+    const folderKey = this.resolveFolder(groupJid);
     const state = this.getGroup(groupJid);
 
     // Only check the message lane — task lane is independent
     if (state.messageActive) {
-      state.messagePendingMessages = true;
-      logger.info({ groupJid }, 'Message container active, message queued');
+      if (!state.pendingMessageJids.includes(groupJid)) {
+        state.pendingMessageJids.push(groupJid);
+      }
+      logger.info({ groupJid, folderKey }, 'Message container active, message queued');
       return;
     }
 
     if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
-      state.messagePendingMessages = true;
+      if (!state.pendingMessageJids.includes(groupJid)) {
+        state.pendingMessageJids.push(groupJid);
+      }
       if (!this.waitingMessageGroups.includes(groupJid)) {
         this.waitingMessageGroups.push(groupJid);
       }
       logger.info(
-        { groupJid, activeCount: this.activeCount },
+        { groupJid, folderKey, activeCount: this.activeCount },
         'At concurrency limit, message queued',
       );
       return;
     }
 
-    logger.info({ groupJid, activeCount: this.activeCount }, 'Launching container for group');
+    logger.info({ groupJid, folderKey, activeCount: this.activeCount }, 'Launching container for group');
     this.runForGroup(groupJid, 'messages');
   }
 
@@ -195,10 +220,13 @@ export class GroupQueue {
    * Delegates to the backend if one is registered (supports local + cloud).
    * Returns true if the message was written, false if no active container.
    *
+   * chatJid is included in the piped message so the container can route
+   * responses to the correct channel when the agent has multiple routes.
+   *
    * Now uses Effect-based queue for automatic retries and timeout protection.
    */
-  async sendMessage(groupJid: string, text: string): Promise<boolean> {
-    const state = this.getGroup(groupJid);
+  async sendMessage(chatJid: string, text: string): Promise<boolean> {
+    const state = this.getGroup(chatJid);
     if (!state.messageActive || !state.messageGroupFolder) return false;
 
     // Use Effect-based queue if available
@@ -206,16 +234,17 @@ export class GroupQueue {
       try {
         await Effect.runPromise(
           this.effectQueue.sendMessage(
-            groupJid,
+            chatJid,
             text,
             state.messageBackend,
             state.messageGroupFolder,
+            chatJid,
           ),
         );
         return true;
       } catch (err) {
         logger.error(
-          { groupJid, error: err },
+          { chatJid, error: err },
           'Effect message send failed after retries, falling back to direct send',
         );
         // Fall through to backup methods
@@ -224,7 +253,7 @@ export class GroupQueue {
 
     // Fallback: delegate to backend directly
     if (state.messageBackend) {
-      return state.messageBackend.sendMessage(state.messageGroupFolder, text);
+      return state.messageBackend.sendMessage(state.messageGroupFolder, text, { chatJid });
     }
 
     // Fallback: direct local filesystem write
@@ -234,7 +263,7 @@ export class GroupQueue {
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
       const filepath = path.join(inputDir, filename);
       const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
+      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text, chatJid }));
       fs.renameSync(tempPath, filepath);
       return true;
     } catch {
@@ -278,7 +307,8 @@ export class GroupQueue {
    * Used for context injection into message prompts.
    */
   getActiveTaskInfo(groupJid: string): ActiveTaskInfo | null {
-    const state = this.groups.get(groupJid);
+    const folderKey = this.resolveFolder(groupJid);
+    const state = this.groups.get(folderKey);
     return state?.activeTaskInfo ?? null;
   }
 
@@ -288,7 +318,8 @@ export class GroupQueue {
   ): Promise<void> {
     const state = this.getGroup(groupJid);
     state.messageActive = true;
-    state.messagePendingMessages = false;
+    // Remove this JID from pending (it's being processed now)
+    state.pendingMessageJids = state.pendingMessageJids.filter(j => j !== groupJid);
     this.activeCount++;
 
     logger.debug(
@@ -380,8 +411,10 @@ export class GroupQueue {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
-    if (state.messagePendingMessages) {
-      this.runForGroup(groupJid, 'drain');
+    if (state.pendingMessageJids.length > 0) {
+      // Process the first pending JID (may differ from the JID that launched the container)
+      const nextJid = state.pendingMessageJids[0];
+      this.runForGroup(nextJid, 'drain');
       // A global slot was freed and immediately re-used; also try draining waiting tasks
       this.drainWaitingTasks();
       return;
@@ -426,8 +459,9 @@ export class GroupQueue {
       const nextJid = this.waitingMessageGroups.shift()!;
       const state = this.getGroup(nextJid);
 
-      if (state.messagePendingMessages) {
-        this.runForGroup(nextJid, 'drain');
+      if (state.pendingMessageJids.length > 0) {
+        const jidToProcess = state.pendingMessageJids[0];
+        this.runForGroup(jidToProcess, 'drain');
       }
     }
   }
@@ -450,7 +484,8 @@ export class GroupQueue {
 
   /** Check if a specific lane is active for a group. */
   isActive(key: string, lane?: Lane): boolean {
-    const state = this.groups.get(key);
+    const folderKey = this.resolveFolder(key);
+    const state = this.groups.get(folderKey);
     if (!state) return false;
     if (lane === 'message') return state.messageActive;
     if (lane === 'task') return state.taskActive;

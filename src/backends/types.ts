@@ -44,6 +44,12 @@ export function getBackendType(entity: AgentOrGroup): BackendType {
   return (entity as RegisteredGroup).backend || 'apple-container';
 }
 
+export interface ChannelInfo {
+  id: string;
+  jid: string;
+  name: string;
+}
+
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -54,6 +60,8 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   discordGuildId?: string;
   serverFolder?: string;
+  /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
+  channels?: ChannelInfo[];
 }
 
 export interface ContainerOutput {
@@ -89,8 +97,9 @@ export interface AgentBackend {
     onOutput?: (output: ContainerOutput) => Promise<void>,
   ): Promise<ContainerOutput>;
 
-  /** Send a follow-up message to an active agent via IPC. Returns true if sent. */
-  sendMessage(groupFolder: string, text: string): boolean;
+  /** Send a follow-up message to an active agent via IPC. Returns true if sent.
+   *  opts.chatJid is included so the container can route responses to the correct channel. */
+  sendMessage(groupFolder: string, text: string, opts?: { chatJid?: string }): boolean;
 
   /** Signal an active agent to wind down. Optional inputSubdir for task lane isolation. */
   closeStdin(groupFolder: string, inputSubdir?: string): void;

@@ -17,11 +17,61 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const USER_REGISTRY_PATH = path.join(IPC_DIR, 'user_registry.json');
 
 // Context from environment variables (set by the agent runner)
-const chatJid = process.env.NANOCLAW_CHAT_JID!;
+const initialChatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
 const discordGuildId = process.env.NANOCLAW_DISCORD_GUILD_ID || undefined;
 const serverFolder = process.env.NANOCLAW_SERVER_FOLDER || undefined;
+
+// Multi-channel support: parse NANOCLAW_CHANNELS if set
+interface ChannelInfo { id: string; jid: string; name: string; }
+const channelsEnv = process.env.NANOCLAW_CHANNELS;
+const channels: ChannelInfo[] = channelsEnv ? (() => {
+  try { return JSON.parse(channelsEnv); } catch { return []; }
+})() : [];
+const isMultiChannel = channels.length > 1;
+
+// Build lookup maps for channel resolution
+const channelById = new Map<string, ChannelInfo>();
+const channelByJid = new Map<string, ChannelInfo>();
+const channelByName = new Map<string, ChannelInfo>();
+for (const ch of channels) {
+  channelById.set(ch.id, ch);
+  channelByJid.set(ch.jid, ch);
+  channelByName.set(ch.name.toLowerCase(), ch);
+}
+
+/**
+ * Resolve a target to a JID. Accepts:
+ * - Channel ID ("1", "2")
+ * - Channel name ("DM", "Group Chat")
+ * - Full JID ("tg:1991174535")
+ */
+function resolveTargetJid(target: string): string {
+  const byId = channelById.get(target);
+  if (byId) return byId.jid;
+  const byName = channelByName.get(target.toLowerCase());
+  if (byName) return byName.jid;
+  return target; // Assume it's already a JID
+}
+
+/**
+ * Get the current chat JID. For multi-channel agents, reads the
+ * dynamic value written by the agent-runner as messages arrive.
+ * Falls back to the initial chatJid from container input.
+ */
+function getCurrentChatJid(): string {
+  if (isMultiChannel) {
+    try {
+      const current = fs.readFileSync('/tmp/current_chat_jid', 'utf-8').trim();
+      if (current) return current;
+    } catch { /* ignore */ }
+  }
+  return initialChatJid;
+}
+
+// For backwards compatibility, chatJid is a getter
+const chatJid = initialChatJid;
 
 // S3 mode detection
 const S3_ENDPOINT = process.env.NANOCLAW_S3_ENDPOINT || '';
@@ -123,16 +173,28 @@ const server = new McpServer({
   version: '1.0.0',
 });
 
+// Build send_message description with channel info for multi-channel agents
+const channelListDesc = isMultiChannel
+  ? `\n\nThis agent has multiple channels:\n${channels.map(ch => `  • "${ch.name}" (ID: ${ch.id}, JID: ${ch.jid})`).join('\n')}\nYou can use channel name, ID, or full JID as target_jid. Default: the most recently active chat.`
+  : '';
+
 server.tool(
   'send_message',
-  `Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group. You can also send to other agents by specifying target_jid (check agent_registry.json for available agents and their JIDs).`,
+  `Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group. You can also send to other agents by specifying target_jid (check agent_registry.json for available agents and their JIDs).${channelListDesc}`,
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
-    target_jid: z.string().optional().describe('Send to a different group/agent by JID. Check /workspace/ipc/agent_registry.json for available targets. Defaults to current group.'),
+    target_jid: z.string().optional().describe(
+      isMultiChannel
+        ? 'Target channel or agent. Accepts channel name, channel ID, or full JID. Defaults to the most recently active chat.'
+        : 'Send to a different group/agent by JID. Check /workspace/ipc/agent_registry.json for available targets. Defaults to current group.',
+    ),
   },
   async (args) => {
-    const targetJid = args.target_jid || chatJid;
+    const rawTarget = args.target_jid;
+    const targetJid = rawTarget
+      ? resolveTargetJid(rawTarget)
+      : getCurrentChatJid();
 
     const data: Record<string, string | undefined> = {
       type: 'message',
@@ -145,7 +207,9 @@ server.tool(
 
     writeIpcFile(MESSAGES_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Message sent${targetJid !== chatJid ? ` to ${targetJid}` : ''}.` }] };
+    const channelName = channelByJid.get(targetJid)?.name;
+    const targetDesc = channelName || (targetJid !== getCurrentChatJid() ? targetJid : '');
+    return { content: [{ type: 'text' as const, text: `Message sent${targetDesc ? ` to ${targetDesc}` : ''}.` }] };
   },
 );
 

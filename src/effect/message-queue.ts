@@ -72,6 +72,7 @@ export interface MessageQueueService {
     text: string,
     backend?: AgentBackend,
     groupFolder?: string,
+    chatJid?: string,
   ) => Effect.Effect<void, MessageSendError | ConcurrencyLimitError>;
 
   /**
@@ -175,6 +176,7 @@ export const makeMessageQueue = (
       text: string,
       backend?: AgentBackend,
       groupFolder?: string,
+      chatJid?: string,
     ): Effect.Effect<void, MessageSendError> =>
       Effect.gen(function* (_) {
         const state = yield* _(getGroupState(groupJid));
@@ -198,7 +200,7 @@ export const makeMessageQueue = (
         // Attempt to send via backend (wrap in try to catch sync exceptions)
         const sendResult = yield* _(
           Effect.try({
-            try: () => targetBackend.sendMessage(targetFolder, text),
+            try: () => targetBackend.sendMessage(targetFolder, text, { chatJid }),
             catch: (error) =>
               new MessageSendError({
                 groupJid,
@@ -235,6 +237,7 @@ export const makeMessageQueue = (
       text: string,
       backend?: AgentBackend,
       groupFolder?: string,
+      chatJid?: string,
     ): Effect.Effect<void, MessageSendError | ConcurrencyLimitError> =>
       Effect.gen(function* (_) {
         // Atomic check-and-increment for concurrency limit
@@ -260,7 +263,7 @@ export const makeMessageQueue = (
 
         // Send with retry and timeout
         const result = yield* _(
-          sendMessageCore(groupJid, text, backend, groupFolder).pipe(
+          sendMessageCore(groupJid, text, backend, groupFolder, chatJid).pipe(
             // Inspect errors before retry: convert non-retryable to defect
             Effect.catchAll((error) => {
               if (error._tag === 'MessageSendError' && !error.retryable) {

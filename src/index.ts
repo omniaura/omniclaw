@@ -30,7 +30,7 @@ import {
   resolveBackend,
   shutdownBackends,
 } from './backends/index.js';
-import type { ContainerOutput } from './backends/types.js';
+import type { ChannelInfo, ContainerOutput } from './backends/types.js';
 import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
@@ -177,6 +177,12 @@ function loadState(): void {
     }
   }
 
+  // Register JID→folder mappings in the queue so multiple JIDs
+  // for the same agent share one container (GroupState keyed by folder).
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    queue.registerJidMapping(jid, group.folder);
+  }
+
   logger.info(
     {
       groupCount: Object.keys(registeredGroups).length,
@@ -206,6 +212,9 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 
   registeredGroups[jid] = group;
   setRegisteredGroup(jid, group);
+
+  // Register JID→folder mapping for multi-channel container sharing
+  queue.registerJidMapping(jid, group.folder);
 
   // Create group folder
   const groupDir = path.join(DATA_DIR, '..', 'groups', group.folder);
@@ -631,6 +640,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Build the channels array for multi-channel agents.
+ * Returns undefined if the agent only has one channel (no routing needed).
+ */
+function buildChannelsForAgent(agentFolder: string): ChannelInfo[] | undefined {
+  const agentToChannels = buildAgentToChannelsMap(channelRoutes);
+  const jids = agentToChannels.get(agentFolder);
+  if (!jids || jids.length <= 1) return undefined;
+
+  return jids.map((jid, i) => {
+    const group = registeredGroups[jid];
+    // Generate a human-readable name: use chat metadata or fall back to JID
+    const name = group?.name || jid;
+    return { id: String(i + 1), jid, name };
+  });
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
@@ -694,6 +720,7 @@ async function runAgent(
 
   try {
     const backend = resolveBackend(group);
+    const agentChannels = buildChannelsForAgent(group.folder);
     const output = await backend.runAgent(
       group,
       {
@@ -705,6 +732,7 @@ async function runAgent(
         isMain,
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
+        channels: agentChannels,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder, backend, 'message'),
       wrappedOnOutput,

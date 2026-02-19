@@ -18,6 +18,12 @@ import fs from 'fs';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 
+interface ChannelInfo {
+  id: string;
+  jid: string;
+  name: string;
+}
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -29,6 +35,8 @@ interface ContainerInput {
   discordGuildId?: string;
   serverFolder?: string;
   secrets?: Record<string, string>;
+  /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
+  channels?: ChannelInfo[];
 }
 
 interface ContainerOutput {
@@ -523,25 +531,42 @@ function shouldClose(): boolean {
   return false;
 }
 
+interface IpcMessage {
+  text: string;
+  chatJid?: string;
+}
+
+// Track the current chat JID for multi-channel agents.
+// Written to /tmp/current_chat_jid so the MCP server can read it.
+const CURRENT_CHAT_FILE = '/tmp/current_chat_jid';
+
+function setCurrentChat(chatJid: string): void {
+  try { fs.writeFileSync(CURRENT_CHAT_FILE, chatJid); } catch { /* ignore */ }
+}
+
 /**
  * Drain all pending IPC input messages.
- * Returns messages found, or empty array.
+ * Returns structured messages with optional chatJid for multi-channel routing.
  */
-function drainIpcInput(): string[] {
+function drainIpcInput(): IpcMessage[] {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
     const files = fs.readdirSync(IPC_INPUT_DIR)
       .filter(f => f.endsWith('.json'))
       .sort();
 
-    const messages: string[] = [];
+    const messages: IpcMessage[] = [];
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         fs.unlinkSync(filePath);
         if (data.type === 'message' && data.text) {
-          messages.push(data.text);
+          messages.push({ text: data.text, chatJid: data.chatJid });
+          // Update current chat if this message has a chatJid
+          if (data.chatJid) {
+            setCurrentChat(data.chatJid);
+          }
         }
       } catch (err) {
         log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
@@ -553,6 +578,44 @@ function drainIpcInput(): string[] {
     log(`IPC drain error: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
+}
+
+/**
+ * Build a channel name lookup from NANOCLAW_CHANNELS env var.
+ */
+function getChannelNameLookup(): Map<string, string> {
+  const lookup = new Map<string, string>();
+  const channelsEnv = process.env.NANOCLAW_CHANNELS;
+  if (channelsEnv) {
+    try {
+      const channels: ChannelInfo[] = JSON.parse(channelsEnv);
+      for (const ch of channels) {
+        lookup.set(ch.jid, ch.name);
+      }
+    } catch { /* ignore */ }
+  }
+  return lookup;
+}
+
+const channelNames = getChannelNameLookup();
+const isMultiChannel = channelNames.size > 1;
+
+/**
+ * Format IPC messages into a prompt string.
+ * For multi-channel agents, prefix messages with chat context.
+ */
+function formatIpcMessages(messages: IpcMessage[]): string {
+  if (!isMultiChannel) {
+    return messages.map(m => m.text).join('\n');
+  }
+
+  return messages.map(m => {
+    if (m.chatJid) {
+      const channelName = channelNames.get(m.chatJid) || m.chatJid;
+      return `[From: ${channelName}]\n${m.text}`;
+    }
+    return m.text;
+  }).join('\n');
 }
 
 /**
@@ -568,7 +631,7 @@ function waitForIpcMessage(): Promise<string | null> {
       }
       const messages = drainIpcInput();
       if (messages.length > 0) {
-        resolve(messages.join('\n'));
+        resolve(formatIpcMessages(messages));
         return;
       }
       setTimeout(poll, IPC_POLL_MS);
@@ -607,9 +670,10 @@ async function runQuery(
       return;
     }
     const messages = drainIpcInput();
-    for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
+    if (messages.length > 0) {
+      const formatted = formatIpcMessages(messages);
+      log(`Piping IPC message into active query (${formatted.length} chars)`);
+      stream.push(formatted);
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
@@ -679,6 +743,7 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
             ...(containerInput.discordGuildId ? { NANOCLAW_DISCORD_GUILD_ID: containerInput.discordGuildId } : {}),
             ...(containerInput.serverFolder ? { NANOCLAW_SERVER_FOLDER: containerInput.serverFolder } : {}),
+            ...(containerInput.channels ? { NANOCLAW_CHANNELS: JSON.stringify(containerInput.channels) } : {}),
           },
         },
       },
@@ -894,6 +959,9 @@ Please review these changes to understand your new capabilities and fixes.
     log(`Failed to read update info: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // Initialize current chat JID from container input
+  setCurrentChat(containerInput.chatJid);
+
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
@@ -902,7 +970,7 @@ Please review these changes to understand your new capabilities and fixes.
   const pending = drainIpcInput();
   if (pending.length > 0) {
     log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + pending.join('\n');
+    prompt += '\n' + formatIpcMessages(pending);
   }
 
   // Prepend update notification if present

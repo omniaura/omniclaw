@@ -464,7 +464,7 @@ export class DaytonaBackend implements AgentBackend {
     }
   }
 
-  sendMessage(groupFolder: string, text: string): boolean {
+  sendMessage(groupFolder: string, text: string, opts?: { chatJid?: string }): boolean {
     const meta = this.sandboxes.get(groupFolder);
     if (!meta) return false;
 
@@ -472,7 +472,7 @@ export class DaytonaBackend implements AgentBackend {
     uploadFile(
       meta.sandbox,
       `workspace/ipc/input/${filename}`,
-      JSON.stringify({ type: 'message', text }),
+      JSON.stringify({ type: 'message', text, ...(opts?.chatJid ? { chatJid: opts.chatJid } : {}) }),
     ).catch((err) => {
       logger.warn({ groupFolder, error: err }, 'Failed to send message to Daytona IPC');
     });

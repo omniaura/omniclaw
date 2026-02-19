@@ -26,6 +26,7 @@ import { StreamParser } from './stream-parser.js';
 import {
   AgentBackend,
   AgentOrGroup,
+  ChannelInfo,
   ContainerInput,
   ContainerOutput,
   VolumeMount,
@@ -550,14 +551,14 @@ export class LocalBackend implements AgentBackend {
     }
   }
 
-  sendMessage(groupFolder: string, text: string): boolean {
+  sendMessage(groupFolder: string, text: string, opts?: { chatJid?: string }): boolean {
     const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
       const filepath = path.join(inputDir, filename);
       const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
+      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text, ...(opts?.chatJid ? { chatJid: opts.chatJid } : {}) }));
       fs.renameSync(tempPath, filepath);
       return true;
     } catch {
