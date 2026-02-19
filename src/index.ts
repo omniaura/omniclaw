@@ -110,6 +110,7 @@ async function shutdown(): Promise<void> {
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
+let resumePositions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let agents: Record<string, Agent> = {};
 let channelRoutes: Record<string, ChannelRoute> = {};
@@ -640,12 +641,15 @@ async function runAgent(
   // Update agent registry for all groups
   buildAgentRegistry();
 
-  // Wrap onOutput to track session ID from streamed results
+  // Wrap onOutput to track session ID and resumeAt from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
+        }
+        if (output.resumeAt) {
+          resumePositions[group.folder] = output.resumeAt;
         }
         await onOutput(output);
       }
@@ -658,6 +662,7 @@ async function runAgent(
       {
         prompt,
         sessionId,
+        resumeAt: resumePositions[group.folder],
         groupFolder: group.folder,
         chatJid,
         isMain,
@@ -671,6 +676,9 @@ async function runAgent(
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
+    }
+    if (output.resumeAt) {
+      resumePositions[group.folder] = output.resumeAt;
     }
 
     if (output.status === 'error') {
@@ -1090,6 +1098,7 @@ async function main(): Promise<void> {
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
+    getResumePositions: () => resumePositions,
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder, lane) => queue.registerProcess(groupJid, proc, containerName, groupFolder, undefined, lane),
     sendMessage: async (jid, rawText) => {

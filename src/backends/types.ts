@@ -47,6 +47,7 @@ export function getBackendType(entity: AgentOrGroup): BackendType {
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
+  resumeAt?: string;
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
@@ -59,6 +60,7 @@ export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
+  resumeAt?: string;
   error?: string;
   intermediate?: boolean;
 }

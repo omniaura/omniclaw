@@ -30,6 +30,7 @@ import { Channel, ContainerProcess, RegisteredGroup, ScheduledTask } from './typ
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
+  getResumePositions: () => Record<string, string>;
   queue: GroupQueue;
   onProcess: (groupJid: string, proc: ContainerProcess, containerName: string, groupFolder: string, lane: 'task') => void;
   sendMessage: (jid: string, text: string) => Promise<string | void>;
@@ -221,8 +222,13 @@ async function runTask(
   let error: string | null = null;
 
   // Always use isolated sessions for tasks to prevent session ID conflicts
-  // between message and task containers running concurrently
+  // between message and task containers running concurrently.
+  // For group-context tasks, pass resumeAt so the container can skip replaying
+  // the full session history and resume from the last known position.
   const sessionId = undefined;
+  const resumeAt = task.context_mode === 'group'
+    ? deps.getResumePositions()[task.group_folder]
+    : undefined;
 
   // Idle timer: writes _close sentinel after IDLE_TIMEOUT of no output,
   // so the container exits instead of hanging at waitForIpcMessage forever.
@@ -272,6 +278,7 @@ async function runTask(
       {
         prompt,
         sessionId,
+        resumeAt,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
         isMain,

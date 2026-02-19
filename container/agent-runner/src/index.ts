@@ -21,6 +21,7 @@ import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
+  resumeAt?: string;
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
@@ -34,6 +35,7 @@ interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
+  resumeAt?: string;
   error?: string;
   intermediate?: boolean;
 }
@@ -811,7 +813,9 @@ Please review these changes to understand your new capabilities and fixes.
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
-  let resumeAt: string | undefined;
+  // Initialize resumeAt from containerInput so subsequent container spawns
+  // skip full session replay and resume from the last known position.
+  let resumeAt: string | undefined = containerInput.resumeAt;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
@@ -832,8 +836,8 @@ Please review these changes to understand your new capabilities and fixes.
         break;
       }
 
-      // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+      // Emit session update so host can track it (include resumeAt so host persists it)
+      writeOutput({ status: 'success', result: null, newSessionId: sessionId, resumeAt });
 
       log('Query ended, waiting for next IPC message...');
 
@@ -854,6 +858,7 @@ Please review these changes to understand your new capabilities and fixes.
       status: 'error',
       result: null,
       newSessionId: sessionId,
+      resumeAt,
       error: errorMessage
     });
     process.exit(1);
