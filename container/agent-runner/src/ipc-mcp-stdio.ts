@@ -237,7 +237,7 @@ server.tool(
   "List scheduled tasks for the current context.",
   {},
   async () => {
-    const tasksFile = path.join(IPC_DIR, groupFolder, 'current_tasks.json');
+    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
 
     try {
       if (!fs.existsSync(tasksFile)) {
