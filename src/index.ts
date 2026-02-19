@@ -16,10 +16,13 @@ import {
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   SESSION_MAX_AGE,
+  SLACK_APP_TOKEN,
+  SLACK_BOT_TOKEN,
   TELEGRAM_BOT_TOKEN,
   TRIGGER_PATTERN,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
+import { SlackChannel } from './channels/slack.js';
 import { TelegramChannel } from './channels/telegram.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
@@ -1096,6 +1099,96 @@ async function main(): Promise<void> {
   if (telegram) channels.push(telegram);
 
   logger.info({ durationMs: Date.now() - startupT0 }, 'Startup complete');
+
+  // Conditionally connect Slack (requires both bot token and app-level socket-mode token)
+  if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
+    try {
+      const slack = new SlackChannel({
+        token: SLACK_BOT_TOKEN,
+        appToken: SLACK_APP_TOKEN,
+        onMessage: (chatJid, msg) => storeMessage(msg),
+        onChatMetadata: (chatJid, timestamp, name) => storeChatMetadata(chatJid, timestamp, name),
+        registeredGroups: () => registeredGroups,
+        onReaction: async (chatJid, messageId, emoji, userName) => {
+          // Share-request approval via thumbs-up / heart / check
+          if (emoji === ':thumbsup:' || emoji === ':+1:' || emoji === ':heart:' || emoji === ':white_check_mark:') {
+            const request = consumeShareRequest(messageId);
+            if (request) {
+              const mainJid = Object.entries(registeredGroups).find(
+                ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+              )?.[0];
+              if (!mainJid) return;
+
+              logger.info(
+                { messageId, emoji, sourceGroup: request.sourceGroup, sourceName: request.sourceName },
+                'Share request approved via Slack reaction',
+              );
+
+              const writePaths = request.serverFolder
+                ? `groups/${request.sourceGroup}/CLAUDE.md and/or groups/${request.serverFolder}/CLAUDE.md`
+                : `groups/${request.sourceGroup}/CLAUDE.md`;
+              const syntheticContent = [
+                `Share request APPROVED from ${request.sourceName} (${request.sourceJid}):`,
+                '',
+                `${request.description}`,
+                '',
+                `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
+                `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
+              ].join('\n');
+
+              storeMessage({
+                id: `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                chat_jid: mainJid,
+                sender: 'system',
+                sender_name: 'System',
+                content: syntheticContent,
+                timestamp: new Date().toISOString(),
+                is_from_me: false,
+              });
+
+              queue.enqueueMessageCheck(mainJid);
+              return;
+            }
+          }
+
+          // General reaction notification for registered groups
+          const group = registeredGroups[chatJid];
+          if (!group) return;
+
+          logger.info(
+            { chatJid, messageId, emoji, userName, group: group.name },
+            'Reaction on bot message in Slack',
+          );
+
+          const reactionContent = `@${ASSISTANT_NAME} [${userName} reacted with ${emoji}]`;
+          const piped = await queue.sendMessage(chatJid, formatMessages([{
+            id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            chat_jid: chatJid,
+            sender: 'system',
+            sender_name: 'System',
+            content: reactionContent,
+            timestamp: new Date().toISOString(),
+          }]));
+          if (!piped) {
+            storeMessage({
+              id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              chat_jid: chatJid,
+              sender: 'system',
+              sender_name: 'System',
+              content: reactionContent,
+              timestamp: new Date().toISOString(),
+              is_from_me: false,
+            });
+            queue.enqueueMessageCheck(chatJid);
+          }
+        },
+      });
+      await slack.connect();
+      channels.push(slack);
+    } catch (err) {
+      logger.error({ err }, 'Failed to connect Slack bot (continuing without Slack)');
+    }
+  }
 
   // Reconcile heartbeat tasks with group config before starting scheduler
   reconcileHeartbeats(registeredGroups);

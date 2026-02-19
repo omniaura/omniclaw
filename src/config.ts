@@ -3,6 +3,9 @@ import path from 'path';
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Omni';
 export const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || '';
 export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+// Slack: bot token (xoxb-...) + app-level token for Socket Mode (xapp-...)
+export const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
+export const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN || '';
 export const TELEGRAM_ONLY = process.env.TELEGRAM_ONLY === 'true';
 export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
   .split(',')
@@ -60,7 +63,7 @@ export const MAX_TASK_CONTAINERS = Math.max(
   parseInt(process.env.MAX_TASK_CONTAINERS || String(MAX_CONCURRENT_CONTAINERS - 1), 10),
 );
 
-function escapeRegex(str: string): string {
+export function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
