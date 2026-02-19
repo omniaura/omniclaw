@@ -264,6 +264,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 fs.unlinkSync(filePath);
                 continue;
               }
+              if (data.type === 'ssh_pubkey' && data.pubkey) {
+                logger.info({ folder: sourceGroup, pubkey: data.pubkey }, 'Agent generated new SSH key');
+                fs.unlinkSync(filePath);
+                continue;
+              }
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: any registered agent can message any other registered agent
                 const targetGroup = registeredGroups[data.chatJid];

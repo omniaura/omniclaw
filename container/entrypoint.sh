@@ -28,13 +28,25 @@ if [ -n "$GITHUB_TOKEN" ]; then
   fi
 fi
 
-# SSH key setup (synced via S3 or mounted)
-if [ -f /workspace/sync/ssh/id_ed25519 ]; then
-  mkdir -p ~/.ssh
-  cp /workspace/sync/ssh/id_ed25519 ~/.ssh/id_ed25519
+# SSH key setup: use workspace-persisted key or generate a new one
+mkdir -p ~/.ssh
+if [ -f /workspace/group/.ssh/id_ed25519 ]; then
+  # Persistent key from previous container run
+  cp /workspace/group/.ssh/id_ed25519 ~/.ssh/id_ed25519
   chmod 600 ~/.ssh/id_ed25519
-  ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+else
+  # Generate a new key for this agent
+  ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 -q
+  # Persist to workspace so it survives container restarts
+  mkdir -p /workspace/group/.ssh
+  cp ~/.ssh/id_ed25519 /workspace/group/.ssh/id_ed25519
+  cp ~/.ssh/id_ed25519.pub /workspace/group/.ssh/id_ed25519.pub
+  chmod 600 /workspace/group/.ssh/id_ed25519
+  # Notify host via IPC that a new key was generated
+  PUBKEY=$(cat ~/.ssh/id_ed25519.pub)
+  echo "{\"type\":\"ssh_pubkey\",\"pubkey\":\"$PUBKEY\"}" > /workspace/ipc/messages/ssh_pubkey_$(date +%s%N).json
 fi
+ssh-keyscan github.com gitlab.com >> ~/.ssh/known_hosts 2>/dev/null || true
 
 # Buffer stdin then run agent.
 # If /tmp/input.json already exists (pre-written by Sprites backend),
