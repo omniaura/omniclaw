@@ -341,9 +341,9 @@ export function createSanitizeBashHook(): HookCallback {
     const command = (preInput.tool_input as { command?: string })?.command;
     if (!command) return {};
 
-    // Block commands accessing /proc/*/environ
-    // Match both numbered PIDs and 'self'
-    if (/\/proc\/(\d+|self)\/environ/.test(command)) {
+    // Block commands accessing /proc/*/environ (any path component, not just numbered PIDs)
+    // Broad match prevents traversal bypasses like /proc/self/../self/environ
+    if (/\/proc\/[^ \t\n]*\/environ/.test(command)) {
       throw new Error(
         'Access to /proc/*/environ is not allowed for security reasons. ' +
         'This file contains process environment variables which may include sensitive credentials. ' +
@@ -353,8 +353,8 @@ export function createSanitizeBashHook(): HookCallback {
 
     // Block other sensitive paths
     const blockedPaths = [
-      /\/tmp\/input\.json/,          // Stdin buffer
-      /\/workspace\/env-dir\//,      // Mounted env directory
+      /\/tmp\/input\.json/,              // Stdin buffer
+      /\/workspace\/env-dir(?:\/|$)/,   // Mounted env directory (with or without trailing slash)
       /\/proc\/.*\/mountinfo/,       // Mount enumeration
       /\/proc\/.*\/mounts/,          // Mount list
       /\/etc\/mtab/,                 // Mount table
@@ -402,8 +402,14 @@ export function createSanitizeReadHook(): HookCallback {
     const filePath = (preInput.tool_input as { file_path?: string })?.file_path;
     if (!filePath) return {};
 
-    // Normalize path (resolve .., symlinks, etc)
-    const normalized = path.resolve(filePath);
+    // Normalize path: resolve '..' components and follow symlinks
+    // path.resolve only handles '..', so use realpathSync to also follow symlinks
+    let normalized = path.resolve(filePath);
+    try {
+      normalized = fs.realpathSync(normalized);
+    } catch {
+      // File may not exist yet; fall back to path.resolve result
+    }
 
     // Block reads of sensitive files
     const blockedPatterns = [
