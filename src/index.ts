@@ -402,7 +402,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Thread streaming via shared helper
   // Synthetic IDs (synth-*, react-*, notify-*, s3-*) aren't real channel message IDs
   // and will cause Discord/Telegram API failures if passed as reply references.
-  const rawMessageId = missedMessages[missedMessages.length - 1]?.id || null;
+  // Use the first message that matches the trigger pattern as the reply target —
+  // not the last message in the batch, which may be a follow-up without a mention.
+  const _triggerPattern = getTriggerPattern(group);
+  const _triggeringMessage =
+    missedMessages.find((m) => _triggerPattern.test(m.content.trim())) ||
+    missedMessages[missedMessages.length - 1];
+  const rawMessageId = _triggeringMessage?.id || null;
   const triggeringMessageId = rawMessageId && /^(synth|react|notify|s3)-/.test(rawMessageId) ? null : rawMessageId;
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
   // Strip the per-group trigger prefix (e.g. "@OmarOmni") when building the
