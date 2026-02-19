@@ -9,12 +9,28 @@ import {
 } from './config.js';
 import { calculateNextRun } from './schedule-utils.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, setRegisteredGroup, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getTaskById,
+  setRegisteredGroup,
+  updateTask,
+} from './db.js';
 import { transferFiles } from './file-transfer.js';
-import { findGroupByFolder, findJidByFolder, findMainGroupJid, isMainGroup } from './group-helpers.js';
+import {
+  findGroupByFolder,
+  findJidByFolder,
+  findMainGroupJid,
+  isMainGroup,
+} from './group-helpers.js';
 import { logger } from './logger.js';
 import { reconcileHeartbeats } from './task-scheduler.js';
-import { BackendType, Channel, HeartbeatConfig, RegisteredGroup } from './types.js';
+import {
+  BackendType,
+  Channel,
+  HeartbeatConfig,
+  RegisteredGroup,
+} from './types.js';
 import { DaytonaBackend } from './backends/daytona-backend.js';
 import { startDaytonaIpcPoller } from './backends/daytona-ipc-poller.js';
 import { startSpritesIpcPoller } from './backends/sprites-ipc-poller.js';
@@ -53,23 +69,60 @@ export interface PendingShareRequest {
 const pendingShareRequests = new Map<string, PendingShareRequest>();
 const STALE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-export function trackShareRequest(messageId: string, meta: PendingShareRequest): void {
+export function trackShareRequest(
+  messageId: string,
+  meta: PendingShareRequest,
+): void {
   // Clean stale entries
   const now = Date.now();
   for (const [id, entry] of pendingShareRequests) {
     if (now - entry.timestamp > STALE_TTL_MS) pendingShareRequests.delete(id);
   }
   pendingShareRequests.set(messageId, meta);
-  logger.info({ messageId, sourceGroup: meta.sourceGroup }, 'Share request tracked for reaction approval');
+  logger.info(
+    { messageId, sourceGroup: meta.sourceGroup },
+    'Share request tracked for reaction approval',
+  );
 }
 
-export function consumeShareRequest(messageId: string): PendingShareRequest | undefined {
+export function consumeShareRequest(
+  messageId: string,
+): PendingShareRequest | undefined {
   const entry = pendingShareRequests.get(messageId);
   if (entry) pendingShareRequests.delete(messageId);
   return entry;
 }
 
 let ipcWatcherRunning = false;
+
+/**
+ * Shared IPC message handler for cloud-backed group pollers (Sprites, Daytona).
+ * Both backends route messages via the same logic; only the log label differs.
+ */
+function makeCloudMessageHandler(deps: IpcDeps) {
+  return async (
+    sourceGroup: string,
+    data: any,
+    backendLabel: string,
+  ): Promise<void> => {
+    if (data.type !== 'message' || !data.chatJid || !data.text) return;
+    const registeredGroups = deps.registeredGroups();
+    const targetGroup = registeredGroups[data.chatJid];
+    const isSelf = targetGroup && targetGroup.folder === sourceGroup;
+    const isMain = sourceGroup === MAIN_GROUP_FOLDER;
+    if (isMain || isSelf || !!targetGroup) {
+      await deps.sendMessage(data.chatJid, data.text);
+      // Cross-group message: also wake up the target agent
+      if (targetGroup && targetGroup.folder !== sourceGroup) {
+        deps.notifyGroup(data.chatJid, data.text);
+      }
+      logger.info(
+        { chatJid: data.chatJid, sourceGroup },
+        `${backendLabel} IPC message sent`,
+      );
+    }
+  };
+}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -112,27 +165,55 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'react_to_message' && data.chatJid && data.messageId && data.emoji) {
+              if (
+                data.type === 'react_to_message' &&
+                data.chatJid &&
+                data.messageId &&
+                data.emoji
+              ) {
                 const ch = deps.findChannel?.(data.chatJid);
                 if (data.remove) {
-                  await (ch?.removeReaction?.(data.chatJid, data.messageId, data.emoji) ?? Promise.resolve());
+                  await (ch?.removeReaction?.(
+                    data.chatJid,
+                    data.messageId,
+                    data.emoji,
+                  ) ?? Promise.resolve());
                 } else {
-                  await (ch?.addReaction?.(data.chatJid, data.messageId, data.emoji) ?? Promise.resolve());
+                  await (ch?.addReaction?.(
+                    data.chatJid,
+                    data.messageId,
+                    data.emoji,
+                  ) ?? Promise.resolve());
                 }
                 logger.info(
-                  { chatJid: data.chatJid, messageId: data.messageId, emoji: data.emoji, remove: !!data.remove, sourceGroup },
+                  {
+                    chatJid: data.chatJid,
+                    messageId: data.messageId,
+                    emoji: data.emoji,
+                    remove: !!data.remove,
+                    sourceGroup,
+                  },
                   'IPC reaction processed',
                 );
                 fs.unlinkSync(filePath);
                 continue;
               }
-              if (data.type === 'format_mention' && data.userName && data.platform) {
+              if (
+                data.type === 'format_mention' &&
+                data.userName &&
+                data.platform
+              ) {
                 // Look up user in registry and write response back to agent
-                const userRegistryPath = path.join(ipcBaseDir, 'user_registry.json');
+                const userRegistryPath = path.join(
+                  ipcBaseDir,
+                  'user_registry.json',
+                );
                 let formattedMention = `@${data.userName}`;
                 try {
                   if (fs.existsSync(userRegistryPath)) {
-                    const registryData = JSON.parse(fs.readFileSync(userRegistryPath, 'utf-8'));
+                    const registryData = JSON.parse(
+                      fs.readFileSync(userRegistryPath, 'utf-8'),
+                    );
                     const key = (data.userName as string).toLowerCase().trim();
                     const user = registryData[key];
                     if (user) {
@@ -152,7 +233,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     }
                   }
                 } catch (err) {
-                  logger.warn({ err, userName: data.userName }, 'format_mention: failed to read user registry');
+                  logger.warn(
+                    { err, userName: data.userName },
+                    'format_mention: failed to read user registry',
+                  );
                 }
                 // Write response back so the agent can read the result
                 if (data.requestId) {
@@ -169,7 +253,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   fs.renameSync(tempPath, responseFile);
                 }
                 logger.info(
-                  { userName: data.userName, platform: data.platform, formattedMention, sourceGroup },
+                  {
+                    userName: data.userName,
+                    platform: data.platform,
+                    formattedMention,
+                    sourceGroup,
+                  },
                   'IPC format_mention processed',
                 );
                 fs.unlinkSync(filePath);
@@ -178,13 +267,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: any registered agent can message any other registered agent
                 const targetGroup = registeredGroups[data.chatJid];
-                const isSelf = targetGroup && targetGroup.folder === sourceGroup;
+                const isSelf =
+                  targetGroup && targetGroup.folder === sourceGroup;
                 const isRegisteredTarget = !!targetGroup;
                 if (isMain || isSelf || isRegisteredTarget) {
-                  await deps.sendMessage(
-                    data.chatJid,
-                    data.text,
-                  );
+                  await deps.sendMessage(data.chatJid, data.text);
                   // Cross-group message: also wake up the target agent
                   if (targetGroup && targetGroup.folder !== sourceGroup) {
                     deps.notifyGroup(data.chatJid, data.text);
@@ -260,6 +347,15 @@ export function startIpcWatcher(deps: IpcDeps): void {
   processIpcFiles();
   logger.info('IPC watcher started (per-group namespaces)');
 
+  const cloudMessageHandler = makeCloudMessageHandler(deps);
+  const cloudTaskHandler = async (
+    sourceGroup: string,
+    isMain: boolean,
+    data: any,
+  ) => {
+    await processTaskIpc(data, sourceGroup, isMain, deps);
+  };
+
   // Also start Sprites IPC poller for cloud-backed groups
   startSpritesIpcPoller({
     spritesBackend: (() => {
@@ -270,26 +366,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
       }
     })(),
     registeredGroups: deps.registeredGroups,
-    processMessage: async (sourceGroup, data) => {
-      const registeredGroups = deps.registeredGroups();
-      if (data.type === 'message' && data.chatJid && data.text) {
-        const targetGroup = registeredGroups[data.chatJid];
-        const isRegisteredTarget = !!targetGroup;
-        const isSelf = targetGroup && targetGroup.folder === sourceGroup;
-        const isMain = sourceGroup === MAIN_GROUP_FOLDER;
-        if (isMain || isSelf || isRegisteredTarget) {
-          await deps.sendMessage(data.chatJid, data.text);
-          // Cross-group message: also wake up the target agent
-          if (targetGroup && targetGroup.folder !== sourceGroup) {
-            deps.notifyGroup(data.chatJid, data.text);
-          }
-          logger.info({ chatJid: data.chatJid, sourceGroup }, 'Sprites IPC message sent');
-        }
-      }
-    },
-    processTask: async (sourceGroup, isMain, data) => {
-      await processTaskIpc(data, sourceGroup, isMain, deps);
-    },
+    processMessage: (sourceGroup, data) =>
+      cloudMessageHandler(sourceGroup, data, 'Sprites'),
+    processTask: cloudTaskHandler,
   });
 
   // Also start Daytona IPC poller for Daytona-backed groups
@@ -302,25 +381,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
       }
     })(),
     registeredGroups: deps.registeredGroups,
-    processMessage: async (sourceGroup, data) => {
-      const registeredGroups = deps.registeredGroups();
-      if (data.type === 'message' && data.chatJid && data.text) {
-        const targetGroup = registeredGroups[data.chatJid];
-        const isRegisteredTarget = !!targetGroup;
-        const isSelf = targetGroup && targetGroup.folder === sourceGroup;
-        const isMain = sourceGroup === MAIN_GROUP_FOLDER;
-        if (isMain || isSelf || isRegisteredTarget) {
-          await deps.sendMessage(data.chatJid, data.text);
-          if (targetGroup && targetGroup.folder !== sourceGroup) {
-            deps.notifyGroup(data.chatJid, data.text);
-          }
-          logger.info({ chatJid: data.chatJid, sourceGroup }, 'Daytona IPC message sent');
-        }
-      }
-    },
-    processTask: async (sourceGroup, isMain, data) => {
-      await processTaskIpc(data, sourceGroup, isMain, deps);
-    },
+    processMessage: (sourceGroup, data) =>
+      cloudMessageHandler(sourceGroup, data, 'Daytona'),
+    processTask: cloudTaskHandler,
   });
 }
 
@@ -565,24 +628,34 @@ export async function processTaskIpc(
       }
 
       // Resolve target group
-      const targetJid = isMain && data.target_group_jid
-        ? data.target_group_jid
-        : findJidByFolder(registeredGroups, sourceGroup);
+      const targetJid =
+        isMain && data.target_group_jid
+          ? data.target_group_jid
+          : findJidByFolder(registeredGroups, sourceGroup);
 
       if (!targetJid) {
-        logger.warn({ sourceGroup }, 'configure_heartbeat: could not resolve target group');
+        logger.warn(
+          { sourceGroup },
+          'configure_heartbeat: could not resolve target group',
+        );
         break;
       }
 
       const targetGroup = registeredGroups[targetJid];
       if (!targetGroup) {
-        logger.warn({ targetJid }, 'configure_heartbeat: target group not registered');
+        logger.warn(
+          { targetJid },
+          'configure_heartbeat: target group not registered',
+        );
         break;
       }
 
       // Authorization: non-main groups can only configure their own heartbeat
       if (!isMain && targetGroup.folder !== sourceGroup) {
-        logger.warn({ sourceGroup, targetFolder: targetGroup.folder }, 'Unauthorized configure_heartbeat attempt');
+        logger.warn(
+          { sourceGroup, targetFolder: targetGroup.folder },
+          'Unauthorized configure_heartbeat attempt',
+        );
         break;
       }
 
@@ -590,7 +663,9 @@ export async function processTaskIpc(
         ? {
             enabled: true,
             interval: data.interval || '1800000',
-            scheduleType: (data.heartbeat_schedule_type === 'cron' ? 'cron' : 'interval') as 'cron' | 'interval',
+            scheduleType: (data.heartbeat_schedule_type === 'cron'
+              ? 'cron'
+              : 'interval') as 'cron' | 'interval',
           }
         : undefined;
 
@@ -618,7 +693,10 @@ export async function processTaskIpc(
 
       // If files are specified with a target_agent, do the file transfer
       if (data.target_agent && data.files && data.files.length > 0) {
-        const targetGroupEntry = findGroupByFolder(registeredGroups, data.target_agent!);
+        const targetGroupEntry = findGroupByFolder(
+          registeredGroups,
+          data.target_agent!,
+        );
         if (targetGroupEntry && sourceGroupEntry) {
           const result = await transferFiles({
             sourceGroup: sourceGroupEntry[1],
@@ -627,15 +705,27 @@ export async function processTaskIpc(
             direction: 'push',
           });
           logger.info(
-            { sourceGroup, targetAgent: data.target_agent, transferred: result.transferred, errors: result.errors },
+            {
+              sourceGroup,
+              targetAgent: data.target_agent,
+              transferred: result.transferred,
+              errors: result.errors,
+            },
             'Share request file transfer completed',
           );
         }
       }
 
       // If request_files are specified, pull files from target to source
-      if (data.target_agent && data.request_files && data.request_files.length > 0) {
-        const targetGroupEntry = findGroupByFolder(registeredGroups, data.target_agent!);
+      if (
+        data.target_agent &&
+        data.request_files &&
+        data.request_files.length > 0
+      ) {
+        const targetGroupEntry = findGroupByFolder(
+          registeredGroups,
+          data.target_agent!,
+        );
         if (targetGroupEntry && sourceGroupEntry) {
           const result = await transferFiles({
             sourceGroup: targetGroupEntry[1],
@@ -644,7 +734,11 @@ export async function processTaskIpc(
             direction: 'push',
           });
           logger.info(
-            { sourceGroup, targetAgent: data.target_agent, transferred: result.transferred },
+            {
+              sourceGroup,
+              targetAgent: data.target_agent,
+              transferred: result.transferred,
+            },
             'Share request file pull completed',
           );
         }
@@ -680,9 +774,15 @@ export async function processTaskIpc(
         pathGuidance = `\n\n*Write context to:* \`groups/${sourceGroup}/CLAUDE.md\``;
       }
 
-      const filesInfo = data.files?.length ? `\n\n*Files shared:* ${data.files.join(', ')}` : '';
-      const requestFilesInfo = data.request_files?.length ? `\n\n*Files requested:* ${data.request_files.join(', ')}` : '';
-      const targetInfo = data.target_agent ? ` (targeted to ${data.target_agent})` : '';
+      const filesInfo = data.files?.length
+        ? `\n\n*Files shared:* ${data.files.join(', ')}`
+        : '';
+      const requestFilesInfo = data.request_files?.length
+        ? `\n\n*Files requested:* ${data.request_files.join(', ')}`
+        : '';
+      const targetInfo = data.target_agent
+        ? ` (targeted to ${data.target_agent})`
+        : '';
 
       const message = `*Context Request* from _${sourceName}_ (${sourceJid})${targetInfo}:\n\n${data.description}${pathGuidance}${filesInfo}${requestFilesInfo}\n\n_React 👍 to approve, or reply manually._`;
       const sentId = await deps.sendMessage(targetJid, message);
@@ -700,7 +800,15 @@ export async function processTaskIpc(
       }
 
       logger.info(
-        { sourceGroup, sourceJid, targetJid, scope, serverFolder, targetAgent: data.target_agent, trackedMessageId: sentId },
+        {
+          sourceGroup,
+          sourceJid,
+          targetJid,
+          scope,
+          serverFolder,
+          targetAgent: data.target_agent,
+          trackedMessageId: sentId,
+        },
         'Share request forwarded',
       );
       break;
@@ -725,7 +833,9 @@ export async function processTaskIpc(
         break;
       }
 
-      const filesInfo = data.files?.length ? `\n\n*Files included:* ${data.files.join(', ')}` : '';
+      const filesInfo = data.files?.length
+        ? `\n\n*Files included:* ${data.files.join(', ')}`
+        : '';
       const delegateMsg = `*Task Request* from _${sourceName}_ (${sourceJid}):\n\n${data.description}${filesInfo}\n\n_React 👍 to approve, or reply manually._`;
       const sentId = await deps.sendMessage(mainJid, delegateMsg);
 
@@ -742,7 +852,11 @@ export async function processTaskIpc(
       }
 
       logger.info(
-        { sourceGroup, callbackAgent, description: data.description.slice(0, 100) },
+        {
+          sourceGroup,
+          callbackAgent,
+          description: data.description.slice(0, 100),
+        },
         'Delegate task forwarded for approval',
       );
       break;
@@ -765,7 +879,9 @@ export async function processTaskIpc(
         break;
       }
 
-      const topicsInfo = data.requestedTopics?.length ? `\n\n*Requested topics:* ${data.requestedTopics.join(', ')}` : '';
+      const topicsInfo = data.requestedTopics?.length
+        ? `\n\n*Requested topics:* ${data.requestedTopics.join(', ')}`
+        : '';
       const contextMsg = `*Context Request* from _${sourceName}_ (${sourceJid}):\n\n${data.description}${topicsInfo}\n\n_React 👍 to approve, or reply manually._`;
       const sentCtxId = await deps.sendMessage(mainJid, contextMsg);
 
@@ -781,7 +897,11 @@ export async function processTaskIpc(
       }
 
       logger.info(
-        { sourceGroup, description: data.description.slice(0, 100), topics: data.requestedTopics },
+        {
+          sourceGroup,
+          description: data.description.slice(0, 100),
+          topics: data.requestedTopics,
+        },
         'Context request forwarded for approval',
       );
       break;
