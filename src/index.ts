@@ -603,6 +603,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         // (status: success with null result = session-update marker = idle-waiting)
         if (result.status === 'success') {
           queue.notifyIdle(chatJid);
+          // Stop typing indicator when agent goes idle — otherwise the 8s
+          // refresh loop keeps the indicator alive until the container exits,
+          // which can be minutes later. Fixes #9.
+          if (typingInterval) {
+            clearInterval(typingInterval);
+            typingInterval = null;
+          }
         }
 
         if (result.status === 'error') {
