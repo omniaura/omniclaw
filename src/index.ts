@@ -121,7 +121,6 @@ let agents: Record<string, Agent> = {};
 let channelRoutes: Record<string, ChannelRoute> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
-let processedIds = new Set<string>(); // Deduplication for timestamp boundary messages
 
 // Track consecutive errors per group to prevent infinite error loops.
 // After MAX_CONSECUTIVE_ERRORS, the cursor advances past the failing batch
@@ -600,6 +599,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           resetIdleTimer();
         }
 
+        // [Upstream PR #354] Mark container as idle when it finishes work
+        // (status: success with null result = session-update marker = idle-waiting)
+        if (result.status === 'success') {
+          queue.notifyIdle(chatJid);
+        }
+
         if (result.status === 'error') {
           hadError = true;
         }
@@ -790,20 +795,8 @@ async function startMessageLoop(): Promise<void> {
         lastTimestamp,
       );
 
-      // Clear processedIds when timestamp advances (prevents memory growth)
-      if (newTimestamp > lastTimestamp) {
-        processedIds.clear();
-      }
-
-      // Filter out already-processed messages (deduplication at timestamp boundaries)
-      const uniqueMessages = messages.filter((msg) => {
-        if (processedIds.has(msg.id)) return false;
-        processedIds.add(msg.id);
-        return true;
-      });
-
-      if (uniqueMessages.length > 0) {
-        logger.info({ count: uniqueMessages.length }, 'New messages');
+      if (messages.length > 0) {
+        logger.info({ count: messages.length }, 'New messages');
 
         // Advance the "seen" cursor for all messages immediately
         lastTimestamp = newTimestamp;
@@ -811,7 +804,7 @@ async function startMessageLoop(): Promise<void> {
 
         // Deduplicate by group
         const messagesByGroup = new Map<string, NewMessage[]>();
-        for (const msg of uniqueMessages) {
+        for (const msg of messages) {
           const existing = messagesByGroup.get(msg.chat_jid);
           if (existing) {
             existing.push(msg);
@@ -860,7 +853,9 @@ async function startMessageLoop(): Promise<void> {
             saveState();
             // Show typing indicator while the container processes the piped message
             const typingCh = findChannel(channels, chatJid);
-            if (typingCh?.setTyping) typingCh.setTyping(chatJid, true);
+            if (typingCh?.setTyping) typingCh.setTyping(chatJid, true).catch((err) =>
+              logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+            );
           } else {
             // No active container — enqueue for a new one
             logger.info({ chatJid, count: messagesToSend.length }, 'No active container, enqueuing for new one');
@@ -1446,7 +1441,10 @@ async function main(): Promise<void> {
 
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
-  startMessageLoop();
+  startMessageLoop().catch((err) => {
+    logger.fatal({ err }, 'Message loop crashed unexpectedly');
+    process.exit(1);
+  });
 }
 
 // Guard: only run when executed directly, not when imported by tests
