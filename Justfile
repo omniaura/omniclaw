@@ -46,8 +46,12 @@ build-all:
     just build
     just build-container
 
-# Tail OmniClaw logs (follow mode)
+# Tail OmniClaw logs (pretty-printed)
 tail:
+    tail -f logs/omniclaw.log | ./scripts/log-fmt.sh
+
+# Tail raw JSON logs (no formatting)
+tail-raw:
     tail -f logs/omniclaw.log
 
 # Build the agent container image. Usage: just build-container [tag]  (default tag: latest)
