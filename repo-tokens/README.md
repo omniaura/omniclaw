@@ -12,7 +12,11 @@ A GitHub Action that calculates the size of your codebase in terms of tokens and
 ## Usage
 
 ```yaml
+<<<<<<< HEAD
 - uses: omniaura/omniclaw/repo-tokens@v1
+=======
+- uses: omniaura/omniclaw/repo-tokens@v1
+>>>>>>> c8ab3d9 (feat: add repo-tokens GitHub Action with token count badge)
   with:
     include: 'src/**/*.ts'
     exclude: 'src/**/*.test.ts'
@@ -51,7 +55,11 @@ jobs:
         with:
           python-version: '3.12'
 
+<<<<<<< HEAD
       - uses: omniaura/omniclaw/repo-tokens@v1
+=======
+      - uses: omniaura/omniclaw/repo-tokens@v1
+>>>>>>> c8ab3d9 (feat: add repo-tokens GitHub Action with token count badge)
         id: tokens
         with:
           include: 'src/**/*.ts'

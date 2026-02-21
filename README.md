@@ -8,7 +8,8 @@
 
 <p align="center">
   <a href="https://github.com/omniaura/omniclaw">GitHub</a>&nbsp; • &nbsp;
-  <a href="https://discord.gg/VGWXrf8x"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>
+  <a href="https://discord.gg/VGWXrf8x"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
+  <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
 </p>
 
 **OmniClaw** is a personal Claude assistant built for security, simplicity, and extensibility.
