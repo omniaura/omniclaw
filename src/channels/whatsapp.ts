@@ -53,6 +53,9 @@ export class WhatsAppChannel implements Channel {
   private connectionHandler: ((data: any) => void) | null = null;
   private credsHandler: (() => Promise<void>) | null = null;
 
+  // Track JIDs with active "composing" status so we can clear them on reconnect
+  private activeTypingJids = new Set<string>();
+
   // Pending connect promise reject — used to signal startup failure without process.exit()
   private connectReject: ((err: Error) => void) | null = null;
 
@@ -151,6 +154,19 @@ export class WhatsAppChannel implements Channel {
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
         this.sock.sendPresenceUpdate('available').catch(() => {});
+
+        // Clear stale typing indicators — WhatsApp "composing" persists across
+        // reconnects, so any chats left in "composing" before the disconnect
+        // will show a stuck typing indicator until we explicitly send "paused".
+        if (this.activeTypingJids.size > 0) {
+          const staleJids = [...this.activeTypingJids];
+          logger.info({ jids: staleJids }, 'Clearing stale typing indicators after reconnect');
+          for (const jid of staleJids) {
+            this.sock.sendPresenceUpdate('paused', jid).catch(() => {});
+          }
+          // Don't clear the set — the agent is still running and will re-assert
+          // "composing" on the next 8s interval tick if needed.
+        }
 
         // Build LID to phone mapping from auth state for self-chat translation
         if (this.sock.user) {
@@ -336,6 +352,11 @@ export class WhatsAppChannel implements Channel {
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     try {
       const status = isTyping ? 'composing' : 'paused';
+      if (isTyping) {
+        this.activeTypingJids.add(jid);
+      } else {
+        this.activeTypingJids.delete(jid);
+      }
       logger.debug({ jid, status }, 'Sending presence update');
       await this.sock.sendPresenceUpdate(status, jid);
     } catch (err) {

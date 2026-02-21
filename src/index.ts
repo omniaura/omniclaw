@@ -554,63 +554,67 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     threadName,
   );
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Wrap in try/catch to prevent unhandled rejections
-    // Adopted from [Upstream PR #243] - Critical stability fix
-    try {
-      if (result.intermediate && result.result) {
-        const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-        await streamer.handleIntermediate(raw);
-        return;
-      }
+  let output: 'success' | 'error';
+  try {
+    output = await runAgent(group, prompt, chatJid, async (result) => {
+      // Wrap in try/catch to prevent unhandled rejections
+      // Adopted from [Upstream PR #243] - Critical stability fix
+      try {
+        if (result.intermediate && result.result) {
+          const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+          await streamer.handleIntermediate(raw);
+          return;
+        }
 
-      // Final output — send to main channel as before
-      if (result.result) {
-        const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-        logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
+        // Final output — send to main channel as before
+        if (result.result) {
+          const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+          // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+          const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+          logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
 
-        // Suppress system/auth errors — log them but don't send to channels
-        // This prevents infinite loops when auth fails (error echoed back → triggers agent → fails again)
-        const isSystemError = systemErrorPatterns.some((p) => p.test(text));
-        if (isSystemError) {
-          const redactedText = redactSensitiveData(text.slice(0, 300));
-          logger.error({ group: group.name }, `Suppressed system error (not sent to user): ${redactedText}`);
-          hadError = true;
-          // Skip sending to channel but continue processing
-        } else if (text) {
-          // Route to the chatJid from the container output (multi-channel support).
-          // Falls back to the original launch chatJid for single-channel agents.
-          const targetJid = result.chatJid || chatJid;
-          const targetChannel = findChannel(channels, targetJid) || channel;
-          if (targetChannel) {
-            const formatted = formatOutbound(targetChannel, text, getAgentName(group));
-            if (formatted) {
-              // Don't use triggeringMessageId for cross-channel responses — it belongs to the original chat
-              const replyId = targetJid === chatJid ? triggeringMessageId : null;
-              await targetChannel.sendMessage(targetJid, formatted, replyId || undefined);
-              outputSentToUser = true;
+          // Suppress system/auth errors — log them but don't send to channels
+          // This prevents infinite loops when auth fails (error echoed back → triggers agent → fails again)
+          const isSystemError = systemErrorPatterns.some((p) => p.test(text));
+          if (isSystemError) {
+            const redactedText = redactSensitiveData(text.slice(0, 300));
+            logger.error({ group: group.name }, `Suppressed system error (not sent to user): ${redactedText}`);
+            hadError = true;
+            // Skip sending to channel but continue processing
+          } else if (text) {
+            // Route to the chatJid from the container output (multi-channel support).
+            // Falls back to the original launch chatJid for single-channel agents.
+            const targetJid = result.chatJid || chatJid;
+            const targetChannel = findChannel(channels, targetJid) || channel;
+            if (targetChannel) {
+              const formatted = formatOutbound(targetChannel, text, getAgentName(group));
+              if (formatted) {
+                // Don't use triggeringMessageId for cross-channel responses — it belongs to the original chat
+                const replyId = targetJid === chatJid ? triggeringMessageId : null;
+                await targetChannel.sendMessage(targetJid, formatted, replyId || undefined);
+                outputSentToUser = true;
+              }
             }
           }
+          // Only reset idle timer on actual results, not session-update markers (result: null)
+          resetIdleTimer();
         }
-        // Only reset idle timer on actual results, not session-update markers (result: null)
-        resetIdleTimer();
-      }
 
-      if (result.status === 'error') {
+        if (result.status === 'error') {
+          hadError = true;
+        }
+      } catch (err) {
+        logger.error({ group: group.name, err }, 'Error in streaming output callback');
         hadError = true;
       }
-    } catch (err) {
-      logger.error({ group: group.name, err }, 'Error in streaming output callback');
-      hadError = true;
-    }
-  });
-
-  // Stop the typing keep-alive loop
-  if (typingInterval) clearInterval(typingInterval);
-  if (channel?.setTyping) await channel.setTyping(chatJid, false);
-  if (idleTimer) clearTimeout(idleTimer);
+    });
+  } finally {
+    // Stop the typing keep-alive loop — must be in finally to prevent stuck
+    // typing indicators when runAgent throws or the process is interrupted.
+    if (typingInterval) clearInterval(typingInterval);
+    if (channel?.setTyping) await channel.setTyping(chatJid, false).catch(() => {});
+    if (idleTimer) clearTimeout(idleTimer);
+  }
 
   streamer.writeThoughtLog();
 
