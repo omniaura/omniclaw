@@ -287,15 +287,14 @@ describe('getNewMessages', () => {
     expect(newTimestamp).toBe('2024-01-01T00:00:04.000Z');
   });
 
-  it('filters by timestamp', () => {
+  it('filters by timestamp (strictly after)', () => {
     const { messages } = getNewMessages(
       ['group1@g.us', 'group2@g.us'],
       '2024-01-01T00:00:02.000Z',
     );
-    // Messages at or after timestamp (g2 msg1 at 00:00:02, g1 msg2 at 00:00:04)
-    expect(messages).toHaveLength(2);
-    expect(messages[0].content).toBe('g2 msg1');
-    expect(messages[1].content).toBe('g1 msg2');
+    // Only messages strictly after the cursor (g1 msg2 at 00:00:04)
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toBe('g1 msg2');
   });
 
   it('returns empty for no registered groups', () => {

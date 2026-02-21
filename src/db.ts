@@ -351,7 +351,7 @@ export function getNewMessages(
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp, sender_user_id, mentions
     FROM messages
-    WHERE timestamp >= ? AND chat_jid IN (${placeholders}) AND (is_from_me IS NULL OR is_from_me = 0)
+    WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND (is_from_me IS NULL OR is_from_me = 0)
     ORDER BY timestamp
   `;
 
