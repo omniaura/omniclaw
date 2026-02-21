@@ -600,6 +600,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           resetIdleTimer();
         }
 
+        // [Upstream PR #354] Mark container as idle when it finishes work
+        // (status: success with null result = session-update marker = idle-waiting)
+        if (result.status === 'success') {
+          queue.notifyIdle(chatJid);
+        }
+
         if (result.status === 'error') {
           hadError = true;
         }
@@ -860,7 +866,9 @@ async function startMessageLoop(): Promise<void> {
             saveState();
             // Show typing indicator while the container processes the piped message
             const typingCh = findChannel(channels, chatJid);
-            if (typingCh?.setTyping) typingCh.setTyping(chatJid, true);
+            if (typingCh?.setTyping) typingCh.setTyping(chatJid, true).catch((err) =>
+              logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+            );
           } else {
             // No active container — enqueue for a new one
             logger.info({ chatJid, count: messagesToSend.length }, 'No active container, enqueuing for new one');
@@ -1446,7 +1454,10 @@ async function main(): Promise<void> {
 
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
-  startMessageLoop();
+  startMessageLoop().catch((err) => {
+    logger.fatal({ err }, 'Message loop crashed unexpectedly');
+    process.exit(1);
+  });
 }
 
 // Guard: only run when executed directly, not when imported by tests

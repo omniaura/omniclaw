@@ -29,6 +29,8 @@ interface ActiveTaskInfo {
 interface GroupState {
   // Message lane
   messageActive: boolean;
+  /** True when the message container is idle-waiting for IPC input (finished work). */
+  idleWaiting: boolean;
   /** JIDs with pending messages. Multiple JIDs can share one GroupState (folder). */
   pendingMessageJids: string[];
   messageProcess: ContainerProcess | null;
@@ -94,6 +96,7 @@ export class GroupQueue {
     if (!state) {
       state = {
         messageActive: false,
+        idleWaiting: false,
         pendingMessageJids: [],
         messageProcess: null,
         messageContainerName: null,
@@ -152,7 +155,9 @@ export class GroupQueue {
     }
 
     logger.info({ groupJid, folderKey, activeCount: this.activeCount }, 'Launching container for group');
-    this.runForGroup(groupJid, 'messages');
+    this.runForGroup(groupJid, 'messages').catch((err) =>
+      logger.error({ groupJid, err }, 'Unhandled error in runForGroup'),
+    );
   }
 
   enqueueTask(groupJid: string, taskId: string, fn: () => Promise<void>, promptPreview: string = ''): void {
@@ -176,6 +181,11 @@ export class GroupQueue {
     // Check both global limit and task-specific limit
     if (this.activeCount >= MAX_CONCURRENT_CONTAINERS || this.activeTaskCount >= MAX_TASK_CONTAINERS) {
       state.pendingTasks.push({ id: taskId, groupJid, fn, promptPreview });
+      // If the message container is idle, preempt it to free a slot
+      if (state.messageActive && state.idleWaiting) {
+        logger.info({ groupJid, taskId }, 'Preempting idle message container for task');
+        this.closeStdin(groupJid, 'message');
+      }
       if (!this.waitingTaskGroups.includes(groupJid)) {
         this.waitingTaskGroups.push(groupJid);
       }
@@ -186,8 +196,15 @@ export class GroupQueue {
       return;
     }
 
-    // Run immediately
-    this.runTask(groupJid, { id: taskId, groupJid, fn, promptPreview });
+    // Run immediately — but if message container is idle, preempt it too
+    // (frees a global slot for the task to use)
+    if (state.messageActive && state.idleWaiting) {
+      logger.info({ groupJid, taskId }, 'Preempting idle message container for task');
+      this.closeStdin(groupJid, 'message');
+    }
+    this.runTask(groupJid, { id: taskId, groupJid, fn, promptPreview }).catch((err) =>
+      logger.error({ groupJid, taskId, err }, 'Unhandled error in runTask'),
+    );
   }
 
   registerProcess(groupJid: string, proc: ContainerProcess, containerName: string, groupFolder?: string, backend?: AgentBackend, lane: Lane = 'message'): void {
@@ -216,6 +233,20 @@ export class GroupQueue {
   }
 
   /**
+   * Mark the message container as idle-waiting (finished work, waiting for IPC input).
+   * If tasks are pending, preempt the idle container immediately.
+   * [Upstream PR #354] - Prevents scheduled task deadlocks.
+   */
+  notifyIdle(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    state.idleWaiting = true;
+    if (state.pendingTasks.length > 0) {
+      logger.info({ groupJid }, 'Idle container preempted: pending tasks found');
+      this.closeStdin(groupJid, 'message');
+    }
+  }
+
+  /**
    * Send a follow-up message to the active message container via IPC.
    * Delegates to the backend if one is registered (supports local + cloud).
    * Returns true if the message was written, false if no active container.
@@ -228,6 +259,7 @@ export class GroupQueue {
   async sendMessage(chatJid: string, text: string): Promise<boolean> {
     const state = this.getGroup(chatJid);
     if (!state.messageActive || !state.messageGroupFolder) return false;
+    state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
     // Use Effect-based queue if available
     if (this.effectQueue && state.messageBackend) {
@@ -318,6 +350,7 @@ export class GroupQueue {
   ): Promise<void> {
     const state = this.getGroup(groupJid);
     state.messageActive = true;
+    state.idleWaiting = false;
     // Remove this JID from pending (it's being processed now)
     state.pendingMessageJids = state.pendingMessageJids.filter(j => j !== groupJid);
     this.activeCount++;
@@ -341,6 +374,7 @@ export class GroupQueue {
       this.scheduleRetry(groupJid, state);
     } finally {
       state.messageActive = false;
+      state.idleWaiting = false;
       state.messageProcess = null;
       state.messageContainerName = null;
       state.messageGroupFolder = null;
@@ -414,7 +448,9 @@ export class GroupQueue {
     if (state.pendingMessageJids.length > 0) {
       // Process the first pending JID (may differ from the JID that launched the container)
       const nextJid = state.pendingMessageJids[0];
-      this.runForGroup(nextJid, 'drain');
+      this.runForGroup(nextJid, 'drain').catch((err) =>
+        logger.error({ groupJid: nextJid, err }, 'Unhandled error in runForGroup (drain)'),
+      );
       // A global slot was freed and immediately re-used; also try draining waiting tasks
       this.drainWaitingTasks();
       return;
@@ -434,7 +470,9 @@ export class GroupQueue {
       // Check task concurrency limits before starting next task
       if (this.activeCount < MAX_CONCURRENT_CONTAINERS && this.activeTaskCount < MAX_TASK_CONTAINERS) {
         const task = state.pendingTasks.shift()!;
-        this.runTask(groupJid, task);
+        this.runTask(groupJid, task).catch((err) =>
+          logger.error({ groupJid, taskId: task.id, err }, 'Unhandled error in runTask (drain)'),
+        );
         // A global slot was freed and immediately re-used; also try draining waiting messages
         this.drainWaitingMessages();
         return;
@@ -461,7 +499,9 @@ export class GroupQueue {
 
       if (state.pendingMessageJids.length > 0) {
         const jidToProcess = state.pendingMessageJids[0];
-        this.runForGroup(jidToProcess, 'drain');
+        this.runForGroup(jidToProcess, 'drain').catch((err) =>
+          logger.error({ groupJid: jidToProcess, err }, 'Unhandled error in runForGroup (waiting)'),
+        );
       }
     }
   }
@@ -477,7 +517,9 @@ export class GroupQueue {
 
       if (state.pendingTasks.length > 0) {
         const task = state.pendingTasks.shift()!;
-        this.runTask(nextJid, task);
+        this.runTask(nextJid, task).catch((err) =>
+          logger.error({ groupJid: nextJid, taskId: task.id, err }, 'Unhandled error in runTask (waiting)'),
+        );
       }
     }
   }
