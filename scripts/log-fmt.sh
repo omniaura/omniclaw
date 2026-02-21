@@ -16,20 +16,19 @@ WHITE='\033[37m'
 
 jq -r --unbuffered '
   # Format timestamp as HH:MM:SS
-  (.time / 1000 | strftime("%H:%M:%S")) as $ts |
+  (.ts / 1000 | strftime("%H:%M:%S")) as $ts |
 
-  # Extract container name (short)
-  (.container // null) as $ctr |
+  # Tag: container name > group name > "-"
+  (.container // .group // "-") as $tag |
 
-  # Detect agent-runner messages
+  # Detect agent-runner messages (from container stderr re-logged by host)
   (.msg | test("^\\[agent-runner\\]") // false) as $is_agent |
 
-  # Strip [agent-runner] prefix
+  # Strip [agent-runner] prefix for cleaner display
   (if $is_agent then .msg | sub("^\\[agent-runner\\] "; "") else .msg end) as $clean_msg |
 
-  # Classify message type for coloring
+  # Classify: op/level fields first, then regex fallback for agent-runner lines
   (if $is_agent then
-    # Agent-runner sub-types
     if ($clean_msg | test("^\\[msg #\\d+\\] tool=")) then "tool"
     elif ($clean_msg | test("^\\[msg #\\d+\\] text=")) then "think"
     elif ($clean_msg | test("^\\[msg #\\d+\\] type=user")) then "user"
@@ -38,20 +37,16 @@ jq -r --unbuffered '
     elif ($clean_msg | test("Starting query|Session initialized")) then "session"
     else "agent"
     end
-  elif (.msg | test("IPC message sent")) then "ipc"
-  elif (.msg | test("message stored|Reply to bot")) then "msg_in"
-  elif (.msg | test("Piped messages")) then "pipe"
-  elif (.msg | test("Spawning container|Launching container")) then "spawn"
-  elif (.msg | test("Container .* exited|Stopped orphaned")) then "exit"
-  elif (.msg | test("Startup complete|running")) then "start"
-  elif (.msg | test("error|Error|failed|Failed")) then "error"
+  elif .level == "error" or .level == "fatal" then "error"
+  elif .op == "containerSpawn" or .op == "channelConnect" or .op == "startup" then "start"
+  elif .op == "containerExit" then "exit"
+  elif .op == "ipcProcess" then "ipc"
+  elif .op == "messageReceived" or .op == "channelSend" then "msg_in"
+  elif .op == "agentRun" then "spawn"
+  elif .op == "taskRun" then "task"
+  elif .level == "debug" then "debug"
   else "info"
   end) as $type |
-
-  # Build the agent tag from container name (lowercase, truncated)
-  (if $ctr then ($ctr | ascii_downcase | .[0:16])
-  else null
-  end) as $tag |
 
   # Format agent-runner tool lines compactly
   (if $type == "tool" then
@@ -69,20 +64,19 @@ jq -r --unbuffered '
     "#\(.n) \(.t)"
   elif $type == "model" then $clean_msg
   elif $type == "session" then $clean_msg
-  elif $type == "msg_in" then
-    (.sender // "") as $sender |
-    (.chatName // "") as $chat |
-    if $sender != "" then "\($sender) → \($chat)" else $clean_msg end
-  elif $type == "ipc" then
-    "ipc → \(.chatJid // "?" | split(":") | last)"
-  elif $type == "pipe" then
-    "\(.count // "?") msg piped"
-  elif $type == "spawn" then $clean_msg
-  elif $type == "exit" then $clean_msg
-  else $clean_msg
+  else
+    # Body: msg + inline metrics
+    (.msg
+     + (if .durationMs then " (\(.durationMs)ms)" else "" end)
+     + (if .messageCount then " [\(.messageCount) msgs]" else "" end)
+     + (if .turns then " turns=\(.turns)" else "" end)
+     + (if .costUsd then " $\(.costUsd)" else "" end)
+     + (if .exitCode then " exit=\(.exitCode)" else "" end)
+     + (if .err and (.err | type) == "string" then " ERR: \(.err)" else "" end)
+    )
   end) as $body |
 
-  # ANSI color codes embedded in output
+  # ANSI color codes
   (if $type == "tool" then "CYAN"
    elif $type == "think" then "WHITE"
    elif $type == "user" then "DIM"
@@ -91,15 +85,16 @@ jq -r --unbuffered '
    elif $type == "session" then "GREEN"
    elif $type == "msg_in" then "YELLOW"
    elif $type == "ipc" then "BLUE"
-   elif $type == "pipe" then "DIM"
-   elif $type == "spawn" then "GREEN"
-   elif $type == "exit" then "RED"
+   elif $type == "spawn" then "CYAN"
    elif $type == "start" then "GREEN"
+   elif $type == "exit" then "RED"
    elif $type == "error" then "RED"
+   elif $type == "task" then "MAGENTA"
+   elif $type == "debug" then "DIM"
    else "DIM"
    end) as $color |
 
-  # Output: timestamp tag body color
+  # Output: color timestamp tag body
   "\($color)\t\($ts)\t\($tag // "-")\t\($body)"
 ' 2>/dev/null | while IFS=$'\t' read -r color ts tag body; do
   case "$color" in

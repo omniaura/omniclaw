@@ -169,10 +169,8 @@ async function runTask(
   const groupDir = path.join(GROUPS_DIR, task.group_folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  logger.info(
-    { taskId: task.id, group: task.group_folder },
-    'Running scheduled task',
-  );
+  const log = logger.child({ op: 'taskRun', taskId: task.id, group: task.group_folder });
+  log.info('Running scheduled task');
 
   const groups = deps.registeredGroups();
   const group = Object.values(groups).find(
@@ -180,10 +178,7 @@ async function runTask(
   );
 
   if (!group) {
-    logger.error(
-      { taskId: task.id, groupFolder: task.group_folder },
-      'Group not found for task',
-    );
+    log.error('Group not found for task');
     logTaskRun({
       task_id: task.id,
       run_at: new Date().toISOString(),
@@ -319,14 +314,11 @@ async function runTask(
       result = output.result;
     }
 
-    logger.info(
-      { taskId: task.id, durationMs: Date.now() - startTime },
-      'Task completed',
-    );
+    log.info({ durationMs: Date.now() - startTime }, 'Task completed');
   } catch (err) {
     if (closeTimer) clearTimeout(closeTimer);
     error = err instanceof Error ? err.message : String(err);
-    logger.error({ taskId: task.id, error }, 'Task failed');
+    log.error({ err: error }, 'Task failed');
   }
 
   streamer.writeThoughtLog();

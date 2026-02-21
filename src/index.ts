@@ -427,6 +427,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
+  const log = logger.child({
+    op: 'agentRun',
+    group: group.name,
+    groupName: group.folder,
+    chatJid,
+    messageCount: missedMessages.length,
+  });
+
   let prompt = formatMessages(missedMessages);
 
   // Inject context about active background tasks
@@ -443,10 +451,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
 
-  logger.info(
-    { group: group.name, messageCount: missedMessages.length },
-    'Processing messages',
-  );
+  log.info('Processing messages');
 
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -454,7 +459,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      logger.debug({ group: group.name }, 'Idle timeout, closing container stdin');
+      log.debug('Idle timeout, closing container stdin');
       queue.closeStdin(chatJid, 'message');
     }, IDLE_TIMEOUT);
   };
@@ -475,8 +480,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         });
       }, 8_000);
     } catch (err) {
-      logger.debug(
-        { group: group.name, error: err },
+      log.debug(
+        { error: err },
         'Typing indicator failed to start',
       );
     }
@@ -570,14 +575,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
           // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
           const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-          logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
+          log.info(`Agent output: ${raw.slice(0, 200)}`);
 
           // Suppress system/auth errors — log them but don't send to channels
           // This prevents infinite loops when auth fails (error echoed back → triggers agent → fails again)
           const isSystemError = systemErrorPatterns.some((p) => p.test(text));
           if (isSystemError) {
             const redactedText = redactSensitiveData(text.slice(0, 300));
-            logger.error({ group: group.name }, `Suppressed system error (not sent to user): ${redactedText}`);
+            log.error(`Suppressed system error (not sent to user): ${redactedText}`);
             hadError = true;
             // Skip sending to channel but continue processing
           } else if (text) {
@@ -609,7 +614,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           hadError = true;
         }
       } catch (err) {
-        logger.error({ group: group.name, err }, 'Error in streaming output callback');
+        log.error({ err }, 'Error in streaming output callback');
         hadError = true;
       }
     });
@@ -628,7 +633,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
       consecutiveErrors[chatJid] = 0;
-      logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
+      log.warn('Agent error after output was sent, skipping cursor rollback to prevent duplicates');
       return true;
     }
 
@@ -638,8 +643,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (errorCount >= MAX_CONSECUTIVE_ERRORS) {
       // Too many consecutive failures — advance cursor to prevent a permanently
       // stuck queue where every future message re-triggers the same failing batch.
-      logger.error(
-        { group: group.name, errorCount },
+      log.error(
+        { errorCount },
         'Max consecutive errors reached, advancing cursor past failing messages',
       );
       consecutiveErrors[chatJid] = 0;
@@ -649,7 +654,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
-    logger.warn({ group: group.name, errorCount }, 'Agent error, rolled back message cursor for retry');
+    log.warn({ errorCount }, 'Agent error, rolled back message cursor for retry');
     return false;
   }
 
@@ -1192,7 +1197,7 @@ async function main(): Promise<void> {
   if (discord) channels.push(discord);
   if (telegram) channels.push(telegram);
 
-  logger.info({ durationMs: Date.now() - startupT0 }, 'Startup complete');
+  logger.info({ op: 'startup', durationMs: Date.now() - startupT0, channelCount: channels.length }, 'Startup complete');
 
   // Conditionally connect Slack (requires both bot token and app-level socket-mode token)
   if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {

@@ -1,9 +1,10 @@
 import fs from 'fs';
 import path from 'path';
-import { Effect } from 'effect';
+import { Effect, Layer } from 'effect';
 
 import type { AgentBackend } from './backends/types.js';
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS, MAX_TASK_CONTAINERS } from './config.js';
+import { OmniClawLoggerLayer } from './effect/logger-layer.js';
 import { logger } from './logger.js';
 import { ContainerProcess } from './types.js';
 import { makeMessageQueue, type MessageQueueService } from './effect/message-queue.js';
@@ -67,7 +68,7 @@ export class GroupQueue {
 
   constructor() {
     // Initialize Effect-based message queue
-    Effect.runPromise(makeMessageQueue()).then((queue) => {
+    Effect.runPromise(makeMessageQueue().pipe(Effect.provide(OmniClawLoggerLayer))).then((queue) => {
       this.effectQueue = queue;
       logger.info('Effect-based message queue initialized');
     }).catch((err) => {

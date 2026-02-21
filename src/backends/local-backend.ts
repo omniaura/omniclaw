@@ -279,10 +279,16 @@ export class LocalBackend implements AgentBackend {
     const configTimeout = containerCfg?.timeout || CONTAINER_TIMEOUT;
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
-    logger.debug(
+    const log = logger.child({
+      op: 'containerSpawn',
+      group: groupName,
+      container: containerName,
+      backend: this.name,
+      mountCount: mounts.length,
+    });
+
+    log.debug(
       {
-        group: groupName,
-        containerName,
         mounts: mounts.map(
           (m) => `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
         ),
@@ -291,13 +297,8 @@ export class LocalBackend implements AgentBackend {
       'Container mount configuration',
     );
 
-    logger.info(
-      {
-        group: groupName,
-        containerName,
-        mountCount: mounts.length,
-        isMain: input.isMain,
-      },
+    log.info(
+      { isMain: input.isMain },
       'Spawning container agent',
     );
 
@@ -312,7 +313,7 @@ export class LocalBackend implements AgentBackend {
         stderr: 'pipe',
       });
     } catch (err) {
-      logger.error({ group: groupName, containerName, error: err }, 'Container spawn error');
+      log.error({ err }, 'Container spawn error');
       return {
         status: 'error',
         result: null,
@@ -330,7 +331,7 @@ export class LocalBackend implements AgentBackend {
     container.stdin.end();
 
     const killOnTimeout = () => {
-      logger.error({ group: groupName, containerName }, 'Container timeout, stopping gracefully');
+      log.error('Container timeout, stopping gracefully');
       const stopProc = Bun.spawn(['container', 'stop', containerName]);
       const killTimer = setTimeout(() => container.kill(9), 15000);
       stopProc.exited.then((code) => {
@@ -399,6 +400,7 @@ export class LocalBackend implements AgentBackend {
 
     const duration = Date.now() - startTime;
     const state = parser.getState();
+    const exitLog = log.child({ op: 'containerExit', exitCode, durationMs: duration });
 
     if (state.timedOut) {
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -414,18 +416,12 @@ export class LocalBackend implements AgentBackend {
       ].join('\n'));
 
       if (state.hadStreamingOutput) {
-        logger.info(
-          { group: groupName, containerName, duration, code: exitCode },
-          'Container timed out after output (idle cleanup)',
-        );
+        exitLog.info('Container timed out after output (idle cleanup)');
         await state.outputChain;
         return { status: 'success', result: null, newSessionId: state.newSessionId };
       }
 
-      logger.error(
-        { group: groupName, containerName, duration, code: exitCode },
-        'Container timed out with no output',
-      );
+      exitLog.error({ timedOut: true }, 'Container timed out with no output');
       return {
         status: 'error',
         result: null,
@@ -486,14 +482,11 @@ export class LocalBackend implements AgentBackend {
     }
 
     fs.writeFileSync(logFile, logLines.join('\n'));
-    logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
+    exitLog.debug({ logFile, verbose: isVerbose }, 'Container log written');
 
     if (exitCode !== 0) {
-      logger.error(
+      exitLog.error(
         {
-          group: groupName,
-          code: exitCode,
-          duration,
           stderr: state.stderr,
           stdout: state.stdout,
           logFile,
@@ -510,8 +503,8 @@ export class LocalBackend implements AgentBackend {
     // Streaming mode
     if (onOutput) {
       await state.outputChain;
-      logger.info(
-        { group: groupName, duration, newSessionId: state.newSessionId },
+      exitLog.info(
+        { newSessionId: state.newSessionId },
         'Container completed (streaming mode)',
       );
       return { status: 'success', result: null, newSessionId: state.newSessionId };
@@ -520,19 +513,14 @@ export class LocalBackend implements AgentBackend {
     // Legacy mode: parse last output marker pair
     try {
       const output = parser.parseFinalOutput();
-      logger.info(
-        {
-          group: groupName,
-          duration,
-          status: output.status,
-          hasResult: !!output.result,
-        },
+      exitLog.info(
+        { status: output.status, hasResult: !!output.result },
         'Container completed',
       );
       return output;
     } catch (err) {
-      logger.error(
-        { group: groupName, stdout: state.stdout, stderr: state.stderr, error: err },
+      exitLog.error(
+        { stdout: state.stdout, stderr: state.stderr, err },
         'Failed to parse container output',
       );
       return {

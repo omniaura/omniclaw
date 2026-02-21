@@ -82,7 +82,7 @@ export class StreamParser {
 
     const lines = chunk.trim().split('\n');
     for (const line of lines) {
-      if (line) logger.info({ container: this.opts.groupName }, line);
+      if (line) logger.debug({ container: this.opts.containerName }, line);
     }
 
     if (this.state.stderrTruncated) return;
