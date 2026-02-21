@@ -170,22 +170,14 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input-task'), { recursive: true });
 
-  // Mount the full IPC directory. For scheduled tasks, override the input/
-  // subdirectory with input-task/ so follow-up messages don't cross lanes.
-  // Note: Apple Container doesn't support file-level bind mounts, so we
-  // mount the whole directory and override only the input subdirectory.
+  // Mount the full IPC directory. The agent-runner inside the container
+  // selects the correct input subdirectory (input/ vs input-task/) based
+  // on containerInput.isScheduledTask, so no mount overlay trick is needed.
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
     readonly: false,
   });
-  if (isScheduledTask) {
-    mounts.push({
-      hostPath: path.join(groupIpcDir, 'input-task'),
-      containerPath: '/workspace/ipc/input',
-      readonly: false,
-    });
-  }
 
   // Environment file
   const envDir = path.join(DATA_DIR, 'env');

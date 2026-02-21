@@ -355,6 +355,204 @@ describe('GroupQueue', () => {
     await Bun.sleep(10);
   });
 
+  // --- IPC lane isolation ---
+
+  describe('IPC lane isolation', () => {
+    it('sendMessage returns false when only task lane active', async () => {
+      let taskResolve: () => void;
+      const processMessages = mock(async () => true);
+      queue.setProcessMessagesFn(processMessages);
+
+      queue.enqueueTask('group1@g.us', 'task-1', () =>
+        new Promise<void>((resolve) => { taskResolve = resolve; }),
+        'Test task',
+      );
+      await Bun.sleep(10);
+
+      expect(queue.isActive('group1@g.us', 'task')).toBe(true);
+      expect(queue.isActive('group1@g.us', 'message')).toBe(false);
+
+      // sendMessage targets message lane only — should return false
+      const result = await queue.sendMessage('group1@g.us', 'hello');
+      expect(result).toBe(false);
+
+      taskResolve!();
+      await Bun.sleep(10);
+    });
+
+    it('sendMessage targets message backend only, not task backend', async () => {
+      let messageResolve: () => void;
+      let taskResolve: () => void;
+
+      const messageSendMock = mock(() => true);
+      const taskSendMock = mock(() => true);
+
+      const messageBackend = {
+        sendMessage: messageSendMock,
+        closeStdin: mock(),
+        runAgent: mock(async () => ({ status: 'success' as const, result: null })),
+      };
+      const taskBackend = {
+        sendMessage: taskSendMock,
+        closeStdin: mock(),
+        runAgent: mock(async () => ({ status: 'success' as const, result: null })),
+      };
+
+      const processMessages = mock(async () => {
+        await new Promise<void>((resolve) => { messageResolve = resolve; });
+        return true;
+      });
+      queue.setProcessMessagesFn(processMessages);
+
+      // Start message lane
+      queue.enqueueMessageCheck('group1@g.us');
+      await Bun.sleep(10);
+
+      // Register message backend
+      queue.registerProcess('group1@g.us', {} as any, 'msg-ctr', 'group1-folder', messageBackend as any, 'message');
+
+      // Start task lane
+      queue.enqueueTask('group1@g.us', 'task-1', () =>
+        new Promise<void>((resolve) => { taskResolve = resolve; }),
+        'Test task',
+      );
+      await Bun.sleep(10);
+
+      // Register task backend
+      queue.registerProcess('group1@g.us', {} as any, 'task-ctr', 'group1-folder', taskBackend as any, 'task');
+
+      // sendMessage should only go to message backend
+      await queue.sendMessage('group1@g.us', 'reaction text');
+
+      expect(messageSendMock).toHaveBeenCalled();
+      expect(taskSendMock).not.toHaveBeenCalled();
+
+      messageResolve!();
+      taskResolve!();
+      await Bun.sleep(10);
+    });
+
+    it('reaction flow: sendMessage returns false when only task active, triggers new message container', async () => {
+      let taskResolve: () => void;
+      let messageRan = false;
+
+      const processMessages = mock(async () => {
+        messageRan = true;
+        return true;
+      });
+      queue.setProcessMessagesFn(processMessages);
+
+      // Start only a task
+      queue.enqueueTask('group1@g.us', 'task-1', () =>
+        new Promise<void>((resolve) => { taskResolve = resolve; }),
+        'Test task',
+      );
+      await Bun.sleep(10);
+
+      // Simulate reaction handler: sendMessage fails → enqueue message check
+      const sent = await queue.sendMessage('group1@g.us', 'reaction');
+      expect(sent).toBe(false);
+
+      // This is what the reaction handler would do on failure
+      queue.enqueueMessageCheck('group1@g.us');
+      await Bun.sleep(10);
+
+      expect(messageRan).toBe(true);
+      expect(queue.isActive('group1@g.us', 'message')).toBe(false); // already completed
+      expect(queue.isActive('group1@g.us', 'task')).toBe(true);
+
+      taskResolve!();
+      await Bun.sleep(10);
+    });
+
+    it('reaction flow: sendMessage succeeds when both lanes active', async () => {
+      let messageResolve: () => void;
+      let taskResolve: () => void;
+
+      const messageSendMock = mock(() => true);
+      const messageBackend = {
+        sendMessage: messageSendMock,
+        closeStdin: mock(),
+        runAgent: mock(async () => ({ status: 'success' as const, result: null })),
+      };
+
+      const processMessages = mock(async () => {
+        await new Promise<void>((resolve) => { messageResolve = resolve; });
+        return true;
+      });
+      queue.setProcessMessagesFn(processMessages);
+
+      // Start both lanes
+      queue.enqueueMessageCheck('group1@g.us');
+      await Bun.sleep(10);
+      queue.registerProcess('group1@g.us', {} as any, 'msg-ctr', 'group1-folder', messageBackend as any, 'message');
+
+      queue.enqueueTask('group1@g.us', 'task-1', () =>
+        new Promise<void>((resolve) => { taskResolve = resolve; }),
+        'Test task',
+      );
+      await Bun.sleep(10);
+
+      // sendMessage should succeed via message backend
+      const sent = await queue.sendMessage('group1@g.us', 'reaction text');
+      expect(sent).toBe(true);
+      expect(messageSendMock).toHaveBeenCalled();
+
+      messageResolve!();
+      taskResolve!();
+      await Bun.sleep(10);
+    });
+
+    it('closeStdin targets correct lane subdirectory', async () => {
+      let messageResolve: () => void;
+      let taskResolve: () => void;
+
+      const messageCloseMock = mock((_folder: string, _subdir: string) => {});
+      const taskCloseMock = mock((_folder: string, _subdir: string) => {});
+
+      const messageBackend = {
+        sendMessage: mock(() => true),
+        closeStdin: messageCloseMock,
+        runAgent: mock(async () => ({ status: 'success' as const, result: null })),
+      };
+      const taskBackend = {
+        sendMessage: mock(() => true),
+        closeStdin: taskCloseMock,
+        runAgent: mock(async () => ({ status: 'success' as const, result: null })),
+      };
+
+      const processMessages = mock(async () => {
+        await new Promise<void>((resolve) => { messageResolve = resolve; });
+        return true;
+      });
+      queue.setProcessMessagesFn(processMessages);
+
+      // Start both lanes
+      queue.enqueueMessageCheck('group1@g.us');
+      await Bun.sleep(10);
+      queue.registerProcess('group1@g.us', {} as any, 'msg-ctr', 'group1-folder', messageBackend as any, 'message');
+
+      queue.enqueueTask('group1@g.us', 'task-1', () =>
+        new Promise<void>((resolve) => { taskResolve = resolve; }),
+        'Test task',
+      );
+      await Bun.sleep(10);
+      queue.registerProcess('group1@g.us', {} as any, 'task-ctr', 'group1-folder', taskBackend as any, 'task');
+
+      // Close message lane → should use 'input'
+      queue.closeStdin('group1@g.us', 'message');
+      expect(messageCloseMock).toHaveBeenCalledWith('group1-folder', 'input');
+
+      // Close task lane → should use 'input-task'
+      queue.closeStdin('group1@g.us', 'task');
+      expect(taskCloseMock).toHaveBeenCalledWith('group1-folder', 'input-task');
+
+      messageResolve!();
+      taskResolve!();
+      await Bun.sleep(10);
+    });
+  });
+
   // --- Task deduplication ---
 
   it('prevents double-queuing of the same task', async () => {

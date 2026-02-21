@@ -73,8 +73,18 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
-const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+// Defaults to the message lane; reassigned to input-task/ after stdin is parsed
+// when containerInput.isScheduledTask is true.
+let IPC_INPUT_DIR = '/workspace/ipc/input';
+let IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+
+/**
+ * Determine the IPC input directory based on whether this is a scheduled task.
+ * Exported for testing.
+ */
+export function resolveIpcInputDir(isScheduledTask?: boolean): string {
+  return isScheduledTask ? '/workspace/ipc/input-task' : '/workspace/ipc/input';
+}
 const IPC_POLL_MS = 500;
 
 // S3 mode detection: if OMNICLAW_S3_ENDPOINT is set, use S3 for output instead of stdout
@@ -907,6 +917,14 @@ async function main(): Promise<void> {
       error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
     });
     process.exit(1);
+  }
+
+  // Scheduled tasks use a separate IPC input directory so reactions and
+  // follow-up messages don't leak into the task lane.
+  if (containerInput.isScheduledTask) {
+    IPC_INPUT_DIR = '/workspace/ipc/input-task';
+    IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+    log('Using task IPC lane: /workspace/ipc/input-task');
   }
 
   // Build SDK env: merge secrets into process.env for the SDK only.
