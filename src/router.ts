@@ -14,7 +14,20 @@ export function formatMessages(messages: NewMessage[]): string {
   const lines = messages.map((m) =>
     `<message id="${m.id}" sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
   );
-  return `<messages>\n${lines.join('\n')}\n</messages>`;
+
+  // Build a participant roster so that conversation compaction/summarization
+  // preserves correct sender attribution (see Issue #13).
+  const senders = Array.from(new Set(
+    messages
+      .map((m) => m.sender_name)
+      .filter((name) => name && name !== 'System'),
+  ));
+
+  const header = senders.length > 0
+    ? `<messages participants="${senders.map(escapeXml).join(', ')}">`
+    : '<messages>';
+
+  return `${header}\n${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {

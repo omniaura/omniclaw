@@ -58,30 +58,53 @@ describe('escapeXml', () => {
 // --- formatMessages ---
 
 describe('formatMessages', () => {
-  it('formats a single message as XML', () => {
+  it('formats a single message as XML with participants attribute', () => {
     const result = formatMessages([makeMsg()]);
     expect(result).toBe(
-      '<messages>\n' +
+      '<messages participants="Alice">\n' +
         '<message id="1" sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
         '</messages>',
     );
   });
 
-  it('formats multiple messages', () => {
+  it('formats multiple messages with participants roster', () => {
     const msgs = [
       makeMsg({ id: '1', sender_name: 'Alice', content: 'hi', timestamp: 't1' }),
       makeMsg({ id: '2', sender_name: 'Bob', content: 'hey', timestamp: 't2' }),
     ];
     const result = formatMessages(msgs);
+    expect(result).toContain('participants="Alice, Bob"');
     expect(result).toContain('sender="Alice"');
     expect(result).toContain('sender="Bob"');
     expect(result).toContain('>hi</message>');
     expect(result).toContain('>hey</message>');
   });
 
+  it('deduplicates participant names', () => {
+    const msgs = [
+      makeMsg({ id: '1', sender_name: 'Alice', content: 'hi', timestamp: 't1' }),
+      makeMsg({ id: '2', sender_name: 'Alice', content: 'hey', timestamp: 't2' }),
+    ];
+    const result = formatMessages(msgs);
+    expect(result).toContain('participants="Alice"');
+    // Should appear once in participants, not "Alice, Alice"
+    expect(result).not.toContain('Alice, Alice');
+  });
+
+  it('excludes System from participants roster', () => {
+    const msgs = [
+      makeMsg({ id: '1', sender_name: 'Alice', content: 'hi', timestamp: 't1' }),
+      makeMsg({ id: '2', sender_name: 'System', content: 'notification', timestamp: 't2' }),
+    ];
+    const result = formatMessages(msgs);
+    expect(result).toContain('participants="Alice"');
+    expect(result).not.toContain('participants="Alice, System"');
+  });
+
   it('escapes special characters in sender names', () => {
     const result = formatMessages([makeMsg({ sender_name: 'A & B <Co>' })]);
     expect(result).toContain('sender="A &amp; B &lt;Co&gt;"');
+    expect(result).toContain('participants="A &amp; B &lt;Co&gt;"');
   });
 
   it('escapes special characters in content', () => {
