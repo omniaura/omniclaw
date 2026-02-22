@@ -1363,6 +1363,22 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
     findChannel: (jid) => findChannel(channels, jid),
+    writeTasksSnapshot: (groupFolder, isMainGroup) => {
+      const tasks = getAllTasks();
+      writeTasksSnapshot(
+        groupFolder,
+        isMainGroup,
+        tasks.map((t) => ({
+          id: t.id,
+          groupFolder: t.group_folder,
+          prompt: t.prompt,
+          schedule_type: t.schedule_type,
+          schedule_value: t.schedule_value,
+          status: t.status,
+          next_run: t.next_run,
+        })),
+      );
+    },
   });
   // Start S3 IPC poller for cloud agents (if B2 is configured)
   if (s3) {

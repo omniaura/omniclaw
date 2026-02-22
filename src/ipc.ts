@@ -58,6 +58,8 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   findChannel?: (jid: string) => Channel | undefined;
+  /** Refresh the current_tasks.json snapshot so the agent sees updates immediately */
+  writeTasksSnapshot?: (groupFolder: string, isMain: boolean) => void;
 }
 
 // --- Pending share request tracking ---
@@ -448,6 +450,11 @@ export async function processTaskIpc(
 ): Promise<void> {
   const registeredGroups = deps.registeredGroups();
 
+  /** Refresh current_tasks.json so the agent sees the mutation immediately */
+  const refreshTasksSnapshot = () => {
+    deps.writeTasksSnapshot?.(sourceGroup, isMain);
+  };
+
   switch (data.type) {
     case 'schedule_task':
       if (
@@ -511,6 +518,7 @@ export async function processTaskIpc(
           { taskId, sourceGroup, targetFolder, contextMode },
           'Task created via IPC',
         );
+        refreshTasksSnapshot();
       }
       break;
 
@@ -523,6 +531,7 @@ export async function processTaskIpc(
             { taskId: data.taskId, sourceGroup },
             'Task paused via IPC',
           );
+          refreshTasksSnapshot();
         } else {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
@@ -541,6 +550,7 @@ export async function processTaskIpc(
             { taskId: data.taskId, sourceGroup },
             'Task resumed via IPC',
           );
+          refreshTasksSnapshot();
         } else {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
@@ -559,6 +569,7 @@ export async function processTaskIpc(
             { taskId: data.taskId, sourceGroup },
             'Task cancelled via IPC',
           );
+          refreshTasksSnapshot();
         } else {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
