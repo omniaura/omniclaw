@@ -18,6 +18,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  TIMEZONE,
 } from '../config.js';
 import { logger } from '../logger.js';
 import { validateAdditionalMounts } from '../mount-security.js';
@@ -229,6 +230,9 @@ function buildVolumeMounts(
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
   const args: string[] = ['run', '-i', '--rm', '--memory', CONTAINER_MEMORY, '--name', containerName];
+
+  // Pass host timezone so container's local time matches the user's
+  args.push('-e', `TZ=${TIMEZONE}`);
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's bun user (uid 1000),
