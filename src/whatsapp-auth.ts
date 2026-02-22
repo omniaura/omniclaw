@@ -8,7 +8,6 @@
  */
 import fs from 'fs';
 import path from 'path';
-import pino from 'pino';
 import qrcode from 'qrcode-terminal';
 import readline from 'readline';
 
@@ -19,13 +18,14 @@ import makeWASocket, {
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
+import { createLogger } from './logger.js';
+
 const AUTH_DIR = './store/auth';
 const QR_FILE = './store/qr-data.txt';
 const STATUS_FILE = './store/auth-status.txt';
 
-const logger = pino({
-  level: 'warn', // Quiet logging - only show errors
-});
+// Quiet logger for Baileys — suppress info/debug noise during auth
+const logger = createLogger({}, 'warn');
 
 // Check for --pairing-code flag and phone number
 const usePairingCode = process.argv.includes('--pairing-code');
