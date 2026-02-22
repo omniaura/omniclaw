@@ -19,6 +19,7 @@ import {
   SPRITES_RAM_MB,
   SPRITES_REGION,
   SPRITES_TOKEN,
+  TIMEZONE,
 } from '../config.js';
 import { logger } from '../logger.js';
 import { ContainerProcess } from '../types.js';
@@ -399,12 +400,12 @@ export class SpritesBackend implements AgentBackend {
       }
     }
 
-    // Environment file
+    // Environment file (with host timezone appended)
     const envFile = path.join(DATA_DIR, 'env', 'env');
-    if (fs.existsSync(envFile)) {
-      const content = fs.readFileSync(envFile, 'utf-8');
-      syncOps.push(syncFile(sprite, '/workspace/env-dir/env', content, 'env'));
-    }
+    let envContent = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf-8') : '';
+    if (envContent && !envContent.endsWith('\n')) envContent += '\n';
+    if (!envContent.includes('TZ=')) envContent += `TZ=${TIMEZONE}\n`;
+    syncOps.push(syncFile(sprite, '/workspace/env-dir/env', envContent, 'env'));
 
     // Agent-runner source files
     const agentRunnerDir = path.join(projectRoot, 'container', 'agent-runner', 'src');
