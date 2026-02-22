@@ -6,7 +6,7 @@
  *
  * Allowlist location: ~/.config/omniclaw/mount-allowlist.json
  */
-import fs from 'fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import os from 'os';
 import path from 'path';
 
@@ -27,7 +27,7 @@ export function _resetAllowlistCache(): void {
 /**
  * Default blocked patterns - paths that should never be mounted
  */
-export const DEFAULT_BLOCKED_PATTERNS = [
+export const DEFAULT_BLOCKED_PATTERNS: readonly string[] = Object.freeze([
   '.ssh',
   '.gnupg',
   '.gpg',
@@ -45,7 +45,7 @@ export const DEFAULT_BLOCKED_PATTERNS = [
   'id_ed25519',
   'private_key',
   '.secret',
-];
+]);
 
 /**
  * Load the mount allowlist from the external config location.
@@ -63,7 +63,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
   }
 
   try {
-    if (!fs.existsSync(MOUNT_ALLOWLIST_PATH)) {
+    if (!existsSync(MOUNT_ALLOWLIST_PATH)) {
       allowlistLoadError = `Mount allowlist not found at ${MOUNT_ALLOWLIST_PATH}`;
       logger.warn(
         { path: MOUNT_ALLOWLIST_PATH },
@@ -73,7 +73,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
       return null;
     }
 
-    const content = fs.readFileSync(MOUNT_ALLOWLIST_PATH, 'utf-8');
+    const content = readFileSync(MOUNT_ALLOWLIST_PATH, 'utf-8');
     const allowlist = JSON.parse(content) as MountAllowlist;
 
     // Validate structure
@@ -139,7 +139,7 @@ function expandPath(p: string): string {
  */
 function getRealPath(p: string): string | null {
   try {
-    return fs.realpathSync(p);
+    return realpathSync(p);
   } catch {
     return null;
   }
