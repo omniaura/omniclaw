@@ -173,7 +173,7 @@ function writePretty(
 // ---------------------------------------------------------------------------
 
 function createLogger(defaults: Record<string, unknown> = {}, levelOverride?: string): Logger {
-  const effectiveLevel = levelOverride || process.env.LOG_LEVEL || 'info';
+  const effectiveLevel = levelOverride || process.env.LOG_LEVEL || 'debug';
   const minLevel = LEVEL_VALUES[effectiveLevel as LogLevel] ?? LEVEL_VALUES.info;
 
   function write(
