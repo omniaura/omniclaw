@@ -23,6 +23,11 @@ import {
   findMainGroupJid,
   isMainGroup,
 } from './group-helpers.js';
+import {
+  listIpcJsonFiles,
+  quarantineIpcFile,
+  readIpcJsonFile,
+} from './ipc-file-security.js';
 import { logger } from './logger.js';
 import { reconcileHeartbeats } from './task-scheduler.js';
 import {
@@ -138,10 +143,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
     // Scan all group IPC directories (identity determined by directory)
     let groupFolders: string[];
     try {
-      groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
-        const stat = fs.statSync(path.join(ipcBaseDir, f));
-        return stat.isDirectory() && f !== 'errors';
-      });
+      groupFolders = fs
+        .readdirSync(ipcBaseDir, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && e.name !== 'errors')
+        .map((e) => e.name);
     } catch (err) {
       logger.error({ err }, 'Error reading IPC base directory');
       setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
@@ -158,13 +163,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
       // Process messages from this group's IPC directory
       try {
         if (fs.existsSync(messagesDir)) {
-          const messageFiles = fs
-            .readdirSync(messagesDir)
-            .filter((f) => f.endsWith('.json'));
+          const messageFiles = listIpcJsonFiles(messagesDir);
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              const result = readIpcJsonFile(filePath);
+              if (!result.ok) {
+                logger.warn(
+                  { file, sourceGroup, reason: result.reason },
+                  'Rejected IPC message file',
+                );
+                quarantineIpcFile(filePath, ipcBaseDir, result.reason, sourceGroup);
+                continue;
+              }
+              const data = result.data as Record<string, unknown>;
               if (
                 data.type === 'react_to_message' &&
                 data.chatJid &&
@@ -298,12 +310,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 { file, sourceGroup, err },
                 'Error processing IPC message',
               );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
+              quarantineIpcFile(filePath, ipcBaseDir, String(err), sourceGroup);
             }
           }
         }
@@ -317,13 +324,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
       // Process tasks from this group's IPC directory
       try {
         if (fs.existsSync(tasksDir)) {
-          const taskFiles = fs
-            .readdirSync(tasksDir)
-            .filter((f) => f.endsWith('.json'));
+          const taskFiles = listIpcJsonFiles(tasksDir);
           for (const file of taskFiles) {
             const filePath = path.join(tasksDir, file);
+            const taskResult = readIpcJsonFile(filePath);
+            if (!taskResult.ok) {
+              logger.warn(
+                { file, sourceGroup, reason: taskResult.reason },
+                'Rejected IPC task file',
+              );
+              quarantineIpcFile(filePath, ipcBaseDir, taskResult.reason, sourceGroup);
+              continue;
+            }
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              const data = taskResult.data as Record<string, unknown>;
               // Pass source group identity to processTaskIpc for authorization
               await processTaskIpc(data, sourceGroup, isMain, deps);
               fs.unlinkSync(filePath);
@@ -332,12 +346,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 { file, sourceGroup, err },
                 'Error processing IPC task',
               );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
+              quarantineIpcFile(filePath, ipcBaseDir, String(err), sourceGroup);
             }
           }
         }
