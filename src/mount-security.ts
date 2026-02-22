@@ -18,10 +18,16 @@ import { AdditionalMount, AllowedRoot, MountAllowlist } from './types.js';
 let cachedAllowlist: MountAllowlist | null = null;
 let allowlistLoadError: string | null = null;
 
+/** @internal Reset the allowlist cache — test-only helper */
+export function _resetAllowlistCache(): void {
+  cachedAllowlist = null;
+  allowlistLoadError = null;
+}
+
 /**
  * Default blocked patterns - paths that should never be mounted
  */
-const DEFAULT_BLOCKED_PATTERNS = [
+export const DEFAULT_BLOCKED_PATTERNS = [
   '.ssh',
   '.gnupg',
   '.gpg',
