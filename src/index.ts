@@ -597,6 +597,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
                 const replyId = targetJid === chatJid ? triggeringMessageId : null;
                 await targetChannel.sendMessage(targetJid, formatted, replyId || undefined);
                 outputSentToUser = true;
+                // Stop typing refresh — prevents the 8s interval from
+                // re-triggering typing AFTER the response is visible.
+                if (typingInterval) {
+                  clearInterval(typingInterval);
+                  typingInterval = null;
+                }
               }
             }
           }
