@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import path from 'path';
 import os from 'os';
 
@@ -112,8 +112,11 @@ describe('readIpcJsonFile', () => {
 
   it('accepts file just under size limit', () => {
     const filePath = path.join(tmpDir, 'justunder.json');
-    // Create a file just under 1 MiB (leave room for JSON wrapper)
-    const content = JSON.stringify({ data: 'a'.repeat(1024 * 1024 - 50) });
+    const MAX_SIZE = 1024 * 1024;
+    // Build JSON and verify byte length is under limit before writing
+    const jsonOverhead = Buffer.byteLength(JSON.stringify({ d: '' }));
+    const content = JSON.stringify({ d: 'a'.repeat(MAX_SIZE - jsonOverhead - 1) });
+    expect(Buffer.byteLength(content)).toBeLessThan(MAX_SIZE);
     writeFileSync(filePath, content);
 
     const result = readIpcJsonFile(filePath);
@@ -156,14 +159,18 @@ describe('listIpcJsonFiles', () => {
 });
 
 describe('quarantineIpcFile', () => {
-  it('moves file to errors directory', () => {
+  it('moves file to errors directory with timestamp', () => {
     const filePath = path.join(tmpDir, 'bad.json');
     writeFileSync(filePath, 'corrupt');
 
     quarantineIpcFile(filePath, tmpDir, 'invalid JSON', 'test-group');
 
     expect(existsSync(filePath)).toBe(false);
-    expect(existsSync(path.join(tmpDir, 'errors', 'test-group-bad.json'))).toBe(true);
+    // Verify file was moved to errors dir with timestamp prefix
+    const errDir = path.join(tmpDir, 'errors');
+    const files = readdirSync(errDir);
+    expect(files.length).toBe(1);
+    expect(files[0]).toMatch(/^test-group-\d+-bad\.json$/);
   });
 
   it('creates errors directory if it does not exist', () => {
@@ -173,6 +180,27 @@ describe('quarantineIpcFile', () => {
     expect(existsSync(path.join(tmpDir, 'errors'))).toBe(false);
     quarantineIpcFile(filePath, tmpDir, 'test', 'mygroup');
     expect(existsSync(path.join(tmpDir, 'errors'))).toBe(true);
+  });
+
+  it('prevents filename collisions with timestamps', async () => {
+    const filePath1 = path.join(tmpDir, 'dup.json');
+    writeFileSync(filePath1, 'corrupt1');
+    quarantineIpcFile(filePath1, tmpDir, 'test', 'grp');
+
+    // Small delay to ensure different timestamp
+    await new Promise((r) => setTimeout(r, 5));
+
+    const filePath2 = path.join(tmpDir, 'dup.json');
+    writeFileSync(filePath2, 'corrupt2');
+    quarantineIpcFile(filePath2, tmpDir, 'test', 'grp');
+
+    const errDir = path.join(tmpDir, 'errors');
+    const files = readdirSync(errDir);
+    expect(files.length).toBe(2);
+    // Both should match the pattern but have different timestamps
+    for (const f of files) {
+      expect(f).toMatch(/^grp-\d+-dup\.json$/);
+    }
   });
 
   it('handles already-deleted files gracefully', () => {

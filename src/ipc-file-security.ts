@@ -81,8 +81,12 @@ export function readIpcJsonFile<T = unknown>(filePath: string): IpcReadResult<T>
     // Bun's node:fs polyfill provides platform-adapted fsConstants.O_NOFOLLOW.
     try {
       fd = openSync(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-    } catch {
-      // Platform may not support O_NOFOLLOW; fall back to O_RDONLY only
+    } catch (e) {
+      // Only fall back for platforms that don't support O_NOFOLLOW
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== 'EINVAL' && code !== 'ENOTSUP' && code !== 'EOPNOTSUPP') {
+        throw e; // Re-throw non-platform errors (EACCES, ENOENT, ELOOP, etc.)
+      }
       fd = openSync(filePath, fsConstants.O_RDONLY);
     }
   } catch (err) {
@@ -173,7 +177,8 @@ export function quarantineIpcFile(
 
   try {
     mkdirSync(quarantineDir, { recursive: true });
-    const destPath = path.join(quarantineDir, `${sourceGroup}-${fileName}`);
+    const timestamp = Date.now();
+    const destPath = path.join(quarantineDir, `${sourceGroup}-${timestamp}-${fileName}`);
     renameSync(filePath, destPath);
     logger.warn(
       { file: fileName, sourceGroup, reason, quarantined: destPath },
