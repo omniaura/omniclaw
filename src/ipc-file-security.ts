@@ -11,11 +11,11 @@
  * Inspired by upstream qwibitai/nanoclaw PR #364 (lawyered0).
  * Adapted for omniaura/omniclaw fork's multi-backend architecture.
  *
- * NOTE: Uses node:fs for low-level operations (lstatSync, openSync, fstatSync,
- * readSync, closeSync, readdirSync with withFileTypes) because bun's polyfilled
- * 'fs' module does not expose these functions. Higher-level operations (mkdirSync,
- * renameSync, unlinkSync) use the standard 'fs' import for consistency with the
- * rest of the codebase.
+ * NOTE: Uses node:fs for low-level POSIX operations (lstatSync, openSync with
+ * O_NOFOLLOW, fstatSync, readSync, closeSync) because Bun.file() does not expose
+ * the fd lifecycle control, open flags, or lstat semantics needed for symlink
+ * rejection and TOCTOU defense. Bun's node:fs polyfill fully supports these APIs
+ * including platform-adapted fsConstants.O_NOFOLLOW.
  */
 
 import {
@@ -77,13 +77,12 @@ export function readIpcJsonFile<T = unknown>(filePath: string): IpcReadResult<T>
   // Layer 2 & 3: Open with O_NOFOLLOW (where supported) + post-open fstat
   let fd: number;
   try {
-    // O_NOFOLLOW (0x20000 on Linux, 0x0100 on macOS) prevents symlink following
-    // Fall back to O_RDONLY if O_NOFOLLOW is not available
-    const O_NOFOLLOW = 0x20000; // Linux value; macOS uses 0x0100
+    // O_NOFOLLOW prevents the kernel from following symlinks during open.
+    // Bun's node:fs polyfill provides platform-adapted fsConstants.O_NOFOLLOW.
     try {
-      fd = openSync(filePath, fsConstants.O_RDONLY | O_NOFOLLOW);
+      fd = openSync(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
     } catch {
-      // Platform may not support O_NOFOLLOW or constants differ; fall back
+      // Platform may not support O_NOFOLLOW; fall back to O_RDONLY only
       fd = openSync(filePath, fsConstants.O_RDONLY);
     }
   } catch (err) {
