@@ -241,8 +241,8 @@ export const makeMessageQueue = (
     ): Effect.Effect<void, MessageSendError | ConcurrencyLimitError> =>
       Effect.gen(function* (_) {
         // Atomic check-and-increment for concurrency limit
-        const incrementResult = yield* _(
-          Ref.modify(activeCount, (current) => {
+        const incrementResult: Effect.Effect<void, ConcurrencyLimitError> = yield* _(
+          Ref.modify<number, Effect.Effect<void, ConcurrencyLimitError>>(activeCount, (current) => {
             if (current >= config.maxConcurrent) {
               return [
                 Effect.fail(
@@ -254,7 +254,7 @@ export const makeMessageQueue = (
                 current,
               ] as const;
             }
-            return [Effect.succeed(undefined), current + 1] as const;
+            return [Effect.void, current + 1] as const;
           }),
         );
 

@@ -155,7 +155,7 @@ describe('storeMessageDirect', () => {
       mentions: [{ id: 'user456', name: 'Bob', platform: 'discord' }],
     });
 
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'BotName');
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z');
     expect(messages).toHaveLength(1);
     expect(messages[0].sender_user_id).toBe('user123');
     expect(messages[0].mentions).toEqual([{ id: 'user456', name: 'Bob', platform: 'discord' }]);
@@ -174,7 +174,7 @@ describe('storeMessageDirect', () => {
       is_from_me: false,
     });
 
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'BotName');
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z');
     expect(messages).toHaveLength(1);
     expect(messages[0].sender_user_id).toBeUndefined();
     expect(messages[0].mentions).toBeUndefined();
@@ -199,7 +199,7 @@ describe('storeMessage with sender_user_id and mentions', () => {
       mentions: [{ id: 'user222', name: 'Eve', platform: 'discord' }],
     });
 
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'BotName');
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z');
     expect(messages).toHaveLength(1);
     expect(messages[0].sender_user_id).toBe('user111');
     expect(messages[0].mentions).toEqual([{ id: 'user222', name: 'Eve', platform: 'discord' }]);
