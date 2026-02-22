@@ -7,6 +7,7 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 
@@ -115,22 +116,31 @@ export async function syncFilesToS3(
     syncOps.push(syncFileToS3(s3, opts.agentId, 'entrypoint.sh', content, `${opts.agentId}:entrypoint`));
   }
 
-  // Skills
+  // Skills (recursive to handle subdirectories like scripts/, templates/)
   const skillsSrc = path.join(projectRoot, 'container', 'skills');
   if (fs.existsSync(skillsSrc)) {
     for (const skillDir of fs.readdirSync(skillsSrc)) {
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
-      for (const file of fs.readdirSync(srcDir)) {
-        const content = fs.readFileSync(path.join(srcDir, file), 'utf-8');
-        syncOps.push(syncFileToS3(s3, opts.agentId, `skills/${skillDir}/${file}`, content, `${opts.agentId}:skills:${skillDir}/${file}`));
-      }
+      const walkDir = (dir: string, relPrefix: string) => {
+        for (const entry of fs.readdirSync(dir)) {
+          const fullPath = path.join(dir, entry);
+          const relPath = `${relPrefix}/${entry}`;
+          if (fs.statSync(fullPath).isDirectory()) {
+            walkDir(fullPath, relPath);
+          } else {
+            const content = fs.readFileSync(fullPath, 'utf-8');
+            syncOps.push(syncFileToS3(s3, opts.agentId, `skills/${relPath}`, content, `${opts.agentId}:skills:${relPath}`));
+          }
+        }
+      };
+      walkDir(srcDir, skillDir);
     }
   }
 
   // SSH key (if configured)
   const sshKeyPath = path.join(
-    process.env.HOME || '/Users/user',
+    process.env.HOME || os.homedir(),
     '.config', 'omniclaw', 'ssh', 'id_ed25519',
   );
   if (fs.existsSync(sshKeyPath)) {
