@@ -1,15 +1,17 @@
 /**
  * Effect Logger Layer for OmniClaw.
  *
- * Outputs the same flat JSON schema as src/logger.ts so all log output
- * (imperative and Effect) is consistent and parseable by log-fmt.sh.
+ * Delegates to the imperative logger from src/logger.ts so all formatting
+ * (JSON + TTY pretty-print) lives in one place.
  */
 
-import { Effect, Layer, List, Logger, LogLevel } from 'effect';
+import { List, Logger, LogLevel } from 'effect';
+import { logger as rootLogger } from '../logger.js';
+import type { Logger as OmniLogger } from '../logger.js';
 
-const isTTY = process.stderr.isTTY;
+type LogMethod = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
-function effectLevelToString(level: LogLevel.LogLevel): string {
+function effectLevelToMethod(level: LogLevel.LogLevel): LogMethod {
   if (LogLevel.greaterThanEqual(level, LogLevel.Fatal)) return 'fatal';
   if (LogLevel.greaterThanEqual(level, LogLevel.Error)) return 'error';
   if (LogLevel.greaterThanEqual(level, LogLevel.Warning)) return 'warn';
@@ -19,69 +21,40 @@ function effectLevelToString(level: LogLevel.LogLevel): string {
 }
 
 /**
- * Build the OmniClaw structured logger for Effect.
- * Outputs identical JSON format as the imperative logger.
+ * Effect logger that delegates to the imperative OmniClaw logger.
+ * Flattens annotations and LogSpans into fields, then calls logger[level]().
  */
 const omniClawLogger = Logger.make(({ logLevel, message, annotations, date, spans }) => {
-  const level = effectLevelToString(logLevel);
+  const method = effectLevelToMethod(logLevel);
 
-  // Flatten annotations to top-level fields
+  // Flatten annotations to fields
   const fields: Record<string, unknown> = {};
   for (const [key, value] of annotations) {
     fields[key] = value;
   }
 
-  // Convert the first LogSpan to op + durationMs
+  // Convert first LogSpan to op + durationMs
   const firstSpan = List.head(spans);
   if (firstSpan._tag === 'Some') {
     fields.op = firstSpan.value.label;
     fields.durationMs = date.getTime() - firstSpan.value.startTime;
   }
 
-  // Extract message text
   const msg = typeof message === 'string'
     ? message
     : Array.isArray(message)
       ? message.map(String).join(' ')
       : String(message);
 
-  const record: Record<string, unknown> = {
-    ts: date.getTime(),
-    level,
-    msg,
-    service: 'omniclaw',
-    ...fields,
-  };
-
-  if (isTTY) {
-    // Delegate to the same pretty-print format
-    const ts = formatTimestamp(date.getTime());
-    const tag = (record.container || record.group || '-') as string;
-    const RST = '\x1b[0m';
-    const DIM = '\x1b[2m';
-    const BOLD = '\x1b[1m';
-    const color = level === 'error' || level === 'fatal' ? '\x1b[31m' : '\x1b[2m';
-    const levelTag = level === 'error' || level === 'fatal' || level === 'warn'
-      ? ` ${level.toUpperCase()} `
-      : '';
-    process.stderr.write(
-      `${DIM}${ts}${RST} ${BOLD}${String(tag).slice(0, 16).padEnd(16)}${RST} ${color}${levelTag}${msg}${RST}\n`,
-    );
+  // Delegate to the imperative logger — all formatting happens there
+  if (Object.keys(fields).length > 0) {
+    rootLogger[method](fields, msg);
   } else {
-    process.stderr.write(JSON.stringify(record) + '\n');
+    rootLogger[method](msg);
   }
 });
 
-function formatTimestamp(ts: number): string {
-  const d = new Date(ts);
-  const h = String(d.getHours()).padStart(2, '0');
-  const m = String(d.getMinutes()).padStart(2, '0');
-  const s = String(d.getSeconds()).padStart(2, '0');
-  return `${h}:${m}:${s}`;
-}
-
 /**
  * Layer that replaces the default Effect logger with OmniClaw's structured logger.
- * Use with Effect.provide(OmniClawLoggerLayer).
  */
 export const OmniClawLoggerLayer = Logger.replace(Logger.defaultLogger, omniClawLogger);
