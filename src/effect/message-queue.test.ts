@@ -13,7 +13,7 @@ import {
 import type { AgentBackend } from '../backends/types.js';
 
 // Mock backend
-class MockBackend implements Partial<AgentBackend> {
+class MockBackend {
   public sendMessageCalls: Array<{ groupFolder: string; text: string }> = [];
   public shouldSucceed = true;
   public name = 'mock-backend';
@@ -44,7 +44,7 @@ describe('Effect Message Queue', () => {
   });
 
   it('should send a message successfully', async () => {
-    await queue.registerBackend('group1', mockBackend as AgentBackend, 'folder1')
+    await queue.registerBackend('group1', mockBackend as unknown as AgentBackend, 'folder1')
       .pipe(Effect.runPromise);
 
     const result = await queue.sendMessage('group1', 'Hello world')
@@ -61,7 +61,7 @@ describe('Effect Message Queue', () => {
   });
 
   it('should retry on failure and eventually succeed', async () => {
-    await queue.registerBackend('group1', mockBackend as AgentBackend, 'folder1')
+    await queue.registerBackend('group1', mockBackend as unknown as AgentBackend, 'folder1')
       .pipe(Effect.runPromise);
 
     let callCount = 0;
@@ -83,7 +83,7 @@ describe('Effect Message Queue', () => {
   });
 
   it('should fail after max retries', async () => {
-    await queue.registerBackend('group1', mockBackend as AgentBackend, 'folder1')
+    await queue.registerBackend('group1', mockBackend as unknown as AgentBackend, 'folder1')
       .pipe(Effect.runPromise);
 
     mockBackend.shouldSucceed = false;
@@ -123,7 +123,7 @@ describe('Effect Message Queue', () => {
       return originalSend(groupFolder, text);
     };
 
-    await queue.registerBackend('group1', slowBackend as AgentBackend, 'folder1')
+    await queue.registerBackend('group1', slowBackend as unknown as AgentBackend, 'folder1')
       .pipe(Effect.runPromise);
 
     // Start 3 concurrent sends (limit is 2)
@@ -151,9 +151,9 @@ describe('Effect Message Queue', () => {
   });
 
   it('should track stats correctly', async () => {
-    await queue.registerBackend('group1', mockBackend as AgentBackend, 'folder1')
+    await queue.registerBackend('group1', mockBackend as unknown as AgentBackend, 'folder1')
       .pipe(Effect.runPromise);
-    await queue.registerBackend('group2', mockBackend as AgentBackend, 'folder2')
+    await queue.registerBackend('group2', mockBackend as unknown as AgentBackend, 'folder2')
       .pipe(Effect.runPromise);
 
     const stats = await queue.getStats()
@@ -167,11 +167,11 @@ describe('Effect Message Queue', () => {
     const backend1 = new MockBackend();
     const backend2 = new MockBackend();
 
-    await queue.registerBackend('group1', backend1 as AgentBackend, 'folder1')
+    await queue.registerBackend('group1', backend1 as unknown as AgentBackend, 'folder1')
       .pipe(Effect.runPromise);
 
     // Send with explicit backend (should override registered one)
-    await queue.sendMessage('group1', 'Override test', backend2 as AgentBackend, 'folder2')
+    await queue.sendMessage('group1', 'Override test', backend2 as unknown as AgentBackend, 'folder2')
       .pipe(Effect.runPromise);
 
     expect(backend1.sendMessageCalls).toHaveLength(0);

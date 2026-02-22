@@ -185,18 +185,21 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 data.messageId &&
                 data.emoji
               ) {
-                const ch = deps.findChannel?.(data.chatJid);
+                const chatJid = data.chatJid as string;
+                const messageId = data.messageId as string;
+                const emoji = data.emoji as string;
+                const ch = deps.findChannel?.(chatJid);
                 if (data.remove) {
                   await (ch?.removeReaction?.(
-                    data.chatJid,
-                    data.messageId,
-                    data.emoji,
+                    chatJid,
+                    messageId,
+                    emoji,
                   ) ?? Promise.resolve());
                 } else {
                   await (ch?.addReaction?.(
-                    data.chatJid,
-                    data.messageId,
-                    data.emoji,
+                    chatJid,
+                    messageId,
+                    emoji,
                   ) ?? Promise.resolve());
                 }
                 logger.info(
@@ -285,15 +288,17 @@ export function startIpcWatcher(deps: IpcDeps): void {
               }
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: any registered agent can message any other registered agent
-                const targetGroup = registeredGroups[data.chatJid];
+                const msgChatJid = data.chatJid as string;
+                const msgText = data.text as string;
+                const targetGroup = registeredGroups[msgChatJid];
                 const isSelf =
                   targetGroup && targetGroup.folder === sourceGroup;
                 const isRegisteredTarget = !!targetGroup;
                 if (isMain || isSelf || isRegisteredTarget) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  await deps.sendMessage(msgChatJid, msgText);
                   // Cross-group message: also wake up the target agent
                   if (targetGroup && targetGroup.folder !== sourceGroup) {
-                    deps.notifyGroup(data.chatJid, data.text);
+                    deps.notifyGroup(msgChatJid, msgText);
                   }
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
@@ -341,7 +346,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = taskResult.data as Record<string, unknown>;
               // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data, sourceGroup, isMain, deps);
+              await processTaskIpc(data as Record<string, unknown> & { type: string }, sourceGroup, isMain, deps);
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
