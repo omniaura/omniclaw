@@ -32,6 +32,7 @@ import {
 } from './backends/index.js';
 import type { ChannelInfo, ContainerOutput } from './backends/types.js';
 import {
+  mapTasksForSnapshot,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
@@ -712,20 +713,7 @@ async function runAgent(
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
-  const tasks = getAllTasks();
-  writeTasksSnapshot(
-    group.folder,
-    isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
-  );
+  writeTasksSnapshot(group.folder, isMain, mapTasksForSnapshot(getAllTasks()));
 
   // Update available groups snapshot (main group only can see all groups)
   const availableGroups = getAvailableGroups();
@@ -1363,6 +1351,9 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
     findChannel: (jid) => findChannel(channels, jid),
+    writeTasksSnapshot: (groupFolder, isMainGroup) => {
+      writeTasksSnapshot(groupFolder, isMainGroup, mapTasksForSnapshot(getAllTasks()));
+    },
   });
   // Start S3 IPC poller for cloud agents (if B2 is configured)
   if (s3) {
@@ -1451,6 +1442,9 @@ async function main(): Promise<void> {
           syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
           getAvailableGroups,
           writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+          writeTasksSnapshot: (groupFolder, isMainGroup) => {
+            writeTasksSnapshot(groupFolder, isMainGroup, mapTasksForSnapshot(getAllTasks()));
+          },
         });
       },
       isAdmin: (agentId) => agents[agentId]?.isAdmin ?? false,

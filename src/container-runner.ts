@@ -9,7 +9,7 @@ import path from 'path';
 
 import { DATA_DIR } from './config.js';
 import { resolveBackend } from './backends/index.js';
-import { ContainerProcess, RegisteredGroup, Agent } from './types.js';
+import { ContainerProcess, RegisteredGroup, Agent, ScheduledTask } from './types.js';
 import type { AgentOrGroup } from './backends/types.js';
 
 // Re-export types from backends
@@ -27,6 +27,19 @@ export async function runContainerAgent(
 ): Promise<import('./backends/types.js').ContainerOutput> {
   const backend = resolveBackend(group);
   return backend.runAgent(group, input, onProcess, onOutput);
+}
+
+/** Map ScheduledTask rows to the lightweight shape used in task snapshots. */
+export function mapTasksForSnapshot(tasks: ScheduledTask[]) {
+  return tasks.map((t) => ({
+    id: t.id,
+    groupFolder: t.group_folder,
+    prompt: t.prompt,
+    schedule_type: t.schedule_type,
+    schedule_value: t.schedule_value,
+    status: t.status,
+    next_run: t.next_run,
+  }));
 }
 
 export function writeTasksSnapshot(
