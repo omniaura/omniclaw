@@ -9,6 +9,8 @@ on:
 jobs:
   update-tokens:
     runs-on: ubuntu-latest
+    # Skip if GitHub App secrets aren't configured (fork without app setup)
+    if: ${{ secrets.APP_ID != '' }}
     steps:
       - uses: actions/create-github-app-token@v1
         id: app-token
