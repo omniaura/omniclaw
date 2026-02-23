@@ -19,6 +19,7 @@ import {
   RAILWAY_API_TOKEN,
 } from '../config.js';
 import { logger } from '../logger.js';
+import { rejectTraversalSegments } from '../path-security.js';
 import { ContainerProcess } from '../types.js';
 import { OmniClawS3 } from '../s3/client.js';
 import { syncFilesToS3 } from '../s3/file-sync.js';
@@ -181,11 +182,13 @@ export class RailwayBackend implements AgentBackend {
   }
 
   async readFile(groupFolder: string, relativePath: string): Promise<Buffer | null> {
+    rejectTraversalSegments(relativePath, 'readFile');
     if (!this.s3) return null;
     return this.s3.readSync(groupFolder, `workspace/${relativePath}`);
   }
 
   async writeFile(groupFolder: string, relativePath: string, content: Buffer | string): Promise<void> {
+    rejectTraversalSegments(relativePath, 'writeFile');
     if (!this.s3) throw new Error('Railway backend not initialized');
     await this.s3.writeSync(groupFolder, `workspace/${relativePath}`, content);
   }
