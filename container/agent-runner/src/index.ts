@@ -397,6 +397,7 @@ export function createSanitizeBashHook(): HookCallback {
     const blockedPaths = [
       /\/tmp\/input\.json/,              // Stdin buffer
       /\/workspace\/env-dir(?:\/|$)/,   // Mounted env directory (with or without trailing slash)
+      /\/workspace\/project\/\.env(?:\s|$|[;|&><)\n]|\$\()/,  // Project root .env (masked by /dev/null mount, defense-in-depth)
       /\/proc\/.*\/mountinfo/,       // Mount enumeration
       /\/proc\/.*\/mounts/,          // Mount list
       /\/etc\/mtab/,                 // Mount table
@@ -434,6 +435,7 @@ export function createSanitizeBashHook(): HookCallback {
  * - /proc/[pid]/environ (kernel env snapshot)
  * - /tmp/input.json (stdin buffer with secrets)
  * - /workspace/env-dir/ (mounted env files)
+ * - /workspace/project/.env (project root secrets, masked by /dev/null mount)
  * - Mount enumeration files (mountinfo, mtab, fstab)
  *
  * Related: Issue #79, upstream PR #216
@@ -458,6 +460,7 @@ export function createSanitizeReadHook(): HookCallback {
       /^\/proc\/(?:\d+|self)(?:\/[^/]+)*\/environ$/, // Process/task environ (any depth: /proc/<pid>/task/<tid>/environ)
       /^\/tmp\/input\.json$/,         // Stdin buffer
       /^\/workspace\/env-dir\//,      // Mounted env directory
+      /^\/workspace\/project\/\.env$/, // Project root .env (masked by /dev/null mount, defense-in-depth)
       /^\/proc\/(\d+|self)\/mountinfo$/,  // Mount enumeration for any PID (Issue #79)
       /^\/proc\/(\d+|self)\/mounts$/,    // Mount list for any PID
       /^\/etc\/mtab$/,                // Mount table

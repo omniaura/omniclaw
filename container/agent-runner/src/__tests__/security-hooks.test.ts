@@ -39,6 +39,42 @@ describe('Security Hooks - Issue #79', () => {
       await expect(hook(input as any, 'id', {} as any)).rejects.toThrow(/restricted file/i);
     });
 
+    it('should block cat /workspace/project/.env', async () => {
+      const hook = createSanitizeBashHook();
+      const input = {
+        tool_name: 'Bash',
+        tool_input: { command: 'cat /workspace/project/.env' },
+      };
+      await expect(hook(input as any, 'id', {} as any)).rejects.toThrow(/restricted file/i);
+    });
+
+    it('should block grep in /workspace/project/.env', async () => {
+      const hook = createSanitizeBashHook();
+      const input = {
+        tool_name: 'Bash',
+        tool_input: { command: 'grep ANTHROPIC /workspace/project/.env' },
+      };
+      await expect(hook(input as any, 'id', {} as any)).rejects.toThrow(/restricted file/i);
+    });
+
+    it('should block piped access to /workspace/project/.env', async () => {
+      const hook = createSanitizeBashHook();
+      const input = {
+        tool_name: 'Bash',
+        tool_input: { command: 'cat /workspace/project/.env | head' },
+      };
+      await expect(hook(input as any, 'id', {} as any)).rejects.toThrow(/restricted file/i);
+    });
+
+    it('should block redirected access to /workspace/project/.env', async () => {
+      const hook = createSanitizeBashHook();
+      const input = {
+        tool_name: 'Bash',
+        tool_input: { command: 'cat /workspace/project/.env>/tmp/out' },
+      };
+      await expect(hook(input as any, 'id', {} as any)).rejects.toThrow(/restricted file/i);
+    });
+
     it('should block access to /proc/self/mountinfo', async () => {
       const hook = createSanitizeBashHook();
       const input = {
@@ -121,6 +157,15 @@ describe('Security Hooks - Issue #79', () => {
       const input = {
         tool_name: 'Read',
         tool_input: { file_path: '/workspace/env-dir/env' },
+      };
+      await expect(hook(input as any, 'id', {} as any)).rejects.toThrow(/not allowed.*security/i);
+    });
+
+    it('should block /workspace/project/.env', async () => {
+      const hook = createSanitizeReadHook();
+      const input = {
+        tool_name: 'Read',
+        tool_input: { file_path: '/workspace/project/.env' },
       };
       await expect(hook(input as any, 'id', {} as any)).rejects.toThrow(/not allowed.*security/i);
     });
