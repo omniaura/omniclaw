@@ -22,6 +22,7 @@ import {
 } from '../config.js';
 import { logger } from '../logger.js';
 import { validateAdditionalMounts } from '../mount-security.js';
+import { assertPathWithin } from '../path-security.js';
 import { ContainerProcess } from '../types.js';
 import { StreamParser } from './stream-parser.js';
 import {
@@ -36,19 +37,6 @@ import {
   getName,
   getServerFolder,
 } from './types.js';
-
-function assertPathWithin(resolved: string, parent: string, label: string): void {
-  const normalizedResolved = path.resolve(resolved);
-  const normalizedParent = path.resolve(parent);
-  if (
-    !normalizedResolved.startsWith(normalizedParent + path.sep) &&
-    normalizedResolved !== normalizedParent
-  ) {
-    throw new Error(
-      `Path traversal detected in ${label}: ${resolved} escapes ${parent}`,
-    );
-  }
-}
 
 function getHomeDir(): string {
   const home = process.env.HOME || os.homedir();
@@ -574,7 +562,9 @@ export class LocalBackend implements AgentBackend {
   }
 
   async readFile(groupFolder: string, relativePath: string): Promise<Buffer | null> {
-    const fullPath = path.join(GROUPS_DIR, groupFolder, relativePath);
+    const groupDir = path.join(GROUPS_DIR, groupFolder);
+    const fullPath = path.join(groupDir, relativePath);
+    assertPathWithin(fullPath, groupDir, 'readFile');
     try {
       return fs.readFileSync(fullPath);
     } catch {
@@ -583,7 +573,9 @@ export class LocalBackend implements AgentBackend {
   }
 
   async writeFile(groupFolder: string, relativePath: string, content: Buffer | string): Promise<void> {
-    const fullPath = path.join(GROUPS_DIR, groupFolder, relativePath);
+    const groupDir = path.join(GROUPS_DIR, groupFolder);
+    const fullPath = path.join(groupDir, relativePath);
+    assertPathWithin(fullPath, groupDir, 'writeFile');
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, content);
   }

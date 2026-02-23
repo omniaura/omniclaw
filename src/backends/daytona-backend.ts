@@ -27,6 +27,7 @@ import {
   TIMEZONE,
 } from '../config.js';
 import { logger } from '../logger.js';
+import { rejectTraversalSegments } from '../path-security.js';
 import { ContainerProcess } from '../types.js';
 import { StreamParser } from './stream-parser.js';
 import { provisionDaytona } from './daytona-provisioning.js';
@@ -501,6 +502,7 @@ export class DaytonaBackend implements AgentBackend {
   }
 
   async readFile(groupFolder: string, relativePath: string): Promise<Buffer | null> {
+    rejectTraversalSegments(relativePath, 'readFile');
     const meta = this.sandboxes.get(groupFolder);
     if (!meta) return null;
 
@@ -508,6 +510,7 @@ export class DaytonaBackend implements AgentBackend {
   }
 
   async writeFile(groupFolder: string, relativePath: string, content: Buffer | string): Promise<void> {
+    rejectTraversalSegments(relativePath, 'writeFile');
     const meta = this.sandboxes.get(groupFolder);
     if (!meta) throw new Error(`No Daytona sandbox for group ${groupFolder}`);
 

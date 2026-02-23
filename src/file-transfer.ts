@@ -8,6 +8,7 @@ import path from 'path';
 
 import { resolveBackend } from './backends/index.js';
 import { logger } from './logger.js';
+import { rejectTraversalSegments } from './path-security.js';
 import { RegisteredGroup } from './types.js';
 
 export interface FileTransferRequest {
@@ -37,6 +38,8 @@ export async function transferFiles(req: FileTransferRequest): Promise<{ transfe
 
   for (const file of req.files) {
     try {
+      // Defense-in-depth: reject traversal before reaching any backend
+      rejectTraversalSegments(file, 'file-transfer');
       const content = await fromBackend.readFile(from.folder, file);
       if (!content) {
         errors.push(`File not found: ${file}`);

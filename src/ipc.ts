@@ -17,6 +17,7 @@ import {
   updateTask,
 } from './db.js';
 import { transferFiles } from './file-transfer.js';
+import { rejectTraversalSegments } from './path-security.js';
 import {
   findGroupByFolder,
   findJidByFolder,
@@ -735,15 +736,26 @@ export async function processTaskIpc(
 
       // If files are specified with a target_agent, do the file transfer
       if (data.target_agent && data.files && data.files.length > 0) {
+        // Validate all file paths before transfer (defense-in-depth)
+        const validFiles: string[] = [];
+        for (const file of data.files) {
+          try {
+            rejectTraversalSegments(file, 'share_request.files');
+            validFiles.push(file);
+          } catch (err) {
+            logger.warn({ file, sourceGroup, error: err }, 'Rejected share_request file path');
+          }
+        }
+
         const targetGroupEntry = findGroupByFolder(
           registeredGroups,
           data.target_agent!,
         );
-        if (targetGroupEntry && sourceGroupEntry) {
+        if (targetGroupEntry && sourceGroupEntry && validFiles.length > 0) {
           const result = await transferFiles({
             sourceGroup: sourceGroupEntry[1],
             targetGroup: targetGroupEntry[1],
-            files: data.files,
+            files: validFiles,
             direction: 'push',
           });
           logger.info(
@@ -764,15 +776,26 @@ export async function processTaskIpc(
         data.request_files &&
         data.request_files.length > 0
       ) {
+        // Validate all requested file paths (defense-in-depth)
+        const validRequestFiles: string[] = [];
+        for (const file of data.request_files) {
+          try {
+            rejectTraversalSegments(file, 'share_request.request_files');
+            validRequestFiles.push(file);
+          } catch (err) {
+            logger.warn({ file, sourceGroup, error: err }, 'Rejected share_request request_files path');
+          }
+        }
+
         const targetGroupEntry = findGroupByFolder(
           registeredGroups,
           data.target_agent!,
         );
-        if (targetGroupEntry && sourceGroupEntry) {
+        if (targetGroupEntry && sourceGroupEntry && validRequestFiles.length > 0) {
           const result = await transferFiles({
             sourceGroup: targetGroupEntry[1],
             targetGroup: sourceGroupEntry[1],
-            files: data.request_files,
+            files: validRequestFiles,
             direction: 'push',
           });
           logger.info(

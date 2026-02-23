@@ -22,6 +22,7 @@ import {
   TIMEZONE,
 } from '../config.js';
 import { logger } from '../logger.js';
+import { rejectTraversalSegments } from '../path-security.js';
 import { ContainerProcess } from '../types.js';
 import { StreamParser } from './stream-parser.js';
 import { provisionSprite } from './sprites-provisioning.js';
@@ -517,11 +518,13 @@ export class SpritesBackend implements AgentBackend {
   }
 
   async readFile(groupFolder: string, relativePath: string): Promise<Buffer | null> {
+    rejectTraversalSegments(relativePath, 'readFile');
     const sprite = this.getSpriteClient(groupFolder);
     return sprite.readFile(`/workspace/group/${relativePath}`);
   }
 
   async writeFile(groupFolder: string, relativePath: string, content: Buffer | string): Promise<void> {
+    rejectTraversalSegments(relativePath, 'writeFile');
     const sprite = this.getSpriteClient(groupFolder);
     await sprite.writeFile(`/workspace/group/${relativePath}`, content, { mkdir: true });
   }
