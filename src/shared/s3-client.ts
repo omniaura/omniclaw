@@ -13,7 +13,7 @@ export interface S3ClientConfig {
 }
 
 export class SharedS3Client {
-  private client: any; // Bun.S3Client
+  private client: InstanceType<typeof Bun.S3Client>;
 
   constructor(config: S3ClientConfig) {
     this.client = new Bun.S3Client({

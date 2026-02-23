@@ -99,11 +99,11 @@ export class SlackChannel implements Channel {
 
     // Register reaction handler (for share-request approvals etc.)
     this.app.event('reaction_added', async ({ event }) => {
-      const channelId = event.item.type === 'message' ? (event.item as any).channel : null;
+      const channelId = event.item.type === 'message' ? event.item.channel : null;
       if (!channelId) return;
 
       const chatJid = channelIdToJid(channelId);
-      const messageId = event.item.type === 'message' ? (event.item as any).ts : null;
+      const messageId = event.item.type === 'message' ? event.item.ts : null;
       if (!messageId) return;
 
       const emoji = `:${event.reaction}:`;
@@ -281,7 +281,7 @@ export class SlackChannel implements Channel {
     let channelName = channelId;
     try {
       const info = await this.client.conversations.info({ channel: channelId });
-      channelName = (info.channel as any)?.name || channelId;
+      channelName = info.channel?.name || channelId;
     } catch {
       // Fall back to channel ID
     }

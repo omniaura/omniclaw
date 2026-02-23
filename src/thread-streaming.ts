@@ -32,7 +32,7 @@ export function createThreadStreamer(
   threadName: string,
 ): ThreadStreamer {
   const thoughtLogBuffer: string[] = [];
-  let thread: any = null;
+  let thread: unknown = null;
   let threadCreationAttempted = false;
 
   const canStream =
