@@ -244,7 +244,9 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 | `ASSISTANT_NAME` | `Omni` | Bot name and trigger pattern |
 | `POLL_INTERVAL` | `2000` | Message polling interval (ms) |
 | `SCHEDULER_POLL_INTERVAL` | `60000` | Task scheduler check interval (ms) |
+| `IPC_POLL_INTERVAL` | `30000` | S3 IPC polling interval for cloud backends (ms) |
 | `CONTAINER_TIMEOUT` | `1800000` | Container execution timeout (30min) |
+| `CONTAINER_STARTUP_TIMEOUT` | `120000` | Container startup timeout (2min) |
 | `IDLE_TIMEOUT` | `1800000` | Keep container alive after last result (30min) |
 | `SESSION_MAX_AGE` | `14400000` | Rotate sessions after 4 hours |
 | `MAX_CONCURRENT_CONTAINERS` | `8` | Global container concurrency limit |
