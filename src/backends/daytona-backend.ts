@@ -116,7 +116,9 @@ class DaytonaProcessWrapper implements ContainerProcess {
   kill(): void {
     if (this._killed) return;
     this._killed = true;
-    this.sandbox.process.deleteSession(this.sessionId).catch(() => {});
+    this.sandbox.process.deleteSession(this.sessionId).catch((err) => {
+      logger.warn({ err, sessionId: this.sessionId }, 'Failed to delete Daytona session');
+    });
   }
 
   get pid(): number {

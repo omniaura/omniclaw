@@ -125,7 +125,7 @@ export class WhatsAppChannel implements Channel {
 
       if (connection === 'close') {
         this.connected = false;
-        const reason = (lastDisconnect?.error as any)?.output?.statusCode;
+        const reason = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
@@ -153,7 +153,9 @@ export class WhatsAppChannel implements Channel {
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
-        this.sock.sendPresenceUpdate('available').catch(() => {});
+        this.sock.sendPresenceUpdate('available').catch((err) => {
+          logger.warn({ err }, 'Failed to send presence update');
+        });
 
         // Clear stale typing indicators — WhatsApp "composing" persists across
         // reconnects, so any chats left in "composing" before the disconnect
@@ -162,7 +164,9 @@ export class WhatsAppChannel implements Channel {
           const staleJids = [...this.activeTypingJids];
           logger.info({ jids: staleJids }, 'Clearing stale typing indicators after reconnect');
           for (const jid of staleJids) {
-            this.sock.sendPresenceUpdate('paused', jid).catch(() => {});
+            this.sock.sendPresenceUpdate('paused', jid).catch((err) => {
+              logger.warn({ err, jid }, 'Failed to clear stale typing indicator');
+            });
           }
           // Don't clear the set — the agent is still running and will re-assert
           // "composing" on the next 8s interval tick if needed.

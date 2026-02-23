@@ -636,7 +636,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // Stop the typing keep-alive loop — must be in finally to prevent stuck
     // typing indicators when runAgent throws or the process is interrupted.
     if (typingInterval) clearInterval(typingInterval);
-    if (channel?.setTyping) await channel.setTyping(chatJid, false).catch(() => {});
+    if (channel?.setTyping) await channel.setTyping(chatJid, false).catch((err) => {
+      logger.debug({ err, chatJid }, 'Failed to clear typing indicator');
+    });
     if (idleTimer) clearTimeout(idleTimer);
   }
 
