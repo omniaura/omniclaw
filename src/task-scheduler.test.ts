@@ -363,6 +363,35 @@ describe('DB task lifecycle', () => {
       });
     });
 
+    it('silently no-ops when task was deleted while running', () => {
+      // Simulate: task existed when run started, but was deleted before logTaskRun
+      // Should NOT throw SQLITE_CONSTRAINT_FOREIGNKEY
+      createTask({
+        id: 'deleted-task',
+        group_folder: 'main',
+        chat_jid: 'g@g.us',
+        prompt: 'run me',
+        schedule_type: 'once',
+        schedule_value: '2024-06-01T00:00:00.000Z',
+        context_mode: 'isolated',
+        next_run: null,
+        status: 'active',
+        created_at: '2024-01-01T00:00:00.000Z',
+      });
+      deleteTask('deleted-task');
+
+      expect(() => {
+        logTaskRun({
+          task_id: 'deleted-task',
+          run_at: '2024-06-01T00:00:01.000Z',
+          duration_ms: 3000,
+          status: 'success',
+          result: 'completed but task gone',
+          error: null,
+        });
+      }).not.toThrow();
+    });
+
     it('deleteTask cleans up associated run logs', () => {
       createTask({
         id: 'cleanup-task',
