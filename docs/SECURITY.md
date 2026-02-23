@@ -99,7 +99,7 @@ const allowedVars = [
 **Project Root `.env` Protection (Defense-in-Depth):**
 
 The project root is bind-mounted read-only at `/workspace/project`. The `.env` file
-contains ALL secrets (not just `allowedVars`). Three layers prevent agent access:
+contains ALL secrets (not just `allowedVars`). Four layers prevent agent access:
 
 1. **Mount overlay** - `/dev/null` is mounted over `/workspace/project/.env`,
    making the file appear empty at the kernel level (upstream PR #419)

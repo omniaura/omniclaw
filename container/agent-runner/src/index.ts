@@ -397,7 +397,7 @@ export function createSanitizeBashHook(): HookCallback {
     const blockedPaths = [
       /\/tmp\/input\.json/,              // Stdin buffer
       /\/workspace\/env-dir(?:\/|$)/,   // Mounted env directory (with or without trailing slash)
-      /\/workspace\/project\/\.env(?:\s|$|[;|&])/,  // Project root .env (masked by /dev/null mount, defense-in-depth)
+      /\/workspace\/project\/\.env(?:\s|$|[;|&><)\n]|\$\()/,  // Project root .env (masked by /dev/null mount, defense-in-depth)
       /\/proc\/.*\/mountinfo/,       // Mount enumeration
       /\/proc\/.*\/mounts/,          // Mount list
       /\/etc\/mtab/,                 // Mount table

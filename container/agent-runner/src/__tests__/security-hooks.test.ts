@@ -66,6 +66,15 @@ describe('Security Hooks - Issue #79', () => {
       await expect(hook(input as any, 'id', {} as any)).rejects.toThrow(/restricted file/i);
     });
 
+    it('should block redirected access to /workspace/project/.env', async () => {
+      const hook = createSanitizeBashHook();
+      const input = {
+        tool_name: 'Bash',
+        tool_input: { command: 'cat /workspace/project/.env>/tmp/out' },
+      };
+      await expect(hook(input as any, 'id', {} as any)).rejects.toThrow(/restricted file/i);
+    });
+
     it('should block access to /proc/self/mountinfo', async () => {
       const hook = createSanitizeBashHook();
       const input = {

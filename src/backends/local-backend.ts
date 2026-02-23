@@ -77,8 +77,8 @@ function buildVolumeMounts(
     // Secrets should only flow through the filtered env-dir mount (allowedVars).
     // Overlay /dev/null so `cat /workspace/project/.env` returns empty content.
     // (Upstream PR #419, Issue #40)
-    const envFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(envFile)) {
+    const projectEnvFile = path.join(projectRoot, '.env');
+    if (fs.existsSync(projectEnvFile)) {
       mounts.push({
         hostPath: '/dev/null',
         containerPath: '/workspace/project/.env',
