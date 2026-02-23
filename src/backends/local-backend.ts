@@ -210,13 +210,15 @@ function buildVolumeMounts(
   // can customize tools without modifying host code or affecting other groups.
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
   const groupAgentRunnerDir = path.join(DATA_DIR, 'sessions', folder, 'agent-runner-src');
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
+  let hasGroupDir = fs.existsSync(groupAgentRunnerDir);
+  if (!hasGroupDir && fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    hasGroupDir = true;
   }
   mounts.push({
-    hostPath: fs.existsSync(groupAgentRunnerDir) ? groupAgentRunnerDir : agentRunnerSrc,
+    hostPath: hasGroupDir ? groupAgentRunnerDir : agentRunnerSrc,
     containerPath: '/app/src',
-    readonly: !fs.existsSync(groupAgentRunnerDir),
+    readonly: !hasGroupDir,
   });
 
   // Additional mounts
