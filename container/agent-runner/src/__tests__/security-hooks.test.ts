@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { createSanitizeBashHook, createSanitizeReadHook } from '../index.ts';
+import { createSanitizeBashHook, createSanitizeReadHook, buildContent } from '../index.ts';
 
 describe('Security Hooks - Issue #79', () => {
   describe('Bash Hook', () => {
@@ -170,6 +170,50 @@ describe('Security Hooks - Issue #79', () => {
         tool_input: { file_path: '/proc/1/../../proc/self/environ' },
       };
       await expect(hook(input as any, 'id', {} as any)).rejects.toThrow(/not allowed.*security/i);
+    });
+  });
+
+  describe('buildContent - Image Path Traversal (Issue #40)', () => {
+    it('should block path traversal to env-dir via image attachment', () => {
+      const result = buildContent('[attachment:image file=../../../../workspace/env-dir/env]');
+      // Should NOT attempt to read the file — should return blocked text
+      expect(result).toEqual([{ type: 'text', text: '[Image blocked: invalid path]' }]);
+    });
+
+    it('should block path traversal to /etc/passwd', () => {
+      const result = buildContent('[attachment:image file=../../../etc/passwd]');
+      expect(result).toEqual([{ type: 'text', text: '[Image blocked: invalid path]' }]);
+    });
+
+    it('should block relative traversal with ../', () => {
+      const result = buildContent('[attachment:image file=../secret.txt]');
+      expect(result).toEqual([{ type: 'text', text: '[Image blocked: invalid path]' }]);
+    });
+
+    it('should block traversal to /proc/self/environ', () => {
+      const result = buildContent('[attachment:image file=../../../../proc/self/environ]');
+      expect(result).toEqual([{ type: 'text', text: '[Image blocked: invalid path]' }]);
+    });
+
+    it('should allow legitimate filenames without traversal', () => {
+      // This file won't exist, so it should return "Image unavailable" (not blocked)
+      const result = buildContent('[attachment:image file=12345-photo.png]');
+      expect(result).toEqual([{ type: 'text', text: '[Image unavailable]' }]);
+    });
+
+    it('should return plain text when no image markers present', () => {
+      const text = 'Hello, this is a normal message';
+      const result = buildContent(text);
+      expect(result).toBe(text);
+    });
+
+    it('should preserve surrounding text with blocked images', () => {
+      const result = buildContent('Before [attachment:image file=../../etc/passwd] After');
+      expect(Array.isArray(result)).toBe(true);
+      const blocks = result as Array<{ type: string; text?: string }>;
+      expect(blocks[0]).toEqual({ type: 'text', text: 'Before ' });
+      expect(blocks[1]).toEqual({ type: 'text', text: '[Image blocked: invalid path]' });
+      expect(blocks[2]).toEqual({ type: 'text', text: ' After' });
     });
   });
 });
