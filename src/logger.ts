@@ -118,7 +118,7 @@ function flattenError(
   if (err instanceof Error) {
     out.err = err.message;
     const code = (err as Error & { code?: string | number }).code;
-    if (code) out.errCode = code;
+    if (code != null) out.errCode = code;
     if (process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace') {
       out.errStack = err.stack;
     }
@@ -126,7 +126,7 @@ function flattenError(
     // Effect errors, plain objects, etc.
     const e = err as ErrorLike;
     out.err = e.message || e.reason || String(err);
-    if (e.code) out.errCode = e.code;
+    if (e.code != null) out.errCode = e.code;
   } else {
     out.err = String(err);
   }
