@@ -29,6 +29,7 @@ import {
   readIpcJsonFile,
 } from './ipc-file-security.js';
 import { logger } from './logger.js';
+import { stripInternalTags } from './router.js';
 import { reconcileHeartbeats } from './task-scheduler.js';
 import {
   BackendType,
@@ -113,15 +114,20 @@ function makeCloudMessageHandler(deps: IpcDeps) {
     backendLabel: string,
   ): Promise<void> => {
     if (data.type !== 'message' || !data.chatJid || !data.text) return;
+    const text = stripInternalTags(data.text);
+    if (!text) {
+      logger.debug({ chatJid: data.chatJid, sourceGroup }, `${backendLabel} IPC message suppressed (internal-only)`);
+      return;
+    }
     const registeredGroups = deps.registeredGroups();
     const targetGroup = registeredGroups[data.chatJid];
     const isSelf = targetGroup && targetGroup.folder === sourceGroup;
     const isMain = sourceGroup === MAIN_GROUP_FOLDER;
     if (isMain || isSelf || !!targetGroup) {
-      await deps.sendMessage(data.chatJid, data.text);
+      await deps.sendMessage(data.chatJid, text);
       // Cross-group message: also wake up the target agent
       if (targetGroup && targetGroup.folder !== sourceGroup) {
-        deps.notifyGroup(data.chatJid, data.text);
+        deps.notifyGroup(data.chatJid, text);
       }
       logger.info(
         { chatJid: data.chatJid, sourceGroup },
@@ -287,9 +293,15 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 continue;
               }
               if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: any registered agent can message any other registered agent
+                // Strip <internal>...</internal> blocks before sending
                 const msgChatJid = data.chatJid as string;
-                const msgText = data.text as string;
+                const msgText = stripInternalTags(data.text as string);
+                if (!msgText) {
+                  logger.debug({ chatJid: data.chatJid, sourceGroup }, 'IPC message suppressed (internal-only)');
+                  fs.unlinkSync(filePath);
+                  continue;
+                }
+                // Authorization: any registered agent can message any other registered agent
                 const targetGroup = registeredGroups[msgChatJid];
                 const isSelf =
                   targetGroup && targetGroup.folder === sourceGroup;
