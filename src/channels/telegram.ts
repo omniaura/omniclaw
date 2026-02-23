@@ -197,8 +197,9 @@ export class TelegramChannel implements Channel {
         ? { reply_parameters: { message_id: parseInt(replyToMessageId, 10) } }
         : {};
 
-      // Telegram has a 4096 character limit per message — split if needed
-      const chunks = splitMessage(text, 4096);
+      // Telegram has a 4096 character limit per message — split if needed.
+      // Preserve leading whitespace so code blocks / indented content aren't mangled.
+      const chunks = splitMessage(text, 4096, { preserveLeadingWhitespace: true });
       for (let i = 0; i < chunks.length; i++) {
         const opts = i === 0 ? replyParams : {};
         await this.bot.api.sendMessage(numericId, chunks[i], opts);

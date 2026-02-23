@@ -477,11 +477,24 @@ export async function processTaskIpc(
     resume_task: 'resumed',
     cancel_task: 'cancelled',
   };
+  const TASK_ACTION_VERBS: Record<string, string> = {
+    pause_task: 'pause',
+    resume_task: 'resume',
+    cancel_task: 'cancel',
+  };
   const handleTaskLifecycle = (action: string, taskId: string | undefined, srcGroup: string, isMainGroup: boolean) => {
-    if (!taskId) return;
+    const verb = TASK_ACTION_VERBS[action] ?? action;
+    if (!taskId) {
+      logger.warn({ action, sourceGroup: srcGroup }, `Task ${verb} attempt with missing taskId`);
+      return;
+    }
     const task = getTaskById(taskId);
     const label = TASK_ACTION_LABELS[action] ?? action;
-    if (task && (isMainGroup || task.group_folder === srcGroup)) {
+    if (!task) {
+      logger.warn({ taskId, sourceGroup: srcGroup }, `Task ${verb} attempt but task not found`);
+      return;
+    }
+    if (isMainGroup || task.group_folder === srcGroup) {
       if (action === 'cancel_task') {
         deleteTask(taskId);
       } else {
@@ -490,7 +503,7 @@ export async function processTaskIpc(
       logger.info({ taskId, sourceGroup: srcGroup }, `Task ${label} via IPC`);
       refreshTasksSnapshot();
     } else {
-      logger.warn({ taskId, sourceGroup: srcGroup }, `Unauthorized task ${label.replace('d', '')} attempt`);
+      logger.warn({ taskId, sourceGroup: srcGroup }, `Unauthorized task ${verb} attempt`);
     }
   };
 
