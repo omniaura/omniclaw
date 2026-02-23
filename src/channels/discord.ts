@@ -28,7 +28,7 @@ import {
 import {
   getAllRegisteredGroups,
   storeChatMetadata,
-  storeMessageDirect,
+  storeMessage,
 } from '../db.js';
 import { logger } from '../logger.js';
 import { Channel, RegisteredGroup } from '../types.js';
@@ -675,7 +675,7 @@ export class DiscordChannel implements Channel {
     this.cleanupOldMedia(group.folder);
 
     // Store message — startMessageLoop() will pick it up
-    storeMessageDirect({
+    storeMessage({
       id: msgId,
       chat_jid: chatJid,
       sender,

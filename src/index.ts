@@ -71,9 +71,6 @@ import { findMainGroupJid } from './group-helpers.js';
 import { logger } from './logger.js';
 import { Effect } from 'effect';
 
-// Re-export for backwards compatibility during refactor
-export { escapeXml, formatMessages } from './router.js';
-
 // Global error handlers to prevent crashes from unhandled rejections/exceptions
 // See: https://github.com/omniaura/omniclaw/issues/221
 // Adopted from [Upstream PR #243] - Critical stability fix

@@ -311,34 +311,6 @@ export function storeMessage(msg: NewMessage): void {
   );
 }
 
-/**
- * Store a message directly (for non-WhatsApp channels that don't use Baileys proto).
- */
-export function storeMessageDirect(msg: {
-  id: string;
-  chat_jid: string;
-  sender: string;
-  sender_name: string;
-  content: string;
-  timestamp: string;
-  is_from_me: boolean;
-  sender_user_id?: string; // Platform-specific user ID (Issue #66)
-  mentions?: Array<{ id: string; name: string; platform: string }>; // User mentions (Issue #66)
-}): void {
-  db.query(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, sender_user_id, mentions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    msg.id,
-    msg.chat_jid,
-    msg.sender,
-    msg.sender_name,
-    msg.content,
-    msg.timestamp,
-    msg.is_from_me ? 1 : 0,
-    msg.sender_user_id ?? null,
-    msg.mentions ? JSON.stringify(msg.mentions) : null,
-  );
-}
 
 export function getNewMessages(
   jids: string[],
