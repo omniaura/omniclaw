@@ -223,12 +223,19 @@ const EXT_TO_MEDIA_TYPE: Record<string, string> = {
   '.webp': 'image/webp',
 };
 
+const MEDIA_DIR = '/workspace/group/media';
+
 /**
  * Parse [attachment:image file=...] markers in text.
  * Returns the original string if no images found, or ContentBlock[] with
  * interleaved text and base64-encoded image blocks.
+ *
+ * Security: Validates that resolved file paths stay within the media directory
+ * to prevent path traversal attacks that could bypass Read/Bash hook protections.
+ * See: https://github.com/omniaura/omniclaw/issues/40
  */
-function buildContent(text: string): string | ContentBlock[] {
+/** @internal exported for testing */
+export function buildContent(text: string): string | ContentBlock[] {
   const matches = [...text.matchAll(IMAGE_MARKER_RE)];
   if (matches.length === 0) return text;
 
@@ -243,7 +250,17 @@ function buildContent(text: string): string | ContentBlock[] {
     }
 
     const filename = match[1];
-    const filePath = path.join('/workspace/group/media', filename);
+    const filePath = path.resolve(MEDIA_DIR, filename);
+
+    // Security: Ensure resolved path stays within the media directory.
+    // Without this check, a crafted filename like "../../../../workspace/env-dir/env"
+    // could read secrets, bypassing createSanitizeReadHook protections.
+    if (!filePath.startsWith(MEDIA_DIR + '/')) {
+      log(`Path traversal blocked in image attachment: ${filename}`);
+      blocks.push({ type: 'text', text: '[Image blocked: invalid path]' });
+      lastIndex = match.index! + match[0].length;
+      continue;
+    }
 
     try {
       if (fs.existsSync(filePath)) {
