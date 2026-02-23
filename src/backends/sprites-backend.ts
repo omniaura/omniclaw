@@ -38,6 +38,21 @@ import {
 
 const API_BASE = 'https://api.sprites.dev/v1';
 
+/** Error thrown when a Sprite exec command fails. */
+class ExecError extends Error {
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+
+  constructor(exitCode: number, stdout: string, stderr: string) {
+    super(`Command failed with exit code ${exitCode}: ${stderr}`);
+    this.name = 'ExecError';
+    this.exitCode = exitCode;
+    this.stdout = stdout;
+    this.stderr = stderr;
+  }
+}
+
 /** Lightweight wrapper around Sprites REST + Exec API */
 class SpriteClient {
   private token: string;
@@ -126,11 +141,7 @@ class SpriteClient {
 
     const exitCode = await proc.exited;
     if (exitCode !== 0) {
-      const err = new Error(`Command failed with exit code ${exitCode}: ${stderr}`);
-      (err as any).exitCode = exitCode;
-      (err as any).stdout = stdout;
-      (err as any).stderr = stderr;
-      throw err;
+      throw new ExecError(exitCode, stdout, stderr);
     }
     return { stdout, stderr };
   }

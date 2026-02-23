@@ -101,6 +101,13 @@ function formatTimestamp(ts: number): string {
 // Error flattening
 // ---------------------------------------------------------------------------
 
+/** Error-like object with optional code/reason fields (Node.js errors, Effect errors, plain objects). */
+interface ErrorLike {
+  message?: string;
+  reason?: string;
+  code?: string | number;
+}
+
 function flattenError(
   fields: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -110,13 +117,14 @@ function flattenError(
   const out = { ...fields };
   if (err instanceof Error) {
     out.err = err.message;
-    if ((err as any).code) out.errCode = (err as any).code;
+    const code = (err as Error & { code?: string | number }).code;
+    if (code) out.errCode = code;
     if (process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace') {
       out.errStack = err.stack;
     }
   } else if (typeof err === 'object') {
     // Effect errors, plain objects, etc.
-    const e = err as any;
+    const e = err as ErrorLike;
     out.err = e.message || e.reason || String(err);
     if (e.code) out.errCode = e.code;
   } else {

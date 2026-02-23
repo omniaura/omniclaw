@@ -120,8 +120,9 @@ export interface Channel {
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: thread support for streaming intermediate output.
-  createThread?(jid: string, messageId: string, name: string): Promise<any>;
-  sendToThread?(thread: any, text: string): Promise<void>;
+  // Thread handles are opaque — callers store the value from createThread and pass it to sendToThread.
+  createThread?(jid: string, messageId: string, name: string): Promise<unknown>;
+  sendToThread?(thread: unknown, text: string): Promise<void>;
   // Optional: add/remove emoji reactions on messages.
   addReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
   removeReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
