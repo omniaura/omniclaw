@@ -96,7 +96,18 @@ const allowedVars = [
 ];
 ```
 
-> **Note:** Anthropic credentials are mounted so that Claude Code can authenticate when the agent runs. However, this means the agent itself can discover these credentials via Bash or file operations. Ideally, Claude Code would authenticate without exposing credentials to the agent's execution environment, but I couldn't figure this out. **PRs welcome** if you have ideas for credential isolation.
+**Project Root `.env` Protection (Defense-in-Depth):**
+
+The project root is bind-mounted read-only at `/workspace/project`. The `.env` file
+contains ALL secrets (not just `allowedVars`). Three layers prevent agent access:
+
+1. **Mount overlay** - `/dev/null` is mounted over `/workspace/project/.env`,
+   making the file appear empty at the kernel level (upstream PR #419)
+2. **Bash hook** - Commands accessing `/workspace/project/.env` are blocked
+3. **Read hook** - Read tool access to `/workspace/project/.env` is blocked
+4. **Claude Code settings** - `deny: ["Read(path:.env)"]` in `.claude/settings.json`
+
+> **Note:** Anthropic credentials are delivered via the filtered env-dir mount (`allowedVars` only). The agent can discover these credentials via Bash or file operations on `/workspace/env-dir/`. Ideally, Claude Code would authenticate without exposing credentials to the agent's execution environment. **PRs welcome** if you have ideas for credential isolation.
 
 ## Privilege Comparison
 

@@ -72,6 +72,20 @@ function buildVolumeMounts(
       readonly: true,
     });
 
+    // Mask .env inside the container to prevent secret leakage.
+    // The project root mount above exposes .env to the agent (even read-only).
+    // Secrets should only flow through the filtered env-dir mount (allowedVars).
+    // Overlay /dev/null so `cat /workspace/project/.env` returns empty content.
+    // (Upstream PR #419, Issue #40)
+    const envFile = path.join(projectRoot, '.env');
+    if (fs.existsSync(envFile)) {
+      mounts.push({
+        hostPath: '/dev/null',
+        containerPath: '/workspace/project/.env',
+        readonly: true,
+      });
+    }
+
     // Main also gets its group folder as the working directory
     const groupPath = path.join(GROUPS_DIR, folder);
     assertPathWithin(groupPath, GROUPS_DIR, 'group folder');
