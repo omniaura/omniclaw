@@ -1,6 +1,6 @@
 # OmniClaw Specification
 
-A personal Claude assistant accessible via WhatsApp, with persistent memory per conversation, scheduled tasks, and email integration.
+A personal AI assistant framework accessible via WhatsApp, Discord, Telegram, and Slack — with persistent memory per conversation, scheduled tasks, multiple compute backends, and inter-agent communication.
 
 ---
 
@@ -23,62 +23,92 @@ A personal Claude assistant accessible via WhatsApp, with persistent memory per 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        HOST (macOS)                                  │
-│                   (Main Node.js Process)                             │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌──────────────┐                     ┌────────────────────┐        │
-│  │  WhatsApp    │────────────────────▶│   SQLite Database  │        │
-│  │  (baileys)   │◀────────────────────│   (messages.db)    │        │
-│  └──────────────┘   store/send        └─────────┬──────────┘        │
-│                                                  │                   │
-│         ┌────────────────────────────────────────┘                   │
-│         │                                                            │
-│         ▼                                                            │
-│  ┌──────────────────┐    ┌──────────────────┐    ┌───────────────┐  │
-│  │  Message Loop    │    │  Scheduler Loop  │    │  IPC Watcher  │  │
-│  │  (polls SQLite)  │    │  (checks tasks)  │    │  (file-based) │  │
-│  └────────┬─────────┘    └────────┬─────────┘    └───────────────┘  │
-│           │                       │                                  │
-│           └───────────┬───────────┘                                  │
-│                       │ spawns container                             │
-│                       ▼                                              │
-├─────────────────────────────────────────────────────────────────────┤
-│                  APPLE CONTAINER (Linux VM)                          │
-├─────────────────────────────────────────────────────────────────────┤
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                    AGENT RUNNER                               │   │
-│  │                                                                │   │
-│  │  Working directory: /workspace/group (mounted from host)       │   │
-│  │  Volume mounts:                                                │   │
-│  │    • groups/{name}/ → /workspace/group                         │   │
-│  │    • groups/global/ → /workspace/global/ (non-main only)        │   │
-│  │    • data/sessions/{group}/.claude/ → /home/node/.claude/      │   │
-│  │    • Additional dirs → /workspace/extra/*                      │   │
-│  │                                                                │   │
-│  │  Tools (all groups):                                           │   │
-│  │    • Bash (safe - sandboxed in container!)                     │   │
-│  │    • Read, Write, Edit, Glob, Grep (file operations)           │   │
-│  │    • WebSearch, WebFetch (internet access)                     │   │
-│  │    • agent-browser (browser automation)                        │   │
-│  │    • mcp__omniclaw__* (scheduler tools via IPC)                │   │
-│  │                                                                │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                          HOST (macOS / Linux)                            │
+│                       (Main Bun/TypeScript Process)                      │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐           │
+│  │  WhatsApp  │ │  Discord   │ │  Telegram  │ │   Slack    │           │
+│  │ (baileys)  │ │(discord.js)│ │  (grammY)  │ │  (bolt)    │           │
+│  └─────┬──────┘ └─────┬──────┘ └─────┬──────┘ └─────┬──────┘           │
+│        └───────────────┴───────┬──────┴───────────────┘                  │
+│                                │ Channel interface                       │
+│                                ▼                                         │
+│                   ┌────────────────────────┐                             │
+│                   │    SQLite Database      │                             │
+│                   │    (messages.db)        │                             │
+│                   └────────────┬───────────┘                             │
+│                                │                                         │
+│     ┌──────────────────────────┼──────────────────────┐                  │
+│     │                          │                      │                  │
+│     ▼                          ▼                      ▼                  │
+│  ┌──────────────┐  ┌──────────────────┐  ┌───────────────┐              │
+│  │ Message Loop │  │ Scheduler Loop   │  │  IPC Watcher  │              │
+│  │ (polls DB)   │  │ (checks tasks)   │  │  (file/S3)    │              │
+│  └──────┬───────┘  └────────┬─────────┘  └───────────────┘              │
+│         │                   │                                            │
+│         └─────────┬─────────┘                                            │
+│                   │ routes to backend                                    │
+│                   ▼                                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │                    BACKEND ABSTRACTION                           │    │
+│  │  ┌────────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌───────┐ │    │
+│  │  │   Local    │ │ Sprites │ │ Daytona │ │ Railway │ │Hetzner│ │    │
+│  │  │(Apple/Dock)│ │ (cloud) │ │ (cloud) │ │ (cloud) │ │(cloud)│ │    │
+│  │  └────────────┘ └─────────┘ └─────────┘ └─────────┘ └───────┘ │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+├──────────────────────────────────────────────────────────────────────────┤
+│                     AGENT CONTAINER (Linux VM)                           │
+├──────────────────────────────────────────────────────────────────────────┤
+│  ┌──────────────────────────────────────────────────────────────┐       │
+│  │                    AGENT RUNNER                               │       │
+│  │                                                               │       │
+│  │  Working directory: /workspace/group (mounted from host)      │       │
+│  │  Volume mounts:                                               │       │
+│  │    • groups/{name}/ → /workspace/group                        │       │
+│  │    • groups/global/ → /workspace/global/ (non-main only)      │       │
+│  │    • data/sessions/{group}/.claude/ → /home/bun/.claude/      │       │
+│  │    • Additional dirs → /workspace/extra/*                     │       │
+│  │                                                               │       │
+│  │  Tools (all groups):                                          │       │
+│  │    • Bash (safe — sandboxed in container)                     │       │
+│  │    • Read, Write, Edit, Glob, Grep (file operations)          │       │
+│  │    • WebSearch, WebFetch (internet access)                    │       │
+│  │    • agent-browser (browser automation)                       │       │
+│  │    • mcp__omniclaw__* (16 IPC tools, see MCP section)         │       │
+│  │                                                               │       │
+│  └──────────────────────────────────────────────────────────────┘       │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Technology Stack
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| WhatsApp Connection | Node.js (@whiskeysockets/baileys) | Connect to WhatsApp, send/receive messages |
-| Message Storage | SQLite (better-sqlite3) | Store messages for polling |
-| Container Runtime | Apple Container | Isolated Linux VMs for agent execution |
-| Agent | @anthropic-ai/claude-agent-sdk (0.2.29) | Run Claude with tools and MCP servers |
-| Browser Automation | agent-browser + Chromium | Web interaction and screenshots |
-| Runtime | Node.js 20+ | Host process for routing and scheduling |
+| Runtime | Bun | Host process, build, test, package management |
+| WhatsApp | @whiskeysockets/baileys | WhatsApp Web protocol |
+| Discord | discord.js | Discord bot gateway |
+| Telegram | grammY | Telegram Bot API |
+| Slack | @slack/bolt + @slack/web-api | Slack Socket Mode |
+| Message Storage | SQLite (bun:sqlite) | Messages, groups, tasks, sessions, routing |
+| Local Backend | Apple Container / Docker | Isolated Linux VMs on the host machine |
+| Cloud Backends | Sprites, Daytona, Railway, Hetzner | Remote agent execution |
+| Agent | Claude Agent SDK | Run Claude with tools and MCP servers |
+| Cloud IPC | Backblaze B2 (S3-compatible) | IPC for cloud-backed agents |
+| Browser | agent-browser + Chromium | Web interaction and screenshots |
+| Structured Effects | Effect-TS | Message queue, user registry |
+| Structured Logging | Pino | JSON log output |
+
+### Key Abstractions
+
+**Channel** (`src/types.ts: Channel`): Unified interface for messaging platforms. Each channel adapter (WhatsApp, Discord, Telegram, Slack) implements `connect()`, `sendMessage()`, `ownsJid()`, and optional features like typing indicators, threads, and reactions.
+
+**AgentBackend** (`src/backends/types.ts`): Unified interface for agent execution environments. Each backend implements `runAgent()`, `sendMessage()`, `readFile()`, `writeFile()`. Local backends use Apple Container/Docker with file-based IPC; cloud backends use S3-based IPC.
+
+**Agent / ChannelRoute** (`src/types.ts`): Decoupled model where Agents are compute entities and ChannelRoutes map channel JIDs to agents. Multiple channels can route to the same agent.
 
 ---
 
@@ -89,79 +119,96 @@ omniclaw/
 ├── CLAUDE.md                      # Project context for Claude Code
 ├── docs/
 │   ├── SPEC.md                    # This specification document
-│   ├── REQUIREMENTS.md            # Architecture decisions
-│   └── SECURITY.md                # Security model
+│   ├── ROADMAP.md                 # Product roadmap
+│   ├── REQUIREMENTS.md            # Architecture decisions and philosophy
+│   ├── SECURITY.md                # Security model
+│   └── *.md                       # Additional docs (networking, debugging, etc.)
 ├── README.md                      # User documentation
-├── package.json                   # Node.js dependencies
+├── package.json                   # Bun/Node.js dependencies
 ├── tsconfig.json                  # TypeScript configuration
 ├── .mcp.json                      # MCP server configuration (reference)
-├── .gitignore
 │
 ├── src/
 │   ├── index.ts                   # Orchestrator: state, message loop, agent invocation
 │   ├── channels/
-│   │   └── whatsapp.ts            # WhatsApp connection, auth, send/receive
+│   │   ├── whatsapp.ts            # WhatsApp adapter (baileys)
+│   │   ├── discord.ts             # Discord adapter (discord.js)
+│   │   ├── telegram.ts            # Telegram adapter (grammY)
+│   │   ├── slack.ts               # Slack adapter (bolt)
+│   │   └── utils.ts               # Shared channel utilities
+│   ├── backends/
+│   │   ├── index.ts               # Backend factory and resolution
+│   │   ├── types.ts               # AgentBackend interface, ContainerInput/Output
+│   │   ├── local-backend.ts       # Apple Container / Docker backend
+│   │   ├── sprites-backend.ts     # Sprites cloud backend
+│   │   ├── daytona-backend.ts     # Daytona cloud backend
+│   │   ├── railway-backend.ts     # Railway cloud backend
+│   │   ├── hetzner-backend.ts     # Hetzner cloud backend
+│   │   ├── stream-parser.ts       # Parse streaming agent output
+│   │   ├── sprites-ipc-poller.ts  # S3 IPC polling for Sprites
+│   │   ├── daytona-ipc-poller.ts  # S3 IPC polling for Daytona
+│   │   └── *-provisioning.ts      # Cloud resource provisioning
+│   ├── effect/
+│   │   ├── message-queue.ts       # Effect-TS based message queue
+│   │   ├── user-registry.ts       # User identity registry
+│   │   └── logger-layer.ts        # Effect logger layer
+│   ├── shared/
+│   │   └── *.ts                   # Shared utilities
+│   ├── s3/
+│   │   ├── client.ts              # S3/B2 client for cloud IPC
+│   │   ├── file-sync.ts           # File synchronization via S3
+│   │   ├── ipc-poller.ts          # S3 IPC message polling
+│   │   └── types.ts               # S3 types
 │   ├── ipc.ts                     # IPC watcher and task processing
 │   ├── router.ts                  # Message formatting and outbound routing
+│   ├── agents.ts                  # Agent CRUD operations
+│   ├── channel-routes.ts          # Channel → Agent routing
 │   ├── config.ts                  # Configuration constants
-│   ├── types.ts                   # TypeScript interfaces (includes Channel)
-│   ├── logger.ts                  # Pino logger setup
-│   ├── db.ts                      # SQLite database initialization and queries
+│   ├── types.ts                   # TypeScript interfaces
+│   ├── logger.ts                  # Pino structured logger
+│   ├── db.ts                      # SQLite database (tables, queries)
 │   ├── group-queue.ts             # Per-group queue with global concurrency limit
-│   ├── mount-security.ts          # Mount allowlist validation for containers
-│   ├── whatsapp-auth.ts           # Standalone WhatsApp authentication
-│   ├── task-scheduler.ts          # Runs scheduled tasks when due
-│   └── container-runner.ts        # Spawns agents in Apple Containers
+│   ├── group-helpers.ts           # Group utility functions
+│   ├── mount-security.ts          # Mount allowlist validation
+│   ├── path-security.ts           # Path traversal protection
+│   ├── ipc-file-security.ts       # IPC file intake hardening
+│   ├── file-transfer.ts           # Agent file transfer support
+│   ├── task-scheduler.ts          # Scheduled task execution
+│   ├── schedule-utils.ts          # Cron/interval utilities
+│   ├── thread-streaming.ts        # Stream intermediate output to threads
+│   ├── container-runner.ts        # Legacy container runner (local backend)
+│   ├── telegram.ts                # Legacy Telegram support
+│   └── whatsapp-auth.ts           # Standalone WhatsApp authentication
 │
 ├── container/
-│   ├── Dockerfile                 # Container image (runs as 'node' user, includes Claude Code CLI)
+│   ├── Dockerfile                 # Container image (Bun runtime, Claude Code CLI)
 │   ├── build.sh                   # Build script for container image
 │   ├── agent-runner/              # Code that runs inside the container
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   └── src/
 │   │       ├── index.ts           # Entry point (query loop, IPC polling, session resume)
-│   │       └── ipc-mcp-stdio.ts   # Stdio-based MCP server for host communication
+│   │       └── ipc-mcp-stdio.ts   # Stdio MCP server (16 tools for host communication)
 │   └── skills/
 │       └── agent-browser.md       # Browser automation skill
 │
-├── dist/                          # Compiled JavaScript (gitignored)
+├── .claude/skills/                # Claude Code skills for setup and customization
 │
-├── .claude/
-│   └── skills/
-│       ├── setup/SKILL.md              # /setup - First-time installation
-│       ├── customize/SKILL.md          # /customize - Add capabilities
-│       ├── debug/SKILL.md              # /debug - Container debugging
-│       ├── add-telegram/SKILL.md       # /add-telegram - Telegram channel
-│       ├── add-gmail/SKILL.md          # /add-gmail - Gmail integration
-│       ├── add-voice-transcription/    # /add-voice-transcription - Whisper
-│       ├── x-integration/SKILL.md      # /x-integration - X/Twitter
-│       ├── convert-to-docker/SKILL.md  # /convert-to-docker - Docker runtime
-│       └── add-parallel/SKILL.md       # /add-parallel - Parallel agents
-│
-├── groups/
+├── groups/                        # Per-group workspaces
 │   ├── CLAUDE.md                  # Global memory (all groups read this)
-│   ├── main/                      # Self-chat (main control channel)
-│   │   ├── CLAUDE.md              # Main channel memory
-│   │   └── logs/                  # Task execution logs
-│   └── {Group Name}/              # Per-group folders (created on registration)
-│       ├── CLAUDE.md              # Group-specific memory
-│       ├── logs/                  # Task logs for this group
-│       └── *.md                   # Files created by the agent
+│   ├── main/                      # Admin/control channel
+│   └── {folder}/                  # Per-group folders
 │
 ├── store/                         # Local data (gitignored)
 │   ├── auth/                      # WhatsApp authentication state
-│   └── messages.db                # SQLite database (messages, chats, scheduled_tasks, task_run_logs, registered_groups, sessions, router_state)
+│   └── messages.db                # SQLite database
 │
 ├── data/                          # Application state (gitignored)
-│   ├── sessions/                  # Per-group session data (.claude/ dirs with JSONL transcripts)
-│   ├── env/env                    # Copy of .env for container mounting
-│   └── ipc/                       # Container IPC (messages/, tasks/)
+│   ├── sessions/                  # Per-group session data
+│   ├── env/env                    # Auth credentials for container mounting
+│   └── ipc/                       # Local container IPC (messages/, tasks/)
 │
 ├── logs/                          # Runtime logs (gitignored)
-│   ├── omniclaw.log               # Host stdout
-│   └── omniclaw.error.log         # Host stderr
-│   # Note: Per-container logs are in groups/{folder}/logs/container-*.log
 │
 └── launchd/
     └── com.omniclaw.plist         # macOS service configuration
@@ -174,92 +221,73 @@ omniclaw/
 Configuration constants are in `src/config.ts`:
 
 ```typescript
-import path from 'path';
+export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Omni';
 
-export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
+// Channel tokens
+export const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || '';
+export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+export const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
+export const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN || '';
+
+// Core intervals
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
-// Paths are absolute (required for container mounts)
-const PROJECT_ROOT = process.cwd();
-export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
-export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
-export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
-
 // Container configuration
 export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || 'omniclaw-agent:latest';
-export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800000', 10); // 30min default
-export const IPC_POLL_INTERVAL = 1000;
-export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep container alive after last result
-export const MAX_CONCURRENT_CONTAINERS = Math.max(1, parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5);
+export const CONTAINER_TIMEOUT = 1800000;      // 30min default
+export const CONTAINER_MEMORY = '4G';
+export const MAX_CONCURRENT_CONTAINERS = 8;
+export const SESSION_MAX_AGE = 14400000;        // 4 hours — auto-rotate sessions
 
-export const TRIGGER_PATTERN = new RegExp(`^@${ASSISTANT_NAME}\\b`, 'i');
+// Cloud backend configs: SPRITES_TOKEN, DAYTONA_API_KEY, RAILWAY_API_TOKEN, HETZNER_API_TOKEN
+// S3/B2 storage: B2_ENDPOINT, B2_ACCESS_KEY_ID, B2_SECRET_ACCESS_KEY, B2_BUCKET
 ```
 
-**Note:** Paths must be absolute for Apple Container volume mounts to work correctly.
+**Note:** Paths must be absolute for container volume mounts to work correctly.
 
 ### Container Configuration
 
-Groups can have additional directories mounted via `containerConfig` in the SQLite `registered_groups` table (stored as JSON in the `container_config` column). Example registration:
+Groups/agents can have additional directories mounted via `containerConfig`. Example:
 
 ```typescript
-registerGroup("1234567890@g.us", {
-  name: "Dev Team",
-  folder: "dev-team",
-  trigger: "@Andy",
-  added_at: new Date().toISOString(),
-  containerConfig: {
-    additionalMounts: [
-      {
-        hostPath: "~/projects/webapp",
-        containerPath: "webapp",
-        readonly: false,
-      },
-    ],
-    timeout: 600000,
-  },
-});
+containerConfig: {
+  additionalMounts: [
+    { hostPath: "~/projects/webapp", containerPath: "webapp", readonly: false }
+  ],
+  timeout: 600000,
+  memory: 4096,
+}
 ```
 
-Additional mounts appear at `/workspace/extra/{containerPath}` inside the container.
+Additional mounts appear at `/workspace/extra/{containerPath}` inside the container. A mount allowlist at `~/.config/omniclaw/mount-allowlist.json` restricts which host paths can be mounted.
 
-**Apple Container mount syntax note:** Read-write mounts use `-v host:container`, but readonly mounts require `--mount "type=bind,source=...,target=...,readonly"` (the `:ro` suffix doesn't work).
+### Backend Configuration
+
+Each agent can specify its compute backend:
+
+| Backend | Config | Use Case |
+|---------|--------|----------|
+| `apple-container` | Default, no extra config | macOS local execution |
+| `docker` | Uses same LocalBackend | Linux/cross-platform local execution |
+| `sprites` | `SPRITES_TOKEN`, `SPRITES_ORG` | Cloud VMs (persistent, always-on) |
+| `daytona` | `DAYTONA_API_KEY`, `DAYTONA_API_URL` | Cloud dev environments |
+| `railway` | `RAILWAY_API_TOKEN` | Railway cloud deployment |
+| `hetzner` | `HETZNER_API_TOKEN` | Hetzner cloud servers |
 
 ### Claude Authentication
 
-Configure authentication in a `.env` file in the project root. Two options:
+Configure in `.env`:
 
-**Option 1: Claude Subscription (OAuth token)**
 ```bash
+# Option 1: Claude Subscription (OAuth token)
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
-```
-The token can be extracted from `~/.claude/.credentials.json` if you're logged in to Claude Code.
 
-**Option 2: Pay-per-use API Key**
-```bash
+# Option 2: Pay-per-use API Key
 ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`) are extracted from `.env` and written to `data/env/env`, then mounted into the container at `/workspace/env-dir/env` and sourced by the entrypoint script. This ensures other environment variables in `.env` are not exposed to the agent. This workaround is needed because Apple Container loses `-e` environment variables when using `-i` (interactive mode with piped stdin).
-
-### Changing the Assistant Name
-
-Set the `ASSISTANT_NAME` environment variable:
-
-```bash
-ASSISTANT_NAME=Bot npm start
-```
-
-Or edit the default in `src/config.ts`. This changes:
-- The trigger pattern (messages must start with `@YourName`)
-- The response prefix (`YourName:` added automatically)
-
-### Placeholder Values in launchd
-
-Files with `{{PLACEHOLDER}}` values need to be configured:
-- `{{PROJECT_ROOT}}` - Absolute path to your omniclaw installation
-- `{{NODE_PATH}}` - Path to node binary (detected via `which node`)
-- `{{HOME}}` - User's home directory
+Only auth variables are extracted and mounted into containers at `/workspace/env-dir/env`.
 
 ---
 
@@ -273,6 +301,7 @@ OmniClaw uses a hierarchical memory system based on CLAUDE.md files.
 |-------|----------|---------|------------|---------|
 | **Global** | `groups/CLAUDE.md` | All groups | Main only | Preferences, facts, context shared across all conversations |
 | **Group** | `groups/{name}/CLAUDE.md` | That group | That group | Group-specific context, conversation memory |
+| **Server** | `groups/servers/{server}/` | Channels in server | Those channels | Shared context across Discord channels in the same server |
 | **Files** | `groups/{name}/*.md` | That group | That group | Notes, research, documents created during conversation |
 
 ### How Memory Works
@@ -285,26 +314,22 @@ OmniClaw uses a hierarchical memory system based on CLAUDE.md files.
 
 2. **Writing Memory**
    - When user says "remember this", agent writes to `./CLAUDE.md`
-   - When user says "remember this globally" (main channel only), agent writes to `../CLAUDE.md`
-   - Agent can create files like `notes.md`, `research.md` in the group folder
+   - Agent can create files in the group folder
 
-3. **Main Channel Privileges**
-   - Only the "main" group (self-chat) can write to global memory
-   - Main can manage registered groups and schedule tasks for any group
-   - Main can configure additional directory mounts for any group
-   - All groups have Bash access (safe because it runs inside container)
+3. **Inter-Agent Context Sharing**
+   - `share_request` — request context from another agent or admin
+   - `delegate_task` — delegate work to the local admin agent
+   - `request_context` / `read_context` / `list_context_topics` — read shared context storage
 
 ---
 
 ## Session Management
 
-Sessions enable conversation continuity - Claude remembers what you talked about.
-
-### How Sessions Work
+Sessions enable conversation continuity.
 
 1. Each group has a session ID stored in SQLite (`sessions` table, keyed by `group_folder`)
 2. Session ID is passed to Claude Agent SDK's `resume` option
-3. Claude continues the conversation with full context
+3. Sessions auto-rotate after `SESSION_MAX_AGE` (4 hours) to prevent unbounded context growth
 4. Session transcripts are stored as JSONL files in `data/sessions/{group}/.claude/`
 
 ---
@@ -314,22 +339,22 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 ### Incoming Message Flow
 
 ```
-1. User sends WhatsApp message
+1. User sends message on any channel (WhatsApp, Discord, Telegram, Slack)
    │
    ▼
-2. Baileys receives message via WhatsApp Web protocol
+2. Channel adapter receives message via platform SDK
    │
    ▼
-3. Message stored in SQLite (store/messages.db)
+3. Message stored in SQLite (store/messages.db) via onInboundMessage callback
    │
    ▼
 4. Message loop polls SQLite (every 2 seconds)
    │
    ▼
 5. Router checks:
-   ├── Is chat_jid in registered groups (SQLite)? → No: ignore
+   ├── Is chat_jid in registered groups? → No: ignore
    └── Does message match trigger pattern? → No: store but don't process
-   │
+   │       (configurable per-group: requiresTrigger, autoRespondToQuestions, autoRespondKeywords)
    ▼
 6. Router catches up conversation:
    ├── Fetch all messages since last agent interaction
@@ -337,19 +362,17 @@ Sessions enable conversation continuity - Claude remembers what you talked about
    └── Build prompt with full conversation context
    │
    ▼
-7. Router invokes Claude Agent SDK:
+7. Backend resolves and runs agent:
    ├── cwd: groups/{group-name}/
    ├── prompt: conversation history + current message
    ├── resume: session_id (for continuity)
-   └── mcpServers: omniclaw (scheduler)
+   └── mcpServers: omniclaw (16 IPC tools)
    │
    ▼
-8. Claude processes message:
-   ├── Reads CLAUDE.md files for context
-   └── Uses tools as needed (search, email, etc.)
+8. Agent processes message, uses tools as needed
    │
    ▼
-9. Router prefixes response with assistant name and sends via WhatsApp
+9. Response routed back via the originating channel
    │
    ▼
 10. Router updates last agent timestamp and saves session ID
@@ -357,23 +380,15 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 
 ### Trigger Word Matching
 
-Messages must start with the trigger pattern (default: `@Andy`):
-- `@Andy what's the weather?` → ✅ Triggers Claude
-- `@andy help me` → ✅ Triggers (case insensitive)
-- `Hey @Andy` → ❌ Ignored (trigger not at start)
-- `What's up?` → ❌ Ignored (no trigger)
+Messages must match the group's trigger pattern (default: `@{ASSISTANT_NAME}`):
+- `@Omni what's the weather?` → triggers
+- `@omni help me` → triggers (case insensitive)
+- `Hey @Omni` → ignored (trigger not at start)
+- `What's up?` → ignored (unless `autoRespondToQuestions` is enabled)
 
 ### Conversation Catch-Up
 
-When a triggered message arrives, the agent receives all messages since its last interaction in that chat. Each message is formatted with timestamp and sender name:
-
-```
-[Jan 31 2:32 PM] John: hey everyone, should we do pizza tonight?
-[Jan 31 2:33 PM] Sarah: sounds good to me
-[Jan 31 2:35 PM] John: @Andy what toppings do you recommend?
-```
-
-This allows the agent to understand the conversation context even if it wasn't mentioned in every message.
+When triggered, the agent receives all messages since its last interaction in that chat, formatted with timestamps and sender names.
 
 ---
 
@@ -381,18 +396,17 @@ This allows the agent to understand the conversation context even if it wasn't m
 
 ### Commands Available in Any Group
 
-| Command | Example | Effect |
-|---------|---------|--------|
-| `@Assistant [message]` | `@Andy what's the weather?` | Talk to Claude |
+| Command | Effect |
+|---------|--------|
+| `@Assistant [message]` | Talk to the agent |
 
 ### Commands Available in Main Channel Only
 
-| Command | Example | Effect |
-|---------|---------|--------|
-| `@Assistant add group "Name"` | `@Andy add group "Family Chat"` | Register a new group |
-| `@Assistant remove group "Name"` | `@Andy remove group "Work Team"` | Unregister a group |
-| `@Assistant list groups` | `@Andy list groups` | Show registered groups |
-| `@Assistant remember [fact]` | `@Andy remember I prefer dark mode` | Add to global memory |
+| Command | Effect |
+|---------|--------|
+| `@Assistant add group "Name"` | Register a new group |
+| `@Assistant remove group "Name"` | Unregister a group |
+| `@Assistant list groups` | Show registered groups |
 
 ---
 
@@ -402,10 +416,11 @@ OmniClaw has a built-in scheduler that runs tasks as full agents in their group'
 
 ### How Scheduling Works
 
-1. **Group Context**: Tasks created in a group run with that group's working directory and memory
-2. **Full Agent Capabilities**: Scheduled tasks have access to all tools (WebSearch, file operations, etc.)
-3. **Optional Messaging**: Tasks can send messages to their group using the `send_message` tool, or complete silently
-4. **Main Channel Privileges**: The main channel can schedule tasks for any group and view all tasks
+1. **Group Context**: Tasks run with their group's working directory and memory
+2. **Full Agent Capabilities**: Access to all tools (web search, file operations, bash, browser)
+3. **Context Modes**: `group` (runs with chat history) or `isolated` (fresh session)
+4. **Optional Messaging**: Tasks can send messages via `send_message`, or complete silently
+5. **Heartbeat**: Groups can have a recurring heartbeat task (configurable interval/cron)
 
 ### Schedule Types
 
@@ -413,47 +428,7 @@ OmniClaw has a built-in scheduler that runs tasks as full agents in their group'
 |------|--------------|---------|
 | `cron` | Cron expression | `0 9 * * 1` (Mondays at 9am) |
 | `interval` | Milliseconds | `3600000` (every hour) |
-| `once` | ISO timestamp | `2024-12-25T09:00:00Z` |
-
-### Creating a Task
-
-```
-User: @Andy remind me every Monday at 9am to review the weekly metrics
-
-Claude: [calls mcp__omniclaw__schedule_task]
-        {
-          "prompt": "Send a reminder to review weekly metrics. Be encouraging!",
-          "schedule_type": "cron",
-          "schedule_value": "0 9 * * 1"
-        }
-
-Claude: Done! I'll remind you every Monday at 9am.
-```
-
-### One-Time Tasks
-
-```
-User: @Andy at 5pm today, send me a summary of today's emails
-
-Claude: [calls mcp__omniclaw__schedule_task]
-        {
-          "prompt": "Search for today's emails, summarize the important ones, and send the summary to the group.",
-          "schedule_type": "once",
-          "schedule_value": "2024-01-31T17:00:00Z"
-        }
-```
-
-### Managing Tasks
-
-From any group:
-- `@Andy list my scheduled tasks` - View tasks for this group
-- `@Andy pause task [id]` - Pause a task
-- `@Andy resume task [id]` - Resume a paused task
-- `@Andy cancel task [id]` - Delete a task
-
-From main channel:
-- `@Andy list all tasks` - View tasks from all groups
-- `@Andy schedule task for "Family Chat": [prompt]` - Schedule for another group
+| `once` | Local ISO timestamp (no Z) | `2025-12-25T09:00:00` |
 
 ---
 
@@ -461,94 +436,55 @@ From main channel:
 
 ### OmniClaw MCP (built-in)
 
-The `omniclaw` MCP server is created dynamically per agent call with the current group's context.
+The `omniclaw` MCP server runs as a stdio process inside the agent container, communicating with the host via file-based IPC (local) or S3 (cloud).
 
-**Available Tools:**
+**Available Tools (16):**
+
 | Tool | Purpose |
 |------|---------|
+| `send_message` | Send a message to the group (supports multi-channel routing) |
 | `schedule_task` | Schedule a recurring or one-time task |
 | `list_tasks` | Show tasks (group's tasks, or all if main) |
-| `get_task` | Get task details and run history |
-| `update_task` | Modify task prompt or schedule |
 | `pause_task` | Pause a task |
 | `resume_task` | Resume a paused task |
 | `cancel_task` | Delete a task |
-| `send_message` | Send a WhatsApp message to the group |
+| `configure_heartbeat` | Enable/disable/configure group heartbeat |
+| `register_group` | Register a new group/channel (main only) |
+| `share_request` | Request context from another agent or admin |
+| `delegate_task` | Delegate work to the local admin agent |
+| `request_context` | Request context from admin (stored to shared storage) |
+| `read_context` | Read shared context by topic |
+| `list_context_topics` | List available shared context topics |
+| `list_agents` | List all registered agents |
+| `react_to_message` | Add/remove emoji reaction (Discord only) |
+| `format_mention` | Format a user mention for Discord |
 
 ---
 
 ## Deployment
 
-OmniClaw runs as a single macOS launchd service.
+OmniClaw runs as a single macOS launchd service (or standalone Bun process).
 
 ### Startup Sequence
 
-When OmniClaw starts, it:
-1. **Ensures Apple Container system is running** - Automatically starts it if needed; kills orphaned OmniClaw containers from previous runs
-2. Initializes the SQLite database (migrates from JSON files if they exist)
-3. Loads state from SQLite (registered groups, sessions, router state)
-4. Connects to WhatsApp (on `connection.open`):
-   - Starts the scheduler loop
-   - Starts the IPC watcher for container messages
-   - Sets up the per-group queue with `processGroupMessages`
-   - Recovers any unprocessed messages from before shutdown
-   - Starts the message polling loop
+1. **Initialize backends** — starts needed backends (Apple Container, cloud connections)
+2. Initialize SQLite database
+3. Load state from SQLite (registered groups, agents, sessions, routes)
+4. Connect all configured channels (WhatsApp, Discord, Telegram, Slack)
+5. Start scheduler loop, IPC watcher, message polling loop
+6. Recover any unprocessed messages from before shutdown
 
-### Service: com.omniclaw
-
-**launchd/com.omniclaw.plist:**
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "...">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.omniclaw</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>{{NODE_PATH}}</string>
-        <string>{{PROJECT_ROOT}}/dist/index.js</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>{{PROJECT_ROOT}}</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>{{HOME}}/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
-        <key>HOME</key>
-        <string>{{HOME}}</string>
-        <key>ASSISTANT_NAME</key>
-        <string>Andy</string>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>{{PROJECT_ROOT}}/logs/omniclaw.log</string>
-    <key>StandardErrorPath</key>
-    <string>{{PROJECT_ROOT}}/logs/omniclaw.error.log</string>
-</dict>
-</plist>
-```
-
-### Managing the Service
+### Running
 
 ```bash
-# Install service
-cp launchd/com.omniclaw.plist ~/Library/LaunchAgents/
+# Development
+bun run dev
 
-# Start service
+# Production
+bun run start
+
+# Or via launchd service (macOS)
 launchctl load ~/Library/LaunchAgents/com.omniclaw.plist
-
-# Stop service
-launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist
-
-# Check status
-launchctl list | grep omniclaw
-
-# View logs
-tail -f logs/omniclaw.log
 ```
 
 ---
@@ -557,44 +493,36 @@ tail -f logs/omniclaw.log
 
 ### Container Isolation
 
-All agents run inside Apple Container (lightweight Linux VMs), providing:
+All agents run in isolated containers (Apple Container / Docker / cloud VMs):
 - **Filesystem isolation**: Agents can only access mounted directories
-- **Safe Bash access**: Commands run inside the container, not on your Mac
-- **Network isolation**: Can be configured per-container if needed
+- **Safe Bash access**: Commands run inside the container, not on the host
 - **Process isolation**: Container processes can't affect the host
-- **Non-root user**: Container runs as unprivileged `node` user (uid 1000)
+- **PID limits and no-new-privileges**: Containers restricted via `--pids-limit` and `--no-new-privileges`
+- **Path traversal protection**: `readFile`/`writeFile` validate paths to prevent cross-group access
+- **Mount allowlist**: Host-side allowlist restricts which directories can be mounted
+- **Project root read-only**: Project source is mounted read-only to prevent container escape
+- **.env blocked**: Agent containers cannot read `.env` from the project root mount
 
 ### Prompt Injection Risk
 
-WhatsApp messages could contain malicious instructions attempting to manipulate Claude's behavior.
+Channel messages could contain malicious instructions.
 
 **Mitigations:**
 - Container isolation limits blast radius
 - Only registered groups are processed
 - Trigger word required (reduces accidental processing)
 - Agents can only access their group's mounted directories
-- Main can configure additional directories per group
 - Claude's built-in safety training
-
-**Recommendations:**
-- Only register trusted groups
-- Review additional directory mounts carefully
-- Review scheduled tasks periodically
-- Monitor logs for unusual activity
+- IPC file intake hardened against symlinks, oversized payloads, and TOCTOU races
 
 ### Credential Storage
 
 | Credential | Storage Location | Notes |
 |------------|------------------|-------|
-| Claude CLI Auth | data/sessions/{group}/.claude/ | Per-group isolation, mounted to /home/node/.claude/ |
+| Claude CLI Auth | data/sessions/{group}/.claude/ | Per-group isolation |
 | WhatsApp Session | store/auth/ | Auto-created, persists ~20 days |
-
-### File Permissions
-
-The groups/ folder contains personal memory and should be protected:
-```bash
-chmod 700 groups/
-```
+| Discord Bot Token | .env (host only) | Not mounted into containers |
+| Telegram Bot Token | .env (host only) | Not mounted into containers |
 
 ---
 
@@ -604,24 +532,20 @@ chmod 700 groups/
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| No response to messages | Service not running | Check `launchctl list | grep omniclaw` |
-| "Claude Code process exited with code 1" | Apple Container failed to start | Check logs; OmniClaw auto-starts container system but may fail |
-| "Claude Code process exited with code 1" | Session mount path wrong | Ensure mount is to `/home/node/.claude/` not `/root/.claude/` |
-| Session not continuing | Session ID not saved | Check SQLite: `sqlite3 store/messages.db "SELECT * FROM sessions"` |
-| Session not continuing | Mount path mismatch | Container user is `node` with HOME=/home/node; sessions must be at `/home/node/.claude/` |
+| No response to messages | Service not running | Check `launchctl list \| grep omniclaw` |
+| Container exit code 1 | Backend failed to start | Check logs; verify container system running |
+| Session not continuing | Session rotated | Normal after 4 hours; starts fresh context |
 | "QR code expired" | WhatsApp session expired | Delete store/auth/ and restart |
-| "No groups registered" | Haven't added groups | Use `@Andy add group "Name"` in main |
+| "No groups registered" | Haven't added groups | Use `@Omni add group "Name"` in main |
 
 ### Log Location
 
-- `logs/omniclaw.log` - stdout
-- `logs/omniclaw.error.log` - stderr
+- `logs/omniclaw.log` — structured JSON logs (pipe through `jq` for readability)
+- `logs/omniclaw.error.log` — stderr
+- `groups/{folder}/logs/container-*.log` — per-container logs
 
 ### Debug Mode
 
-Run manually for verbose output:
 ```bash
-npm run dev
-# or
-node dist/index.js
+bun run dev
 ```
