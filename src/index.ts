@@ -953,6 +953,86 @@ function buildAgentRegistry(): void {
   }
 }
 
+/**
+ * Handle share-request approval via reaction emoji.
+ * Returns true if the reaction was consumed (was a tracked share request).
+ */
+function handleShareRequestApproval(messageId: string, emoji: string, channelName: string): boolean {
+  const request = consumeShareRequest(messageId);
+  if (!request) return false;
+
+  const mainJid = findMainGroupJid(registeredGroups);
+  if (!mainJid) return false;
+
+  logger.info(
+    { messageId, emoji, sourceGroup: request.sourceGroup, sourceName: request.sourceName },
+    `Share request approved via ${channelName} reaction`,
+  );
+
+  const writePaths = request.serverFolder
+    ? `groups/${request.sourceGroup}/CLAUDE.md and/or groups/${request.serverFolder}/CLAUDE.md`
+    : `groups/${request.sourceGroup}/CLAUDE.md`;
+  const syntheticContent = [
+    `Share request APPROVED from ${request.sourceName} (${request.sourceJid}):`,
+    '',
+    `${request.description}`,
+    '',
+    `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
+    `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
+  ].join('\n');
+
+  storeMessage({
+    id: `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    chat_jid: mainJid,
+    sender: 'system',
+    sender_name: 'System',
+    content: syntheticContent,
+    timestamp: new Date().toISOString(),
+    is_from_me: false,
+  });
+
+  queue.enqueueMessageCheck(mainJid);
+  return true;
+}
+
+/**
+ * Handle a reaction notification on a bot message (non-approval reactions).
+ * Pipes to the active container or stores in DB and enqueues.
+ */
+async function handleReactionNotification(
+  chatJid: string,
+  messageId: string,
+  emoji: string,
+  userName: string,
+  channelName: string,
+): Promise<void> {
+  const group = registeredGroups[chatJid];
+  if (!group) return;
+
+  logger.info(
+    { chatJid, messageId, emoji, userName, group: group.name },
+    `Reaction on bot message in ${channelName}`,
+  );
+
+  const reactionContent = `@${ASSISTANT_NAME} [${userName} reacted with ${emoji}]`;
+
+  const reactionMessage = {
+    id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    chat_jid: chatJid,
+    sender: 'system',
+    sender_name: 'System',
+    content: reactionContent,
+    timestamp: new Date().toISOString(),
+    is_from_me: false,
+  };
+
+  const piped = await queue.sendMessage(chatJid, formatMessages([reactionMessage]));
+  if (!piped) {
+    storeMessage(reactionMessage);
+    queue.enqueueMessageCheck(chatJid);
+  }
+}
+
 async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
@@ -1008,46 +1088,8 @@ async function main(): Promise<void> {
     onChatMetadata: (chatJid, timestamp) => storeChatMetadata(chatJid, timestamp),
     registeredGroups: () => registeredGroups,
     onReaction: (chatJid, messageId, emoji) => {
-      // Only handle approval emojis
       if (!emoji.startsWith('👍') && emoji !== '❤️' && emoji !== '✅') return;
-
-      const request = consumeShareRequest(messageId);
-      if (!request) return; // Not a tracked share request
-
-      // Find the main group's JID
-      const mainJid = findMainGroupJid(registeredGroups);
-      if (!mainJid) return;
-
-      logger.info(
-        { messageId, emoji, sourceGroup: request.sourceGroup, sourceName: request.sourceName },
-        'Share request approved via reaction',
-      );
-
-      // Inject synthetic message into main group DB
-      const writePaths = request.serverFolder
-        ? `groups/${request.sourceGroup}/CLAUDE.md and/or groups/${request.serverFolder}/CLAUDE.md`
-        : `groups/${request.sourceGroup}/CLAUDE.md`;
-      const syntheticContent = [
-        `Share request APPROVED from ${request.sourceName} (${request.sourceJid}):`,
-        ``,
-        `${request.description}`,
-        ``,
-        `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
-        `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
-      ].join('\n');
-
-      storeMessage({
-        id: `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        chat_jid: mainJid,
-        sender: 'system',
-        sender_name: 'System',
-        content: syntheticContent,
-        timestamp: new Date().toISOString(),
-        is_from_me: false,
-      });
-
-      // Wake up the main agent
-      queue.enqueueMessageCheck(mainJid);
+      handleShareRequestApproval(messageId, emoji, 'WhatsApp');
     },
   });
 
@@ -1088,80 +1130,10 @@ async function main(): Promise<void> {
         const discord = new DiscordChannel({
           token: DISCORD_BOT_TOKEN,
           onReaction: async (chatJid, messageId, emoji, userName) => {
-            // 1. Check for share_request approval first (only approval emojis)
             if (emoji.startsWith('👍') || emoji === '❤️' || emoji === '✅') {
-              const request = consumeShareRequest(messageId);
-              if (request) {
-                const mainJid = Object.entries(registeredGroups).find(
-                  ([, g]) => g.folder === MAIN_GROUP_FOLDER,
-                )?.[0];
-                if (!mainJid) return;
-
-                logger.info(
-                  { messageId, emoji, sourceGroup: request.sourceGroup, sourceName: request.sourceName },
-                  'Share request approved via Discord reaction',
-                );
-
-                const writePaths = request.serverFolder
-                  ? `groups/${request.sourceGroup}/CLAUDE.md and/or groups/${request.serverFolder}/CLAUDE.md`
-                  : `groups/${request.sourceGroup}/CLAUDE.md`;
-                const syntheticContent = [
-                  `Share request APPROVED from ${request.sourceName} (${request.sourceJid}):`,
-                  '',
-                  `${request.description}`,
-                  '',
-                  `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
-                  `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
-                ].join('\n');
-
-                storeMessage({
-                  id: `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                  chat_jid: mainJid,
-                  sender: 'system',
-                  sender_name: 'System',
-                  content: syntheticContent,
-                  timestamp: new Date().toISOString(),
-                  is_from_me: false,
-                });
-
-                queue.enqueueMessageCheck(mainJid);
-                return;
-              }
+              if (handleShareRequestApproval(messageId, emoji, 'Discord')) return;
             }
-
-            // 2. Context-aware reaction notification: include emoji and reactor name
-            const group = registeredGroups[chatJid];
-            if (!group) return;
-
-            logger.info(
-              { chatJid, messageId, emoji, userName, group: group.name },
-              'Reaction on bot message in Discord',
-            );
-
-            const reactionContent = `@${ASSISTANT_NAME} [${userName} reacted with ${emoji}]`;
-
-            // Try to pipe directly to active container
-            const piped = await queue.sendMessage(chatJid, formatMessages([{
-              id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              chat_jid: chatJid,
-              sender: 'system',
-              sender_name: 'System',
-              content: reactionContent,
-              timestamp: new Date().toISOString(),
-            }]));
-            if (!piped) {
-              // No active container — store in DB and enqueue
-              storeMessage({
-                id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                chat_jid: chatJid,
-                sender: 'system',
-                sender_name: 'System',
-                content: reactionContent,
-                timestamp: new Date().toISOString(),
-                is_from_me: false,
-              });
-              queue.enqueueMessageCheck(chatJid);
-            }
+            await handleReactionNotification(chatJid, messageId, emoji, userName, 'Discord');
           },
         });
         yield* Effect.tryPromise(() => discord.connect());
@@ -1209,77 +1181,10 @@ async function main(): Promise<void> {
         onChatMetadata: (chatJid, timestamp, name) => storeChatMetadata(chatJid, timestamp, name),
         registeredGroups: () => registeredGroups,
         onReaction: async (chatJid, messageId, emoji, userName) => {
-          // Share-request approval via thumbs-up / heart / check
           if (emoji === ':thumbsup:' || emoji === ':+1:' || emoji === ':heart:' || emoji === ':white_check_mark:') {
-            const request = consumeShareRequest(messageId);
-            if (request) {
-              const mainJid = Object.entries(registeredGroups).find(
-                ([, g]) => g.folder === MAIN_GROUP_FOLDER,
-              )?.[0];
-              if (!mainJid) return;
-
-              logger.info(
-                { messageId, emoji, sourceGroup: request.sourceGroup, sourceName: request.sourceName },
-                'Share request approved via Slack reaction',
-              );
-
-              const writePaths = request.serverFolder
-                ? `groups/${request.sourceGroup}/CLAUDE.md and/or groups/${request.serverFolder}/CLAUDE.md`
-                : `groups/${request.sourceGroup}/CLAUDE.md`;
-              const syntheticContent = [
-                `Share request APPROVED from ${request.sourceName} (${request.sourceJid}):`,
-                '',
-                `${request.description}`,
-                '',
-                `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
-                `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
-              ].join('\n');
-
-              storeMessage({
-                id: `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                chat_jid: mainJid,
-                sender: 'system',
-                sender_name: 'System',
-                content: syntheticContent,
-                timestamp: new Date().toISOString(),
-                is_from_me: false,
-              });
-
-              queue.enqueueMessageCheck(mainJid);
-              return;
-            }
+            if (handleShareRequestApproval(messageId, emoji, 'Slack')) return;
           }
-
-          // General reaction notification for registered groups
-          const group = registeredGroups[chatJid];
-          if (!group) return;
-
-          logger.info(
-            { chatJid, messageId, emoji, userName, group: group.name },
-            'Reaction on bot message in Slack',
-          );
-
-          const reactionContent = `@${ASSISTANT_NAME} [${userName} reacted with ${emoji}]`;
-          const piped = await queue.sendMessage(chatJid, formatMessages([{
-            id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            chat_jid: chatJid,
-            sender: 'system',
-            sender_name: 'System',
-            content: reactionContent,
-            timestamp: new Date().toISOString(),
-          }]));
-          if (!piped) {
-            storeMessage({
-              id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              chat_jid: chatJid,
-              sender: 'system',
-              sender_name: 'System',
-              content: reactionContent,
-              timestamp: new Date().toISOString(),
-              is_from_me: false,
-            });
-            queue.enqueueMessageCheck(chatJid);
-          }
+          await handleReactionNotification(chatJid, messageId, emoji, userName, 'Slack');
         },
       });
       await slack.connect();
