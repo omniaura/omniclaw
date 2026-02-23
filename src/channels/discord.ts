@@ -32,6 +32,7 @@ import {
 } from '../db.js';
 import { logger } from '../logger.js';
 import { Channel, RegisteredGroup } from '../types.js';
+import { splitMessage } from './utils.js';
 
 /**
  * Merge Discord user mention data into the shared user registry JSON.
@@ -786,25 +787,3 @@ async function resolveChannel(
   return null;
 }
 
-/**
- * Split a message into chunks respecting Discord's 2000-char limit.
- * Prefers splitting at newlines, then spaces, then hard-splits.
- */
-function splitMessage(text: string, maxLength: number): string[] {
-  if (text.length <= maxLength) return [text];
-
-  const chunks: string[] = [];
-  let remaining = text;
-
-  while (remaining.length > maxLength) {
-    let splitIdx = remaining.lastIndexOf('\n', maxLength);
-    if (splitIdx <= 0) splitIdx = remaining.lastIndexOf(' ', maxLength);
-    if (splitIdx <= 0) splitIdx = maxLength;
-
-    chunks.push(remaining.slice(0, splitIdx));
-    remaining = remaining.slice(splitIdx).replace(/^\n/, '');
-  }
-
-  if (remaining) chunks.push(remaining);
-  return chunks;
-}
