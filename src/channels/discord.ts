@@ -787,4 +787,3 @@ async function resolveChannel(
   return null;
 }
 
-// splitMessage is imported from ./utils.ts (shared across channels)

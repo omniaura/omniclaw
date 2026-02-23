@@ -32,7 +32,7 @@ export function splitMessage(text: string, maxLength: number, preferBreaks = tru
     if (splitIdx <= 0) splitIdx = maxLength;
 
     chunks.push(remaining.slice(0, splitIdx));
-    remaining = remaining.slice(splitIdx).replace(/^\n/, '');
+    remaining = remaining.slice(splitIdx).replace(/^[\n ]/, '');
   }
 
   if (remaining) chunks.push(remaining);

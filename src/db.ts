@@ -74,7 +74,7 @@ function mapRowToRegisteredGroup(row: RegisteredGroupRow): Omit<RegisteredGroup,
     backend: (row.backend as any) || undefined,
     description: row.description || undefined,
     autoRespondToQuestions: row.auto_respond_to_questions === 1 || undefined,
-    autoRespondKeywords: row.auto_respond_keywords ? JSON.parse(row.auto_respond_keywords) : undefined,
+    autoRespondKeywords: safeJsonParse<string[]>(row.auto_respond_keywords, { jid: row.jid }, 'auto_respond_keywords'),
     streamIntermediates: row.stream_intermediates === 1 || undefined,
   };
 }
@@ -636,6 +636,7 @@ export function expireStaleSessions(maxAgeMs: number): string[] {
 
 // --- Registered group accessors ---
 
+/** Look up a registered group by JID, with folder-name validation against path traversal. */
 export function getRegisteredGroup(
   jid: string,
 ): (RegisteredGroup & { jid: string }) | undefined {
@@ -656,6 +657,7 @@ export function getRegisteredGroup(
   return { jid: row.jid, ...mapRowToRegisteredGroup(row) };
 }
 
+/** Insert or replace a registered group entry. */
 export function setRegisteredGroup(
   jid: string,
   group: RegisteredGroup,
@@ -682,6 +684,7 @@ export function setRegisteredGroup(
   );
 }
 
+/** Return all registered groups keyed by JID, skipping entries with invalid folder names. */
 export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   const rows = db
     .prepare('SELECT * FROM registered_groups')
@@ -778,12 +781,14 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
   }
 }
 
+/** Look up an agent by ID, returning undefined if not found. */
 export function getAgent(id: string): Agent | undefined {
   const row = db.prepare('SELECT * FROM agents WHERE id = ?').get(id) as AgentRow | undefined;
   if (!row) return undefined;
   return mapRowToAgent(row);
 }
 
+/** Return all agents keyed by agent ID. */
 export function getAllAgents(): Record<string, Agent> {
   const rows = db.prepare('SELECT * FROM agents').all() as AgentRow[];
   const result: Record<string, Agent> = {};
@@ -793,6 +798,7 @@ export function getAllAgents(): Record<string, Agent> {
   return result;
 }
 
+/** Insert or replace an agent record. */
 export function setAgent(agent: Agent): void {
   db.query(`
     INSERT OR REPLACE INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, is_local, server_folder, created_at)
@@ -812,12 +818,14 @@ export function setAgent(agent: Agent): void {
   );
 }
 
+/** Look up a channel route by JID, returning undefined if not found. */
 export function getChannelRoute(channelJid: string): ChannelRoute | undefined {
   const row = db.prepare('SELECT * FROM channel_routes WHERE channel_jid = ?').get(channelJid) as ChannelRouteRow | undefined;
   if (!row) return undefined;
   return mapRowToChannelRoute(row);
 }
 
+/** Return all channel routes keyed by channel JID. */
 export function getAllChannelRoutes(): Record<string, ChannelRoute> {
   const rows = db.prepare('SELECT * FROM channel_routes').all() as ChannelRouteRow[];
   const result: Record<string, ChannelRoute> = {};
@@ -827,6 +835,7 @@ export function getAllChannelRoutes(): Record<string, ChannelRoute> {
   return result;
 }
 
+/** Insert or replace a channel route record. */
 export function setChannelRoute(route: ChannelRoute): void {
   db.query(`
     INSERT OR REPLACE INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_guild_id, created_at)
@@ -841,6 +850,7 @@ export function setChannelRoute(route: ChannelRoute): void {
   );
 }
 
+/** Return all channel routes associated with a given agent ID. */
 export function getRoutesForAgent(agentId: string): ChannelRoute[] {
   const rows = db.prepare('SELECT * FROM channel_routes WHERE agent_id = ?').all(agentId) as ChannelRouteRow[];
   return rows.map(mapRowToChannelRoute);
