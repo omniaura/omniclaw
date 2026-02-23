@@ -10,7 +10,6 @@ import {
   getTaskById,
   storeChatMetadata,
   storeMessage,
-  storeMessageDirect,
   updateTask,
 } from './db.js';
 
@@ -137,13 +136,13 @@ describe('storeMessage', () => {
   });
 });
 
-// --- storeMessageDirect (sender_user_id + mentions) ---
+// --- storeMessage (sender_user_id + mentions) ---
 
-describe('storeMessageDirect', () => {
+describe('storeMessage with sender_user_id and mentions', () => {
   it('persists sender_user_id and mentions', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
-    storeMessageDirect({
+    storeMessage({
       id: 'dc-msg-1',
       chat_jid: 'group@g.us',
       sender: 'discord:user123',
@@ -161,10 +160,10 @@ describe('storeMessageDirect', () => {
     expect(messages[0].mentions).toEqual([{ id: 'user456', name: 'Bob', platform: 'discord' }]);
   });
 
-  it('stores null sender_user_id and mentions when not provided', () => {
+  it('stores undefined sender_user_id and mentions when not provided', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
-    storeMessageDirect({
+    storeMessage({
       id: 'dc-msg-2',
       chat_jid: 'group@g.us',
       sender: 'discord:user789',
@@ -179,12 +178,8 @@ describe('storeMessageDirect', () => {
     expect(messages[0].sender_user_id).toBeUndefined();
     expect(messages[0].mentions).toBeUndefined();
   });
-});
 
-// --- storeMessage (sender_user_id + mentions via NewMessage) ---
-
-describe('storeMessage with sender_user_id and mentions', () => {
-  it('persists sender_user_id and mentions from NewMessage', () => {
+  it('persists sender_user_id and mentions from NewMessage format', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
     storeMessage({

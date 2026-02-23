@@ -6,7 +6,7 @@ import {
 import {
   getAllRegisteredGroups,
   storeChatMetadata,
-  storeMessageDirect,
+  storeMessage,
 } from './db.js';
 import { logger } from './logger.js';
 
@@ -34,7 +34,7 @@ function storeNonTextMessage(ctx: any, placeholder: string): void {
   const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
 
   storeChatMetadata(chatId, timestamp);
-  storeMessageDirect({
+  storeMessage({
     id: ctx.message.message_id.toString(),
     chat_jid: chatId,
     sender: ctx.from?.id?.toString() || '',
@@ -125,7 +125,7 @@ export async function connectTelegram(botToken: string): Promise<void> {
     }
 
     // Store message — startMessageLoop() will pick it up
-    storeMessageDirect({
+    storeMessage({
       id: msgId,
       chat_jid: chatId,
       sender,
