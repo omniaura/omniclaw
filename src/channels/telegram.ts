@@ -6,6 +6,7 @@ import {
 } from '../config.js';
 import { logger } from '../logger.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import { splitMessage } from './utils.js';
 
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
@@ -197,14 +198,10 @@ export class TelegramChannel implements Channel {
         : {};
 
       // Telegram has a 4096 character limit per message — split if needed
-      const MAX_LENGTH = 4096;
-      if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text, replyParams);
-      } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          const opts = i === 0 ? replyParams : {};
-          await this.bot.api.sendMessage(numericId, text.slice(i, i + MAX_LENGTH), opts);
-        }
+      const chunks = splitMessage(text, 4096);
+      for (let i = 0; i < chunks.length; i++) {
+        const opts = i === 0 ? replyParams : {};
+        await this.bot.api.sendMessage(numericId, chunks[i], opts);
       }
       logger.info({ jid, length: text.length }, 'Telegram message sent');
     } catch (err) {
