@@ -252,6 +252,8 @@ runcmd:
   - ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null
   - docker pull ${CONTAINER_IMAGE}
   - docker run -d --name ${appName}-agent \\
+      --pids-limit 256 \\
+      --security-opt no-new-privileges:true \\
       -v /root/.ssh:/home/bun/.ssh:ro \\
       -e OMNICLAW_S3_ENDPOINT=${B2_ENDPOINT} \\
       -e OMNICLAW_S3_REGION=${B2_REGION} \\
