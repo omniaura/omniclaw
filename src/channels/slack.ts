@@ -4,6 +4,7 @@ import { WebClient } from '@slack/web-api';
 import { ASSISTANT_NAME, TRIGGER_PATTERN, escapeRegex } from '../config.js';
 import { logger } from '../logger.js';
 import { Channel, OnChatMetadata, OnInboundMessage, RegisteredGroup } from '../types.js';
+import { splitMessage as splitMessageShared } from './utils.js';
 
 // JID format: "slack:{channelId}" for channels/DMs
 // e.g. "slack:C12345678" for a channel, "slack:D12345678" for a DM
@@ -17,14 +18,22 @@ function channelIdToJid(channelId: string): string {
   return `slack:${channelId}`;
 }
 
-/** Split text at Slack's 4000-char message limit */
+/** Split text at Slack's 4000-char message limit (hard split, no break preference) */
 function splitMessage(text: string, maxLen = 4000): string[] {
-  if (text.length <= maxLen) return [text];
-  const chunks: string[] = [];
-  for (let i = 0; i < text.length; i += maxLen) {
-    chunks.push(text.slice(i, i + maxLen));
+  return splitMessageShared(text, maxLen, false);
+}
+
+/** Resolve a Slack user ID to a display name, falling back to the provided default. */
+async function resolveSlackUserName(client: WebClient, userId: string, fallback: string): Promise<string> {
+  try {
+    const info = await client.users.info({ user: userId });
+    return info.user?.profile?.display_name ||
+      info.user?.profile?.real_name ||
+      info.user?.name ||
+      fallback;
+  } catch {
+    return fallback;
   }
-  return chunks;
 }
 
 /** Resolve <@USERID> Slack mentions into display names. */
@@ -37,17 +46,10 @@ async function resolveMentions(
   const mentions: Array<{ id: string; name: string }> = [];
 
   for (const userId of userIds) {
-    try {
-      const info = await client.users.info({ user: userId });
-      const displayName =
-        info.user?.profile?.display_name ||
-        info.user?.profile?.real_name ||
-        info.user?.name ||
-        userId;
+    const displayName = await resolveSlackUserName(client, userId, userId);
+    if (displayName !== userId) {
       mentions.push({ id: userId, name: displayName });
       text = text.replace(new RegExp(`<@${userId}>`, 'g'), `@${displayName}`);
-    } catch {
-      // If lookup fails, leave the raw mention
     }
   }
 
@@ -106,17 +108,7 @@ export class SlackChannel implements Channel {
 
       const emoji = `:${event.reaction}:`;
 
-      let userName = event.user;
-      try {
-        const info = await this.client.users.info({ user: event.user });
-        userName =
-          info.user?.profile?.display_name ||
-          info.user?.profile?.real_name ||
-          info.user?.name ||
-          event.user;
-      } catch {
-        // Fall back to user ID
-      }
+      const userName = await resolveSlackUserName(this.client, event.user, event.user);
 
       this.opts.onReaction?.(chatJid, messageId, emoji, userName);
     });
@@ -261,17 +253,7 @@ export class SlackChannel implements Channel {
     const timestamp = new Date(parseFloat(event.ts) * 1000).toISOString();
 
     const senderUserId = 'user' in event ? event.user : 'unknown';
-    let senderName = senderUserId;
-    try {
-      const info = await this.client.users.info({ user: senderUserId });
-      senderName =
-        info.user?.profile?.display_name ||
-        info.user?.profile?.real_name ||
-        info.user?.name ||
-        senderUserId;
-    } catch {
-      // Fall back to user ID
-    }
+    const senderName = await resolveSlackUserName(this.client, senderUserId, senderUserId);
 
     // Resolve <@USERID> mentions to display names
     const { text: resolvedText, mentions } = await resolveMentions(event.text, this.client);
