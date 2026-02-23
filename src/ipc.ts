@@ -734,6 +734,10 @@ export async function processTaskIpc(
       const sourceName = sourceGroupEntry?.[1].name || sourceGroup;
       const sourceJid = sourceGroupEntry?.[0] || sourceGroup;
 
+      // Track validated files at case scope for notification message
+      let sharedFiles: string[] = [];
+      let requestedFiles: string[] = [];
+
       // If files are specified with a target_agent, do the file transfer
       if (data.target_agent && data.files && data.files.length > 0) {
         // Validate all file paths before transfer (defense-in-depth)
@@ -768,6 +772,7 @@ export async function processTaskIpc(
             'Share request file transfer completed',
           );
         }
+        sharedFiles = validFiles;
       }
 
       // If request_files are specified, pull files from target to source
@@ -807,6 +812,7 @@ export async function processTaskIpc(
             'Share request file pull completed',
           );
         }
+        requestedFiles = validRequestFiles;
       }
 
       // Determine target JID: specific agent or main
@@ -839,11 +845,11 @@ export async function processTaskIpc(
         pathGuidance = `\n\n*Write context to:* \`groups/${sourceGroup}/CLAUDE.md\``;
       }
 
-      const filesInfo = data.files?.length
-        ? `\n\n*Files shared:* ${data.files.join(', ')}`
+      const filesInfo = sharedFiles.length
+        ? `\n\n*Files shared:* ${sharedFiles.join(', ')}`
         : '';
-      const requestFilesInfo = data.request_files?.length
-        ? `\n\n*Files requested:* ${data.request_files.join(', ')}`
+      const requestFilesInfo = requestedFiles.length
+        ? `\n\n*Files requested:* ${requestedFiles.join(', ')}`
         : '';
       const targetInfo = data.target_agent
         ? ` (targeted to ${data.target_agent})`
