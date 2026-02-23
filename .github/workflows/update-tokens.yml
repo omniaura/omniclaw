@@ -9,24 +9,38 @@ on:
 jobs:
   update-tokens:
     runs-on: ubuntu-latest
-    # Skip if GitHub App secrets aren't configured (fork without app setup)
-    if: ${{ secrets.APP_ID != '' }}
     steps:
+      - name: Check for GitHub App secrets
+        id: check-secrets
+        run: |
+          if [ -z "$APP_ID" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "GitHub App secrets not configured, skipping token count update"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+
       - uses: actions/create-github-app-token@v1
+        if: steps.check-secrets.outputs.skip != 'true'
         id: app-token
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - uses: actions/checkout@v4
+        if: steps.check-secrets.outputs.skip != 'true'
         with:
           token: ${{ steps.app-token.outputs.token }}
 
       - uses: actions/setup-python@v5
+        if: steps.check-secrets.outputs.skip != 'true'
         with:
           python-version: '3.12'
 
       - uses: ./repo-tokens
+        if: steps.check-secrets.outputs.skip != 'true'
         id: tokens
         with:
           include: 'src/**/*.ts container/agent-runner/src/**/*.ts container/Dockerfile container/build.sh launchd/com.omniclaw.plist CLAUDE.md'
@@ -34,6 +48,7 @@ jobs:
           badge-path: 'repo-tokens/badge.svg'
 
       - name: Commit if changed
+        if: steps.check-secrets.outputs.skip != 'true'
         run: |
           git add README.md repo-tokens/badge.svg
           git diff --cached --quiet && exit 0
