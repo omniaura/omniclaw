@@ -634,11 +634,7 @@ export class LocalBackend implements AgentBackend {
   }
 
   private printContainerSystemError(): void {
-    console.error(
-      '\nFATAL: Container system failed to start.',
-      '\nRun `container system start` and restart the application.',
-      '\nSee the project README for installation instructions.\n',
-    );
+    logger.error('FATAL: Container system failed to start. Run `container system start` and restart the application. See the project README for installation instructions.');
   }
 
   private async cleanupOrphanedContainers(): Promise<void> {

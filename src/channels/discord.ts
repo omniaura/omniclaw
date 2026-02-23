@@ -118,7 +118,7 @@ export class DiscordChannel implements Channel {
           { username: readyClient.user.tag, id: readyClient.user.id },
           'Discord bot connected',
         );
-        console.log(`\n  Discord bot: ${readyClient.user.tag}`);
+        logger.info({ tag: readyClient.user.tag }, 'Discord bot ready');
         resolve();
       });
 

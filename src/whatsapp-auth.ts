@@ -109,7 +109,7 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
       } else if (reason === 515) {
         // 515 = stream error, often happens after pairing succeeds but before
         // registration completes. Reconnect to finish the handshake.
-        console.log('\n⟳ Stream error (515) after pairing — reconnecting...');
+        logger.warn({ statusCode: 515 }, 'Stream error after pairing — reconnecting');
         connectSocket(phoneNumber, true);
       } else {
         fs.writeFileSync(STATUS_FILE, `failed:${reason || 'unknown'}`);
