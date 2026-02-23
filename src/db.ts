@@ -248,6 +248,11 @@ export function _initTestDatabase(): void {
   createSchema(db);
 }
 
+/** @internal - for tests only. Backdates a session's created_at timestamp. */
+export function _backdateSessionForTest(groupJid: string, isoTimestamp: string): void {
+  db.prepare('UPDATE sessions SET created_at = ? WHERE group_folder = ?').run(isoTimestamp, groupJid);
+}
+
 /**
  * Store chat metadata only (no message content).
  * Used for all chats to enable group discovery without storing sensitive content.

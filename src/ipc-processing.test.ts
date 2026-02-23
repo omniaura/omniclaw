@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 
 import {
   _initTestDatabase,
+  _backdateSessionForTest,
   createTask,
   getAllTasks,
   getTaskById,
@@ -196,7 +197,6 @@ describe('processTaskIpc: configure_heartbeat', () => {
         type: 'configure_heartbeat',
         enabled: true,
         interval: '900000',
-        heartbeat_schedule_type: 'interval',
       },
       'other-group',
       false,
@@ -676,13 +676,10 @@ describe('processTaskIpc: task snapshot refresh', () => {
 describe('expireStaleSessions', () => {
   it('expires sessions older than maxAgeMs', () => {
     setSession('old-group', 'session-old');
-    // Manually backdating is not possible with setSession (uses datetime('now')),
-    // so we test with a very large maxAge to verify no sessions are expired
-    const expired = expireStaleSessions(1); // 1ms max age
-    // The session was just created, but datetime('now') has second precision
-    // so with 1ms it might or might not expire depending on timing
-    // Use a safe assertion: expired list is an array
-    expect(Array.isArray(expired)).toBe(true);
+    _backdateSessionForTest('old-group', '2000-01-01T00:00:00.000Z');
+    const expired = expireStaleSessions(60_000); // 1 minute max age
+    expect(expired).toEqual(['old-group']);
+    expect(getSession('old-group')).toBeUndefined();
   });
 
   it('returns empty array when no sessions exist', () => {
