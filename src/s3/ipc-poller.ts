@@ -9,6 +9,7 @@
 
 import { IPC_POLL_INTERVAL } from '../config.js';
 import { logger } from '../logger.js';
+import type { IpcMessagePayload, IpcTaskPayload } from '../types.js';
 import type { OmniClawS3 } from './client.js';
 import type { S3Output } from './types.js';
 
@@ -19,9 +20,9 @@ export interface S3IpcPollerDeps {
   /** Process an outbox result (deliver to channel). */
   processOutput: (agentId: string, output: S3Output) => Promise<void>;
   /** Process an IPC message file's contents (from agent's IPC messages dir). */
-  processMessage: (sourceAgentId: string, data: any) => Promise<void>;
+  processMessage: (sourceAgentId: string, data: IpcMessagePayload) => Promise<void>;
   /** Process an IPC task file's contents. */
-  processTask: (sourceAgentId: string, isAdmin: boolean, data: any) => Promise<void>;
+  processTask: (sourceAgentId: string, isAdmin: boolean, data: IpcTaskPayload) => Promise<void>;
   /** Check if an agent is admin. */
   isAdmin: (agentId: string) => boolean;
 }

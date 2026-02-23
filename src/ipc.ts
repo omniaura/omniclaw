@@ -36,6 +36,8 @@ import {
   BackendType,
   Channel,
   HeartbeatConfig,
+  IpcMessagePayload,
+  IpcTaskPayload,
   RegisteredGroup,
 } from './types.js';
 import { DaytonaBackend } from './backends/daytona-backend.js';
@@ -111,7 +113,7 @@ let ipcWatcherRunning = false;
 function makeCloudMessageHandler(deps: IpcDeps) {
   return async (
     sourceGroup: string,
-    data: any,
+    data: IpcMessagePayload,
     backendLabel: string,
   ): Promise<void> => {
     if (data.type !== 'message' || !data.chatJid || !data.text) return;
@@ -185,16 +187,16 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 quarantineIpcFile(filePath, ipcBaseDir, result.reason, sourceGroup);
                 continue;
               }
-              const data = result.data as Record<string, unknown>;
+              const data = result.data as IpcMessagePayload;
               if (
                 data.type === 'react_to_message' &&
                 data.chatJid &&
                 data.messageId &&
                 data.emoji
               ) {
-                const chatJid = data.chatJid as string;
-                const messageId = data.messageId as string;
-                const emoji = data.emoji as string;
+                const chatJid = data.chatJid;
+                const messageId = data.messageId;
+                const emoji = data.emoji;
                 const ch = deps.findChannel?.(chatJid);
                 if (data.remove) {
                   await (ch?.removeReaction?.(
@@ -238,7 +240,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     const registryData = JSON.parse(
                       fs.readFileSync(userRegistryPath, 'utf-8'),
                     );
-                    const key = (data.userName as string).toLowerCase().trim();
+                    const key = data.userName!.toLowerCase().trim();
                     const user = registryData[key];
                     if (user) {
                       switch (user.platform) {
@@ -295,8 +297,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
               }
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Strip <internal>...</internal> blocks before sending
-                const msgChatJid = data.chatJid as string;
-                const msgText = stripInternalTags(data.text as string);
+                const msgChatJid = data.chatJid;
+                const msgText = stripInternalTags(data.text);
                 if (!msgText) {
                   logger.debug({ chatJid: data.chatJid, sourceGroup }, 'IPC message suppressed (internal-only)');
                   fs.unlinkSync(filePath);
@@ -357,9 +359,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
               continue;
             }
             try {
-              const data = taskResult.data as Record<string, unknown>;
+              const data = taskResult.data as IpcTaskPayload;
               // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data as Record<string, unknown> & { type: string }, sourceGroup, isMain, deps);
+              await processTaskIpc(data, sourceGroup, isMain, deps);
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
@@ -385,7 +387,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
   const cloudTaskHandler = async (
     sourceGroup: string,
     isMain: boolean,
-    data: any,
+    data: IpcTaskPayload,
   ) => {
     await processTaskIpc(data, sourceGroup, isMain, deps);
   };
@@ -422,46 +424,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
 }
 
 export async function processTaskIpc(
-  data: {
-    type: string;
-    taskId?: string;
-    prompt?: string;
-    schedule_type?: string;
-    schedule_value?: string;
-    context_mode?: string;
-    groupFolder?: string;
-    chatJid?: string;
-    targetJid?: string;
-    // For register_group
-    jid?: string;
-    name?: string;
-    folder?: string;
-    trigger?: string;
-    requiresTrigger?: boolean;
-    containerConfig?: RegisteredGroup['containerConfig'];
-    discord_guild_id?: string;
-    // For configure_heartbeat
-    enabled?: boolean;
-    interval?: string;
-    heartbeat_schedule_type?: string;
-    target_group_jid?: string;
-    // For share_request
-    description?: string;
-    sourceGroup?: string;
-    scope?: string;
-    serverFolder?: string;
-    discordGuildId?: string;
-    target_agent?: string;
-    files?: string[];
-    request_files?: string[];
-    // For register_group: backend config
-    backend?: BackendType;
-    group_description?: string;
-    // For delegate_task
-    callbackAgentId?: string;
-    // For context_request
-    requestedTopics?: string[];
-  },
+  data: IpcTaskPayload,
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
   deps: IpcDeps,
@@ -482,7 +445,7 @@ export async function processTaskIpc(
         data.targetJid
       ) {
         // Resolve the target group from JID
-        const targetJid = data.targetJid as string;
+        const targetJid = data.targetJid!;
         const targetGroupEntry = registeredGroups[targetJid];
 
         if (!targetGroupEntry) {

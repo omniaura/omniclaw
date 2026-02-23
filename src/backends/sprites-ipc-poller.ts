@@ -6,7 +6,7 @@
 
 import { IPC_POLL_INTERVAL } from '../config.js';
 import { logger } from '../logger.js';
-import { RegisteredGroup } from '../types.js';
+import { IpcMessagePayload, IpcTaskPayload, RegisteredGroup } from '../types.js';
 import { SpritesBackend } from './sprites-backend.js';
 
 const API_BASE = 'https://api.sprites.dev/v1';
@@ -15,9 +15,9 @@ interface SpritesIpcPollerDeps {
   spritesBackend: SpritesBackend;
   registeredGroups: () => Record<string, RegisteredGroup>;
   /** Process an IPC message file's contents */
-  processMessage: (sourceGroup: string, data: any) => Promise<void>;
+  processMessage: (sourceGroup: string, data: IpcMessagePayload) => Promise<void>;
   /** Process an IPC task file's contents */
-  processTask: (sourceGroup: string, isMain: boolean, data: any) => Promise<void>;
+  processTask: (sourceGroup: string, isMain: boolean, data: IpcTaskPayload) => Promise<void>;
 }
 
 let pollerRunning = false;
