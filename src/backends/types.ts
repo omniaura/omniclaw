@@ -3,9 +3,9 @@
  * Defines the AgentBackend interface that all backends implement.
  */
 
-import { Agent, ContainerProcess, RegisteredGroup } from '../types.js';
+import { Agent, type BackendType, ContainerProcess, RegisteredGroup } from '../types.js';
 
-export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona' | 'railway' | 'hetzner';
+export type { BackendType };
 
 /**
  * Unified group-or-agent type for backwards compatibility.
