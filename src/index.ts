@@ -1016,24 +1016,19 @@ async function handleReactionNotification(
 
   const reactionContent = `@${ASSISTANT_NAME} [${userName} reacted with ${emoji}]`;
 
-  const piped = await queue.sendMessage(chatJid, formatMessages([{
+  const reactionMessage = {
     id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     chat_jid: chatJid,
     sender: 'system',
     sender_name: 'System',
     content: reactionContent,
     timestamp: new Date().toISOString(),
-  }]));
+    is_from_me: false,
+  };
+
+  const piped = await queue.sendMessage(chatJid, formatMessages([reactionMessage]));
   if (!piped) {
-    storeMessage({
-      id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      chat_jid: chatJid,
-      sender: 'system',
-      sender_name: 'System',
-      content: reactionContent,
-      timestamp: new Date().toISOString(),
-      is_from_me: false,
-    });
+    storeMessage(reactionMessage);
     queue.enqueueMessageCheck(chatJid);
   }
 }
