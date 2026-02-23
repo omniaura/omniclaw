@@ -10,14 +10,14 @@ import { type Sandbox } from '@daytonaio/sdk';
 
 import { IPC_POLL_INTERVAL } from '../config.js';
 import { logger } from '../logger.js';
-import { RegisteredGroup } from '../types.js';
+import { IpcMessagePayload, IpcTaskPayload, RegisteredGroup } from '../types.js';
 import { DaytonaBackend } from './daytona-backend.js';
 
 interface DaytonaIpcPollerDeps {
   daytonaBackend: DaytonaBackend;
   registeredGroups: () => Record<string, RegisteredGroup>;
-  processMessage: (sourceGroup: string, data: any) => Promise<void>;
-  processTask: (sourceGroup: string, isMain: boolean, data: any) => Promise<void>;
+  processMessage: (sourceGroup: string, data: IpcMessagePayload) => Promise<void>;
+  processTask: (sourceGroup: string, isMain: boolean, data: IpcTaskPayload) => Promise<void>;
 }
 
 let pollerRunning = false;
@@ -93,7 +93,7 @@ async function pollDirectory(
     return; // Directory doesn't exist yet
   }
 
-  const jsonFiles = entries.filter((e: any) => !e.isDir && e.name.endsWith('.json'));
+  const jsonFiles = entries.filter((e) => !e.isDir && e.name.endsWith('.json'));
 
   for (const entry of jsonFiles) {
     const filePath = `${dirPath}/${entry.name}`;

@@ -46,7 +46,7 @@ export interface HeartbeatConfig {
   scheduleType: 'cron' | 'interval';
 }
 
-export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona' | 'railway';
+export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona' | 'railway' | 'hetzner';
 
 export interface RegisteredGroup {
   name: string;
@@ -205,4 +205,62 @@ export function registeredGroupToRoute(jid: string, group: RegisteredGroup): Cha
     discordGuildId: group.discordGuildId,
     createdAt: group.added_at,
   };
+}
+
+// --- IPC Data Types ---
+
+/** IPC message payloads sent by agents to the orchestrator. */
+export interface IpcMessagePayload {
+  type: string;
+  chatJid?: string;
+  text?: string;
+  messageId?: string;
+  emoji?: string;
+  remove?: boolean;
+  userName?: string;
+  platform?: string;
+  requestId?: string;
+  pubkey?: string;
+}
+
+/** IPC task payloads sent by agents to the orchestrator. */
+export interface IpcTaskPayload {
+  type: string;
+  taskId?: string;
+  prompt?: string;
+  schedule_type?: string;
+  schedule_value?: string;
+  context_mode?: string;
+  groupFolder?: string;
+  chatJid?: string;
+  targetJid?: string;
+  // For register_group
+  jid?: string;
+  name?: string;
+  folder?: string;
+  trigger?: string;
+  requiresTrigger?: boolean;
+  containerConfig?: ContainerConfig;
+  discord_guild_id?: string;
+  // For configure_heartbeat
+  enabled?: boolean;
+  interval?: string;
+  heartbeat_schedule_type?: string;
+  target_group_jid?: string;
+  // For share_request
+  description?: string;
+  sourceGroup?: string;
+  scope?: string;
+  serverFolder?: string;
+  discordGuildId?: string;
+  target_agent?: string;
+  files?: string[];
+  request_files?: string[];
+  // For register_group: backend config
+  backend?: BackendType;
+  group_description?: string;
+  // For delegate_task
+  callbackAgentId?: string;
+  // For context_request
+  requestedTopics?: string[];
 }
