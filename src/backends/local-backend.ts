@@ -238,7 +238,13 @@ function buildVolumeMounts(
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
-  const args: string[] = ['run', '-i', '--rm', '--memory', CONTAINER_MEMORY, '--name', containerName];
+  const args: string[] = [
+    'run', '-i', '--rm',
+    '--memory', CONTAINER_MEMORY,
+    '--pids-limit', '256',
+    '--security-opt', 'no-new-privileges:true',
+    '--name', containerName,
+  ];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
