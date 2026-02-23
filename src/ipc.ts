@@ -243,13 +243,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     if (user) {
                       switch (user.platform) {
                         case 'discord':
+                        case 'slack':
                           formattedMention = `<@${user.id}>`;
                           break;
                         case 'whatsapp':
                           formattedMention = `@${user.id}`;
-                          break;
-                        case 'slack':
-                          formattedMention = `<@${user.id}>`;
                           break;
                         default:
                           formattedMention = `@${user.name}`;
@@ -473,6 +471,42 @@ export async function processTaskIpc(
     deps.writeTasksSnapshot?.(sourceGroup, isMain);
   };
 
+  /** Shared handler for pause/resume/cancel — identical auth + dispatch pattern */
+  const TASK_ACTION_LABELS: Record<string, string> = {
+    pause_task: 'paused',
+    resume_task: 'resumed',
+    cancel_task: 'cancelled',
+  };
+  const TASK_ACTION_VERBS: Record<string, string> = {
+    pause_task: 'pause',
+    resume_task: 'resume',
+    cancel_task: 'cancel',
+  };
+  const handleTaskLifecycle = (action: string, taskId: string | undefined, srcGroup: string, isMainGroup: boolean) => {
+    const verb = TASK_ACTION_VERBS[action] ?? action;
+    if (!taskId) {
+      logger.warn({ action, sourceGroup: srcGroup }, `Task ${verb} attempt with missing taskId`);
+      return;
+    }
+    const task = getTaskById(taskId);
+    const label = TASK_ACTION_LABELS[action] ?? action;
+    if (!task) {
+      logger.warn({ taskId, sourceGroup: srcGroup }, `Task ${verb} attempt but task not found`);
+      return;
+    }
+    if (isMainGroup || task.group_folder === srcGroup) {
+      if (action === 'cancel_task') {
+        deleteTask(taskId);
+      } else {
+        updateTask(taskId, { status: action === 'pause_task' ? 'paused' : 'active' });
+      }
+      logger.info({ taskId, sourceGroup: srcGroup }, `Task ${label} via IPC`);
+      refreshTasksSnapshot();
+    } else {
+      logger.warn({ taskId, sourceGroup: srcGroup }, `Unauthorized task ${verb} attempt`);
+    }
+  };
+
   switch (data.type) {
     case 'schedule_task':
       if (
@@ -541,60 +575,9 @@ export async function processTaskIpc(
       break;
 
     case 'pause_task':
-      if (data.taskId) {
-        const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'paused' });
-          logger.info(
-            { taskId: data.taskId, sourceGroup },
-            'Task paused via IPC',
-          );
-          refreshTasksSnapshot();
-        } else {
-          logger.warn(
-            { taskId: data.taskId, sourceGroup },
-            'Unauthorized task pause attempt',
-          );
-        }
-      }
-      break;
-
     case 'resume_task':
-      if (data.taskId) {
-        const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'active' });
-          logger.info(
-            { taskId: data.taskId, sourceGroup },
-            'Task resumed via IPC',
-          );
-          refreshTasksSnapshot();
-        } else {
-          logger.warn(
-            { taskId: data.taskId, sourceGroup },
-            'Unauthorized task resume attempt',
-          );
-        }
-      }
-      break;
-
     case 'cancel_task':
-      if (data.taskId) {
-        const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          deleteTask(data.taskId);
-          logger.info(
-            { taskId: data.taskId, sourceGroup },
-            'Task cancelled via IPC',
-          );
-          refreshTasksSnapshot();
-        } else {
-          logger.warn(
-            { taskId: data.taskId, sourceGroup },
-            'Unauthorized task cancel attempt',
-          );
-        }
-      }
+      handleTaskLifecycle(data.type, data.taskId, sourceGroup, isMain);
       break;
 
     case 'refresh_groups':
