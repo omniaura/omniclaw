@@ -130,7 +130,6 @@ export class SlackChannel implements Channel {
       this.botUserId = authResult.user_id as string;
       const botName = authResult.user || ASSISTANT_NAME;
       logger.info({ botUserId: this.botUserId, botName }, 'Slack bot connected');
-      console.log(`\n  Slack bot: @${botName}`);
     } catch (err) {
       logger.warn({ err }, 'Failed to fetch Slack bot user ID');
     }
