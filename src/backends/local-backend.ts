@@ -73,10 +73,15 @@ function buildVolumeMounts(
   const srvFolder = getServerFolder(group);
 
   if (isMain) {
+    // Main gets the project root read-only. Writable paths the agent needs
+    // (group folder, IPC, .claude/) are mounted separately below.
+    // Read-only prevents the agent from modifying host application code
+    // (src/, dist/, package.json, etc.) which would bypass the sandbox
+    // entirely on next restart. (Upstream PR #392)
     mounts.push({
       hostPath: projectRoot,
       containerPath: '/workspace/project',
-      readonly: false,
+      readonly: true,
     });
 
     // Main also gets its group folder as the working directory
@@ -201,12 +206,19 @@ function buildVolumeMounts(
     }
   }
 
-  // Agent-runner source mount
+  // Agent-runner source: copy to per-group writable location so each group
+  // can customize tools without modifying host code or affecting other groups.
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
+  const groupAgentRunnerDir = path.join(DATA_DIR, 'sessions', folder, 'agent-runner-src');
+  let hasGroupDir = fs.existsSync(groupAgentRunnerDir);
+  if (!hasGroupDir && fs.existsSync(agentRunnerSrc)) {
+    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    hasGroupDir = true;
+  }
   mounts.push({
-    hostPath: agentRunnerSrc,
+    hostPath: hasGroupDir ? groupAgentRunnerDir : agentRunnerSrc,
     containerPath: '/app/src',
-    readonly: true,
+    readonly: !hasGroupDir,
   });
 
   // Additional mounts

@@ -21,7 +21,19 @@ Agents execute in Apple Container (lightweight Linux VMs), providing:
 
 This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted.
 
-### 2. Mount Security
+### 2. Read-Only Project Root
+
+The main group's project root is mounted **read-only** at `/workspace/project`. This prevents
+a container escape attack where the agent modifies host application code (e.g., `src/`, `dist/`,
+`package.json`) that runs outside the container on next restart.
+
+Writable paths the agent legitimately needs are mounted separately:
+- `/workspace/group` — group folder (rw)
+- `/workspace/ipc` — IPC directory (rw)
+- `/home/bun/.claude` — per-group Claude sessions (rw)
+- `/app/src` — per-group agent-runner copy (rw)
+
+### 3. Mount Security
 
 **External Allowlist** - Mount permissions stored at `~/.config/omniclaw/mount-allowlist.json`, which is:
 - Outside project root
@@ -40,14 +52,14 @@ private_key, .secret
 - Container path validation (rejects `..` and absolute paths)
 - `nonMainReadOnly` option forces read-only for non-main groups
 
-### 3. Session Isolation
+### 4. Session Isolation
 
 Each group has isolated Claude sessions at `data/sessions/{group}/.claude/`:
 - Groups cannot see other groups' conversation history
 - Session data includes full message history and file contents read
 - Prevents cross-group information disclosure
 
-### 4. IPC Authorization
+### 5. IPC Authorization
 
 Messages and task operations are verified against group identity:
 
@@ -60,7 +72,7 @@ Messages and task operations are verified against group identity:
 | View all tasks | ✓ | Own only |
 | Manage other groups | ✓ | ✗ |
 
-### 5. Credential Handling
+### 6. Credential Handling
 
 **Mounted Credentials:**
 - Claude auth tokens (filtered from `.env`, read-only)
@@ -73,7 +85,15 @@ Messages and task operations are verified against group identity:
 **Credential Filtering:**
 Only these environment variables are exposed to containers:
 ```typescript
-const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
+// Authoritative source: allowedVars in src/backends/local-backend.ts
+const allowedVars = [
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'ANTHROPIC_API_KEY',
+  'GITHUB_TOKEN',
+  'GIT_AUTHOR_NAME',
+  'GIT_AUTHOR_EMAIL',
+  'CLAUDE_MODEL',
+];
 ```
 
 > **Note:** Anthropic credentials are mounted so that Claude Code can authenticate when the agent runs. However, this means the agent itself can discover these credentials via Bash or file operations. Ideally, Claude Code would authenticate without exposing credentials to the agent's execution environment, but I couldn't figure this out. **PRs welcome** if you have ideas for credential isolation.
@@ -82,7 +102,7 @@ const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
 
 | Capability | Main Group | Non-Main Group |
 |------------|------------|----------------|
-| Project root access | `/workspace/project` (rw) | None |
+| Project root access | `/workspace/project` (ro) | None |
 | Group folder | `/workspace/group` (rw) | `/workspace/group` (rw) |
 | Global memory | Implicit via project | `/workspace/global` (ro) |
 | Additional mounts | Configurable | Read-only unless allowed |
