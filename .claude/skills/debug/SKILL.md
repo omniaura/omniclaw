@@ -146,8 +146,8 @@ If sessions aren't being resumed (new session ID every time), or Claude Code exi
 
 **Check the mount path:**
 ```bash
-# In container-runner.ts, verify mount is to /home/node/.claude/, NOT /root/.claude/
-grep -A3 "Claude sessions" src/container-runner.ts
+# In local-backend.ts, verify mount is to /home/node/.claude/, NOT /root/.claude/
+grep -A3 "Claude sessions" src/backends/local-backend.ts
 ```
 
 **Verify sessions are accessible:**
@@ -160,7 +160,7 @@ ls -la $HOME/.claude/projects/ 2>&1 | head -5
 '
 ```
 
-**Fix:** Ensure `container-runner.ts` mounts to `/home/node/.claude/`:
+**Fix:** Ensure `local-backend.ts` mounts to `/home/node/.claude/`:
 ```typescript
 mounts.push({
   hostPath: claudeDir,
@@ -333,7 +333,7 @@ echo -e "\n4. Container image exists?"
 echo '{}' | container run -i --entrypoint /bin/echo omniclaw-agent:latest "OK" 2>/dev/null || echo "MISSING - run ./container/build.sh"
 
 echo -e "\n5. Session mount path correct?"
-grep -q "/home/node/.claude" src/container-runner.ts 2>/dev/null && echo "OK" || echo "WRONG - should mount to /home/node/.claude/, not /root/.claude/"
+grep -q "/home/node/.claude" src/backends/local-backend.ts 2>/dev/null && echo "OK" || echo "WRONG - should mount to /home/node/.claude/, not /root/.claude/"
 
 echo -e "\n6. Groups directory?"
 ls -la groups/ 2>/dev/null || echo "MISSING - run setup"
