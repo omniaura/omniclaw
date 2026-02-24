@@ -306,7 +306,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 
 server.tool(
   'list_tasks',
-  "List scheduled tasks for the current context.",
+  "List scheduled tasks for the current context. Shows task ownership so you can identify which group/agent each task belongs to.",
   {},
   async () => {
     const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
@@ -324,12 +324,15 @@ server.tool(
 
       const formatted = tasks
         .map(
-          (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
-            `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
+          (t: { id: string; groupFolder?: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) => {
+            const owner = t.groupFolder || 'unknown';
+            const ownerLabel = owner === groupFolder ? `${owner} (yours)` : owner;
+            return `- [${t.id}] (owner: ${ownerLabel}) ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`;
+          },
         )
         .join('\n');
 
-      return { content: [{ type: 'text' as const, text: `Scheduled tasks:\n${formatted}` }] };
+      return { content: [{ type: 'text' as const, text: `Scheduled tasks (current group: ${groupFolder}):\n${formatted}` }] };
     } catch (err) {
       return {
         content: [{ type: 'text' as const, text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}` }],
@@ -340,9 +343,24 @@ server.tool(
 
 server.tool(
   'pause_task',
-  'Pause a scheduled task. It will not run until resumed.',
+  'Pause a scheduled task. It will not run until resumed. Non-main agents can only pause their own tasks.',
   { task_id: z.string().describe('The task ID to pause') },
   async (args) => {
+    // Check task ownership from snapshot
+    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+    try {
+      if (fs.existsSync(tasksFile)) {
+        const tasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
+        const task = tasks.find((t: { id: string }) => t.id === args.task_id);
+        if (task && task.groupFolder !== groupFolder && !isMain) {
+          return {
+            content: [{ type: 'text' as const, text: `Cannot pause task ${args.task_id}: it belongs to "${task.groupFolder}", not "${groupFolder}". Only the owning group or the main agent can pause a task.` }],
+            isError: true,
+          };
+        }
+      }
+    } catch { /* proceed — server will do final auth check */ }
+
     const data = {
       type: 'pause_task',
       taskId: args.task_id,
@@ -359,9 +377,24 @@ server.tool(
 
 server.tool(
   'resume_task',
-  'Resume a paused task.',
+  'Resume a paused task. Non-main agents can only resume their own tasks.',
   { task_id: z.string().describe('The task ID to resume') },
   async (args) => {
+    // Check task ownership from snapshot
+    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+    try {
+      if (fs.existsSync(tasksFile)) {
+        const tasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
+        const task = tasks.find((t: { id: string }) => t.id === args.task_id);
+        if (task && task.groupFolder !== groupFolder && !isMain) {
+          return {
+            content: [{ type: 'text' as const, text: `Cannot resume task ${args.task_id}: it belongs to "${task.groupFolder}", not "${groupFolder}". Only the owning group or the main agent can resume a task.` }],
+            isError: true,
+          };
+        }
+      }
+    } catch { /* proceed — server will do final auth check */ }
+
     const data = {
       type: 'resume_task',
       taskId: args.task_id,
@@ -378,9 +411,31 @@ server.tool(
 
 server.tool(
   'cancel_task',
-  'Cancel and delete a scheduled task.',
+  'Cancel and delete a scheduled task. Non-main agents can only cancel their own tasks.',
   { task_id: z.string().describe('The task ID to cancel') },
   async (args) => {
+    // Check task ownership from snapshot before sending cancel request
+    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+    let ownerWarning = '';
+    try {
+      if (fs.existsSync(tasksFile)) {
+        const tasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
+        const task = tasks.find((t: { id: string }) => t.id === args.task_id);
+        if (task) {
+          const taskOwner = task.groupFolder || 'unknown';
+          if (taskOwner !== groupFolder) {
+            if (!isMain) {
+              return {
+                content: [{ type: 'text' as const, text: `Cannot cancel task ${args.task_id}: it belongs to "${taskOwner}", not "${groupFolder}". Only the owning group or the main agent can cancel a task.` }],
+                isError: true,
+              };
+            }
+            ownerWarning = ` WARNING: This task belongs to "${taskOwner}", not "${groupFolder}".`;
+          }
+        }
+      }
+    } catch { /* proceed with cancel — server will do final auth check */ }
+
     const data = {
       type: 'cancel_task',
       taskId: args.task_id,
@@ -391,7 +446,7 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
+    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.${ownerWarning}` }] };
   },
 );
 
