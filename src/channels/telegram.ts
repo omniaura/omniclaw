@@ -193,8 +193,9 @@ export class TelegramChannel implements Channel {
 
     try {
       const numericId = jid.replace(/^tg:/, '');
-      const replyParams = replyToMessageId
-        ? { reply_parameters: { message_id: parseInt(replyToMessageId, 10) } }
+      const parsedReplyId = replyToMessageId ? parseInt(replyToMessageId, 10) : NaN;
+      const replyParams = !isNaN(parsedReplyId)
+        ? { reply_parameters: { message_id: parsedReplyId } }
         : {};
 
       // Telegram has a 4096 character limit per message — split if needed.

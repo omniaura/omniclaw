@@ -243,12 +243,12 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
   const args: string[] = [
     'run', '-i', '--rm',
     '--memory', CONTAINER_MEMORY,
-    '--security-opt', 'no-new-privileges:true',
     '--name', containerName,
   ];
 
   if (isDocker) {
     args.push('--pids-limit', '256');
+    args.push('--security-opt', 'no-new-privileges:true');
   }
 
   // Pass host timezone so container's local time matches the user's
