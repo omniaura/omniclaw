@@ -7,11 +7,6 @@ export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 // Slack: bot token (xoxb-...) + app-level token for Socket Mode (xapp-...)
 export const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
 export const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN || '';
-export const TELEGRAM_ONLY = process.env.TELEGRAM_ONLY === 'true';
-export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
-  .split(',')
-  .map((t) => t.trim())
-  .filter(Boolean);
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
