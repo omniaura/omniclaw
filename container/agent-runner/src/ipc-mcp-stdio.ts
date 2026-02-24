@@ -832,7 +832,7 @@ if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
     async (args) => {
       writeIpcFile(MESSAGES_DIR, {
         type: 'react_to_message',
-        chatJid,
+        chatJid: getCurrentChatJid(),
         messageId: args.message_id,
         emoji: args.emoji,
         remove: args.remove || false,
@@ -843,7 +843,7 @@ if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
     },
   );
 
-  server.tool(
+  if (!isTelegram) server.tool(
     'format_mention',
     'Format a user mention for Discord using their display name. Returns the proper <@USER_ID> format for Discord mentions.',
     {

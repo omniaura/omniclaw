@@ -8,6 +8,19 @@ import { logger } from '../logger.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 import { splitMessage } from './utils.js';
 
+type TelegramReactionEmoji = import('@grammyjs/types').ReactionTypeEmoji['emoji'];
+const VALID_TELEGRAM_REACTIONS: readonly TelegramReactionEmoji[] = [
+  '👍', '👎', '❤', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱', '🤬', '😢', '🎉',
+  '🤩', '🤮', '💩', '🙏', '👌', '🕊', '🤡', '🥱', '🥴', '😍', '🐳', '❤‍🔥',
+  '🌚', '🌭', '💯', '🤣', '⚡', '🍌', '🏆', '💔', '🤨', '😐', '🍓', '🍾',
+  '💋', '🖕', '😈', '😴', '😭', '🤓', '👻', '👨‍💻', '👀', '🎃', '🙈', '😇', '😨',
+  '🤝', '✍', '🤗', '🫡', '🎅', '🎄', '☃', '💅', '🤪', '🗿', '🆒', '💘', '🙉',
+  '🦄', '😘', '💊', '🙊', '😎', '👾', '🤷‍♂', '🤷', '🤷‍♀', '😡',
+];
+function isTelegramReactionEmoji(v: string): v is TelegramReactionEmoji {
+  return (VALID_TELEGRAM_REACTIONS as readonly string[]).includes(v);
+}
+
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
@@ -216,16 +229,23 @@ export class TelegramChannel implements Channel {
     const numericChatId = jid.replace(/^tg:/, '');
     const numericMsgId = parseInt(messageId, 10);
     if (isNaN(numericMsgId)) return;
+    if (!isTelegramReactionEmoji(emoji)) {
+      logger.warn({ jid, messageId, emoji }, 'Unsupported Telegram reaction emoji — skipping');
+      return;
+    }
     try {
       await this.bot.api.setMessageReaction(numericChatId, numericMsgId, [
-        { type: 'emoji', emoji: emoji as import('@grammyjs/types').ReactionTypeEmoji['emoji'] },
+        { type: 'emoji', emoji },
       ]);
     } catch (err) {
       logger.warn({ jid, messageId, emoji, err }, 'Failed to add Telegram reaction');
     }
   }
 
-  async removeReaction(jid: string, messageId: string, emoji: string): Promise<void> {
+  // NOTE: Telegram's Bot API has no single-reaction removal endpoint. This clears
+  // all reactions on the message. The emoji param is accepted for interface
+  // compatibility but is not used in the API call.
+  async removeReaction(jid: string, messageId: string, _emoji: string): Promise<void> {
     if (!this.bot) return;
     const numericChatId = jid.replace(/^tg:/, '');
     const numericMsgId = parseInt(messageId, 10);
@@ -233,7 +253,7 @@ export class TelegramChannel implements Channel {
     try {
       await this.bot.api.setMessageReaction(numericChatId, numericMsgId, []);
     } catch (err) {
-      logger.warn({ jid, messageId, emoji, err }, 'Failed to remove Telegram reaction');
+      logger.warn({ jid, messageId, err }, 'Failed to remove Telegram reaction');
     }
   }
 

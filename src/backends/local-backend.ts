@@ -606,27 +606,37 @@ export class LocalBackend implements AgentBackend {
   }
 
   async initialize(): Promise<void> {
-    // Kill any orphaned OmniClaw containers from a previous run
-    await $`pkill -f 'container run.*omniclaw-'`.quiet().nothrow();
+    const isDocker = LOCAL_RUNTIME === 'docker';
 
-    // Idempotent start — fast no-op if already running
-    logger.info('Starting Apple Container system...');
-    const start = await $`container system start`.quiet().nothrow();
-    if (start.exitCode !== 0) {
-      logger.error({ stderr: start.stderr.toString() }, 'Failed to start Apple Container system');
-      this.printContainerSystemError();
-      throw new Error('Apple Container system is required but failed to start');
+    if (!isDocker) {
+      // Kill any orphaned OmniClaw containers from a previous run (Apple Container only)
+      await $`pkill -f 'container run.*omniclaw-'`.quiet().nothrow();
+
+      // Idempotent start — fast no-op if already running
+      logger.info('Starting Apple Container system...');
+      const start = await $`container system start`.quiet().nothrow();
+      if (start.exitCode !== 0) {
+        logger.error({ stderr: start.stderr.toString() }, 'Failed to start Apple Container system');
+        this.printContainerSystemError();
+        throw new Error('Apple Container system is required but failed to start');
+      }
     }
 
     // Probe to verify containers actually work
-    const probe = await $`container run --rm --entrypoint /bin/echo ${CONTAINER_IMAGE} ok`.quiet().nothrow();
+    const probe = await $`${LOCAL_RUNTIME} run --rm --entrypoint /bin/echo ${CONTAINER_IMAGE} ok`.quiet().nothrow();
     if (probe.exitCode === 0 && probe.text().trim() === 'ok') {
       logger.info('Container system ready (probe passed)');
       await this.cleanupOrphanedContainers();
       return;
     }
 
-    // Probe failed — fall back to full stop/sleep/start cycle
+    if (isDocker) {
+      // Docker daemon is always running; a failed probe is a hard error
+      logger.error({ exitCode: probe.exitCode, output: probe.text().trim() }, 'Docker container probe failed');
+      throw new Error('Docker container probe failed — check that the image exists and Docker is running');
+    }
+
+    // Probe failed — fall back to full stop/sleep/start cycle (Apple Container only)
     logger.warn({ exitCode: probe.exitCode, output: probe.text().trim() }, 'Container probe failed, performing full restart cycle...');
     await $`container system stop`.quiet().nothrow();
     await Bun.sleep(3000);
@@ -656,12 +666,18 @@ export class LocalBackend implements AgentBackend {
 
   private async cleanupOrphanedContainers(): Promise<void> {
     try {
-      const lsResult = await $`container ls --format json`.quiet();
-      const containers: { status: string; configuration: { id: string } }[] = JSON.parse(lsResult.text() || '[]');
-      const orphans = containers
-        .filter((c) => c.status === 'running' && c.configuration.id.startsWith('omniclaw-'))
-        .map((c) => c.configuration.id);
-      await Promise.all(orphans.map((name) => $`container stop ${name}`.quiet().nothrow()));
+      let orphans: string[];
+      if (LOCAL_RUNTIME === 'docker') {
+        const lsResult = await $`docker ps --filter name=omniclaw- --format {{.Names}}`.quiet();
+        orphans = lsResult.text().split('\n').map((s) => s.trim()).filter(Boolean);
+      } else {
+        const lsResult = await $`container ls --format json`.quiet();
+        const containers: { status: string; configuration: { id: string } }[] = JSON.parse(lsResult.text() || '[]');
+        orphans = containers
+          .filter((c) => c.status === 'running' && c.configuration.id.startsWith('omniclaw-'))
+          .map((c) => c.configuration.id);
+      }
+      await Promise.all(orphans.map((name) => $`${LOCAL_RUNTIME} stop ${name}`.quiet().nothrow()));
       if (orphans.length > 0) {
         logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
       }
