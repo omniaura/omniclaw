@@ -218,7 +218,7 @@ export class TelegramChannel implements Channel {
     if (isNaN(numericMsgId)) return;
     try {
       await this.bot.api.setMessageReaction(numericChatId, numericMsgId, [
-        { type: 'emoji', emoji },
+        { type: 'emoji', emoji: emoji as import('@grammyjs/types').ReactionTypeEmoji['emoji'] },
       ]);
     } catch (err) {
       logger.warn({ jid, messageId, emoji, err }, 'Failed to add Telegram reaction');
