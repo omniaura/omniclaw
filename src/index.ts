@@ -35,7 +35,7 @@ import {
   mapTasksForSnapshot,
   writeGroupsSnapshot,
   writeTasksSnapshot,
-} from './container-runner.js';
+} from './ipc-snapshots.js';
 import {
   expireStaleSessions,
   getAllAgents,
@@ -367,7 +367,7 @@ async function backfillDiscordGuildIds(discord: DiscordChannel): Promise<void> {
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
  */
-export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
+export function getAvailableGroups(): import('./ipc-snapshots.js').AvailableGroup[] {
   const chats = getAllChats();
   const registeredJids = new Set(Object.keys(registeredGroups));
 

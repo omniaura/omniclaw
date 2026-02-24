@@ -1,32 +1,21 @@
 /**
- * Container Runner for OmniClaw
- * Thin re-export layer for backward compatibility.
- * Actual implementation is in backends/local-backend.ts.
+ * IPC Snapshot Utilities
+ *
+ * Functions for writing task and group snapshots to the per-group IPC directories.
+ * These snapshots are read by containers to provide current task/group state.
  */
 
 import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR } from './config.js';
-import { resolveBackend } from './backends/index.js';
-import { ContainerProcess, RegisteredGroup, Agent, ScheduledTask } from './types.js';
-import type { AgentOrGroup } from './backends/types.js';
+import type { ScheduledTask } from './types.js';
 
-// Re-export types from backends
-export type { ContainerInput, ContainerOutput } from './backends/types.js';
-
-/**
- * Run an agent via the appropriate backend.
- * @deprecated Use resolveBackend(group).runAgent() directly.
- */
-export async function runContainerAgent(
-  group: AgentOrGroup,
-  input: import('./backends/types.js').ContainerInput,
-  onProcess: (proc: ContainerProcess, containerName: string) => void,
-  onOutput?: (output: import('./backends/types.js').ContainerOutput) => Promise<void>,
-): Promise<import('./backends/types.js').ContainerOutput> {
-  const backend = resolveBackend(group);
-  return backend.runAgent(group, input, onProcess, onOutput);
+export interface AvailableGroup {
+  jid: string;
+  name: string;
+  lastActivity: string;
+  isRegistered: boolean;
 }
 
 /** Map ScheduledTask rows to the lightweight shape used in task snapshots. */
@@ -64,13 +53,6 @@ export function writeTasksSnapshot(
 
   const tasksFile = path.join(groupIpcDir, 'current_tasks.json');
   fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));
-}
-
-export interface AvailableGroup {
-  jid: string;
-  name: string;
-  lastActivity: string;
-  isRegistered: boolean;
 }
 
 export function writeGroupsSnapshot(

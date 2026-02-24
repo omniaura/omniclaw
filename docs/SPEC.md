@@ -131,7 +131,7 @@ omniclaw/
 │   ├── db.ts                      # SQLite database initialization and queries
 │   ├── router.ts                  # Message formatting and outbound routing
 │   ├── logger.ts                  # Pino structured logger setup
-│   ├── container-runner.ts        # Container lifecycle management
+│   ├── ipc-snapshots.ts           # Task and group snapshot utilities for IPC
 │   ├── ipc.ts                     # IPC watcher and task/message processing
 │   ├── ipc-file-security.ts       # IPC file intake hardening (symlink, TOCTOU, size)
 │   ├── file-transfer.ts           # Push/pull file transfers between agents
