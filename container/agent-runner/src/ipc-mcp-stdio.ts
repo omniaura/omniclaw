@@ -815,13 +815,17 @@ This is useful when you need to send messages to specific agents or request cont
   },
 );
 
-// Discord-only tools
-if (chatJid.startsWith('dc:')) {
+// Reaction tool — Discord and Telegram
+if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
+  const isTelegram = chatJid.startsWith('tg:');
+  const reactionDesc = isTelegram
+    ? 'Add or remove an emoji reaction on a Telegram message. Telegram only supports a fixed set of emoji: 👍 👎 ❤ 🔥 🥰 👏 😁 🤔 🤯 😱 🤬 😢 🎉 🤩 🤮 💩 🙏 👌 🕊 🤡 🥱 🥴 😍 🐳 ❤‍🔥 🌚 🌭 💯 🤣 ⚡ 🍌 🏆 💔 🤨 😐 🍓 🍾 💋 😈 😴 😭 🤓 👻 👀 🎃 🙈 😇 😂 🤦 🤷 — use only these or the reaction will silently fail.'
+    : 'Add or remove an emoji reaction on a Discord message. Use message IDs from the conversation.';
   server.tool(
     'react_to_message',
-    'Add or remove an emoji reaction on a Discord message. Use message IDs from the conversation.',
+    reactionDesc,
     {
-      message_id: z.string().describe('The Discord message ID to react to'),
+      message_id: z.string().describe('The message ID to react to'),
       emoji: z.string().describe('Emoji to react with (e.g. "\ud83d\udc4d", "\u2764\ufe0f", "\ud83c\udf89", "\u2705")'),
       remove: z.boolean().optional().describe('Set to true to remove the reaction instead of adding it'),
     },
