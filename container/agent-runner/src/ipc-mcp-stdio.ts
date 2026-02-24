@@ -346,17 +346,24 @@ server.tool(
   'Pause a scheduled task. It will not run until resumed. Non-main agents can only pause their own tasks.',
   { task_id: z.string().describe('The task ID to pause') },
   async (args) => {
-    // Check task ownership from snapshot
+    // Check task ownership from snapshot before sending pause request
     const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+    let ownerWarning = '';
     try {
       if (fs.existsSync(tasksFile)) {
         const tasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
         const task = tasks.find((t: { id: string }) => t.id === args.task_id);
-        if (task && task.groupFolder !== groupFolder && !isMain) {
-          return {
-            content: [{ type: 'text' as const, text: `Cannot pause task ${args.task_id}: it belongs to "${task.groupFolder}", not "${groupFolder}". Only the owning group or the main agent can pause a task.` }],
-            isError: true,
-          };
+        if (task) {
+          const taskOwner = task.groupFolder ?? 'unknown';
+          if (taskOwner !== groupFolder) {
+            if (!isMain) {
+              return {
+                content: [{ type: 'text' as const, text: `Cannot pause task ${args.task_id}: it belongs to "${taskOwner}", not "${groupFolder}". Only the owning group or the main agent can pause a task.` }],
+                isError: true,
+              };
+            }
+            ownerWarning = ` WARNING: This task belongs to "${taskOwner}", not "${groupFolder}".`;
+          }
         }
       }
     } catch { /* proceed — server will do final auth check */ }
@@ -371,7 +378,7 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.` }] };
+    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.${ownerWarning}` }] };
   },
 );
 
@@ -380,17 +387,24 @@ server.tool(
   'Resume a paused task. Non-main agents can only resume their own tasks.',
   { task_id: z.string().describe('The task ID to resume') },
   async (args) => {
-    // Check task ownership from snapshot
+    // Check task ownership from snapshot before sending resume request
     const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+    let ownerWarning = '';
     try {
       if (fs.existsSync(tasksFile)) {
         const tasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
         const task = tasks.find((t: { id: string }) => t.id === args.task_id);
-        if (task && task.groupFolder !== groupFolder && !isMain) {
-          return {
-            content: [{ type: 'text' as const, text: `Cannot resume task ${args.task_id}: it belongs to "${task.groupFolder}", not "${groupFolder}". Only the owning group or the main agent can resume a task.` }],
-            isError: true,
-          };
+        if (task) {
+          const taskOwner = task.groupFolder ?? 'unknown';
+          if (taskOwner !== groupFolder) {
+            if (!isMain) {
+              return {
+                content: [{ type: 'text' as const, text: `Cannot resume task ${args.task_id}: it belongs to "${taskOwner}", not "${groupFolder}". Only the owning group or the main agent can resume a task.` }],
+                isError: true,
+              };
+            }
+            ownerWarning = ` WARNING: This task belongs to "${taskOwner}", not "${groupFolder}".`;
+          }
         }
       }
     } catch { /* proceed — server will do final auth check */ }
@@ -405,7 +419,7 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.` }] };
+    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.${ownerWarning}` }] };
   },
 );
 
@@ -422,7 +436,7 @@ server.tool(
         const tasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
         const task = tasks.find((t: { id: string }) => t.id === args.task_id);
         if (task) {
-          const taskOwner = task.groupFolder || 'unknown';
+          const taskOwner = task.groupFolder ?? 'unknown';
           if (taskOwner !== groupFolder) {
             if (!isMain) {
               return {
