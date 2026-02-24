@@ -211,6 +211,32 @@ export class TelegramChannel implements Channel {
     }
   }
 
+  async addReaction(jid: string, messageId: string, emoji: string): Promise<void> {
+    if (!this.bot) return;
+    const numericChatId = jid.replace(/^tg:/, '');
+    const numericMsgId = parseInt(messageId, 10);
+    if (isNaN(numericMsgId)) return;
+    try {
+      await this.bot.api.setMessageReaction(numericChatId, numericMsgId, [
+        { type: 'emoji', emoji },
+      ]);
+    } catch (err) {
+      logger.warn({ jid, messageId, emoji, err }, 'Failed to add Telegram reaction');
+    }
+  }
+
+  async removeReaction(jid: string, messageId: string, emoji: string): Promise<void> {
+    if (!this.bot) return;
+    const numericChatId = jid.replace(/^tg:/, '');
+    const numericMsgId = parseInt(messageId, 10);
+    if (isNaN(numericMsgId)) return;
+    try {
+      await this.bot.api.setMessageReaction(numericChatId, numericMsgId, []);
+    } catch (err) {
+      logger.warn({ jid, messageId, emoji, err }, 'Failed to remove Telegram reaction');
+    }
+  }
+
   isConnected(): boolean {
     return this.bot !== null;
   }
