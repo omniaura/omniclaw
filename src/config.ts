@@ -26,6 +26,7 @@ export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 export const MAIN_GROUP_FOLDER = 'main';
 
+export const LOCAL_RUNTIME = process.env.LOCAL_RUNTIME || 'container';
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'omniclaw-agent:latest';
 export const CONTAINER_MEMORY = process.env.CONTAINER_MEMORY || '4G';

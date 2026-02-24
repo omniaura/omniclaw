@@ -815,20 +815,24 @@ This is useful when you need to send messages to specific agents or request cont
   },
 );
 
-// Discord-only tools
-if (chatJid.startsWith('dc:')) {
+// Reaction tool — Discord and Telegram
+if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
+  const isTelegram = chatJid.startsWith('tg:');
+  const reactionDesc = isTelegram
+    ? 'Add or remove an emoji reaction on a Telegram message. Telegram only supports a fixed set of emoji reactions — using an invalid one will return an API error. The set grows over time; see https://core.telegram.org/bots/api#reactiontypeemoji for the current list.'
+    : 'Add or remove an emoji reaction on a Discord message. Use message IDs from the conversation.';
   server.tool(
     'react_to_message',
-    'Add or remove an emoji reaction on a Discord message. Use message IDs from the conversation.',
+    reactionDesc,
     {
-      message_id: z.string().describe('The Discord message ID to react to'),
+      message_id: z.string().describe('The message ID to react to'),
       emoji: z.string().describe('Emoji to react with (e.g. "\ud83d\udc4d", "\u2764\ufe0f", "\ud83c\udf89", "\u2705")'),
       remove: z.boolean().optional().describe('Set to true to remove the reaction instead of adding it'),
     },
     async (args) => {
       writeIpcFile(MESSAGES_DIR, {
         type: 'react_to_message',
-        chatJid,
+        chatJid: getCurrentChatJid(),
         messageId: args.message_id,
         emoji: args.emoji,
         remove: args.remove || false,
@@ -839,7 +843,7 @@ if (chatJid.startsWith('dc:')) {
     },
   );
 
-  server.tool(
+  if (!isTelegram) server.tool(
     'format_mention',
     'Format a user mention for Discord using their display name. Returns the proper <@USER_ID> format for Discord mentions.',
     {
