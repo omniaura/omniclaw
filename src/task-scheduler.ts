@@ -10,7 +10,7 @@ import {
 import { calculateNextRun } from './schedule-utils.js';
 import { resolveBackend } from './backends/index.js';
 import type { ContainerOutput } from './backends/types.js';
-import { writeTasksSnapshot } from './container-runner.js';
+import { writeTasksSnapshot } from './ipc-snapshots.js';
 import { createThreadStreamer } from './thread-streaming.js';
 import {
   advanceTaskNextRun,

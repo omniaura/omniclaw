@@ -8,7 +8,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { calculateNextRun } from './schedule-utils.js';
-import { AvailableGroup } from './container-runner.js';
+import { AvailableGroup } from './ipc-snapshots.js';
 import {
   createTask,
   deleteTask,

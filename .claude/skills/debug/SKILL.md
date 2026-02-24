@@ -12,9 +12,9 @@ This guide covers debugging the containerized agent execution system.
 ```
 Host (macOS)                          Container (Linux VM)
 ─────────────────────────────────────────────────────────────
-src/container-runner.ts               container/agent-runner/
+src/backends/local-backend.ts          container/agent-runner/
     │                                      │
-    │ spawns Apple Container               │ runs Claude Agent SDK
+    │ spawns container via backend         │ runs Claude Agent SDK
     │ with volume mounts                   │ with MCP servers
     │                                      │
     ├── data/env/env ──────────────> /workspace/env-dir/env

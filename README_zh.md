@@ -130,7 +130,8 @@ WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) -->
 - `src/ipc.ts` - IPC 监听与任务处理
 - `src/router.ts` - 消息格式化与出站路由
 - `src/group-queue.ts` - 每群组队列，带全局并发限制
-- `src/container-runner.ts` - 生成流式智能体容器
+- `src/backends/` - 可插拔后端系统（Apple Container、Sprites、Docker等）
+- `src/ipc-snapshots.ts` - IPC 任务和群组快照工具
 - `src/task-scheduler.ts` - 运行计划任务
 - `src/db.ts` - SQLite 操作（消息、群组、会话、状态）
 - `groups/*/CLAUDE.md` - 各群组的记忆
