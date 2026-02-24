@@ -170,6 +170,39 @@ function writeIpcFile(dir: string, data: object): string {
   return filename;
 }
 
+/** Check task ownership from the snapshot. Returns an error response if the
+ *  caller lacks permission, or an ownerWarning string (may be empty) if allowed. */
+function checkTaskOwnership(
+  taskId: string,
+  action: 'pause' | 'resume' | 'cancel',
+): { allowed: true; ownerWarning: string } | { allowed: false; response: { content: [{ type: 'text'; text: string }]; isError: true } } {
+  const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+  try {
+    if (fs.existsSync(tasksFile)) {
+      const raw = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
+      if (Array.isArray(raw)) {
+        const task = raw.find((t: { id: string }) => t.id === taskId);
+        if (task) {
+          const taskOwner = task.groupFolder ?? 'unknown';
+          if (taskOwner !== groupFolder) {
+            if (!isMain) {
+              return {
+                allowed: false,
+                response: {
+                  content: [{ type: 'text' as const, text: `Cannot ${action} task ${taskId}: it belongs to "${taskOwner}", not "${groupFolder}". Only the owning group or the main agent can ${action} a task.` }],
+                  isError: true,
+                },
+              };
+            }
+            return { allowed: true, ownerWarning: ` WARNING: This task belongs to "${taskOwner}", not "${groupFolder}".` };
+          }
+        }
+      }
+    }
+  } catch { /* proceed — server will do final auth check */ }
+  return { allowed: true, ownerWarning: '' };
+}
+
 const server = new McpServer({
   name: 'omniclaw',
   version: '1.0.0',
@@ -306,7 +339,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 
 server.tool(
   'list_tasks',
-  "List scheduled tasks for the current context.",
+  "List scheduled tasks for the current context. Shows task ownership so you can identify which group/agent each task belongs to.",
   {},
   async () => {
     const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
@@ -324,12 +357,16 @@ server.tool(
 
       const formatted = tasks
         .map(
-          (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
-            `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
+          (t: { id: string; groupFolder?: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) => {
+            const owner = t.groupFolder ?? 'unknown';
+            const ownerLabel = owner === groupFolder ? `${owner} (yours)` : owner;
+            const promptPreview = t.prompt.length > 50 ? `${t.prompt.slice(0, 50)}...` : t.prompt;
+            return `- [${t.id}] (owner: ${ownerLabel}) ${promptPreview} (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`;
+          },
         )
         .join('\n');
 
-      return { content: [{ type: 'text' as const, text: `Scheduled tasks:\n${formatted}` }] };
+      return { content: [{ type: 'text' as const, text: `Scheduled tasks (current group: ${groupFolder}):\n${formatted}` }] };
     } catch (err) {
       return {
         content: [{ type: 'text' as const, text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}` }],
@@ -340,9 +377,13 @@ server.tool(
 
 server.tool(
   'pause_task',
-  'Pause a scheduled task. It will not run until resumed.',
+  'Pause a scheduled task. It will not run until resumed. Non-main agents can only pause their own tasks.',
   { task_id: z.string().describe('The task ID to pause') },
   async (args) => {
+    const ownerCheck = checkTaskOwnership(args.task_id, 'pause');
+    if (!ownerCheck.allowed) return ownerCheck.response;
+    const { ownerWarning } = ownerCheck;
+
     const data = {
       type: 'pause_task',
       taskId: args.task_id,
@@ -353,15 +394,19 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.` }] };
+    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.${ownerWarning}` }] };
   },
 );
 
 server.tool(
   'resume_task',
-  'Resume a paused task.',
+  'Resume a paused task. Non-main agents can only resume their own tasks.',
   { task_id: z.string().describe('The task ID to resume') },
   async (args) => {
+    const ownerCheck = checkTaskOwnership(args.task_id, 'resume');
+    if (!ownerCheck.allowed) return ownerCheck.response;
+    const { ownerWarning } = ownerCheck;
+
     const data = {
       type: 'resume_task',
       taskId: args.task_id,
@@ -372,15 +417,19 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.` }] };
+    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.${ownerWarning}` }] };
   },
 );
 
 server.tool(
   'cancel_task',
-  'Cancel and delete a scheduled task.',
+  'Cancel and delete a scheduled task. Non-main agents can only cancel their own tasks.',
   { task_id: z.string().describe('The task ID to cancel') },
   async (args) => {
+    const ownerCheck = checkTaskOwnership(args.task_id, 'cancel');
+    if (!ownerCheck.allowed) return ownerCheck.response;
+    const { ownerWarning } = ownerCheck;
+
     const data = {
       type: 'cancel_task',
       taskId: args.task_id,
@@ -391,7 +440,7 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
+    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.${ownerWarning}` }] };
   },
 );
 
