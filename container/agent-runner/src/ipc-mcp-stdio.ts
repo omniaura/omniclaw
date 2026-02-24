@@ -170,6 +170,39 @@ function writeIpcFile(dir: string, data: object): string {
   return filename;
 }
 
+/** Check task ownership from the snapshot. Returns an error response if the
+ *  caller lacks permission, or an ownerWarning string (may be empty) if allowed. */
+function checkTaskOwnership(
+  taskId: string,
+  action: 'pause' | 'resume' | 'cancel',
+): { allowed: true; ownerWarning: string } | { allowed: false; response: { content: [{ type: 'text'; text: string }]; isError: true } } {
+  const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+  try {
+    if (fs.existsSync(tasksFile)) {
+      const raw = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
+      if (Array.isArray(raw)) {
+        const task = raw.find((t: { id: string }) => t.id === taskId);
+        if (task) {
+          const taskOwner = task.groupFolder ?? 'unknown';
+          if (taskOwner !== groupFolder) {
+            if (!isMain) {
+              return {
+                allowed: false,
+                response: {
+                  content: [{ type: 'text' as const, text: `Cannot ${action} task ${taskId}: it belongs to "${taskOwner}", not "${groupFolder}". Only the owning group or the main agent can ${action} a task.` }],
+                  isError: true,
+                },
+              };
+            }
+            return { allowed: true, ownerWarning: ` WARNING: This task belongs to "${taskOwner}", not "${groupFolder}".` };
+          }
+        }
+      }
+    }
+  } catch { /* proceed — server will do final auth check */ }
+  return { allowed: true, ownerWarning: '' };
+}
+
 const server = new McpServer({
   name: 'omniclaw',
   version: '1.0.0',
@@ -325,9 +358,10 @@ server.tool(
       const formatted = tasks
         .map(
           (t: { id: string; groupFolder?: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) => {
-            const owner = t.groupFolder || 'unknown';
+            const owner = t.groupFolder ?? 'unknown';
             const ownerLabel = owner === groupFolder ? `${owner} (yours)` : owner;
-            return `- [${t.id}] (owner: ${ownerLabel}) ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`;
+            const promptPreview = t.prompt.length > 50 ? `${t.prompt.slice(0, 50)}...` : t.prompt;
+            return `- [${t.id}] (owner: ${ownerLabel}) ${promptPreview} (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`;
           },
         )
         .join('\n');
@@ -346,27 +380,9 @@ server.tool(
   'Pause a scheduled task. It will not run until resumed. Non-main agents can only pause their own tasks.',
   { task_id: z.string().describe('The task ID to pause') },
   async (args) => {
-    // Check task ownership from snapshot before sending pause request
-    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
-    let ownerWarning = '';
-    try {
-      if (fs.existsSync(tasksFile)) {
-        const tasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
-        const task = tasks.find((t: { id: string }) => t.id === args.task_id);
-        if (task) {
-          const taskOwner = task.groupFolder ?? 'unknown';
-          if (taskOwner !== groupFolder) {
-            if (!isMain) {
-              return {
-                content: [{ type: 'text' as const, text: `Cannot pause task ${args.task_id}: it belongs to "${taskOwner}", not "${groupFolder}". Only the owning group or the main agent can pause a task.` }],
-                isError: true,
-              };
-            }
-            ownerWarning = ` WARNING: This task belongs to "${taskOwner}", not "${groupFolder}".`;
-          }
-        }
-      }
-    } catch { /* proceed — server will do final auth check */ }
+    const ownerCheck = checkTaskOwnership(args.task_id, 'pause');
+    if (!ownerCheck.allowed) return ownerCheck.response;
+    const { ownerWarning } = ownerCheck;
 
     const data = {
       type: 'pause_task',
@@ -387,27 +403,9 @@ server.tool(
   'Resume a paused task. Non-main agents can only resume their own tasks.',
   { task_id: z.string().describe('The task ID to resume') },
   async (args) => {
-    // Check task ownership from snapshot before sending resume request
-    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
-    let ownerWarning = '';
-    try {
-      if (fs.existsSync(tasksFile)) {
-        const tasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
-        const task = tasks.find((t: { id: string }) => t.id === args.task_id);
-        if (task) {
-          const taskOwner = task.groupFolder ?? 'unknown';
-          if (taskOwner !== groupFolder) {
-            if (!isMain) {
-              return {
-                content: [{ type: 'text' as const, text: `Cannot resume task ${args.task_id}: it belongs to "${taskOwner}", not "${groupFolder}". Only the owning group or the main agent can resume a task.` }],
-                isError: true,
-              };
-            }
-            ownerWarning = ` WARNING: This task belongs to "${taskOwner}", not "${groupFolder}".`;
-          }
-        }
-      }
-    } catch { /* proceed — server will do final auth check */ }
+    const ownerCheck = checkTaskOwnership(args.task_id, 'resume');
+    if (!ownerCheck.allowed) return ownerCheck.response;
+    const { ownerWarning } = ownerCheck;
 
     const data = {
       type: 'resume_task',
@@ -428,27 +426,9 @@ server.tool(
   'Cancel and delete a scheduled task. Non-main agents can only cancel their own tasks.',
   { task_id: z.string().describe('The task ID to cancel') },
   async (args) => {
-    // Check task ownership from snapshot before sending cancel request
-    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
-    let ownerWarning = '';
-    try {
-      if (fs.existsSync(tasksFile)) {
-        const tasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
-        const task = tasks.find((t: { id: string }) => t.id === args.task_id);
-        if (task) {
-          const taskOwner = task.groupFolder ?? 'unknown';
-          if (taskOwner !== groupFolder) {
-            if (!isMain) {
-              return {
-                content: [{ type: 'text' as const, text: `Cannot cancel task ${args.task_id}: it belongs to "${taskOwner}", not "${groupFolder}". Only the owning group or the main agent can cancel a task.` }],
-                isError: true,
-              };
-            }
-            ownerWarning = ` WARNING: This task belongs to "${taskOwner}", not "${groupFolder}".`;
-          }
-        }
-      }
-    } catch { /* proceed with cancel — server will do final auth check */ }
+    const ownerCheck = checkTaskOwnership(args.task_id, 'cancel');
+    if (!ownerCheck.allowed) return ownerCheck.response;
+    const { ownerWarning } = ownerCheck;
 
     const data = {
       type: 'cancel_task',
