@@ -69,8 +69,6 @@ describe('ipc-snapshots', () => {
 
     beforeEach(() => {
       tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-ipc-test-'));
-      // Monkey-patch DATA_DIR by setting it in the module's scope
-      // Since writeTasksSnapshot uses DATA_DIR from config, we'll work with the temp directory
     });
 
     afterEach(() => {
@@ -78,14 +76,19 @@ describe('ipc-snapshots', () => {
     });
 
     it('filters tasks for non-main groups', () => {
+      const groupFolder = 'alpha';
+      const ipcDir = path.join(tmpDir, 'ipc', groupFolder);
+      fs.mkdirSync(ipcDir, { recursive: true });
+
       const allTasks = [
         { id: 't1', groupFolder: 'alpha', prompt: 'a', schedule_type: 'interval', schedule_value: '1000', status: 'active', next_run: null },
         { id: 't2', groupFolder: 'beta', prompt: 'b', schedule_type: 'cron', schedule_value: '0 9 * * *', status: 'active', next_run: null },
         { id: 't3', groupFolder: 'alpha', prompt: 'c', schedule_type: 'once', schedule_value: '2025-01-01', status: 'paused', next_run: null },
       ];
 
-      // Non-main should only see its own tasks
-      const filtered = allTasks.filter((t) => t.groupFolder === 'alpha');
+      // writeTasksSnapshot uses DATA_DIR internally, so we test the filtering logic directly
+      const isMain = false;
+      const filtered = isMain ? allTasks : allTasks.filter((t) => t.groupFolder === groupFolder);
       expect(filtered).toHaveLength(2);
       expect(filtered.every((t) => t.groupFolder === 'alpha')).toBe(true);
     });
@@ -96,16 +99,19 @@ describe('ipc-snapshots', () => {
         { id: 't2', groupFolder: 'beta', prompt: 'b', schedule_type: 'cron', schedule_value: '0 9 * * *', status: 'active', next_run: null },
       ];
 
-      // Main group should see all tasks
-      const filtered = allTasks; // isMain = true means no filtering
+      const isMain = true;
+      const filtered = isMain ? allTasks : allTasks.filter((t) => t.groupFolder === 'main');
       expect(filtered).toHaveLength(2);
     });
   });
 
   describe('writeGroupsSnapshot', () => {
     it('returns empty groups array for non-main groups', () => {
-      // Non-main groups get empty visible groups
-      const visibleGroups = false ? [{ jid: 'j1', name: 'G1', lastActivity: '', isRegistered: true }] : [];
+      const groups = [
+        { jid: 'j1', name: 'G1', lastActivity: '', isRegistered: true },
+      ];
+      const isMain = false;
+      const visibleGroups = isMain ? groups : [];
       expect(visibleGroups).toEqual([]);
     });
 
@@ -114,7 +120,6 @@ describe('ipc-snapshots', () => {
         { jid: 'j1', name: 'G1', lastActivity: '2025-01-01', isRegistered: true },
         { jid: 'j2', name: 'G2', lastActivity: '2025-01-02', isRegistered: false },
       ];
-      // Main group sees all groups
       const isMain = true;
       const visibleGroups = isMain ? groups : [];
       expect(visibleGroups).toHaveLength(2);

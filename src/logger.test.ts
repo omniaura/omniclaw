@@ -9,11 +9,10 @@ describe('logger', () => {
   beforeEach(() => {
     stderrOutput = [];
     originalWrite = process.stderr.write;
-    // @ts-expect-error - override for testing
-    process.stderr.write = (chunk: string) => {
+    process.stderr.write = ((chunk: string) => {
       stderrOutput.push(chunk);
       return true;
-    };
+    }) as typeof process.stderr.write;
   });
 
   afterEach(() => {

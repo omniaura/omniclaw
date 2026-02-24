@@ -9,7 +9,7 @@ describe('schedule-utils', () => {
         const result = calculateNextRun('cron', '0 9 * * *');
         expect(result).not.toBeNull();
         // Should be a valid ISO date
-        expect(new Date(result!).toISOString()).toBe(result);
+        expect(new Date(result!).toISOString()).toBe(result!);
       });
 
       it('returns a future date', () => {
@@ -29,7 +29,7 @@ describe('schedule-utils', () => {
         const result = calculateNextRun('cron', '');
         // cron-parser accepts empty string with default field values
         expect(result).not.toBeNull();
-        expect(new Date(result!).toISOString()).toBe(result);
+        expect(new Date(result!).toISOString()).toBe(result!);
       });
     });
 
