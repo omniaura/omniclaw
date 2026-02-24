@@ -8,8 +8,11 @@ mockModule.module('./config.js', () => ({
   MAX_TASK_CONTAINERS: 2,
 }));
 
+import realFs from 'fs';
+
 mockModule.module('fs', () => ({
   default: {
+    ...realFs,
     mkdirSync: mock(),
     writeFileSync: mock(),
     renameSync: mock(),
