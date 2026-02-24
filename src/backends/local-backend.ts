@@ -18,6 +18,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  LOCAL_RUNTIME,
   TIMEZONE,
 } from '../config.js';
 import { logger } from '../logger.js';
@@ -238,13 +239,17 @@ function buildVolumeMounts(
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
+  const isDocker = LOCAL_RUNTIME === 'docker';
   const args: string[] = [
     'run', '-i', '--rm',
     '--memory', CONTAINER_MEMORY,
-    '--pids-limit', '256',
     '--security-opt', 'no-new-privileges:true',
     '--name', containerName,
   ];
+
+  if (isDocker) {
+    args.push('--pids-limit', '256');
+  }
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -275,7 +280,7 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
 }
 
 export class LocalBackend implements AgentBackend {
-  readonly name = 'apple-container';
+  readonly name = LOCAL_RUNTIME === 'docker' ? 'docker' : 'apple-container';
 
   async runAgent(
     group: AgentOrGroup,
@@ -326,7 +331,7 @@ export class LocalBackend implements AgentBackend {
 
     let container: ReturnType<typeof Bun.spawn>;
     try {
-      container = Bun.spawn(['container', ...containerArgs], {
+      container = Bun.spawn([LOCAL_RUNTIME, ...containerArgs], {
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
@@ -351,7 +356,7 @@ export class LocalBackend implements AgentBackend {
 
     const killOnTimeout = () => {
       log.error('Container timeout, stopping gracefully');
-      const stopProc = Bun.spawn(['container', 'stop', containerName]);
+      const stopProc = Bun.spawn([LOCAL_RUNTIME, 'stop', containerName]);
       const killTimer = setTimeout(() => container.kill(9), 15000);
       stopProc.exited.then((code) => {
         if (code === 0) {
