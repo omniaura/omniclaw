@@ -819,7 +819,7 @@ This is useful when you need to send messages to specific agents or request cont
 if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
   const isTelegram = chatJid.startsWith('tg:');
   const reactionDesc = isTelegram
-    ? 'Add or remove an emoji reaction on a Telegram message. Telegram only supports a fixed set of emoji: 👍 👎 ❤ 🔥 🥰 👏 😁 🤔 🤯 😱 🤬 😢 🎉 🤩 🤮 💩 🙏 👌 🕊 🤡 🥱 🥴 😍 🐳 ❤‍🔥 🌚 🌭 💯 🤣 ⚡ 🍌 🏆 💔 🤨 😐 🍓 🍾 💋 😈 😴 😭 🤓 👻 👀 🎃 🙈 😇 😂 🤦 🤷 — use only these or the reaction will silently fail.'
+    ? 'Add or remove an emoji reaction on a Telegram message. Telegram only supports a fixed set of emoji reactions — using an invalid one will return an API error. The set grows over time; see https://core.telegram.org/bots/api#reactiontypeemoji for the current list.'
     : 'Add or remove an emoji reaction on a Discord message. Use message IDs from the conversation.';
   server.tool(
     'react_to_message',
