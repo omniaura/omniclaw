@@ -6,6 +6,7 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
@@ -41,6 +42,11 @@ export class WhatsAppChannel implements Channel {
   private messageCache = new Map<string, { msg: any; ts: number }>();
   private static readonly MESSAGE_CACHE_MAX = 500;
   private static readonly MESSAGE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+  // Reconnect backoff state — resets to 0 on successful open
+  private reconnectAttempt = 0;
+  private static readonly RECONNECT_BASE_MS = 3_000;
+  private static readonly RECONNECT_MAX_MS = 5 * 60_000; // 5 min cap
+
   // Track IDs of messages we sent so the upsert handler can ignore echoes (self-chat loop fix)
   private sentMessageIds = new Set<string>();
   // Also track sent text for reply-context lookups (WhatsApp strips quoted body in self-chat)
@@ -94,7 +100,9 @@ export class WhatsAppChannel implements Channel {
       }
     }
 
+    const { version } = await fetchLatestWaWebVersion({});
     this.sock = makeWASocket({
+      version,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -130,15 +138,17 @@ export class WhatsAppChannel implements Channel {
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          this.reconnectAttempt++;
+          const delay = Math.min(
+            WhatsAppChannel.RECONNECT_BASE_MS * 2 ** (this.reconnectAttempt - 1),
+            WhatsAppChannel.RECONNECT_MAX_MS,
+          );
+          logger.info({ attempt: this.reconnectAttempt, delayMs: delay }, `WhatsApp disconnected — reconnecting in ${Math.round(delay / 1000)}s`);
+          setTimeout(() => {
+            this.connectInternal().catch((err) => {
+              logger.error({ err }, 'WhatsApp reconnect attempt failed');
+            });
+          }, delay);
         } else {
           const msg = 'Logged out. Run /setup to re-authenticate.';
           logger.info(msg);
@@ -150,6 +160,7 @@ export class WhatsAppChannel implements Channel {
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnectAttempt = 0;
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
