@@ -145,7 +145,6 @@ omniclaw/
 │   ├── schedule-utils.ts          # Cron/interval/once schedule helpers
 │   ├── thread-streaming.ts        # Stream intermediate output to channel threads
 │   ├── whatsapp-auth.ts           # Standalone WhatsApp QR authentication
-│   ├── telegram.ts                # Telegram standalone entry point
 │   │
 │   ├── channels/
 │   │   ├── whatsapp.ts            # WhatsApp channel (baileys)
