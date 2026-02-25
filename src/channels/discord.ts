@@ -31,6 +31,7 @@ import {
   storeMessage,
 } from '../db.js';
 import { logger } from '../logger.js';
+import { assertPathWithin } from '../path-security.js';
 import { Channel, RegisteredGroup } from '../types.js';
 import { splitMessage } from './utils.js';
 
@@ -562,12 +563,15 @@ export class DiscordChannel implements Channel {
           try {
             const mediaDir = path.join(GROUPS_DIR, group.folder, 'media');
             fs.mkdirSync(mediaDir, { recursive: true });
-            const filename = `${msgId}-${a.name || 'image.png'}`;
+            // Layer 1: Strip directory components to prevent path traversal
+            // (e.g. "../../etc/cron.d/evil.png" → "evil.png")
+            const safeName = path.basename(a.name || 'image.png');
+            const filename = `${msgId}-${safeName}`;
+            const filePath = path.join(mediaDir, filename);
+            // Layer 2: Defense-in-depth — verify resolved path stays within mediaDir
+            assertPathWithin(filePath, mediaDir, 'Discord image attachment');
             const resp = await fetch(a.url);
-            fs.writeFileSync(
-              path.join(mediaDir, filename),
-              Buffer.from(await resp.arrayBuffer()),
-            );
+            fs.writeFileSync(filePath, Buffer.from(await resp.arrayBuffer()));
             parts.push(`[attachment:image file=${filename}]`);
           } catch (err) {
             logger.error(
@@ -604,8 +608,10 @@ export class DiscordChannel implements Channel {
             '.env.example',
           ]);
           const MAX_TEXT_SIZE = 100 * 1024; // 100 KB
-          const ext = path.extname(a.name || '').toLowerCase();
-          const fileName = a.name || 'attachment';
+          // Strip directory components from filename to prevent path traversal in metadata
+          const safeName = path.basename(a.name || 'attachment');
+          const ext = path.extname(safeName).toLowerCase();
+          const fileName = safeName;
 
           if (
             TEXT_EXTENSIONS.has(ext) &&
