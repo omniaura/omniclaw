@@ -651,6 +651,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         { errorCount },
         'Max consecutive errors reached, advancing cursor past failing messages',
       );
+
+      // Notify the user so the message isn't silently dropped (fixes #94)
+      if (channel) {
+        const errorMsg = "Sorry, I hit a server error a few times and couldn't process your message. Please try again.";
+        const formatted = formatOutbound(channel, errorMsg, getAgentName(group));
+        if (formatted) {
+          channel.sendMessage(chatJid, formatted, triggeringMessageId || undefined).catch((err) => {
+            log.warn({ err }, 'Failed to send error notification to user');
+          });
+        }
+      }
+
       consecutiveErrors[chatJid] = 0;
       return false;
     }
