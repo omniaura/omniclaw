@@ -47,21 +47,20 @@ A multi-channel agent orchestration framework powered by Claude, with persistent
 │  ┌──────────────────┐  ┌─────────▼──────────┐  ┌───────────────┐            │
 │  │  Message Loop    │  │  Scheduler Loop    │  │  IPC Watcher  │            │
 │  │  (polls SQLite)  │  │  (checks tasks)    │  │  (file-based  │            │
-│  └────────┬─────────┘  └────────┬───────────┘  │  + S3 cloud)  │            │
+│  └────────┬─────────┘  └────────┬───────────┘  │  (file-based) │            │
 │           │                     │               └───────────────┘            │
 │           └──────────┬──────────┘                                            │
 │                      │ resolves backend                                      │
 │                      ▼                                                       │
 │  ┌───────────────────────────────────────────────────────────┐               │
 │  │              BACKEND ABSTRACTION LAYER                    │               │
-│  │  ┌──────────────┐ ┌────────────┐ ┌─────────────────┐     │               │
-│  │  │ Apple        │ │  Sprites   │ │  Daytona /      │     │               │
-│  │  │ Container    │ │  (Fly.io)  │ │  Railway /      │     │               │
-│  │  │ (local)      │ │  (cloud)   │ │  Hetzner /      │     │               │
-│  │  │              │ │            │ │  Docker         │     │               │
-│  │  └──────────────┘ └────────────┘ └─────────────────┘     │               │
+│  │  ┌──────────────┐ ┌─────────────────┐                     │               │
+│  │  │ Apple        │ │  Docker         │                     │               │
+│  │  │ Container    │ │  (cross-plat)   │                     │               │
+│  │  │ (macOS)      │ │                 │                     │               │
+│  │  └──────────────┘ └─────────────────┘                     │               │
 │  └───────────────────────────────────────────────────────────┘               │
-│                      │ spawns container / VM                                 │
+│                      │ spawns container                                       │
 │                      ▼                                                       │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                      CONTAINER / VM (Linux)                                  │
@@ -69,7 +68,7 @@ A multi-channel agent orchestration framework powered by Claude, with persistent
 │  ┌────────────────────────────────────────────────────────────────────────┐  │
 │  │                         AGENT RUNNER                                   │  │
 │  │                                                                        │  │
-│  │  Working directory: /workspace/group (mounted from host/S3)            │  │
+│  │  Working directory: /workspace/group (mounted from host)               │  │
 │  │  Volume mounts:                                                        │  │
 │  │    • groups/{name}/ → /workspace/group                                 │  │
 │  │    • groups/global/ → /workspace/global/ (non-main only)               │  │
@@ -100,7 +99,6 @@ A multi-channel agent orchestration framework powered by Claude, with persistent
 | Message Storage | SQLite (bun:sqlite) | Store messages, groups, tasks, sessions |
 | Agent SDK | @anthropic-ai/claude-agent-sdk | Run Claude with tools and MCP servers |
 | Browser | agent-browser + Chromium | Web interaction and screenshots |
-| Cloud IPC | S3 (Backblaze B2) | Inter-agent communication for cloud backends |
 | Effect System | Effect | Structured error handling and observability |
 | Logging | Pino (structured JSON) | Runtime logging |
 
@@ -157,33 +155,12 @@ omniclaw/
 │   │   ├── index.ts               # Backend initialization and resolution
 │   │   ├── types.ts               # Backend interfaces (ContainerInput, ContainerOutput, Backend)
 │   │   ├── local-backend.ts       # Apple Container + Docker backend
-│   │   ├── sprites-backend.ts     # Sprites (Fly.io) cloud backend
-│   │   ├── sprites-ipc-poller.ts  # S3-based IPC polling for Sprites
-│   │   ├── sprites-provisioning.ts# Sprites VM provisioning
-│   │   ├── daytona-backend.ts     # Daytona dev environment backend
-│   │   ├── daytona-ipc-poller.ts  # S3-based IPC polling for Daytona
-│   │   ├── daytona-provisioning.ts# Daytona workspace provisioning
-│   │   ├── railway-backend.ts     # Railway cloud backend
-│   │   ├── railway-api.ts         # Railway API client
-│   │   ├── hetzner-backend.ts     # Hetzner Cloud backend
-│   │   ├── hetzner-api.ts         # Hetzner API client
 │   │   └── stream-parser.ts       # Container output stream parsing
-│   │
-│   ├── s3/
-│   │   ├── client.ts              # S3 client (Backblaze B2)
-│   │   ├── ipc-poller.ts          # S3-based IPC polling for cloud agents
-│   │   ├── file-sync.ts           # File synchronization to/from S3
-│   │   └── types.ts               # S3 types
 │   │
 │   ├── effect/
 │   │   ├── logger-layer.ts        # Effect-based structured logging
 │   │   ├── message-queue.ts       # Effect-based message queue
 │   │   └── user-registry.ts       # User registry for @mention resolution
-│   │
-│   └── shared/
-│       ├── index.ts               # Shared helper exports
-│       ├── quarterplan.ts         # Quarterly planning utilities
-│       └── s3-client.ts           # Shared S3 client configuration
 │
 ├── container/
 │   ├── Dockerfile                 # Container image (runs as 'bun' user)
@@ -243,7 +220,7 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 | `ASSISTANT_NAME` | `Omni` | Bot name and trigger pattern |
 | `POLL_INTERVAL` | `2000` | Message polling interval (ms) |
 | `SCHEDULER_POLL_INTERVAL` | `60000` | Task scheduler check interval (ms) |
-| `IPC_POLL_INTERVAL` | `30000` | S3 IPC polling interval for cloud backends (ms) |
+| `IPC_POLL_INTERVAL` | `30000` | IPC watcher polling interval (ms) |
 | `CONTAINER_TIMEOUT` | `1800000` | Container execution timeout (30min) |
 | `CONTAINER_STARTUP_TIMEOUT` | `120000` | Container startup timeout (2min) |
 | `IDLE_TIMEOUT` | `1800000` | Keep container alive after last result (30min) |
@@ -269,17 +246,6 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 
 | Variable | Backend | Purpose |
 |----------|---------|---------|
-| `SPRITES_TOKEN` | Sprites | API token for Fly.io |
-| `SPRITES_ORG` | Sprites | Organization name |
-| `SPRITES_REGION` | Sprites | Deployment region |
-| `DAYTONA_API_KEY` | Daytona | API key |
-| `DAYTONA_API_URL` | Daytona | API endpoint |
-| `RAILWAY_API_TOKEN` | Railway | API token |
-| `HETZNER_API_TOKEN` | Hetzner | API token |
-| `B2_ENDPOINT` | S3 IPC | Backblaze B2 endpoint |
-| `B2_ACCESS_KEY_ID` | S3 IPC | Backblaze access key |
-| `B2_SECRET_ACCESS_KEY` | S3 IPC | Backblaze secret key |
-| `B2_BUCKET` | S3 IPC | S3 bucket name |
 
 ### Claude Authentication
 
@@ -381,10 +347,6 @@ interface Backend {
 |---------|------|-------------|----------|
 | Apple Container | `apple-container` | macOS (local) | Development, local agents |
 | Docker | `docker` | Any (local) | Cross-platform local execution |
-| Sprites | `sprites` | Fly.io (cloud) | Production 24/7 agents |
-| Daytona | `daytona` | Daytona (cloud) | Dev environments |
-| Railway | `railway` | Railway (cloud) | Cloud deployment |
-| Hetzner | `hetzner` | Hetzner (cloud) | Budget cloud VMs |
 
 ### Backend Selection
 
@@ -393,20 +355,12 @@ Each agent has a `backend` field that determines where it runs:
 ```typescript
 interface Agent {
   id: string;
-  backend: BackendType;  // 'apple-container' | 'sprites' | 'daytona' | ...
+  backend: BackendType;  // 'apple-container' | 'docker'
   // ...
 }
 ```
 
 The orchestrator calls `resolveBackend(agent.backend)` to get the appropriate backend implementation, then invokes `backend.runAgent(input)`.
-
-### Cloud IPC
-
-Cloud backends (Sprites, Daytona) use S3-based IPC via Backblaze B2:
-- Agents write IPC messages/tasks to S3
-- Host polls S3 for new messages at `IPC_POLL_INTERVAL`
-- File sync pushes workspace files to S3 for cloud agents
-- Separate IPC pollers per backend (`sprites-ipc-poller.ts`, `daytona-ipc-poller.ts`)
 
 ---
 
@@ -654,22 +608,22 @@ All agents are registered in `/workspace/ipc/agent_registry.json`:
       "id": "main",
       "name": "PeytonOmni",
       "jid": "...",
-      "backend": "sprites",
+      "backend": "apple-container",
       "description": "Main orchestrator"
     }
   ]
 }
 ```
 
-### Example: Local-Cloud Coordination
+### Example: Multi-Agent Coordination
 
-```
+```text
 Code Review Request:
-1. PeytonOmni (Cloud/Sprites) — Fetch PR, analyze changes
-2. Delegate to LocalOmni — "Run tests locally"
-3. LocalOmni (Apple Container) — Checkout branch, run tests
+1. PeytonOmni — Fetch PR, analyze changes
+2. Delegate to reviewer agent — "Run tests"
+3. Reviewer (Apple Container) — Checkout branch, run tests
 4. Share results back — via IPC context
-5. PeytonOmni (Cloud) — Post review with test results
+5. PeytonOmni — Post review with test results
 ```
 
 ---
@@ -697,14 +651,6 @@ launchctl list | grep omniclaw
 tail -f logs/omniclaw.log
 ```
 
-### Cloud Deployment (Sprites)
-
-Sprites agents run on Fly.io VMs:
-- Persistent VMs (not serverless) — 24/7 availability
-- Workspace synced via S3 (Backblaze B2)
-- IPC messages polled from S3
-- Auto health checks and restart
-
 ### Startup Sequence
 
 1. Initialize SQLite database (migrate schemas if needed)
@@ -714,7 +660,6 @@ Sprites agents run on Fly.io VMs:
 5. On channel connection:
    - Start scheduler loop
    - Start IPC watcher (local file-based)
-   - Start S3 IPC poller (if cloud backends configured)
    - Set up per-group message queue
    - Reconcile heartbeats
    - Start message polling loop
@@ -727,7 +672,7 @@ See [SECURITY.md](./SECURITY.md) for the complete security model. Key points:
 
 ### Container Isolation (Primary Boundary)
 
-All agents run in isolated containers (Apple Container, Docker, or cloud VMs):
+All agents run in isolated containers (Apple Container or Docker):
 - **Filesystem isolation** — Only mounted directories visible
 - **Process isolation** — Container processes cannot affect host
 - **Non-root execution** — Runs as unprivileged `bun` user
@@ -782,7 +727,6 @@ Multi-layer defense across:
 | Slow session resume | Large session transcript | `resumeAt` should be persisted; check session age |
 | Session not continuing | Session expired | Sessions rotate after `SESSION_MAX_AGE` (4 hours) |
 | "QR code expired" | WhatsApp session expired | Delete `store/auth/` and restart |
-| Cloud agent not responding | S3 IPC issue | Check B2 credentials and `s3/ipc-poller.ts` logs |
 | Multiple containers for same agent | Multi-channel duplicate spawn | Fixed by agent-channel model (one container per agent folder) |
 
 ### Log Location

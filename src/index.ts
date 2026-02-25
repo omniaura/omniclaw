@@ -3,11 +3,6 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  B2_ACCESS_KEY_ID,
-  B2_BUCKET,
-  B2_ENDPOINT,
-  B2_REGION,
-  B2_SECRET_ACCESS_KEY,
   buildTriggerPattern,
   DATA_DIR,
   DISCORD_BOT_TOKEN,
@@ -57,12 +52,9 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
-import { getCloudAgentIds } from './agents.js';
 import { resolveAgentForChannel, buildAgentToChannelsMap } from './channel-routes.js';
 import { GroupQueue } from './group-queue.js';
 import { consumeShareRequest, startIpcWatcher } from './ipc.js';
-import { OmniClawS3 } from './s3/client.js';
-import { startS3IpcPoller } from './s3/ipc-poller.js';
 import { findChannel, formatMessages, formatOutbound, getAgentName } from './router.js';
 import { reconcileHeartbeats, startSchedulerLoop } from './task-scheduler.js';
 import { createThreadStreamer } from './thread-streaming.js';
@@ -128,7 +120,6 @@ const MAX_CONSECUTIVE_ERRORS = 3;
 
 let whatsapp: WhatsAppChannel | null = null;
 let channels: Channel[] = [];
-let s3: OmniClawS3 | null = null;
 const queue = new GroupQueue();
 
 function loadState(): void {
@@ -514,7 +505,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   // Thread streaming via shared helper
-  // Synthetic IDs (synth-*, react-*, notify-*, s3-*) aren't real channel message IDs
+  // Synthetic IDs (synth-*, react-*, notify-*) aren't real channel message IDs
   // and will cause Discord/Telegram API failures if passed as reply references.
   // Find the LAST message that triggered the agent (most recent @mention or reply-to-bot).
   // Messages are ordered oldest-first, so findLast() gives us the newest trigger.
@@ -538,7 +529,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // triggeringMessage is used to decide whether to process; the reply should
   // thread to what the user most recently said.
   const lastMessageId = missedMessages[missedMessages.length - 1]?.id || triggeringMessage?.id || null;
-  const triggeringMessageId = lastMessageId && /^(synth|react|notify|s3)-/.test(lastMessageId) ? null : lastMessageId;
+  const triggeringMessageId = lastMessageId && /^(synth|react|notify)-/.test(lastMessageId) ? null : lastMessageId;
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
   const threadName = lastContent
     .replace(TRIGGER_PATTERN, '').trim().slice(0, 80) || 'Agent working...';
@@ -1038,18 +1029,6 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
-  // Initialize S3 client if B2 is configured
-  if (B2_ENDPOINT) {
-    s3 = new OmniClawS3({
-      endpoint: B2_ENDPOINT,
-      accessKeyId: B2_ACCESS_KEY_ID,
-      secretAccessKey: B2_SECRET_ACCESS_KEY,
-      bucket: B2_BUCKET,
-      region: B2_REGION,
-    });
-    logger.info('B2 S3 client initialized');
-  }
-
   // Expire stale sessions on startup to prevent unbounded context growth
   const expired = expireStaleSessions(SESSION_MAX_AGE);
   if (expired.length > 0) {
@@ -1259,101 +1238,6 @@ async function main(): Promise<void> {
       writeTasksSnapshot(groupFolder, isMainGroup, mapTasksForSnapshot(getAllTasks()));
     },
   });
-  // Start S3 IPC poller for cloud agents (if B2 is configured)
-  if (s3) {
-    startS3IpcPoller({
-      s3,
-      getCloudAgentIds,
-      processOutput: async (agentId, output) => {
-        // Find the channel route(s) for this agent
-        const agentToChannels = buildAgentToChannelsMap(channelRoutes);
-        const jids = agentToChannels.get(agentId) || [];
-        const targetJid = output.targetChannelJid || jids[0];
-
-        if (targetJid && output.result) {
-          const ch = findChannel(channels, targetJid);
-          if (ch) {
-            const agent = agents[agentId];
-            const text = formatOutbound(ch, output.result, agent?.name);
-            if (text) await ch.sendMessage(targetJid, text);
-          }
-        }
-
-        if (output.newSessionId) {
-          sessions[agentId] = output.newSessionId;
-          setSession(agentId, output.newSessionId);
-        }
-      },
-      processMessage: async (sourceAgentId, data) => {
-        if (data.type === 'message' && data.chatJid && data.text) {
-          const targetGroup = registeredGroups[data.chatJid];
-          const isRegisteredTarget = !!targetGroup;
-          const isMain = sourceAgentId === MAIN_GROUP_FOLDER;
-          if (isMain || isRegisteredTarget) {
-            const ch = findChannel(channels, data.chatJid);
-            if (ch) {
-              const agent = agents[sourceAgentId];
-              const text = formatOutbound(ch, data.text, agent?.name);
-              if (text) await ch.sendMessage(data.chatJid, text);
-            }
-            // Cross-agent: wake up the target agent
-            if (targetGroup && targetGroup.folder !== sourceAgentId) {
-              const trigger = targetGroup.trigger || `@${ASSISTANT_NAME}`;
-              storeMessage({
-                id: `s3-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                chat_jid: data.chatJid,
-                sender: 'system',
-                sender_name: `${agents[sourceAgentId]?.name || sourceAgentId}`,
-                content: `${trigger} ${data.text}`,
-                timestamp: new Date().toISOString(),
-                is_from_me: false,
-              });
-              queue.enqueueMessageCheck(data.chatJid);
-            }
-          }
-        }
-      },
-      processTask: async (sourceAgentId, isAdmin, data) => {
-        const { processTaskIpc } = await import('./ipc.js');
-        await processTaskIpc(data, sourceAgentId, isAdmin, {
-          sendMessage: async (jid, rawText) => {
-            const ch = findChannel(channels, jid);
-            if (!ch) return;
-            const agent = agents[sourceAgentId];
-            const text = formatOutbound(ch, rawText, agent?.name);
-            if (text) return await ch.sendMessage(jid, text);
-          },
-          notifyGroup: (jid, text) => {
-            const group = registeredGroups[jid];
-            const trigger = group?.trigger || `@${ASSISTANT_NAME}`;
-            storeMessage({
-              id: `notify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              chat_jid: jid,
-              sender: 'system',
-              sender_name: `${agents[sourceAgentId]?.name || sourceAgentId}`,
-              content: `${trigger} ${text}`,
-              timestamp: new Date().toISOString(),
-              is_from_me: false,
-            });
-            queue.enqueueMessageCheck(jid);
-          },
-          registeredGroups: () => registeredGroups,
-          registerGroup,
-          updateGroup: (jid, group) => {
-            registeredGroups[jid] = group;
-            setRegisteredGroup(jid, group);
-          },
-          syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
-          getAvailableGroups,
-          writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
-          writeTasksSnapshot: (groupFolder, isMainGroup) => {
-            writeTasksSnapshot(groupFolder, isMainGroup, mapTasksForSnapshot(getAllTasks()));
-          },
-        });
-      },
-      isAdmin: (agentId) => agents[agentId]?.isAdmin ?? false,
-    });
-  }
 
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

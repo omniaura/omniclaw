@@ -33,18 +33,12 @@ import { logger } from './logger.js';
 import { stripInternalTags } from './router.js';
 import { reconcileHeartbeats } from './task-scheduler.js';
 import {
-  BackendType,
   Channel,
   HeartbeatConfig,
   IpcMessagePayload,
   IpcTaskPayload,
   RegisteredGroup,
 } from './types.js';
-import { DaytonaBackend } from './backends/daytona-backend.js';
-import { startDaytonaIpcPoller } from './backends/daytona-ipc-poller.js';
-import { startSpritesIpcPoller } from './backends/sprites-ipc-poller.js';
-import { SpritesBackend } from './backends/sprites-backend.js';
-import { getBackend } from './backends/index.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<string | void>;
@@ -105,40 +99,6 @@ export function consumeShareRequest(
 }
 
 let ipcWatcherRunning = false;
-
-/**
- * Shared IPC message handler for cloud-backed group pollers (Sprites, Daytona).
- * Both backends route messages via the same logic; only the log label differs.
- */
-function makeCloudMessageHandler(deps: IpcDeps) {
-  return async (
-    sourceGroup: string,
-    data: IpcMessagePayload,
-    backendLabel: string,
-  ): Promise<void> => {
-    if (data.type !== 'message' || !data.chatJid || !data.text) return;
-    const text = stripInternalTags(data.text);
-    if (!text) {
-      logger.debug({ chatJid: data.chatJid, sourceGroup }, `${backendLabel} IPC message suppressed (internal-only)`);
-      return;
-    }
-    const registeredGroups = deps.registeredGroups();
-    const targetGroup = registeredGroups[data.chatJid];
-    const isSelf = targetGroup && targetGroup.folder === sourceGroup;
-    const isMain = sourceGroup === MAIN_GROUP_FOLDER;
-    if (isMain || isSelf || !!targetGroup) {
-      await deps.sendMessage(data.chatJid, text);
-      // Cross-group message: also wake up the target agent
-      if (targetGroup && targetGroup.folder !== sourceGroup) {
-        deps.notifyGroup(data.chatJid, text);
-      }
-      logger.info(
-        { chatJid: data.chatJid, sourceGroup },
-        `${backendLabel} IPC message sent`,
-      );
-    }
-  };
-}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -380,45 +340,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   processIpcFiles();
   logger.info('IPC watcher started (per-group namespaces)');
-
-  const cloudMessageHandler = makeCloudMessageHandler(deps);
-  const cloudTaskHandler = async (
-    sourceGroup: string,
-    isMain: boolean,
-    data: IpcTaskPayload,
-  ) => {
-    await processTaskIpc(data, sourceGroup, isMain, deps);
-  };
-
-  // Also start Sprites IPC poller for cloud-backed groups
-  startSpritesIpcPoller({
-    spritesBackend: (() => {
-      try {
-        return getBackend('sprites') as SpritesBackend;
-      } catch {
-        return new SpritesBackend();
-      }
-    })(),
-    registeredGroups: deps.registeredGroups,
-    processMessage: (sourceGroup, data) =>
-      cloudMessageHandler(sourceGroup, data, 'Sprites'),
-    processTask: cloudTaskHandler,
-  });
-
-  // Also start Daytona IPC poller for Daytona-backed groups
-  startDaytonaIpcPoller({
-    daytonaBackend: (() => {
-      try {
-        return getBackend('daytona') as DaytonaBackend;
-      } catch {
-        return new DaytonaBackend();
-      }
-    })(),
-    registeredGroups: deps.registeredGroups,
-    processMessage: (sourceGroup, data) =>
-      cloudMessageHandler(sourceGroup, data, 'Daytona'),
-    processTask: cloudTaskHandler,
-  });
 }
 
 export async function processTaskIpc(

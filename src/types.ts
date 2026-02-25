@@ -46,7 +46,7 @@ export interface HeartbeatConfig {
   scheduleType: 'cron' | 'interval';
 }
 
-export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona' | 'railway' | 'hetzner';
+export type BackendType = 'apple-container' | 'docker';
 
 export interface RegisteredGroup {
   name: string;
@@ -62,7 +62,6 @@ export interface RegisteredGroup {
   serverFolder?: string;    // e.g., "servers/omniaura-discord" (shared across channels in same server)
   backend?: BackendType;     // Which backend runs this group's agent (default: apple-container)
   description?: string;      // What this agent does (for agent registry)
-  devUrl?: string;           // Sprites dev URL (auto-populated for sprites backend)
   streamIntermediates?: boolean; // Stream intermediate output (thinking, tool calls) to channel threads. Default: false
 }
 

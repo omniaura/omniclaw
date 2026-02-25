@@ -46,15 +46,6 @@ kill <pid>
 # (Use your normal startup command)
 ```
 
-**For cloud instances (Sprites on Fly.io):**
-```bash
-# Push new image to registry
-fly deploy --app <app-name> --local-only
-
-# Or use remote build
-fly deploy --app <app-name>
-```
-
 ## What's New
 
 ### Recent Updates (Feb 2026)
@@ -105,11 +96,6 @@ jobs:
         run: |
           # Push to your container registry
           # (Configure registry authentication as needed)
-
-      - name: Deploy to Fly.io
-        run: |
-          # Deploy to cloud instances
-          fly deploy --app omniclaw-main
 ```
 
 ### Scheduled Updates

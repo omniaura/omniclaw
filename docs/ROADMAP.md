@@ -22,15 +22,11 @@ Last updated: 2026-02-23
 | Telegram | grammY | Stable | Bot API, no trigger prefix needed |
 | Slack | @slack/bolt | Early | Socket Mode, basic messaging |
 
-### Backends (6)
+### Backends
 | Backend | Maturity | Notes |
 |---------|----------|-------|
 | Apple Container (local) | Stable | Default, macOS only |
 | Docker (local) | Partial | Uses same LocalBackend, needs testing (#3) |
-| Sprites (cloud) | Stable | Persistent VMs on Fly.io, S3 IPC |
-| Daytona (cloud) | Stable | Cloud dev environments, S3 IPC |
-| Railway (cloud) | Early | Basic deployment support |
-| Hetzner (cloud) | Early | VM provisioning |
 
 ### Core Features
 | Feature | Maturity | Notes |
@@ -87,7 +83,7 @@ The codebase has grown (18K+ lines in `src/`). Continuously look for:
 #### Test Coverage Expansion (Ongoing)
 Good test coverage for IPC, scheduling, routing, security. Gaps remain in:
 - Channel adapters (integration tests)
-- Cloud backends (mock-based unit tests)
+- Backend implementations (mock-based unit tests)
 - End-to-end message flow
 
 ### Long-term
@@ -111,7 +107,7 @@ Structured logs exist but there's no dashboard or alerting. Consider:
 
 ### Feb 2026
 - Multi-channel support (Discord, Telegram, Slack) — all four channels operational
-- 6 compute backends (local + 4 cloud providers)
+- 2 compute backends (Apple Container + Docker)
 - Agent/ChannelRoute decoupling
 - Comprehensive security hardening (path traversal, mount allowlist, .env blocking, IPC hardening, container PID limits)
 - Structured logging migration (console.log → Pino)

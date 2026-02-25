@@ -90,7 +90,7 @@ Environment variable prefixes changed:
 
 **Backwards compatibility:** The old names still work as fallback in `auto-update.sh`. Update at your convenience.
 
-Container-internal env vars (`OMNICLAW_S3_*`, `OMNICLAW_CHANNELS`, etc.) are set automatically by the host — no manual changes needed.
+Container-internal env vars (`OMNICLAW_CHANNELS`, etc.) are set automatically by the host — no manual changes needed.
 
 ### 7. Update Git Remote (After GitHub Repo Rename)
 
@@ -121,12 +121,7 @@ rm -rf ~/.config/nanoclaw
 - **Launchd service**: `com.nanoclaw` → `com.omniclaw`
 - **Config directory**: `~/.config/nanoclaw/` → `~/.config/omniclaw/`
 - **Container names**: `nanoclaw-{group}-*` → `omniclaw-{group}-*`
-- **S3 class**: `NanoClawS3` → `OmniClawS3`
 - **Git author**: `NanoClaw Agent` → `OmniClaw Agent`
-
-## Cloud Backends
-
-Existing Daytona sandboxes and Sprites VMs keep their old `nanoclaw-*` names. This is cosmetic only — no breakage. New instances will use `omniclaw-*` names. You can manually rename or recreate them if desired.
 
 ## Troubleshooting
 

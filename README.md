@@ -127,7 +127,7 @@ Key files:
 - `src/ipc.ts` - IPC watcher and task processing
 - `src/router.ts` - Message formatting and outbound routing
 - `src/group-queue.ts` - Per-group queue with global concurrency limit
-- `src/backends/` - Pluggable backend system (Apple Container, Sprites, Docker, etc.)
+- `src/backends/` - Pluggable backend system (Apple Container, Docker)
 - `src/ipc-snapshots.ts` - Task and group snapshot utilities for IPC
 - `src/task-scheduler.ts` - Runs scheduled tasks
 - `src/db.ts` - SQLite operations (messages, groups, sessions, state)

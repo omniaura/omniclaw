@@ -7,7 +7,7 @@ import path from 'path';
 
 /**
  * Reject a relative path that contains directory traversal segments.
- * Works for all backends (local, cloud, S3) where the path is relative
+ * Works for all backends where the path is relative
  * to a workspace root.
  *
  * @param relativePath - The path to validate (relative to workspace root)

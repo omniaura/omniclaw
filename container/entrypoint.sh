@@ -55,8 +55,8 @@ fi
 ssh-keyscan github.com gitlab.com >> ~/.ssh/known_hosts 2>/dev/null || true
 
 # Buffer stdin then run agent.
-# If /tmp/input.json already exists (pre-written by Sprites backend),
-# skip the stdin buffering step. Apple Container requires EOF to flush stdin pipe.
+# If /tmp/input.json already exists, skip the stdin buffering step.
+# Apple Container requires EOF to flush stdin pipe.
 if [ ! -s /tmp/input.json ]; then
   cat > /tmp/input.json
 fi

@@ -5,9 +5,7 @@
 
 import { logger } from '../logger.js';
 import { Agent, RegisteredGroup } from '../types.js';
-import { DaytonaBackend } from './daytona-backend.js';
 import { LocalBackend } from './local-backend.js';
-import { SpritesBackend } from './sprites-backend.js';
 import { AgentBackend, AgentOrGroup, BackendType, getBackendType } from './types.js';
 
 const DEFAULT_BACKEND: BackendType = 'apple-container';
@@ -24,24 +22,6 @@ export function getBackend(type: BackendType): AgentBackend {
     case 'docker':
       backend = new LocalBackend();
       break;
-    case 'sprites':
-      backend = new SpritesBackend();
-      break;
-    case 'daytona':
-      backend = new DaytonaBackend();
-      break;
-    case 'railway': {
-      // Lazy-load to avoid circular deps and missing module errors when not used
-      const { RailwayBackend } = require('./railway-backend.js');
-      backend = new RailwayBackend();
-      break;
-    }
-    case 'hetzner': {
-      // Lazy-load to avoid circular deps and missing module errors when not used
-      const { HetznerBackend } = require('./hetzner-backend.js');
-      backend = new HetznerBackend();
-      break;
-    }
     default:
       throw new Error(`Unknown backend type: ${type}`);
   }
@@ -54,18 +34,6 @@ export function getBackend(type: BackendType): AgentBackend {
 export function resolveBackend(entity: AgentOrGroup): AgentBackend {
   const type = getBackendType(entity);
   return getBackend(type);
-}
-
-/** Get the Sprites backend instance (if any groups use it). */
-export function getSpritesBackend(): SpritesBackend | null {
-  const backend = backends.get('sprites');
-  return backend instanceof SpritesBackend ? backend : null;
-}
-
-/** Get the Daytona backend instance (if any groups use it). */
-export function getDaytonaBackend(): DaytonaBackend | null {
-  const backend = backends.get('daytona');
-  return backend instanceof DaytonaBackend ? backend : null;
 }
 
 /**

@@ -65,7 +65,7 @@ A personal Claude assistant accessible via WhatsApp, Discord, Telegram, or Slack
 
 **Core components:**
 - **Claude Agent SDK** as the core agent
-- **Multiple backends** for isolated agent execution (Apple Container, Sprites/Fly.io, Docker, Daytona, Railway)
+- **Multiple backends** for isolated agent execution (Apple Container, Docker)
 - **Multi-channel I/O** — WhatsApp, Discord, Telegram, Slack
 - **Persistent memory** per conversation and globally
 - **Scheduled tasks** that run Claude and can message back
@@ -100,7 +100,7 @@ A personal Claude assistant accessible via WhatsApp, Discord, Telegram, or Slack
 
 ### Container Isolation
 - All agents run inside isolated containers via a pluggable backend system
-- Supported backends: Apple Container (macOS), Sprites/Fly.io (cloud), Docker, Daytona, Railway
+- Supported backends: Apple Container (macOS), Docker
 - Each agent invocation spawns a container with mounted directories
 - Containers provide filesystem isolation - agents can only see mounted paths
 - Bash access is safe because commands run inside the container, not on the host
@@ -185,9 +185,8 @@ A personal Claude assistant accessible via WhatsApp, Discord, Telegram, or Slack
 
 ### Deployment
 - **Local**: Runs on Mac via launchd (Apple Container backend)
-- **Cloud**: Runs on Sprites/Fly.io VMs (persistent, always-on)
-- **Hybrid**: Local and cloud agents can coordinate via IPC
-- Single Node.js process handles routing and orchestration
+- **Docker**: Cross-platform deployment via Docker containers
+- Single Bun process handles routing and orchestration
 
 ---
 
