@@ -967,13 +967,16 @@ async function main(): Promise<void> {
 
   // Runtime dispatch: select which agent runtime to use
   const runtime = containerInput.agentRuntime || 'claude-agent-sdk';
+  if (runtime === 'opencode') {
+    const { runOpenCodeRuntime } = await import('./opencode-runtime.js');
+    await runOpenCodeRuntime(containerInput);
+    return;
+  }
   if (runtime !== 'claude-agent-sdk') {
-    // Future runtimes (opencode, openhands, codex) will be dispatched here.
-    // For now, only claude-agent-sdk is implemented.
     writeOutput({
       status: 'error',
       result: null,
-      error: `Agent runtime '${runtime}' is not yet implemented. Only 'claude-agent-sdk' is currently supported.`,
+      error: `Agent runtime '${runtime}' is not yet implemented. Supported: 'claude-agent-sdk', 'opencode'.`,
     });
     process.exit(1);
   }
