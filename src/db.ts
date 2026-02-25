@@ -77,6 +77,18 @@ function safeJsonParse<T>(
   }
 }
 
+const VALID_AGENT_RUNTIMES = new Set<Agent['agentRuntime']>([
+  'claude-agent-sdk',
+  'opencode',
+]);
+
+function normalizeAgentRuntime(value: string | null | undefined): Agent['agentRuntime'] {
+  if (value && VALID_AGENT_RUNTIMES.has(value as Agent['agentRuntime'])) {
+    return value as Agent['agentRuntime'];
+  }
+  return 'claude-agent-sdk';
+}
+
 /** Map a database row to a RegisteredGroup object (without jid field) */
 function mapRowToRegisteredGroup(
   row: RegisteredGroupRow,
@@ -120,7 +132,7 @@ function mapRowToAgent(row: AgentRow): Agent {
     description: row.description || undefined,
     folder: row.folder,
     backend: row.backend as Agent['backend'],
-    agentRuntime: (row.agent_runtime as Agent['agentRuntime']) || 'claude-agent-sdk',
+    agentRuntime: normalizeAgentRuntime(row.agent_runtime),
     containerConfig: safeJsonParse(
       row.container_config,
       { id: row.id },
@@ -907,7 +919,7 @@ export function setAgent(agent: Agent): void {
     agent.description || null,
     agent.folder,
     agent.backend,
-    agent.agentRuntime || 'claude-agent-sdk',
+    normalizeAgentRuntime(agent.agentRuntime),
     agent.containerConfig ? JSON.stringify(agent.containerConfig) : null,
     agent.heartbeat ? JSON.stringify(agent.heartbeat) : null,
     agent.isAdmin ? 1 : 0,
