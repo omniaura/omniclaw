@@ -123,10 +123,6 @@ rm -rf ~/.config/nanoclaw
 - **Container names**: `nanoclaw-{group}-*` → `omniclaw-{group}-*`
 - **Git author**: `NanoClaw Agent` → `OmniClaw Agent`
 
-## Cloud Backends
-
-Existing Sprites VMs keep their old `nanoclaw-*` names. This is cosmetic only — no breakage. New instances will use `omniclaw-*` names. You can manually rename or recreate them if desired.
-
 ## Troubleshooting
 
 **Agent output not appearing:** Host and container IPC markers must match. Rebuild both host (`bun run build`) and container (`./container/build.sh`).

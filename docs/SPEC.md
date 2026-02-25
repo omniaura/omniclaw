@@ -47,20 +47,20 @@ A multi-channel agent orchestration framework powered by Claude, with persistent
 │  ┌──────────────────┐  ┌─────────▼──────────┐  ┌───────────────┐            │
 │  │  Message Loop    │  │  Scheduler Loop    │  │  IPC Watcher  │            │
 │  │  (polls SQLite)  │  │  (checks tasks)    │  │  (file-based  │            │
-│  └────────┬─────────┘  └────────┬───────────┘  │  (local FS)   │            │
+│  └────────┬─────────┘  └────────┬───────────┘  │  (file-based) │            │
 │           │                     │               └───────────────┘            │
 │           └──────────┬──────────┘                                            │
 │                      │ resolves backend                                      │
 │                      ▼                                                       │
 │  ┌───────────────────────────────────────────────────────────┐               │
 │  │              BACKEND ABSTRACTION LAYER                    │               │
-│  │  ┌──────────────┐ ┌────────────┐ ┌─────────────────┐     │               │
-│  │  │ Apple        │ │  Sprites   │ │  Docker         │     │               │
-│  │  │ Container    │ │  (Fly.io)  │ │  (local)        │     │               │
-│  │  │ (local)      │ │  (cloud)   │ │                 │     │               │
-│  │  └──────────────┘ └────────────┘ └─────────────────┘     │               │
+│  │  ┌──────────────┐ ┌─────────────────┐                     │               │
+│  │  │ Apple        │ │  Docker         │                     │               │
+│  │  │ Container    │ │  (cross-plat)   │                     │               │
+│  │  │ (macOS)      │ │                 │                     │               │
+│  │  └──────────────┘ └─────────────────┘                     │               │
 │  └───────────────────────────────────────────────────────────┘               │
-│                      │ spawns container / VM                                 │
+│                      │ spawns container                                       │
 │                      ▼                                                       │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                      CONTAINER / VM (Linux)                                  │
@@ -99,7 +99,6 @@ A multi-channel agent orchestration framework powered by Claude, with persistent
 | Message Storage | SQLite (bun:sqlite) | Store messages, groups, tasks, sessions |
 | Agent SDK | @anthropic-ai/claude-agent-sdk | Run Claude with tools and MCP servers |
 | Browser | agent-browser + Chromium | Web interaction and screenshots |
-| Cloud IPC | S3 (Backblaze B2) | Inter-agent communication for cloud backends |
 | Effect System | Effect | Structured error handling and observability |
 | Logging | Pino (structured JSON) | Runtime logging |
 
@@ -156,9 +155,6 @@ omniclaw/
 │   │   ├── index.ts               # Backend initialization and resolution
 │   │   ├── types.ts               # Backend interfaces (ContainerInput, ContainerOutput, Backend)
 │   │   ├── local-backend.ts       # Apple Container + Docker backend
-│   │   ├── sprites-backend.ts     # Sprites (Fly.io) cloud backend
-│   │   ├── sprites-ipc-poller.ts  # IPC polling for Sprites cloud agents
-│   │   ├── sprites-provisioning.ts# Sprites VM provisioning
 │   │   └── stream-parser.ts       # Container output stream parsing
 │   │
 │   ├── effect/
@@ -250,9 +246,6 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 
 | Variable | Backend | Purpose |
 |----------|---------|---------|
-| `SPRITES_TOKEN` | Sprites | API token for Fly.io |
-| `SPRITES_ORG` | Sprites | Organization name |
-| `SPRITES_REGION` | Sprites | Deployment region |
 
 ### Claude Authentication
 
@@ -354,7 +347,6 @@ interface Backend {
 |---------|------|-------------|----------|
 | Apple Container | `apple-container` | macOS (local) | Development, local agents |
 | Docker | `docker` | Any (local) | Cross-platform local execution |
-| Sprites | `sprites` | Fly.io (cloud) | Production 24/7 agents |
 
 ### Backend Selection
 
@@ -363,19 +355,12 @@ Each agent has a `backend` field that determines where it runs:
 ```typescript
 interface Agent {
   id: string;
-  backend: BackendType;  // 'apple-container' | 'docker' | 'sprites'
+  backend: BackendType;  // 'apple-container' | 'docker'
   // ...
 }
 ```
 
 The orchestrator calls `resolveBackend(agent.backend)` to get the appropriate backend implementation, then invokes `backend.runAgent(input)`.
-
-### Cloud IPC
-
-Cloud backends (Sprites) use IPC polling via the Sprites API:
-- Agents write IPC messages/tasks to the Sprites VM filesystem
-- Host polls for new messages at `IPC_POLL_INTERVAL`
-- IPC poller: `sprites-ipc-poller.ts`
 
 ---
 
@@ -623,22 +608,22 @@ All agents are registered in `/workspace/ipc/agent_registry.json`:
       "id": "main",
       "name": "PeytonOmni",
       "jid": "...",
-      "backend": "sprites",
+      "backend": "apple-container",
       "description": "Main orchestrator"
     }
   ]
 }
 ```
 
-### Example: Local-Cloud Coordination
+### Example: Multi-Agent Coordination
 
 ```
 Code Review Request:
-1. PeytonOmni (Cloud/Sprites) — Fetch PR, analyze changes
-2. Delegate to LocalOmni — "Run tests locally"
-3. LocalOmni (Apple Container) — Checkout branch, run tests
+1. PeytonOmni — Fetch PR, analyze changes
+2. Delegate to reviewer agent — "Run tests"
+3. Reviewer (Apple Container) — Checkout branch, run tests
 4. Share results back — via IPC context
-5. PeytonOmni (Cloud) — Post review with test results
+5. PeytonOmni — Post review with test results
 ```
 
 ---
@@ -666,14 +651,6 @@ launchctl list | grep omniclaw
 tail -f logs/omniclaw.log
 ```
 
-### Cloud Deployment (Sprites)
-
-Sprites agents run on Fly.io VMs:
-- Persistent VMs (not serverless) — 24/7 availability
-- Workspace synced via S3 (Backblaze B2)
-- IPC messages polled from S3
-- Auto health checks and restart
-
 ### Startup Sequence
 
 1. Initialize SQLite database (migrate schemas if needed)
@@ -683,7 +660,6 @@ Sprites agents run on Fly.io VMs:
 5. On channel connection:
    - Start scheduler loop
    - Start IPC watcher (local file-based)
-   - Start S3 IPC poller (if cloud backends configured)
    - Set up per-group message queue
    - Reconcile heartbeats
    - Start message polling loop

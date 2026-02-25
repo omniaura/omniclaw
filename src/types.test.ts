@@ -52,22 +52,16 @@ describe('types.ts conversion functions', () => {
     });
 
     it('preserves specified backend', () => {
-      const group = makeGroup({ backend: 'sprites' });
+      const group = makeGroup({ backend: 'docker' });
       const agent = registeredGroupToAgent('jid@g.us', group);
-      expect(agent.backend).toBe('sprites');
-      expect(agent.isLocal).toBe(false);
+      expect(agent.backend).toBe('docker');
+      expect(agent.isLocal).toBe(true);
     });
 
     it('marks docker as local', () => {
       const group = makeGroup({ backend: 'docker' });
       const agent = registeredGroupToAgent('jid@g.us', group);
       expect(agent.isLocal).toBe(true);
-    });
-
-    it('marks sprites as non-local', () => {
-      const group = makeGroup({ backend: 'sprites' });
-      const agent = registeredGroupToAgent('jid@g.us', group);
-      expect(agent.isLocal).toBe(false);
     });
 
     it('preserves containerConfig', () => {

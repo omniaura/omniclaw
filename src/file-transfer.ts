@@ -1,7 +1,7 @@
 /**
  * Cross-backend file transfer for OmniClaw.
  * Copies files between agents running on different backends
- * (e.g., local Apple Container → Sprites cloud, or vice versa).
+ * (e.g., between Apple Container and Docker instances).
  */
 
 import path from 'path';

@@ -155,7 +155,7 @@ Agents can use discussions as shared context:
 ```bash
 # Agent 1 creates discussion with findings
 gh-discussion-create omniaura/omniclaw "Q&A" \
-  "Cloud-Local Communication Strategy" "Researched Sprites ↔ Apple Container communication patterns..."
+  "IPC Communication Strategy" "Researched Apple Container ↔ Docker communication patterns..."
 
 # Agent 2 adds insights to same discussion
 gh-discussion-comment omniaura/omniclaw 15 \

@@ -15,7 +15,7 @@ Single Bun process that connects to WhatsApp, routes messages to Claude Agent SD
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |
-| `src/backends/` | Pluggable backend system (Apple Container, Sprites, Docker) |
+| `src/backends/` | Backend system (Apple Container, Docker) |
 | `src/ipc-snapshots.ts` | Task and group snapshot utilities for IPC |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |

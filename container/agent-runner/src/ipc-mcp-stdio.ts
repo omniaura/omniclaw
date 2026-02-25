@@ -453,7 +453,7 @@ server.tool(
 
 Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat"). For Discord channels, provide the discord_guild_id to enable server-level shared context.
 
-Backend options: "apple-container" (local VM, default), "sprites" (cloud VM on Fly.io — persistent, always-on).`,
+Backend options: "apple-container" (local VM, default), "docker" (Docker container).`,
   {
     jid: z.string().describe('The group JID (e.g., "120363336345536173@g.us" for WhatsApp, "dc:123456" for Discord)'),
     name: z.string().describe('Display name for the group'),
@@ -463,7 +463,7 @@ Backend options: "apple-container" (local VM, default), "sprites" (cloud VM on F
       .describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
     discord_guild_id: z.string().optional().describe('Discord guild/server ID — enables server-level shared context across channels'),
-    backend: z.enum(['apple-container', 'docker', 'sprites']).optional().describe('Backend to run this agent on (default: apple-container)'),
+    backend: z.enum(['apple-container', 'docker']).optional().describe('Backend to run this agent on (default: apple-container)'),
     description: z.string().optional().describe('What this agent does (shown in agent registry, helps other agents route requests)'),
   },
   async (args) => {
@@ -647,7 +647,7 @@ server.tool(
 Returns information about each agent including their ID, name, description, backend type, and JID (for messaging).
 This is useful when you need to send messages to specific agents or request context from them.`,
   {
-    filter_backend: z.enum(['apple-container', 'docker', 'sprites']).optional()
+    filter_backend: z.enum(['apple-container', 'docker']).optional()
       .describe('Optional: filter agents by backend type'),
     include_self: z.boolean().default(true)
       .describe('Include the current agent in results (default: true)'),

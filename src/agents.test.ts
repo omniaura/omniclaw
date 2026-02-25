@@ -67,9 +67,9 @@ describe('agents.ts', () => {
     });
 
     it('preserves backend type', () => {
-      const agent = makeAgent({ backend: 'sprites' });
+      const agent = makeAgent({ backend: 'docker' });
       const group = agentToRegisteredGroup(agent, 'jid@g.us');
-      expect(group.backend).toBe('sprites');
+      expect(group.backend).toBe('docker');
     });
 
     it('preserves description', () => {

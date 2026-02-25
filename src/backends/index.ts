@@ -6,7 +6,6 @@
 import { logger } from '../logger.js';
 import { Agent, RegisteredGroup } from '../types.js';
 import { LocalBackend } from './local-backend.js';
-import { SpritesBackend } from './sprites-backend.js';
 import { AgentBackend, AgentOrGroup, BackendType, getBackendType } from './types.js';
 
 const DEFAULT_BACKEND: BackendType = 'apple-container';
@@ -23,9 +22,6 @@ export function getBackend(type: BackendType): AgentBackend {
     case 'docker':
       backend = new LocalBackend();
       break;
-    case 'sprites':
-      backend = new SpritesBackend();
-      break;
     default:
       throw new Error(`Unknown backend type: ${type}`);
   }
@@ -38,12 +34,6 @@ export function getBackend(type: BackendType): AgentBackend {
 export function resolveBackend(entity: AgentOrGroup): AgentBackend {
   const type = getBackendType(entity);
   return getBackend(type);
-}
-
-/** Get the Sprites backend instance (if any groups use it). */
-export function getSpritesBackend(): SpritesBackend | null {
-  const backend = backends.get('sprites');
-  return backend instanceof SpritesBackend ? backend : null;
 }
 
 /**

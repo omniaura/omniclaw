@@ -564,17 +564,17 @@ describe('processTaskIpc: register_group with discord', () => {
       {
         type: 'register_group',
         jid: 'new@g.us',
-        name: 'Sprites Group',
-        folder: 'sprites-group',
+        name: 'Docker Group',
+        folder: 'docker-group',
         trigger: '@Bot',
-        backend: 'sprites',
+        backend: 'docker',
       },
       'main',
       true,
       deps,
     );
 
-    expect(groups['new@g.us'].backend).toBe('sprites');
+    expect(groups['new@g.us'].backend).toBe('docker');
   });
 
   it('sets description when provided', async () => {
@@ -789,9 +789,9 @@ describe('Agent CRUD', () => {
       id: 'minimal-agent',
       name: 'Minimal',
       folder: 'minimal-folder',
-      backend: 'sprites',
+      backend: 'apple-container',
       isAdmin: false,
-      isLocal: false,
+      isLocal: true,
       createdAt: '2024-06-01T00:00:00.000Z',
     });
     const agent = getAgent('minimal-agent');

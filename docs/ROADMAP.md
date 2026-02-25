@@ -22,12 +22,11 @@ Last updated: 2026-02-23
 | Telegram | grammY | Stable | Bot API, no trigger prefix needed |
 | Slack | @slack/bolt | Early | Socket Mode, basic messaging |
 
-### Backends (6)
+### Backends
 | Backend | Maturity | Notes |
 |---------|----------|-------|
 | Apple Container (local) | Stable | Default, macOS only |
 | Docker (local) | Partial | Uses same LocalBackend, needs testing (#3) |
-| Sprites (cloud) | Stable | Persistent VMs on Fly.io |
 
 ### Core Features
 | Feature | Maturity | Notes |

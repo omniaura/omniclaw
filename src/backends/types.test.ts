@@ -16,9 +16,9 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     id: 'test-agent',
     name: 'Test Agent',
     folder: 'agent-folder',
-    backend: 'sprites',
+    backend: 'apple-container',
     isAdmin: false,
-    isLocal: false,
+    isLocal: true,
     createdAt: '2025-01-01T00:00:00.000Z',
     ...overrides,
   };
@@ -104,7 +104,7 @@ describe('backends/types.ts', () => {
 
   describe('getBackendType', () => {
     it('returns backend from an Agent directly', () => {
-      expect(getBackendType(makeAgent({ backend: 'sprites' }))).toBe('sprites');
+      expect(getBackendType(makeAgent({ backend: 'apple-container' }))).toBe('apple-container');
     });
 
     it('returns backend from a RegisteredGroup', () => {
@@ -118,11 +118,10 @@ describe('backends/types.ts', () => {
     it('returns each backend type correctly for Agent', () => {
       expect(getBackendType(makeAgent({ backend: 'apple-container' }))).toBe('apple-container');
       expect(getBackendType(makeAgent({ backend: 'docker' }))).toBe('docker');
-      expect(getBackendType(makeAgent({ backend: 'sprites' }))).toBe('sprites');
     });
 
     it('returns each backend type correctly for RegisteredGroup', () => {
-      expect(getBackendType(makeGroup({ backend: 'sprites' }))).toBe('sprites');
+      expect(getBackendType(makeGroup({ backend: 'docker' }))).toBe('docker');
     });
   });
 });
