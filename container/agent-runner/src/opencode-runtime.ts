@@ -190,7 +190,8 @@ async function startOpenCodeServer(env: Record<string, string | undefined>): Pro
   );
 
   // Log stderr in background
-  const stderrReader = serverProcess.stderr?.getReader();
+  const stderrStream = serverProcess.stderr;
+  const stderrReader = typeof stderrStream === 'number' ? null : stderrStream?.getReader();
   if (stderrReader) {
     (async () => {
       const decoder = new TextDecoder();
@@ -213,7 +214,7 @@ async function startOpenCodeServer(env: Record<string, string | undefined>): Pro
 
   while (Date.now() < deadline) {
     try {
-      const resp = await fetch(`${baseUrl}/health`);
+      const resp = await fetch(`${baseUrl}/global/health`);
       if (resp.ok) {
         log('OpenCode server is healthy');
         return;
@@ -256,7 +257,7 @@ interface OpenCodeClient {
       body: { parts: Array<{ type: string; text: string }>; noReply?: boolean };
     }): Promise<{ data?: any }>;
     abort(opts: { path: { id: string } }): Promise<void>;
-    messages(opts: { path: { id: string } }): Promise<{ data?: any[] }>;
+    messages(opts: { path: { id: string } }): Promise<{ data?: any }>;
   };
   global: {
     health(): Promise<{ data?: { version: string } }>;
@@ -324,6 +325,32 @@ function extractResponseText(result: any): string | null {
   return null;
 }
 
+function extractTextFromParts(parts: any[]): string | null {
+  const textParts = parts
+    .filter((p: any) => p?.type === 'text' && typeof p.text === 'string')
+    .map((p: any) => p.text);
+  return textParts.length > 0 ? textParts.join('\n') : null;
+}
+
+function extractTextFromMessage(msg: any): string | null {
+  if (!msg) return null;
+  if (typeof msg.content === 'string') return msg.content;
+  if (Array.isArray(msg.content)) return extractTextFromParts(msg.content);
+  if (Array.isArray(msg.parts)) return extractTextFromParts(msg.parts);
+  return null;
+}
+
+function extractLatestAssistantFromMessages(messages: any[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg?.role === 'assistant' || msg?.type === 'assistant') {
+      const text = extractTextFromMessage(msg);
+      if (text) return text;
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Main runtime entry point
 // ---------------------------------------------------------------------------
@@ -337,7 +364,7 @@ async function runOpenCodePrompt(
   sessionId: string,
   prompt: string,
   timeoutMs: number,
-): Promise<{ sessionId: string; closedDuringPrompt: boolean }> {
+): Promise<{ sessionId: string; closedDuringPrompt: boolean; promptSucceeded: boolean }> {
   let closedDuringPrompt = false;
 
   // Poll IPC for follow-up messages during the prompt
@@ -373,7 +400,21 @@ async function runOpenCodePrompt(
 
     ipcPolling = false;
 
-    const responseText = extractResponseText(result);
+    let responseText = extractResponseText(result);
+    if (!responseText) {
+      try {
+        const messagesResponse = await client.session.messages({ path: { id: sessionId } });
+        const payload = messagesResponse.data;
+        const messages = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.messages)
+            ? payload.messages
+            : [];
+        responseText = extractLatestAssistantFromMessages(messages);
+      } catch (err) {
+        log(`Failed to fetch session messages for response extraction: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     log(`Prompt completed, response: ${responseText ? responseText.slice(0, 200) : '(empty)'}...`);
 
     // Emit intermediate tool results if available
@@ -388,12 +429,12 @@ async function runOpenCodePrompt(
     if (currentChatJid) output.chatJid = currentChatJid;
     writeOutput(output);
 
-    return { sessionId, closedDuringPrompt };
+    return { sessionId, closedDuringPrompt, promptSucceeded: true };
   } catch (err) {
     ipcPolling = false;
 
     if (closedDuringPrompt) {
-      return { sessionId, closedDuringPrompt: true };
+      return { sessionId, closedDuringPrompt: true, promptSucceeded: false };
     }
 
     const errorMessage = err instanceof Error ? err.message : String(err);
@@ -405,7 +446,7 @@ async function runOpenCodePrompt(
       error: `OpenCode prompt error: ${errorMessage}`,
     });
 
-    return { sessionId, closedDuringPrompt: false };
+    return { sessionId, closedDuringPrompt: false, promptSucceeded: false };
   }
 }
 
@@ -568,6 +609,10 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
 
       if (result.closedDuringPrompt) {
         log('Close sentinel consumed during prompt, exiting');
+        break;
+      }
+      if (!result.promptSucceeded) {
+        log('Prompt failed, exiting runtime loop');
         break;
       }
 
