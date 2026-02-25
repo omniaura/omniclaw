@@ -58,10 +58,6 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 ARG GRAPHITE_VERSION=1.7.16
 RUN npm install -g @withgraphite/graphite-cli@${GRAPHITE_VERSION}
 
-# Install claude-code globally
-# Note: agent-browser is available as an on-demand skill (installed on first use)
-RUN bun install -g @anthropic-ai/claude-code
-
 # Install OpenCode CLI (alternative agent runtime)
 # Uses the official install script which places the binary in ~/.local/bin
 RUN curl -fsSL https://opencode.ai/install | OPENCODE_INSTALL_DIR=/usr/local/bin bash
