@@ -79,6 +79,9 @@ export function buildTriggerPattern(trigger?: string): RegExp {
   return new RegExp(`^@${escapeRegex(name)}\\b`, 'i');
 }
 
+// Allow overriding the Anthropic model (e.g. switch to cheaper model)
+export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || undefined;
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =
