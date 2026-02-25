@@ -529,7 +529,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // triggeringMessage is used to decide whether to process; the reply should
   // thread to what the user most recently said.
   const lastMessageId = missedMessages[missedMessages.length - 1]?.id || triggeringMessage?.id || null;
-  const triggeringMessageId = lastMessageId && /^(synth|react|notify|s3)-/.test(lastMessageId) ? null : lastMessageId;
+  const triggeringMessageId = lastMessageId && /^(synth|react|notify)-/.test(lastMessageId) ? null : lastMessageId;
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
   const threadName = lastContent
     .replace(TRIGGER_PATTERN, '').trim().slice(0, 80) || 'Agent working...';
