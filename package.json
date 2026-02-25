@@ -5,7 +5,7 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target bun",
+    "build": "bun build src/index.ts --outdir dist --target bun --external @opencode-ai/sdk",
     "start": "bun src/index.ts",
     "dev": "bun --watch src/index.ts",
     "auth": "bun src/whatsapp-auth.ts",

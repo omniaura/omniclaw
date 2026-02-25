@@ -109,7 +109,7 @@ export class OpenCodeBackend implements AgentBackend {
     );
 
     // Lazy-load the SDK to avoid hard dependency when backend isn't used
-    const { createOpencode } = await import(/* webpackIgnore: true */ '@opencode-ai/sdk' as string);
+    const { createOpencode } = await import('@opencode-ai/sdk' as string);
 
     const config: Record<string, unknown> = {};
     if (OPENCODE_MODEL) {
@@ -410,7 +410,7 @@ export class OpenCodeBackend implements AgentBackend {
   async initialize(): Promise<void> {
     // Verify opencode SDK is available
     try {
-      await import(/* webpackIgnore: true */ '@opencode-ai/sdk' as string);
+      await import('@opencode-ai/sdk' as string);
       logger.info('OpenCode backend initialized (SDK available)');
     } catch {
       logger.warn(
