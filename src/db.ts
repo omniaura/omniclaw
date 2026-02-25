@@ -310,6 +310,9 @@ function createSchema(database: Database): void {
     CREATE INDEX IF NOT EXISTS idx_channel_routes_agent ON channel_routes(agent_id);
   `);
 
+  // Migrate agents table for existing DBs
+  addColumnIfNotExists(database, 'agents', 'agent_runtime', 'TEXT', "'claude-agent-sdk'");
+
   // Auto-migrate from registered_groups → agents + channel_routes
   migrateRegisteredGroupsToAgents(database);
 }
