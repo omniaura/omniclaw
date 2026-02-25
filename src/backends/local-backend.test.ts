@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, afterAll } from 'bun:test';
+import fs from 'node:fs';
+import path from 'node:path';
 import { LocalBackend } from './local-backend.js';
+import { DATA_DIR } from '../config.js';
 
 /**
  * Tests for LocalBackend's public API surface.
@@ -77,6 +80,12 @@ describe('LocalBackend', () => {
   });
 
   describe('sendMessage', () => {
+    const testIpcDir = path.join(DATA_DIR, 'ipc', '__test_local_backend_msg__');
+
+    afterAll(() => {
+      fs.rmSync(testIpcDir, { recursive: true, force: true });
+    });
+
     it('returns a boolean', () => {
       const backend = new LocalBackend();
       const result = backend.sendMessage('__test_local_backend_msg__', 'hello');
