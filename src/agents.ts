@@ -3,10 +3,8 @@
  * Thin wrapper around db.ts accessors with convenience helpers.
  */
 
-import { getAllAgents, getAgent, setAgent } from './db.js';
+import { getAllAgents } from './db.js';
 import type { Agent, RegisteredGroup } from './types.js';
-
-export { getAllAgents, getAgent, setAgent };
 
 /**
  * Convert an Agent back to a RegisteredGroup for backwards compatibility.

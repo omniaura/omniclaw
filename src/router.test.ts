@@ -1,7 +1,7 @@
 /**
  * Tests for router.ts functions not covered by formatting.test.ts.
  *
- * Covers: getAgentName, routeOutbound, findChannel.
+ * Covers: getAgentName, findChannel.
  * (escapeXml, formatMessages, stripInternalTags, formatOutbound
  *  are already tested in formatting.test.ts)
  */
@@ -9,7 +9,7 @@ import { describe, it, expect } from 'bun:test';
 
 import { ASSISTANT_NAME } from './config.js';
 import { Channel, RegisteredGroup } from './types.js';
-import { getAgentName, routeOutbound, findChannel } from './router.js';
+import { getAgentName, findChannel } from './router.js';
 
 // --- Mock Channel factory ---
 
@@ -94,51 +94,3 @@ describe('findChannel', () => {
   });
 });
 
-// --- routeOutbound ---
-
-describe('routeOutbound', () => {
-  it('sends message via the channel that owns the JID', async () => {
-    const sent: Array<{ jid: string; text: string }> = [];
-    const ch = makeChannel({ jids: ['abc@g.us'], connected: true, sentMessages: sent });
-
-    await routeOutbound([ch], 'abc@g.us', 'Hello!');
-
-    expect(sent).toHaveLength(1);
-    expect(sent[0].jid).toBe('abc@g.us');
-    expect(sent[0].text).toBe('Hello!');
-  });
-
-  it('throws when no channel owns the JID', async () => {
-    const ch = makeChannel({ jids: ['other@g.us'] });
-
-    await expect(routeOutbound([ch], 'unknown@g.us', 'Hello!')).rejects.toThrow(
-      'No channel for JID: unknown@g.us',
-    );
-  });
-
-  it('throws when matching channel is not connected', async () => {
-    const ch = makeChannel({ jids: ['abc@g.us'], connected: false });
-
-    await expect(routeOutbound([ch], 'abc@g.us', 'Hello!')).rejects.toThrow(
-      'No channel for JID: abc@g.us',
-    );
-  });
-
-  it('sends to first connected channel when multiple match', async () => {
-    const sent1: Array<{ jid: string; text: string }> = [];
-    const sent2: Array<{ jid: string; text: string }> = [];
-    const ch1 = makeChannel({ jids: ['abc@g.us'], connected: false, sentMessages: sent1 });
-    const ch2 = makeChannel({ jids: ['abc@g.us'], connected: true, sentMessages: sent2 });
-
-    await routeOutbound([ch1, ch2], 'abc@g.us', 'Hello!');
-
-    expect(sent1).toHaveLength(0);
-    expect(sent2).toHaveLength(1);
-  });
-
-  it('handles empty channels array', async () => {
-    await expect(routeOutbound([], 'abc@g.us', 'Hello!')).rejects.toThrow(
-      'No channel for JID: abc@g.us',
-    );
-  });
-});

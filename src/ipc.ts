@@ -752,95 +752,58 @@ export async function processTaskIpc(
       break;
     }
 
-    case 'delegate_task': {
+    case 'delegate_task':
+    case 'context_request': {
       if (!data.description) {
-        logger.warn({ data }, 'delegate_task missing description');
+        logger.warn({ data }, `${data.type} missing description`);
         break;
       }
 
-      // Find the source group's display name and JID
       const sourceGroupEntry = findGroupByFolder(registeredGroups, sourceGroup);
       const sourceName = sourceGroupEntry?.[1].name || sourceGroup;
       const sourceJid = sourceGroupEntry?.[0] || sourceGroup;
-      const callbackAgent = data.callbackAgentId || sourceGroup;
 
-      // Route to admin (main) group for approval
       const mainJid = findMainGroupJid(registeredGroups);
       if (!mainJid) {
-        logger.warn('delegate_task: could not find main group JID');
+        logger.warn(`${data.type}: could not find main group JID`);
         break;
       }
 
-      const filesInfo = data.files?.length
-        ? `\n\n*Files included:* ${data.files.join(', ')}`
-        : '';
-      const delegateMsg = `*Task Request* from _${sourceName}_ (${sourceJid}):\n\n${data.description}${filesInfo}\n\n_React 👍 to approve, or reply manually._`;
-      const sentId = await deps.sendMessage(mainJid, delegateMsg);
+      let label: string;
+      let extraInfo: string;
+      let trackedDescription: string;
+      if (data.type === 'delegate_task') {
+        const callbackAgent = data.callbackAgentId || sourceGroup;
+        label = 'Task Request';
+        extraInfo = data.files?.length
+          ? `\n\n*Files included:* ${data.files.join(', ')}`
+          : '';
+        trackedDescription = `[DELEGATE TASK] ${data.description}\n\nCallback agent: ${callbackAgent}`;
+      } else {
+        label = 'Context Request';
+        extraInfo = data.requestedTopics?.length
+          ? `\n\n*Requested topics:* ${data.requestedTopics.join(', ')}`
+          : '';
+        trackedDescription = `[CONTEXT REQUEST] ${data.description}${data.requestedTopics?.length ? `\nTopics: ${data.requestedTopics.join(', ')}` : ''}`;
+      }
 
-      // Track for reaction-based approval
+      const requestMsg = `*${label}* from _${sourceName}_ (${sourceJid}):\n\n${data.description}${extraInfo}\n\n_React 👍 to approve, or reply manually._`;
+      const sentId = await deps.sendMessage(mainJid, requestMsg);
+
       if (sentId) {
         trackShareRequest(sentId, {
           sourceJid,
           sourceName,
           sourceGroup,
-          description: `[DELEGATE TASK] ${data.description}\n\nCallback agent: ${callbackAgent}`,
+          description: trackedDescription,
           serverFolder: undefined,
           timestamp: Date.now(),
         });
       }
 
       logger.info(
-        {
-          sourceGroup,
-          callbackAgent,
-          description: data.description.slice(0, 100),
-        },
-        'Delegate task forwarded for approval',
-      );
-      break;
-    }
-
-    case 'context_request': {
-      if (!data.description) {
-        logger.warn({ data }, 'context_request missing description');
-        break;
-      }
-
-      const sourceGroupEntry = findGroupByFolder(registeredGroups, sourceGroup);
-      const sourceName = sourceGroupEntry?.[1].name || sourceGroup;
-      const sourceJid = sourceGroupEntry?.[0] || sourceGroup;
-
-      // Route to admin for approval
-      const mainJid = findMainGroupJid(registeredGroups);
-      if (!mainJid) {
-        logger.warn('context_request: could not find main group JID');
-        break;
-      }
-
-      const topicsInfo = data.requestedTopics?.length
-        ? `\n\n*Requested topics:* ${data.requestedTopics.join(', ')}`
-        : '';
-      const contextMsg = `*Context Request* from _${sourceName}_ (${sourceJid}):\n\n${data.description}${topicsInfo}\n\n_React 👍 to approve, or reply manually._`;
-      const sentCtxId = await deps.sendMessage(mainJid, contextMsg);
-
-      if (sentCtxId) {
-        trackShareRequest(sentCtxId, {
-          sourceJid,
-          sourceName,
-          sourceGroup,
-          description: `[CONTEXT REQUEST] ${data.description}${data.requestedTopics?.length ? `\nTopics: ${data.requestedTopics.join(', ')}` : ''}`,
-          serverFolder: undefined,
-          timestamp: Date.now(),
-        });
-      }
-
-      logger.info(
-        {
-          sourceGroup,
-          description: data.description.slice(0, 100),
-          topics: data.requestedTopics,
-        },
-        'Context request forwarded for approval',
+        { sourceGroup, description: data.description.slice(0, 100) },
+        `${label} forwarded for approval`,
       );
       break;
     }

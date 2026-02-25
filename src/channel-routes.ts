@@ -3,10 +3,7 @@
  * Maps channel JIDs to agents. Multiple channels can route to the same agent.
  */
 
-import { getAllChannelRoutes, getChannelRoute, getRoutesForAgent, setChannelRoute } from './db.js';
-import type { Agent, ChannelRoute } from './types.js';
-
-export { getAllChannelRoutes, getChannelRoute, getRoutesForAgent, setChannelRoute };
+import type { ChannelRoute } from './types.js';
 
 /**
  * Resolve which agent should handle a message from a given channel JID.
