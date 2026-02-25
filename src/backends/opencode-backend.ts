@@ -19,6 +19,8 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  OPENCODE_PORT_BASE,
+  OPENCODE_MODEL,
 } from '../config.js';
 import { logger } from '../logger.js';
 import { assertPathWithin } from '../path-security.js';
@@ -32,10 +34,6 @@ import {
   getFolder,
   getName,
 } from './types.js';
-
-// OpenCode backend configuration (env vars)
-const OPENCODE_PORT_BASE = parseInt(process.env.OPENCODE_PORT_BASE || '14096', 10);
-const OPENCODE_MODEL = process.env.OPENCODE_MODEL || '';
 
 /** Track port assignments per group to avoid conflicts. */
 let nextPort = OPENCODE_PORT_BASE;

@@ -18,7 +18,6 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     folder: 'agent-folder',
     backend: 'apple-container',
     isAdmin: false,
-    isLocal: true,
     createdAt: '2025-01-01T00:00:00.000Z',
     ...overrides,
   };

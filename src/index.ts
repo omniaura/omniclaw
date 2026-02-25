@@ -1032,7 +1032,6 @@ function buildAgentRegistry(): void {
       description: agent.description || '',
       backend: agent.backend,
       isMain: agent.isAdmin,
-      isLocal: agent.isLocal,
       trigger: firstRoute?.trigger || `@${ASSISTANT_NAME}`,
     };
   });
@@ -1048,11 +1047,6 @@ function buildAgentRegistry(): void {
         description: group.description || '',
         backend: group.backend || 'apple-container',
         isMain: group.folder === MAIN_GROUP_FOLDER,
-        isLocal:
-          !group.backend ||
-          group.backend === 'apple-container' ||
-          group.backend === 'docker' ||
-          group.backend === 'opencode',
         trigger: group.trigger,
       });
     }

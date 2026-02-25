@@ -47,7 +47,6 @@ interface AgentRow {
   container_config: string | null;
   heartbeat: string | null;
   is_admin: number;
-  is_local: number;
   server_folder: string | null;
   created_at: string;
 }
@@ -131,7 +130,6 @@ function mapRowToAgent(row: AgentRow): Agent {
       'agent heartbeat',
     ),
     isAdmin: row.is_admin === 1,
-    isLocal: row.is_local === 1,
     serverFolder: row.server_folder || undefined,
     createdAt: row.created_at,
   };
@@ -294,7 +292,6 @@ function createSchema(database: Database): void {
       container_config TEXT,
       heartbeat TEXT,
       is_admin INTEGER NOT NULL DEFAULT 0,
-      is_local INTEGER NOT NULL DEFAULT 1,
       server_folder TEXT,
       created_at TEXT NOT NULL
     );
@@ -831,8 +828,8 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
   }
 
   const insertAgent = database.prepare(`
-    INSERT OR IGNORE INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, is_local, server_folder, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, server_folder, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertRoute = database.prepare(`
@@ -843,7 +840,6 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
   for (const [folder, row] of agentsByFolder) {
     const isMain = folder === 'main';
     const backend = row.backend || 'apple-container';
-    const isLocal = backend === 'apple-container' || backend === 'docker' || backend === 'opencode';
 
     insertAgent.run(
       folder, // id
@@ -854,7 +850,6 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
       row.container_config,
       row.heartbeat,
       isMain ? 1 : 0, // is_admin
-      isLocal ? 1 : 0, // is_local
       row.server_folder,
       row.added_at,
     );
@@ -896,8 +891,8 @@ export function getAllAgents(): Record<string, Agent> {
 export function setAgent(agent: Agent): void {
   db.query(
     `
-    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, is_local, server_folder, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, server_folder, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     agent.id,
@@ -908,7 +903,6 @@ export function setAgent(agent: Agent): void {
     agent.containerConfig ? JSON.stringify(agent.containerConfig) : null,
     agent.heartbeat ? JSON.stringify(agent.heartbeat) : null,
     agent.isAdmin ? 1 : 0,
-    agent.isLocal ? 1 : 0,
     agent.serverFolder || null,
     agent.createdAt,
   );

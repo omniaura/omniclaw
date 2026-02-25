@@ -163,7 +163,6 @@ export interface Agent {
   containerConfig?: ContainerConfig;
   heartbeat?: HeartbeatConfig;
   isAdmin: boolean; // Local agent = true (can approve tasks, access local FS)
-  isLocal: boolean; // Runs on local machine (Apple Container)
   serverFolder?: string; // Shared server context (e.g., "servers/omniaura-discord")
   createdAt: string;
 }
@@ -199,7 +198,6 @@ export function registeredGroupToAgent(
     containerConfig: group.containerConfig,
     heartbeat: group.heartbeat,
     isAdmin: isMainGroup,
-    isLocal: backendType === 'apple-container' || backendType === 'docker' || backendType === 'opencode',
     serverFolder: group.serverFolder,
     createdAt: group.added_at,
   };

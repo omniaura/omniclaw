@@ -748,7 +748,6 @@ describe('Agent CRUD', () => {
     folder: 'test-folder',
     backend: 'apple-container',
     isAdmin: false,
-    isLocal: true,
     createdAt: '2024-01-01T00:00:00.000Z',
   };
 
@@ -761,7 +760,6 @@ describe('Agent CRUD', () => {
     expect(agent!.folder).toBe('test-folder');
     expect(agent!.backend).toBe('apple-container');
     expect(agent!.isAdmin).toBe(false);
-    expect(agent!.isLocal).toBe(true);
   });
 
   it('returns undefined for nonexistent agent', () => {
@@ -821,8 +819,7 @@ describe('Agent CRUD', () => {
       folder: 'minimal-folder',
       backend: 'apple-container',
       isAdmin: false,
-      isLocal: true,
-      createdAt: '2024-06-01T00:00:00.000Z',
+        createdAt: '2024-06-01T00:00:00.000Z',
     });
     const agent = getAgent('minimal-agent');
     expect(agent!.description).toBeUndefined();

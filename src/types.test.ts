@@ -29,7 +29,6 @@ describe('types.ts conversion functions', () => {
       expect(agent.folder).toBe('test-group');
       expect(agent.backend).toBe('apple-container');
       expect(agent.isAdmin).toBe(false);
-      expect(agent.isLocal).toBe(true);
       expect(agent.createdAt).toBe('2025-01-01T00:00:00.000Z');
     });
 
@@ -55,20 +54,12 @@ describe('types.ts conversion functions', () => {
       const group = makeGroup({ backend: 'docker' });
       const agent = registeredGroupToAgent('jid@g.us', group);
       expect(agent.backend).toBe('docker');
-      expect(agent.isLocal).toBe(true);
     });
 
-    it('marks docker as local', () => {
-      const group = makeGroup({ backend: 'docker' });
-      const agent = registeredGroupToAgent('jid@g.us', group);
-      expect(agent.isLocal).toBe(true);
-    });
-
-    it('marks opencode as local', () => {
+    it('preserves opencode backend', () => {
       const group = makeGroup({ backend: 'opencode' });
       const agent = registeredGroupToAgent('jid@g.us', group);
       expect(agent.backend).toBe('opencode');
-      expect(agent.isLocal).toBe(true);
     });
 
     it('preserves containerConfig', () => {
