@@ -74,9 +74,6 @@ RUN bun install
 # Copy source code
 COPY container/agent-runner/ ./
 
-# Copy MCP servers
-COPY container/mcp-servers/ /app/mcp-servers/
-
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/server /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
