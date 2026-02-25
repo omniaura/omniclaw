@@ -121,6 +121,7 @@ describe('backends/types.ts', () => {
     });
 
     it('returns each backend type correctly for RegisteredGroup', () => {
+      expect(getBackendType(makeGroup({ backend: 'apple-container' }))).toBe('apple-container');
       expect(getBackendType(makeGroup({ backend: 'docker' }))).toBe('docker');
     });
   });

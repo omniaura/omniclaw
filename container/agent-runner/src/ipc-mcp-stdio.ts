@@ -596,10 +596,16 @@ server.tool(
   `Read shared context that has been written to your context storage.
 Context is stored as markdown files by topic name. Use list_context_topics first to see what's available.`,
   {
-    topic: z.string().describe('The topic name to read (e.g., "project-overview", "api-refactor")'),
+    topic: z.string()
+      .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/, 'Topic must be a simple name (no path separators)')
+      .describe('The topic name to read (e.g., "project-overview", "api-refactor")'),
   },
   async (args) => {
-    const contextPath = path.join('/workspace/group/context', `${args.topic}.md`);
+    const contextDir = path.resolve('/workspace/group/context');
+    const contextPath = path.resolve(contextDir, `${args.topic}.md`);
+    if (!contextPath.startsWith(`${contextDir}${path.sep}`)) {
+      return { content: [{ type: 'text' as const, text: `No context found for topic "${args.topic}".` }] };
+    }
     try {
       if (!fs.existsSync(contextPath)) {
         return { content: [{ type: 'text' as const, text: `No context found for topic "${args.topic}".` }] };

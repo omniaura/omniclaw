@@ -220,7 +220,7 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 | `ASSISTANT_NAME` | `Omni` | Bot name and trigger pattern |
 | `POLL_INTERVAL` | `2000` | Message polling interval (ms) |
 | `SCHEDULER_POLL_INTERVAL` | `60000` | Task scheduler check interval (ms) |
-| `IPC_POLL_INTERVAL` | `30000` | S3 IPC polling interval for cloud backends (ms) |
+| `IPC_POLL_INTERVAL` | `30000` | IPC watcher polling interval (ms) |
 | `CONTAINER_TIMEOUT` | `1800000` | Container execution timeout (30min) |
 | `CONTAINER_STARTUP_TIMEOUT` | `120000` | Container startup timeout (2min) |
 | `IDLE_TIMEOUT` | `1800000` | Keep container alive after last result (30min) |
@@ -617,7 +617,7 @@ All agents are registered in `/workspace/ipc/agent_registry.json`:
 
 ### Example: Multi-Agent Coordination
 
-```
+```text
 Code Review Request:
 1. PeytonOmni — Fetch PR, analyze changes
 2. Delegate to reviewer agent — "Run tests"
@@ -672,7 +672,7 @@ See [SECURITY.md](./SECURITY.md) for the complete security model. Key points:
 
 ### Container Isolation (Primary Boundary)
 
-All agents run in isolated containers (Apple Container, Docker, or cloud VMs):
+All agents run in isolated containers (Apple Container or Docker):
 - **Filesystem isolation** — Only mounted directories visible
 - **Process isolation** — Container processes cannot affect host
 - **Non-root execution** — Runs as unprivileged `bun` user

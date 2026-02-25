@@ -83,7 +83,7 @@ The codebase has grown (18K+ lines in `src/`). Continuously look for:
 #### Test Coverage Expansion (Ongoing)
 Good test coverage for IPC, scheduling, routing, security. Gaps remain in:
 - Channel adapters (integration tests)
-- Cloud backends (mock-based unit tests)
+- Backend implementations (mock-based unit tests)
 - End-to-end message flow
 
 ### Long-term
@@ -107,7 +107,7 @@ Structured logs exist but there's no dashboard or alerting. Consider:
 
 ### Feb 2026
 - Multi-channel support (Discord, Telegram, Slack) — all four channels operational
-- 6 compute backends (local + 4 cloud providers)
+- 2 compute backends (Apple Container + Docker)
 - Agent/ChannelRoute decoupling
 - Comprehensive security hardening (path traversal, mount allowlist, .env blocking, IPC hardening, container PID limits)
 - Structured logging migration (console.log → Pino)
