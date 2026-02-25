@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'bun:test';
-import { createSanitizeBashHook, createSanitizeReadHook, buildContent } from '../index.ts';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { createSanitizeBashHook, createSanitizeReadHook, createFileSizeHook, buildContent } from '../index.ts';
 
 describe('Security Hooks - Issue #79', () => {
   describe('Bash Hook', () => {
@@ -215,6 +218,61 @@ describe('Security Hooks - Issue #79', () => {
         tool_input: { file_path: '/proc/1/../../proc/self/environ' },
       };
       await expect(hook(input as any, 'id', {} as any)).rejects.toThrow(/not allowed.*security/i);
+    });
+  });
+
+  describe('File Size Hook', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filesize-hook-test-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('should pass through small files unchanged', async () => {
+      const hook = createFileSizeHook();
+      const smallFile = path.join(tmpDir, 'small.ts');
+      fs.writeFileSync(smallFile, 'const x = 1;\n'.repeat(10));
+      const input = { tool_name: 'Read', tool_input: { file_path: smallFile } };
+      const result = await hook(input as any, 'id', {} as any);
+      expect(result).toEqual({});
+    });
+
+    it('should inject limit for files over 50KB', async () => {
+      const hook = createFileSizeHook();
+      const largeFile = path.join(tmpDir, 'large.md');
+      fs.writeFileSync(largeFile, 'x'.repeat(51 * 1024));
+      const input = { tool_name: 'Read', tool_input: { file_path: largeFile } };
+      const result = await hook(input as any, 'id', {} as any) as any;
+      expect(result.hookSpecificOutput?.updatedInput?.limit).toBe(500);
+      expect(result.hookSpecificOutput?.updatedInput?.file_path).toBe(largeFile);
+    });
+
+    it('should respect an explicit limit already set by the agent', async () => {
+      const hook = createFileSizeHook();
+      const largeFile = path.join(tmpDir, 'large.ts');
+      fs.writeFileSync(largeFile, 'x'.repeat(51 * 1024));
+      const input = { tool_name: 'Read', tool_input: { file_path: largeFile, limit: 50 } };
+      const result = await hook(input as any, 'id', {} as any);
+      // Should not override — agent already specified what it wants
+      expect(result).toEqual({});
+    });
+
+    it('should return empty object for nonexistent files', async () => {
+      const hook = createFileSizeHook();
+      const input = { tool_name: 'Read', tool_input: { file_path: '/nonexistent/file.ts' } };
+      const result = await hook(input as any, 'id', {} as any);
+      expect(result).toEqual({});
+    });
+
+    it('should return empty object when no file_path provided', async () => {
+      const hook = createFileSizeHook();
+      const input = { tool_name: 'Read', tool_input: {} };
+      const result = await hook(input as any, 'id', {} as any);
+      expect(result).toEqual({});
     });
   });
 

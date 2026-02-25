@@ -363,6 +363,51 @@ export function createSanitizeBashHook(): HookCallback {
   };
 }
 
+const MAX_READ_BYTES = 50 * 1024; // 50 KB
+const DEFAULT_READ_LIMIT_LINES = 500;
+
+/**
+ * createFileSizeHook
+ *
+ * Prevents large files from flooding the context window.
+ * If a file exceeds MAX_READ_BYTES and the agent hasn't already specified
+ * a `limit`, injects `limit: DEFAULT_READ_LIMIT_LINES` so the agent sees
+ * a truncated preview rather than the full file.
+ *
+ * The agent can still read specific sections using offset+limit.
+ */
+export function createFileSizeHook(): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const preInput = input as PreToolUseHookInput;
+    const { file_path, limit } = preInput.tool_input as { file_path?: string; limit?: number };
+    if (!file_path) return {};
+    // Respect an explicit limit the agent already set
+    if (limit != null) return {};
+
+    let size: number;
+    try {
+      size = fs.statSync(file_path).size;
+    } catch {
+      return {}; // File doesn't exist — let Read handle it
+    }
+
+    if (size > MAX_READ_BYTES) {
+      log(`Large file: ${file_path} (${Math.round(size / 1024)}KB), injecting limit=${DEFAULT_READ_LIMIT_LINES}`);
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          updatedInput: {
+            ...(preInput.tool_input as Record<string, unknown>),
+            limit: DEFAULT_READ_LIMIT_LINES,
+          },
+        },
+      };
+    }
+
+    return {};
+  };
+}
+
 /**
  * createSanitizeReadHook
  *
@@ -727,7 +772,7 @@ async function runQuery(
         PreCompact: [{ hooks: [createPreCompactHook()] }],
         PreToolUse: [
           { matcher: 'Bash', hooks: [createSanitizeBashHook()] },
-          { matcher: 'Read', hooks: [createSanitizeReadHook()] },
+          { matcher: 'Read', hooks: [createSanitizeReadHook(), createFileSizeHook()] },
         ],
       },
     }
