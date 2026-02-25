@@ -56,10 +56,16 @@ describe('types.ts conversion functions', () => {
       expect(agent.backend).toBe('docker');
     });
 
-    it('preserves opencode backend', () => {
-      const group = makeGroup({ backend: 'opencode' });
+    it('defaults agentRuntime to claude-agent-sdk', () => {
+      const group = makeGroup();
       const agent = registeredGroupToAgent('jid@g.us', group);
-      expect(agent.backend).toBe('opencode');
+      expect(agent.agentRuntime).toBe('claude-agent-sdk');
+    });
+
+    it('preserves opencode agentRuntime', () => {
+      const group = makeGroup({ agentRuntime: 'opencode' });
+      const agent = registeredGroupToAgent('jid@g.us', group);
+      expect(agent.agentRuntime).toBe('opencode');
     });
 
     it('preserves containerConfig', () => {

@@ -47,7 +47,10 @@ export interface HeartbeatConfig {
   scheduleType: 'cron' | 'interval';
 }
 
-export type BackendType = 'apple-container' | 'docker' | 'opencode';
+export type BackendType = 'apple-container' | 'docker';
+
+/** Which agent runtime runs inside the container. */
+export type AgentRuntime = 'claude-agent-sdk' | 'opencode';
 
 export interface RegisteredGroup {
   name: string;
@@ -61,7 +64,8 @@ export interface RegisteredGroup {
   heartbeat?: HeartbeatConfig;
   discordGuildId?: string; // Discord guild/server ID (for server-level context)
   serverFolder?: string; // e.g., "servers/omniaura-discord" (shared across channels in same server)
-  backend?: BackendType; // Which backend runs this group's agent (default: apple-container)
+  backend?: BackendType; // Which container backend runs this group's agent (default: apple-container)
+  agentRuntime?: AgentRuntime; // Which agent runtime runs inside the container (default: claude-agent-sdk)
   description?: string; // What this agent does (for agent registry)
   streamIntermediates?: boolean; // Stream intermediate output (thinking, tool calls) to channel threads. Default: false
 }
@@ -160,6 +164,7 @@ export interface Agent {
   description?: string;
   folder: string; // Workspace folder (= id for backwards compat)
   backend: BackendType;
+  agentRuntime: AgentRuntime;    // Which agent runtime runs inside the container
   containerConfig?: ContainerConfig;
   heartbeat?: HeartbeatConfig;
   isAdmin: boolean; // Local agent = true (can approve tasks, access local FS)
@@ -195,6 +200,7 @@ export function registeredGroupToAgent(
     description: group.description,
     folder: group.folder,
     backend: backendType,
+    agentRuntime: group.agentRuntime || 'claude-agent-sdk',
     containerConfig: group.containerConfig,
     heartbeat: group.heartbeat,
     isAdmin: isMainGroup,
@@ -271,6 +277,7 @@ export interface IpcTaskPayload {
   request_files?: string[];
   // For register_group: backend config
   backend?: BackendType;
+  agent_runtime?: AgentRuntime;
   group_description?: string;
   // For delegate_task
   callbackAgentId?: string;

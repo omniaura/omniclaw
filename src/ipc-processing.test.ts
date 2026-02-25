@@ -747,6 +747,7 @@ describe('Agent CRUD', () => {
     description: 'A test agent',
     folder: 'test-folder',
     backend: 'apple-container',
+    agentRuntime: 'claude-agent-sdk',
     isAdmin: false,
     createdAt: '2024-01-01T00:00:00.000Z',
   };
@@ -818,6 +819,7 @@ describe('Agent CRUD', () => {
       name: 'Minimal',
       folder: 'minimal-folder',
       backend: 'apple-container',
+      agentRuntime: 'claude-agent-sdk',
       isAdmin: false,
         createdAt: '2024-06-01T00:00:00.000Z',
     });

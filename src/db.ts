@@ -44,6 +44,7 @@ interface AgentRow {
   description: string | null;
   folder: string;
   backend: string;
+  agent_runtime: string | null;
   container_config: string | null;
   heartbeat: string | null;
   is_admin: number;
@@ -119,6 +120,7 @@ function mapRowToAgent(row: AgentRow): Agent {
     description: row.description || undefined,
     folder: row.folder,
     backend: row.backend as Agent['backend'],
+    agentRuntime: (row.agent_runtime as Agent['agentRuntime']) || 'claude-agent-sdk',
     containerConfig: safeJsonParse(
       row.container_config,
       { id: row.id },
@@ -289,6 +291,7 @@ function createSchema(database: Database): void {
       description TEXT,
       folder TEXT NOT NULL UNIQUE,
       backend TEXT NOT NULL DEFAULT 'apple-container',
+      agent_runtime TEXT DEFAULT 'claude-agent-sdk',
       container_config TEXT,
       heartbeat TEXT,
       is_admin INTEGER NOT NULL DEFAULT 0,
@@ -828,8 +831,8 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
   }
 
   const insertAgent = database.prepare(`
-    INSERT OR IGNORE INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, server_folder, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, heartbeat, is_admin, server_folder, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertRoute = database.prepare(`
@@ -847,6 +850,7 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
       row.description,
       folder,
       backend,
+      'claude-agent-sdk',  // agent_runtime (default for migration)
       row.container_config,
       row.heartbeat,
       isMain ? 1 : 0, // is_admin
@@ -891,8 +895,8 @@ export function getAllAgents(): Record<string, Agent> {
 export function setAgent(agent: Agent): void {
   db.query(
     `
-    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, server_folder, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, heartbeat, is_admin, server_folder, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     agent.id,
@@ -900,6 +904,7 @@ export function setAgent(agent: Agent): void {
     agent.description || null,
     agent.folder,
     agent.backend,
+    agent.agentRuntime || 'claude-agent-sdk',
     agent.containerConfig ? JSON.stringify(agent.containerConfig) : null,
     agent.heartbeat ? JSON.stringify(agent.heartbeat) : null,
     agent.isAdmin ? 1 : 0,

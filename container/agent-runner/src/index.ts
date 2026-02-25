@@ -26,6 +26,8 @@ interface ChannelInfo {
   name: string;
 }
 
+type AgentRuntime = 'claude-agent-sdk' | 'opencode';
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -37,6 +39,8 @@ interface ContainerInput {
   discordGuildId?: string;
   serverFolder?: string;
   secrets?: Record<string, string>;
+  /** Which agent runtime to use. Default: claude-agent-sdk */
+  agentRuntime?: AgentRuntime;
   /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
   channels?: ChannelInfo[];
 }
@@ -951,12 +955,25 @@ async function main(): Promise<void> {
     containerInput = JSON.parse(stdinData);
     // Delete the temp file the entrypoint wrote — it contains secrets
     try { fs.unlinkSync('/tmp/input.json'); } catch { /* may not exist */ }
-    log(`Received input for group: ${containerInput.groupFolder}`);
+    log(`Received input for group: ${containerInput.groupFolder} (runtime: ${containerInput.agentRuntime || 'claude-agent-sdk'})`);
   } catch (err) {
     writeOutput({
       status: 'error',
       result: null,
       error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
+    });
+    process.exit(1);
+  }
+
+  // Runtime dispatch: select which agent runtime to use
+  const runtime = containerInput.agentRuntime || 'claude-agent-sdk';
+  if (runtime !== 'claude-agent-sdk') {
+    // Future runtimes (opencode, openhands, codex) will be dispatched here.
+    // For now, only claude-agent-sdk is implemented.
+    writeOutput({
+      status: 'error',
+      result: null,
+      error: `Agent runtime '${runtime}' is not yet implemented. Only 'claude-agent-sdk' is currently supported.`,
     });
     process.exit(1);
   }

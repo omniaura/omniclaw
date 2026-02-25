@@ -5,12 +5,13 @@
 
 import {
   Agent,
+  type AgentRuntime,
   type BackendType,
   ContainerProcess,
   RegisteredGroup,
 } from '../types.js';
 
-export type { BackendType };
+export type { AgentRuntime, BackendType };
 
 /**
  * Unified group-or-agent type for backwards compatibility.
@@ -51,6 +52,12 @@ export function getBackendType(entity: AgentOrGroup): BackendType {
   return (entity as RegisteredGroup).backend || 'apple-container';
 }
 
+/** Get agent runtime from either type. */
+export function getAgentRuntime(entity: AgentOrGroup): AgentRuntime {
+  if (isAgent(entity)) return entity.agentRuntime;
+  return (entity as RegisteredGroup).agentRuntime || 'claude-agent-sdk';
+}
+
 export interface ChannelInfo {
   id: string;
   jid: string;
@@ -67,6 +74,8 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   discordGuildId?: string;
   serverFolder?: string;
+  /** Which agent runtime to use inside the container. Default: claude-agent-sdk */
+  agentRuntime?: AgentRuntime;
   /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
   channels?: ChannelInfo[];
 }

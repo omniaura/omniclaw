@@ -331,6 +331,7 @@ async function runTask(
         isScheduledTask: true,
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
+        agentRuntime: group.agentRuntime,
       },
       (proc, containerName) =>
         deps.onProcess(

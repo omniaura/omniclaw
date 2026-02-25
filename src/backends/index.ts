@@ -6,13 +6,6 @@
 import { logger } from '../logger.js';
 import { Agent, RegisteredGroup } from '../types.js';
 import { LocalBackend } from './local-backend.js';
-import {
-  AgentBackend,
-  AgentOrGroup,
-  BackendType,
-  getBackendType,
-} from './types.js';
-import { OpenCodeBackend } from \'./opencode-backend.js\';
 
 const DEFAULT_BACKEND: BackendType = 'apple-container';
 
@@ -27,9 +20,6 @@ export function getBackend(type: BackendType): AgentBackend {
     case 'apple-container':
     case 'docker':
       backend = new LocalBackend();
-      break;
-    case 'opencode':
-      backend = new OpenCodeBackend();
       break;
     default:
       throw new Error(`Unknown backend type: ${type}`);

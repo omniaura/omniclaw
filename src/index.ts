@@ -857,6 +857,7 @@ async function runAgent(
         isMain,
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
+        agentRuntime: group.agentRuntime,
         channels: agentChannels,
       },
       (proc, containerName) =>
@@ -1031,6 +1032,7 @@ function buildAgentRegistry(): void {
       name: agent.name,
       description: agent.description || '',
       backend: agent.backend,
+      agentRuntime: agent.agentRuntime,
       isMain: agent.isAdmin,
       trigger: firstRoute?.trigger || `@${ASSISTANT_NAME}`,
     };
@@ -1046,6 +1048,7 @@ function buildAgentRegistry(): void {
         name: group.name,
         description: group.description || '',
         backend: group.backend || 'apple-container',
+        agentRuntime: group.agentRuntime || 'claude-agent-sdk',
         isMain: group.folder === MAIN_GROUP_FOLDER,
         trigger: group.trigger,
       });
