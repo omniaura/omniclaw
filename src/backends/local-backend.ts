@@ -76,10 +76,11 @@ function buildVolumeMounts(
     // Mask .env inside the container to prevent secret leakage.
     // The project root mount above exposes .env to the agent (even read-only).
     // Secrets should only flow through the filtered env-dir mount (allowedVars).
-    // Overlay /dev/null so `cat /workspace/project/.env` returns empty content.
+    // Docker: bind-mount /dev/null over .env (file-to-file mounts work in Docker).
+    // Apple Container: only supports directory mounts — rely on hook-level protections instead.
     // (Upstream PR #419, Issue #40)
     const projectEnvFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(projectEnvFile)) {
+    if (fs.existsSync(projectEnvFile) && LOCAL_RUNTIME === 'docker') {
       mounts.push({
         hostPath: '/dev/null',
         containerPath: '/workspace/project/.env',
