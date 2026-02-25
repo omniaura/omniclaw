@@ -1051,7 +1051,8 @@ function buildAgentRegistry(): void {
         isLocal:
           !group.backend ||
           group.backend === 'apple-container' ||
-          group.backend === 'docker',
+          group.backend === 'docker' ||
+          group.backend === 'opencode',
         trigger: group.trigger,
       });
     }

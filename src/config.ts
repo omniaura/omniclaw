@@ -86,3 +86,7 @@ export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || undefined;
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// OpenCode backend configuration
+export const OPENCODE_PORT_BASE = parseInt(process.env.OPENCODE_PORT_BASE || '14096', 10);
+export const OPENCODE_MODEL = process.env.OPENCODE_MODEL || '';

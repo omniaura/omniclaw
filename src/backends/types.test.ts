@@ -136,6 +136,7 @@ describe('backends/types.ts', () => {
         'apple-container',
       );
       expect(getBackendType(makeAgent({ backend: 'docker' }))).toBe('docker');
+      expect(getBackendType(makeAgent({ backend: 'opencode' }))).toBe('opencode');
     });
 
     it('returns each backend type correctly for RegisteredGroup', () => {
@@ -143,6 +144,7 @@ describe('backends/types.ts', () => {
         'apple-container',
       );
       expect(getBackendType(makeGroup({ backend: 'docker' }))).toBe('docker');
+      expect(getBackendType(makeGroup({ backend: 'opencode' }))).toBe('opencode');
     });
   });
 });

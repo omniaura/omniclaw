@@ -843,7 +843,7 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
   for (const [folder, row] of agentsByFolder) {
     const isMain = folder === 'main';
     const backend = row.backend || 'apple-container';
-    const isLocal = backend === 'apple-container' || backend === 'docker';
+    const isLocal = backend === 'apple-container' || backend === 'docker' || backend === 'opencode';
 
     insertAgent.run(
       folder, // id

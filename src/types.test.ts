@@ -64,6 +64,13 @@ describe('types.ts conversion functions', () => {
       expect(agent.isLocal).toBe(true);
     });
 
+    it('marks opencode as local', () => {
+      const group = makeGroup({ backend: 'opencode' });
+      const agent = registeredGroupToAgent('jid@g.us', group);
+      expect(agent.backend).toBe('opencode');
+      expect(agent.isLocal).toBe(true);
+    });
+
     it('preserves containerConfig', () => {
       const config = { timeout: 60000, memory: 2048 };
       const group = makeGroup({ containerConfig: config });

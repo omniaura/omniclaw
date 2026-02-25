@@ -47,7 +47,7 @@ export interface HeartbeatConfig {
   scheduleType: 'cron' | 'interval';
 }
 
-export type BackendType = 'apple-container' | 'docker';
+export type BackendType = 'apple-container' | 'docker' | 'opencode';
 
 export interface RegisteredGroup {
   name: string;
@@ -199,7 +199,7 @@ export function registeredGroupToAgent(
     containerConfig: group.containerConfig,
     heartbeat: group.heartbeat,
     isAdmin: isMainGroup,
-    isLocal: backendType === 'apple-container' || backendType === 'docker',
+    isLocal: backendType === 'apple-container' || backendType === 'docker' || backendType === 'opencode',
     serverFolder: group.serverFolder,
     createdAt: group.added_at,
   };
