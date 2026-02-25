@@ -172,6 +172,18 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Optional shared OpenCode auth/config from the host.
+  // If present, mounting this path lets `opencode` inside the container reuse
+  // host `/connect` credentials (including OpenAI provider auth).
+  const hostOpenCodeDir = path.join(homeDir, '.local', 'share', 'opencode');
+  if (fs.existsSync(hostOpenCodeDir)) {
+    mounts.push({
+      hostPath: hostOpenCodeDir,
+      containerPath: '/home/bun/.local/share/opencode',
+      readonly: false,
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const ipcBase = path.join(DATA_DIR, 'ipc');
