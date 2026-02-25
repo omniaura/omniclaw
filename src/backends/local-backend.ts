@@ -624,7 +624,12 @@ export class LocalBackend implements AgentBackend {
     }
 
     // Probe to verify containers actually work
-    const probe = await $`${LOCAL_RUNTIME} run --rm --entrypoint /bin/echo ${CONTAINER_IMAGE} ok`.quiet().nothrow();
+    const probeProc = Bun.spawn([LOCAL_RUNTIME, 'run', '--rm', '--entrypoint', '/bin/echo', CONTAINER_IMAGE, 'ok'], {
+      stdout: 'pipe', stderr: 'pipe',
+    });
+    const probeStdout = await new Response(probeProc.stdout).text();
+    const probeExitCode = await probeProc.exited;
+    const probe = { exitCode: probeExitCode, text: () => probeStdout };
     if (probe.exitCode === 0 && probe.text().trim() === 'ok') {
       logger.info('Container system ready (probe passed)');
       await this.cleanupOrphanedContainers();
@@ -649,7 +654,12 @@ export class LocalBackend implements AgentBackend {
       throw new Error('Apple Container system failed to start on retry');
     }
 
-    const probe2 = await $`container run --rm --entrypoint /bin/echo ${CONTAINER_IMAGE} ok`.quiet().nothrow();
+    const probe2Proc = Bun.spawn([LOCAL_RUNTIME, 'run', '--rm', '--entrypoint', '/bin/echo', CONTAINER_IMAGE, 'ok'], {
+      stdout: 'pipe', stderr: 'pipe',
+    });
+    const probe2Stdout = await new Response(probe2Proc.stdout).text();
+    const probe2ExitCode = await probe2Proc.exited;
+    const probe2 = { exitCode: probe2ExitCode, text: () => probe2Stdout };
     if (probe2.exitCode !== 0 || probe2.text().trim() !== 'ok') {
       logger.error('Container probe still failing after full restart');
       this.printContainerSystemError();
@@ -678,7 +688,12 @@ export class LocalBackend implements AgentBackend {
           .filter((c) => c.status === 'running' && c.configuration.id.startsWith('omniclaw-'))
           .map((c) => c.configuration.id);
       }
-      await Promise.all(orphans.map((name) => $`${LOCAL_RUNTIME} stop ${name}`.quiet().nothrow()));
+      await Promise.all(
+        orphans.map((name) => {
+          const proc = Bun.spawn([LOCAL_RUNTIME, 'stop', name], { stdout: 'ignore', stderr: 'ignore' });
+          return proc.exited;
+        }),
+      );
       if (orphans.length > 0) {
         logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
       }
