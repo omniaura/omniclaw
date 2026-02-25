@@ -566,6 +566,10 @@ and notify you when results are available via context storage.`,
   },
 );
 
+// Shared topic-name regex: alphanumeric start, then alphanumeric/dot/hyphen/underscore, max 128 chars.
+// Rejects path separators ('/', '\') and leading dots to prevent directory traversal.
+const TOPIC_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+
 server.tool(
   'request_context',
   `Request context or information from the local agent or admin.
@@ -573,7 +577,9 @@ Use this when you need project status, repo information, or any context that has
 The request goes to the admin for approval, then the local agent writes the context to your shared storage.`,
   {
     description: z.string().describe('What context or information you need and why'),
-    requested_topics: z.array(z.string()).optional().describe('Specific topic names to request (e.g., ["api-refactor", "project-overview"])'),
+    requested_topics: z.array(
+      z.string().regex(TOPIC_NAME_REGEX, 'Topic must be a simple name (no path separators)')
+    ).optional().describe('Specific topic names to request (e.g., ["api-refactor", "project-overview"])'),
   },
   async (args) => {
     writeIpcFile(TASKS_DIR, {
@@ -597,18 +603,24 @@ server.tool(
 Context is stored as markdown files by topic name. Use list_context_topics first to see what's available.`,
   {
     topic: z.string()
-      .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/, 'Topic must be a simple name (no path separators)')
+      .regex(TOPIC_NAME_REGEX, 'Topic must be a simple name (no path separators)')
       .describe('The topic name to read (e.g., "project-overview", "api-refactor")'),
   },
   async (args) => {
     const contextDir = path.resolve('/workspace/group/context');
     const contextPath = path.resolve(contextDir, `${args.topic}.md`);
+    // Belt-and-suspenders: verify resolved path stays within context directory
     if (!contextPath.startsWith(`${contextDir}${path.sep}`)) {
-      return { content: [{ type: 'text' as const, text: `No context found for topic "${args.topic}".` }] };
+      return { content: [{ type: 'text' as const, text: 'Error: invalid topic name' }] };
     }
     try {
       if (!fs.existsSync(contextPath)) {
         return { content: [{ type: 'text' as const, text: `No context found for topic "${args.topic}".` }] };
+      }
+      // Reject symlinks — prevents escape via symlink planted in context dir
+      const stat = fs.lstatSync(contextPath);
+      if (stat.isSymbolicLink()) {
+        return { content: [{ type: 'text' as const, text: 'Error: invalid topic name' }] };
       }
       const content = fs.readFileSync(contextPath, 'utf-8');
       return { content: [{ type: 'text' as const, text: content }] };
@@ -626,12 +638,18 @@ server.tool(
   'List all available context topics in your shared context storage.',
   {},
   async () => {
-    const contextDir = '/workspace/group/context';
+    const contextDir = path.resolve('/workspace/group/context');
     try {
       if (!fs.existsSync(contextDir)) {
         return { content: [{ type: 'text' as const, text: 'No context directory found. No context has been shared yet.' }] };
       }
-      const files = fs.readdirSync(contextDir).filter((f) => f.endsWith('.md'));
+      // Only list regular .md files (skip symlinks)
+      const files = fs.readdirSync(contextDir).filter((f) => {
+        if (!f.endsWith('.md')) return false;
+        try {
+          return fs.lstatSync(path.join(contextDir, f)).isFile();
+        } catch { return false; }
+      });
       if (files.length === 0) {
         return { content: [{ type: 'text' as const, text: 'No context topics found.' }] };
       }
