@@ -29,6 +29,7 @@ import { ContainerProcess } from '../types.js';
 import { OmniClawS3 } from '../s3/client.js';
 import { syncFilesToS3 } from '../s3/file-sync.js';
 import type { S3Message, S3Output } from '../s3/types.js';
+import { CloudProcessWrapper } from './cloud-process-wrapper.js';
 import {
   AgentBackend,
   AgentOrGroup,
@@ -40,15 +41,6 @@ import {
   getServerFolder,
 } from './types.js';
 import * as HetznerAPI from './hetzner-api.js';
-
-/** Dummy process wrapper for Hetzner (no real PID). */
-class HetznerProcessWrapper implements ContainerProcess {
-  private _killed = false;
-
-  get killed(): boolean { return this._killed; }
-  kill(): void { this._killed = true; }
-  get pid(): number { return 0; }
-}
 
 interface HetznerServerContext {
   serverId: number;
@@ -110,7 +102,7 @@ export class HetznerBackend implements AgentBackend {
     this.servers.set(folder, serverCtx);
 
     // 4. Register dummy process
-    const processWrapper = new HetznerProcessWrapper();
+    const processWrapper = new CloudProcessWrapper();
     onProcess(processWrapper, `hetzner-${folder}`);
 
     try {

@@ -24,6 +24,7 @@ import { ContainerProcess } from '../types.js';
 import { OmniClawS3 } from '../s3/client.js';
 import { syncFilesToS3 } from '../s3/file-sync.js';
 import type { S3Message, S3Output } from '../s3/types.js';
+import { CloudProcessWrapper } from './cloud-process-wrapper.js';
 import {
   AgentBackend,
   AgentOrGroup,
@@ -34,15 +35,6 @@ import {
   getName,
   getServerFolder,
 } from './types.js';
-
-/** Dummy process wrapper for Railway (no real PID). */
-class RailwayProcessWrapper implements ContainerProcess {
-  private _killed = false;
-
-  get killed(): boolean { return this._killed; }
-  kill(): void { this._killed = true; }
-  get pid(): number { return 0; }
-}
 
 export class RailwayBackend implements AgentBackend {
   readonly name = 'railway';
@@ -91,7 +83,7 @@ export class RailwayBackend implements AgentBackend {
     await this.s3.writeInbox(folder, inboxMessage);
 
     // 3. Register dummy process
-    const processWrapper = new RailwayProcessWrapper();
+    const processWrapper = new CloudProcessWrapper();
     onProcess(processWrapper, `railway-${folder}`);
 
     // 4. Poll S3 outbox for results
