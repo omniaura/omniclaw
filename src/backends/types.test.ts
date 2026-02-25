@@ -118,14 +118,11 @@ describe('backends/types.ts', () => {
     it('returns each backend type correctly for Agent', () => {
       expect(getBackendType(makeAgent({ backend: 'apple-container' }))).toBe('apple-container');
       expect(getBackendType(makeAgent({ backend: 'docker' }))).toBe('docker');
-      expect(getBackendType(makeAgent({ backend: 'daytona' }))).toBe('daytona');
-      expect(getBackendType(makeAgent({ backend: 'railway' }))).toBe('railway');
-      expect(getBackendType(makeAgent({ backend: 'hetzner' }))).toBe('hetzner');
+      expect(getBackendType(makeAgent({ backend: 'sprites' }))).toBe('sprites');
     });
 
     it('returns each backend type correctly for RegisteredGroup', () => {
       expect(getBackendType(makeGroup({ backend: 'sprites' }))).toBe('sprites');
-      expect(getBackendType(makeGroup({ backend: 'railway' }))).toBe('railway');
     });
   });
 });

@@ -75,17 +75,6 @@ function getCurrentChatJid(): string {
 // For backwards compatibility, chatJid is a getter
 const chatJid = initialChatJid;
 
-// S3 mode detection
-const S3_ENDPOINT = process.env.OMNICLAW_S3_ENDPOINT || '';
-const S3_ACCESS_KEY_ID = process.env.OMNICLAW_S3_ACCESS_KEY_ID || '';
-const S3_SECRET_ACCESS_KEY = process.env.OMNICLAW_S3_SECRET_ACCESS_KEY || '';
-const S3_BUCKET = process.env.OMNICLAW_S3_BUCKET || '';
-const S3_REGION = process.env.OMNICLAW_S3_REGION || '';
-const S3_AGENT_ID = process.env.OMNICLAW_AGENT_ID || groupFolder;
-const IS_S3_MODE = !!S3_ENDPOINT;
-
-let s3Client: any = null;
-
 // User registry for mention formatting (Issue #66)
 interface UserInfo {
   id: string;
@@ -111,61 +100,15 @@ function loadUserRegistry(): UserRegistry {
 // Load registry on startup
 const userRegistry = loadUserRegistry();
 
-function getS3Client() {
-  if (s3Client) return s3Client;
-  if (!IS_S3_MODE) return null;
-  s3Client = new (globalThis as any).Bun.S3Client({
-    endpoint: S3_ENDPOINT,
-    accessKeyId: S3_ACCESS_KEY_ID,
-    secretAccessKey: S3_SECRET_ACCESS_KEY,
-    bucket: S3_BUCKET,
-    region: S3_REGION || undefined,
-  });
-  return s3Client;
-}
-
-async function writeS3File(key: string, data: string): Promise<void> {
-  const client = getS3Client();
-  if (!client) throw new Error('S3 client not available');
-  await client.write(key, data);
-}
-
-async function readS3File(key: string): Promise<string | null> {
-  const client = getS3Client();
-  if (!client) return null;
-  try {
-    const file = client.file(key);
-    const exists = await file.exists();
-    if (!exists) return null;
-    return await file.text();
-  } catch {
-    return null;
-  }
-}
-
 function writeIpcFile(dir: string, data: object): string {
   const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
 
-  if (IS_S3_MODE) {
-    // S3 mode: write to agent's IPC prefix in S3
-    // dir is like '/workspace/ipc/messages' → extract the last segment
-    const ipcType = path.basename(dir); // 'messages' or 'tasks'
-    const key = `agents/${S3_AGENT_ID}/ipc/${ipcType}/${filename}`;
-    writeS3File(key, JSON.stringify(data, null, 2)).catch((err) => {
-      // Fallback to filesystem
-      fs.mkdirSync(dir, { recursive: true });
-      const filepath = path.join(dir, filename);
-      fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
-    });
-  } else {
-    // Filesystem mode
-    fs.mkdirSync(dir, { recursive: true });
-    const filepath = path.join(dir, filename);
-    // Atomic write: temp file then rename
-    const tempPath = `${filepath}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
-    fs.renameSync(tempPath, filepath);
-  }
+  fs.mkdirSync(dir, { recursive: true });
+  const filepath = path.join(dir, filename);
+  // Atomic write: temp file then rename
+  const tempPath = `${filepath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
+  fs.renameSync(tempPath, filepath);
 
   return filename;
 }
@@ -656,29 +599,18 @@ Context is stored as markdown files by topic name. Use list_context_topics first
     topic: z.string().describe('The topic name to read (e.g., "project-overview", "api-refactor")'),
   },
   async (args) => {
-    if (IS_S3_MODE) {
-      // S3 mode: read from agent's context prefix
-      const key = `agents/${S3_AGENT_ID}/context/${args.topic}.md`;
-      const content = await readS3File(key);
-      if (!content) {
+    const contextPath = path.join('/workspace/group/context', `${args.topic}.md`);
+    try {
+      if (!fs.existsSync(contextPath)) {
         return { content: [{ type: 'text' as const, text: `No context found for topic "${args.topic}".` }] };
       }
+      const content = fs.readFileSync(contextPath, 'utf-8');
       return { content: [{ type: 'text' as const, text: content }] };
-    } else {
-      // Filesystem mode: read from workspace
-      const contextPath = path.join('/workspace/group/context', `${args.topic}.md`);
-      try {
-        if (!fs.existsSync(contextPath)) {
-          return { content: [{ type: 'text' as const, text: `No context found for topic "${args.topic}".` }] };
-        }
-        const content = fs.readFileSync(contextPath, 'utf-8');
-        return { content: [{ type: 'text' as const, text: content }] };
-      } catch (err) {
-        return {
-          content: [{ type: 'text' as const, text: `Error reading context: ${err instanceof Error ? err.message : String(err)}` }],
-          isError: true,
-        };
-      }
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error reading context: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
     }
   },
 );
@@ -688,28 +620,22 @@ server.tool(
   'List all available context topics in your shared context storage.',
   {},
   async () => {
-    if (IS_S3_MODE) {
-      // S3 mode: list context prefix
-      // We can't easily list S3 without the full client, so check known paths
-      return { content: [{ type: 'text' as const, text: 'S3 context listing not yet implemented. Use read_context with a specific topic name.' }] };
-    } else {
-      const contextDir = '/workspace/group/context';
-      try {
-        if (!fs.existsSync(contextDir)) {
-          return { content: [{ type: 'text' as const, text: 'No context directory found. No context has been shared yet.' }] };
-        }
-        const files = fs.readdirSync(contextDir).filter((f) => f.endsWith('.md'));
-        if (files.length === 0) {
-          return { content: [{ type: 'text' as const, text: 'No context topics found.' }] };
-        }
-        const topics = files.map((f) => f.replace(/\.md$/, ''));
-        return { content: [{ type: 'text' as const, text: `Available context topics:\n${topics.map((t) => `- ${t}`).join('\n')}` }] };
-      } catch (err) {
-        return {
-          content: [{ type: 'text' as const, text: `Error listing context: ${err instanceof Error ? err.message : String(err)}` }],
-          isError: true,
-        };
+    const contextDir = '/workspace/group/context';
+    try {
+      if (!fs.existsSync(contextDir)) {
+        return { content: [{ type: 'text' as const, text: 'No context directory found. No context has been shared yet.' }] };
       }
+      const files = fs.readdirSync(contextDir).filter((f) => f.endsWith('.md'));
+      if (files.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No context topics found.' }] };
+      }
+      const topics = files.map((f) => f.replace(/\.md$/, ''));
+      return { content: [{ type: 'text' as const, text: `Available context topics:\n${topics.map((t) => `- ${t}`).join('\n')}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error listing context: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
     }
   },
 );
@@ -721,7 +647,7 @@ server.tool(
 Returns information about each agent including their ID, name, description, backend type, and JID (for messaging).
 This is useful when you need to send messages to specific agents or request context from them.`,
   {
-    filter_backend: z.enum(['apple-container', 'docker', 'sprites', 'daytona', 'railway', 'hetzner']).optional()
+    filter_backend: z.enum(['apple-container', 'docker', 'sprites']).optional()
       .describe('Optional: filter agents by backend type'),
     include_self: z.boolean().default(true)
       .describe('Include the current agent in results (default: true)'),

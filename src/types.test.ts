@@ -70,24 +70,6 @@ describe('types.ts conversion functions', () => {
       expect(agent.isLocal).toBe(false);
     });
 
-    it('marks daytona as non-local', () => {
-      const group = makeGroup({ backend: 'daytona' });
-      const agent = registeredGroupToAgent('jid@g.us', group);
-      expect(agent.isLocal).toBe(false);
-    });
-
-    it('marks railway as non-local', () => {
-      const group = makeGroup({ backend: 'railway' });
-      const agent = registeredGroupToAgent('jid@g.us', group);
-      expect(agent.isLocal).toBe(false);
-    });
-
-    it('marks hetzner as non-local', () => {
-      const group = makeGroup({ backend: 'hetzner' });
-      const agent = registeredGroupToAgent('jid@g.us', group);
-      expect(agent.isLocal).toBe(false);
-    });
-
     it('preserves containerConfig', () => {
       const config = { timeout: 60000, memory: 2048 };
       const group = makeGroup({ containerConfig: config });

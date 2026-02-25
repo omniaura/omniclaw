@@ -47,7 +47,7 @@ A multi-channel agent orchestration framework powered by Claude, with persistent
 │  ┌──────────────────┐  ┌─────────▼──────────┐  ┌───────────────┐            │
 │  │  Message Loop    │  │  Scheduler Loop    │  │  IPC Watcher  │            │
 │  │  (polls SQLite)  │  │  (checks tasks)    │  │  (file-based  │            │
-│  └────────┬─────────┘  └────────┬───────────┘  │  + S3 cloud)  │            │
+│  └────────┬─────────┘  └────────┬───────────┘  │  (local FS)   │            │
 │           │                     │               └───────────────┘            │
 │           └──────────┬──────────┘                                            │
 │                      │ resolves backend                                      │
@@ -55,10 +55,9 @@ A multi-channel agent orchestration framework powered by Claude, with persistent
 │  ┌───────────────────────────────────────────────────────────┐               │
 │  │              BACKEND ABSTRACTION LAYER                    │               │
 │  │  ┌──────────────┐ ┌────────────┐ ┌─────────────────┐     │               │
-│  │  │ Apple        │ │  Sprites   │ │  Daytona /      │     │               │
-│  │  │ Container    │ │  (Fly.io)  │ │  Railway /      │     │               │
-│  │  │ (local)      │ │  (cloud)   │ │  Hetzner /      │     │               │
-│  │  │              │ │            │ │  Docker         │     │               │
+│  │  │ Apple        │ │  Sprites   │ │  Docker         │     │               │
+│  │  │ Container    │ │  (Fly.io)  │ │  (local)        │     │               │
+│  │  │ (local)      │ │  (cloud)   │ │                 │     │               │
 │  │  └──────────────┘ └────────────┘ └─────────────────┘     │               │
 │  └───────────────────────────────────────────────────────────┘               │
 │                      │ spawns container / VM                                 │
@@ -69,7 +68,7 @@ A multi-channel agent orchestration framework powered by Claude, with persistent
 │  ┌────────────────────────────────────────────────────────────────────────┐  │
 │  │                         AGENT RUNNER                                   │  │
 │  │                                                                        │  │
-│  │  Working directory: /workspace/group (mounted from host/S3)            │  │
+│  │  Working directory: /workspace/group (mounted from host)               │  │
 │  │  Volume mounts:                                                        │  │
 │  │    • groups/{name}/ → /workspace/group                                 │  │
 │  │    • groups/global/ → /workspace/global/ (non-main only)               │  │
@@ -158,32 +157,14 @@ omniclaw/
 │   │   ├── types.ts               # Backend interfaces (ContainerInput, ContainerOutput, Backend)
 │   │   ├── local-backend.ts       # Apple Container + Docker backend
 │   │   ├── sprites-backend.ts     # Sprites (Fly.io) cloud backend
-│   │   ├── sprites-ipc-poller.ts  # S3-based IPC polling for Sprites
+│   │   ├── sprites-ipc-poller.ts  # IPC polling for Sprites cloud agents
 │   │   ├── sprites-provisioning.ts# Sprites VM provisioning
-│   │   ├── daytona-backend.ts     # Daytona dev environment backend
-│   │   ├── daytona-ipc-poller.ts  # S3-based IPC polling for Daytona
-│   │   ├── daytona-provisioning.ts# Daytona workspace provisioning
-│   │   ├── railway-backend.ts     # Railway cloud backend
-│   │   ├── railway-api.ts         # Railway API client
-│   │   ├── hetzner-backend.ts     # Hetzner Cloud backend
-│   │   ├── hetzner-api.ts         # Hetzner API client
 │   │   └── stream-parser.ts       # Container output stream parsing
-│   │
-│   ├── s3/
-│   │   ├── client.ts              # S3 client (Backblaze B2)
-│   │   ├── ipc-poller.ts          # S3-based IPC polling for cloud agents
-│   │   ├── file-sync.ts           # File synchronization to/from S3
-│   │   └── types.ts               # S3 types
 │   │
 │   ├── effect/
 │   │   ├── logger-layer.ts        # Effect-based structured logging
 │   │   ├── message-queue.ts       # Effect-based message queue
 │   │   └── user-registry.ts       # User registry for @mention resolution
-│   │
-│   └── shared/
-│       ├── index.ts               # Shared helper exports
-│       ├── quarterplan.ts         # Quarterly planning utilities
-│       └── s3-client.ts           # Shared S3 client configuration
 │
 ├── container/
 │   ├── Dockerfile                 # Container image (runs as 'bun' user)
@@ -272,14 +253,6 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 | `SPRITES_TOKEN` | Sprites | API token for Fly.io |
 | `SPRITES_ORG` | Sprites | Organization name |
 | `SPRITES_REGION` | Sprites | Deployment region |
-| `DAYTONA_API_KEY` | Daytona | API key |
-| `DAYTONA_API_URL` | Daytona | API endpoint |
-| `RAILWAY_API_TOKEN` | Railway | API token |
-| `HETZNER_API_TOKEN` | Hetzner | API token |
-| `B2_ENDPOINT` | S3 IPC | Backblaze B2 endpoint |
-| `B2_ACCESS_KEY_ID` | S3 IPC | Backblaze access key |
-| `B2_SECRET_ACCESS_KEY` | S3 IPC | Backblaze secret key |
-| `B2_BUCKET` | S3 IPC | S3 bucket name |
 
 ### Claude Authentication
 
@@ -382,9 +355,6 @@ interface Backend {
 | Apple Container | `apple-container` | macOS (local) | Development, local agents |
 | Docker | `docker` | Any (local) | Cross-platform local execution |
 | Sprites | `sprites` | Fly.io (cloud) | Production 24/7 agents |
-| Daytona | `daytona` | Daytona (cloud) | Dev environments |
-| Railway | `railway` | Railway (cloud) | Cloud deployment |
-| Hetzner | `hetzner` | Hetzner (cloud) | Budget cloud VMs |
 
 ### Backend Selection
 
@@ -393,7 +363,7 @@ Each agent has a `backend` field that determines where it runs:
 ```typescript
 interface Agent {
   id: string;
-  backend: BackendType;  // 'apple-container' | 'sprites' | 'daytona' | ...
+  backend: BackendType;  // 'apple-container' | 'docker' | 'sprites'
   // ...
 }
 ```
@@ -402,11 +372,10 @@ The orchestrator calls `resolveBackend(agent.backend)` to get the appropriate ba
 
 ### Cloud IPC
 
-Cloud backends (Sprites, Daytona) use S3-based IPC via Backblaze B2:
-- Agents write IPC messages/tasks to S3
-- Host polls S3 for new messages at `IPC_POLL_INTERVAL`
-- File sync pushes workspace files to S3 for cloud agents
-- Separate IPC pollers per backend (`sprites-ipc-poller.ts`, `daytona-ipc-poller.ts`)
+Cloud backends (Sprites) use IPC polling via the Sprites API:
+- Agents write IPC messages/tasks to the Sprites VM filesystem
+- Host polls for new messages at `IPC_POLL_INTERVAL`
+- IPC poller: `sprites-ipc-poller.ts`
 
 ---
 
@@ -782,7 +751,6 @@ Multi-layer defense across:
 | Slow session resume | Large session transcript | `resumeAt` should be persisted; check session age |
 | Session not continuing | Session expired | Sessions rotate after `SESSION_MAX_AGE` (4 hours) |
 | "QR code expired" | WhatsApp session expired | Delete `store/auth/` and restart |
-| Cloud agent not responding | S3 IPC issue | Check B2 credentials and `s3/ipc-poller.ts` logs |
 | Multiple containers for same agent | Multi-channel duplicate spawn | Fixed by agent-channel model (one container per agent folder) |
 
 ### Log Location

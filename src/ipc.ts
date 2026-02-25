@@ -40,8 +40,6 @@ import {
   IpcTaskPayload,
   RegisteredGroup,
 } from './types.js';
-import { DaytonaBackend } from './backends/daytona-backend.js';
-import { startDaytonaIpcPoller } from './backends/daytona-ipc-poller.js';
 import { startSpritesIpcPoller } from './backends/sprites-ipc-poller.js';
 import { SpritesBackend } from './backends/sprites-backend.js';
 import { getBackend } from './backends/index.js';
@@ -107,7 +105,7 @@ export function consumeShareRequest(
 let ipcWatcherRunning = false;
 
 /**
- * Shared IPC message handler for cloud-backed group pollers (Sprites, Daytona).
+ * Shared IPC message handler for cloud-backed group pollers (Sprites).
  * Both backends route messages via the same logic; only the log label differs.
  */
 function makeCloudMessageHandler(deps: IpcDeps) {
@@ -405,20 +403,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
     processTask: cloudTaskHandler,
   });
 
-  // Also start Daytona IPC poller for Daytona-backed groups
-  startDaytonaIpcPoller({
-    daytonaBackend: (() => {
-      try {
-        return getBackend('daytona') as DaytonaBackend;
-      } catch {
-        return new DaytonaBackend();
-      }
-    })(),
-    registeredGroups: deps.registeredGroups,
-    processMessage: (sourceGroup, data) =>
-      cloudMessageHandler(sourceGroup, data, 'Daytona'),
-    processTask: cloudTaskHandler,
-  });
 }
 
 export async function processTaskIpc(

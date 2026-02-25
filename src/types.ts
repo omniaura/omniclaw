@@ -46,7 +46,7 @@ export interface HeartbeatConfig {
   scheduleType: 'cron' | 'interval';
 }
 
-export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona' | 'railway' | 'hetzner';
+export type BackendType = 'apple-container' | 'docker' | 'sprites';
 
 export interface RegisteredGroup {
   name: string;

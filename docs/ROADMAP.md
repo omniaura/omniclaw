@@ -27,10 +27,7 @@ Last updated: 2026-02-23
 |---------|----------|-------|
 | Apple Container (local) | Stable | Default, macOS only |
 | Docker (local) | Partial | Uses same LocalBackend, needs testing (#3) |
-| Sprites (cloud) | Stable | Persistent VMs on Fly.io, S3 IPC |
-| Daytona (cloud) | Stable | Cloud dev environments, S3 IPC |
-| Railway (cloud) | Early | Basic deployment support |
-| Hetzner (cloud) | Early | VM provisioning |
+| Sprites (cloud) | Stable | Persistent VMs on Fly.io |
 
 ### Core Features
 | Feature | Maturity | Notes |
