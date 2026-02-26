@@ -155,7 +155,7 @@ const channelListDesc = isMultiChannel
 
 server.tool(
   'send_message',
-  `Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. You can also send to other agents by specifying target_jid (check agent_registry.json for available agents and their JIDs).
+  `Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. To message another agent, use the "sendTo" field from /workspace/ipc/agent_registry.json — it tells you exactly what target_jid to use and whether to prefix the message with their trigger word. Never use an agent's id or folder name as target_jid.
 
 IMPORTANT: Your final text response is ALSO sent to the user automatically. If send_message already contains your complete response, stay silent afterwards — wrap any remaining acknowledgment (e.g. "Done!", "Sent!") in <internal> tags so it isn't delivered as a duplicate message.
 

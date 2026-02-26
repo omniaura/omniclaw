@@ -1431,16 +1431,26 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
             (s) => s.agentId === agent.id,
           )
         : undefined;
+    const primaryJid = jids[0] || agent.id;
+    const trigger = firstSub?.trigger || `@${ASSISTANT_NAME}`;
+    const requiresTrigger = firstSub?.requiresTrigger !== false;
+    // Pre-computed send instructions so agents don't have to guess how to
+    // reach each other. Sending to a shared channel with the wrong target_jid
+    // or without the trigger silently routes to the wrong agent.
+    const sendTo = requiresTrigger
+      ? `target_jid="${primaryJid}", text must start with "${trigger} "`
+      : `target_jid="${primaryJid}"`;
     return {
       id: agent.id,
-      jid: jids[0] || agent.id, // Primary JID
+      jid: primaryJid,
       jids, // All JIDs
       name: agent.name,
       description: agent.description || '',
       backend: agent.backend,
       agentRuntime: agent.agentRuntime,
       isMain: agent.isAdmin,
-      trigger: firstSub?.trigger || `@${ASSISTANT_NAME}`,
+      trigger,
+      sendTo, // How to reach this agent via send_message
     };
   });
 
