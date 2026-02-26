@@ -643,6 +643,7 @@ export class LocalBackend implements AgentBackend {
     opts?: { chatJid?: string },
   ): boolean {
     const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, 'input');
+    assertPathWithin(inputDir, path.join(DATA_DIR, 'ipc'), 'sendMessage');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
@@ -665,6 +666,7 @@ export class LocalBackend implements AgentBackend {
 
   closeStdin(groupFolder: string, inputSubdir: string = 'input'): void {
     const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, inputSubdir);
+    assertPathWithin(inputDir, path.join(DATA_DIR, 'ipc'), 'closeStdin');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
       fs.writeFileSync(path.join(inputDir, '_close'), '');
@@ -675,8 +677,11 @@ export class LocalBackend implements AgentBackend {
 
   writeIpcData(groupFolder: string, filename: string, data: string): void {
     const groupIpcDir = path.join(DATA_DIR, 'ipc', groupFolder);
+    assertPathWithin(groupIpcDir, path.join(DATA_DIR, 'ipc'), 'writeIpcData');
+    const targetFile = path.join(groupIpcDir, filename);
+    assertPathWithin(targetFile, groupIpcDir, 'writeIpcData filename');
     fs.mkdirSync(groupIpcDir, { recursive: true });
-    fs.writeFileSync(path.join(groupIpcDir, filename), data);
+    fs.writeFileSync(targetFile, data);
   }
 
   async readFile(

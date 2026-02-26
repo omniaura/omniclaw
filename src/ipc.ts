@@ -73,6 +73,7 @@ export interface PendingShareRequest {
 
 const pendingShareRequests = new Map<string, PendingShareRequest>();
 const STALE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const MAX_PENDING_SHARE_REQUESTS = 1000;
 
 export function trackShareRequest(
   messageId: string,
@@ -82,6 +83,11 @@ export function trackShareRequest(
   const now = Date.now();
   for (const [id, entry] of pendingShareRequests) {
     if (now - entry.timestamp > STALE_TTL_MS) pendingShareRequests.delete(id);
+  }
+  // Cap size to prevent memory exhaustion from flooding
+  if (pendingShareRequests.size >= MAX_PENDING_SHARE_REQUESTS) {
+    const oldestKey = pendingShareRequests.keys().next().value;
+    if (oldestKey) pendingShareRequests.delete(oldestKey);
   }
   pendingShareRequests.set(messageId, meta);
   logger.info(
@@ -566,8 +572,15 @@ export async function processTaskIpc(
           requiresTrigger: data.requiresTrigger,
         };
 
-        // If a Discord guild ID is provided, set it and compute serverFolder
+        // If a Discord guild ID is provided, validate it and compute serverFolder
         if (data.discord_guild_id) {
+          if (!/^\d+$/.test(data.discord_guild_id)) {
+            logger.warn(
+              { discordGuildId: data.discord_guild_id, sourceGroup },
+              'Invalid discord_guild_id rejected (must be numeric snowflake)',
+            );
+            break;
+          }
           groupToRegister.discordGuildId = data.discord_guild_id;
           groupToRegister.serverFolder = `servers/${data.discord_guild_id}`;
         }
