@@ -190,7 +190,7 @@ function buildVolumeMounts(
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'GITHUB_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'CLAUDE_MODEL'];
+    const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL', 'GITHUB_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'CLAUDE_MODEL'];
     const filteredLines = envContent.split('\n').filter((line) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return false;
@@ -689,14 +689,26 @@ export class LocalBackend implements AgentBackend {
           .filter((c) => c.status === 'running' && c.configuration.id.startsWith('omniclaw-'))
           .map((c) => c.configuration.id);
       }
+      // Defense-in-depth: validate container names before passing to Bun.spawn.
+      // Names are generated as `omniclaw-<safeName>-<timestamp>` with safeName already
+      // sanitized, but orphan names come from runtime output — re-validate to
+      // reject any names containing shell metacharacters. [Upstream PR #507]
+      const SAFE_CONTAINER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+      const safeOrphans = orphans.filter((name) => {
+        if (!SAFE_CONTAINER_NAME_RE.test(name)) {
+          logger.warn({ name }, 'Skipping orphaned container with unsafe name');
+          return false;
+        }
+        return true;
+      });
       await Promise.all(
-        orphans.map((name) => {
+        safeOrphans.map((name) => {
           const proc = Bun.spawn([LOCAL_RUNTIME, 'stop', name], { stdout: 'ignore', stderr: 'ignore' });
           return proc.exited;
         }),
       );
-      if (orphans.length > 0) {
-        logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
+      if (safeOrphans.length > 0) {
+        logger.info({ count: safeOrphans.length, names: safeOrphans }, 'Stopped orphaned containers');
       }
     } catch (err) {
       logger.warn({ err }, 'Failed to clean up orphaned containers');

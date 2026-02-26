@@ -297,7 +297,7 @@ function createPreCompactHook(): HookCallback {
 // Secrets to strip from Bash tool subprocess environments.
 // These are needed by claude-code for API auth but should never
 // be visible to commands Kit runs.
-const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_OAUTH_TOKEN'];
 
 /**
  * createSanitizeBashHook
@@ -672,7 +672,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; sessionStale?: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -892,6 +892,19 @@ async function runQuery(
       log(`Session initialized: ${newSessionId}`);
     }
 
+    // Detect stale session: if we get error_during_execution before system/init,
+    // the session transcript no longer exists (e.g. container was recreated).
+    // Discard the stale session and retry as fresh. [Upstream PR #503]
+    if (
+      message.type === 'system' &&
+      (message as { subtype?: string }).subtype === 'error_during_execution' &&
+      !newSessionId &&
+      sessionId
+    ) {
+      log(`Session ${sessionId} appears stale (error_during_execution before init), will retry as fresh session`);
+      return { newSessionId: undefined, lastAssistantUuid: undefined, closedDuringQuery, sessionStale: true };
+    }
+
     if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
       const tn = message as { task_id: string; status: string; summary: string };
       log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
@@ -1033,11 +1046,26 @@ Please review these changes to understand your new capabilities and fixes.
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
       const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
-      if (queryResult.newSessionId) {
-        sessionId = queryResult.newSessionId;
-      }
-      if (queryResult.lastAssistantUuid) {
-        resumeAt = queryResult.lastAssistantUuid;
+
+      // Handle stale session: discard session state and retry as fresh [Upstream PR #503]
+      if (queryResult.sessionStale) {
+        log('Retrying query as fresh session (stale session discarded)');
+        sessionId = undefined;
+        resumeAt = undefined;
+        const freshResult = await runQuery(prompt, undefined, mcpServerPath, containerInput, sdkEnv, undefined);
+        if (freshResult.newSessionId) sessionId = freshResult.newSessionId;
+        if (freshResult.lastAssistantUuid) resumeAt = freshResult.lastAssistantUuid;
+        if (freshResult.closedDuringQuery) {
+          log('Close sentinel consumed during fresh retry, exiting');
+          break;
+        }
+      } else {
+        if (queryResult.newSessionId) {
+          sessionId = queryResult.newSessionId;
+        }
+        if (queryResult.lastAssistantUuid) {
+          resumeAt = queryResult.lastAssistantUuid;
+        }
       }
 
       // If _close was consumed during the query, exit immediately.
