@@ -109,12 +109,14 @@ function buildVolumeMounts(
   group: AgentOrGroup,
   isMain: boolean,
   isScheduledTask: boolean = false,
+  runtimeFolder?: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const homeDir = getHomeDir();
   const projectRoot = process.cwd();
 
   const folder = getFolder(group);
+  const runtimeFolderName = runtimeFolder || folder;
   const srvFolder = getServerFolder(group);
 
   if (isMain) {
@@ -189,7 +191,7 @@ function buildVolumeMounts(
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const sessionsBase = path.join(DATA_DIR, 'sessions');
-  const groupSessionsDir = path.join(sessionsBase, folder, '.claude');
+  const groupSessionsDir = path.join(sessionsBase, runtimeFolderName, '.claude');
   assertPathWithin(groupSessionsDir, sessionsBase, 'sessions directory');
 
   fs.mkdirSync(groupSessionsDir, { recursive: true });
@@ -243,7 +245,7 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const ipcBase = path.join(DATA_DIR, 'ipc');
-  const groupIpcDir = path.join(ipcBase, folder);
+  const groupIpcDir = path.join(ipcBase, runtimeFolderName);
   assertPathWithin(groupIpcDir, ipcBase, 'IPC directory');
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
@@ -307,7 +309,7 @@ function buildVolumeMounts(
   const groupAgentRunnerDir = path.join(
     DATA_DIR,
     'sessions',
-    folder,
+    runtimeFolderName,
     'agent-runner-src',
   );
   assertPathWithin(
@@ -416,6 +418,7 @@ export class LocalBackend implements AgentBackend {
   ): Promise<ContainerOutput> {
     const startTime = Date.now();
     const folder = getFolder(group);
+    const runtimeFolder = input.runtimeFolder || folder;
     const groupName = getName(group);
     const containerCfg = getContainerConfig(group);
 
@@ -426,8 +429,9 @@ export class LocalBackend implements AgentBackend {
       group,
       input.isMain,
       input.isScheduledTask,
+      runtimeFolder,
     );
-    const safeName = folder.replace(/[^a-zA-Z0-9-]/g, '-');
+    const safeName = runtimeFolder.replace(/[^a-zA-Z0-9-]/g, '-');
     const containerName = `omniclaw-${safeName}-${Date.now()}`;
     const containerArgs = buildContainerArgs({
       mounts,

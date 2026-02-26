@@ -69,6 +69,8 @@ export interface ContainerInput {
   sessionId?: string;
   resumeAt?: string;
   groupFolder: string;
+  /** Host-side runtime key for IPC/session isolation (defaults to groupFolder). */
+  runtimeFolder?: string;
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;

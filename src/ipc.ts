@@ -63,6 +63,22 @@ export interface IpcDeps {
   writeTasksSnapshot?: (groupFolder: string, isMain: boolean) => void;
 }
 
+const DISPATCH_RUNTIME_SEP = '__dispatch__';
+
+function resolveOwnerGroupFolder(
+  sourceGroup: string,
+  registeredGroups: Record<string, RegisteredGroup>,
+): string {
+  const knownFolders = new Set(
+    Object.values(registeredGroups).map((g) => g.folder),
+  );
+  if (knownFolders.has(sourceGroup)) return sourceGroup;
+  const idx = sourceGroup.indexOf(DISPATCH_RUNTIME_SEP);
+  if (idx === -1) return sourceGroup;
+  const owner = sourceGroup.slice(0, idx);
+  return knownFolders.has(owner) ? owner : sourceGroup;
+}
+
 // --- Pending share request tracking ---
 
 export interface PendingShareRequest {
@@ -303,7 +319,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
     const registeredGroups = deps.registeredGroups();
 
     for (const sourceGroup of groupFolders) {
-      const isMain = sourceGroup === MAIN_GROUP_FOLDER;
+      const ownerGroup = resolveOwnerGroupFolder(sourceGroup, registeredGroups);
+      const isMain = ownerGroup === MAIN_GROUP_FOLDER;
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
 
@@ -331,7 +348,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const data = result.data as IpcMessagePayload;
               await processMessageIpc(
                 data,
-                sourceGroup,
+                ownerGroup,
                 isMain,
                 ipcBaseDir,
                 registeredGroups,
@@ -377,7 +394,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = taskResult.data as IpcTaskPayload;
               // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data, sourceGroup, isMain, deps);
+              await processTaskIpc(data, ownerGroup, isMain, deps);
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(

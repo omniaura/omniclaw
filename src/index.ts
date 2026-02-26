@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'crypto';
 
 import {
   ASSISTANT_NAME,
@@ -145,6 +146,7 @@ const queue = new GroupQueue();
 
 const MAX_CHANNEL_AGENT_FANOUT = 3;
 const DISPATCH_KEY_SEP = '::agent::';
+const DISPATCH_RUNTIME_SEP = '__dispatch__';
 
 function makeDispatchKey(channelJid: string, agentId: string): string {
   return `${channelJid}${DISPATCH_KEY_SEP}${agentId}`;
@@ -160,6 +162,16 @@ function parseDispatchKey(key: string): {
     channelJid: key.slice(0, idx),
     agentId: key.slice(idx + DISPATCH_KEY_SEP.length),
   };
+}
+
+function getRuntimeGroupFolder(baseFolder: string, processKeyJid: string): string {
+  const { agentId } = parseDispatchKey(processKeyJid);
+  if (!agentId) return baseFolder;
+  const digest = createHash('sha1')
+    .update(processKeyJid)
+    .digest('hex')
+    .slice(0, 16);
+  return `${baseFolder}${DISPATCH_RUNTIME_SEP}${digest}`;
 }
 
 function getSubscriptionsForChannelInMemory(
@@ -284,16 +296,6 @@ function backfillDiscordBotIds(): void {
 
 function refreshChannelSubscriptions(): void {
   channelSubscriptions = getAllChannelSubscriptions();
-  for (const [channelJid, subs] of Object.entries(channelSubscriptions)) {
-    for (const sub of subs) {
-      const agent = agents[sub.agentId];
-      if (!agent) continue;
-      queue.registerJidMapping(
-        makeDispatchKey(channelJid, sub.agentId),
-        agent.folder,
-      );
-    }
-  }
 }
 
 function refreshRegisteredGroupsFromCanonicalState(): {
@@ -516,8 +518,6 @@ Then read the code directly — don't ask the admin to copy files for you.
   filtered.push(sub);
   channelSubscriptions[jid] = filtered;
   setChannelSubscription(sub);
-  queue.registerJidMapping(makeDispatchKey(jid, agent.id), agent.folder);
-
   logger.info(
     {
       jid,
@@ -1066,6 +1066,7 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
+  const runtimeGroupFolder = getRuntimeGroupFolder(group.folder, processKeyJid);
 
   // Expire stale sessions before each run to prevent unbounded context growth
   const expired = expireStaleSessions(SESSION_MAX_AGE);
@@ -1079,15 +1080,20 @@ async function runAgent(
     );
   }
 
-  const sessionId = sessions[group.folder];
+  const sessionId = sessions[runtimeGroupFolder];
 
   // Update tasks snapshot for container to read (filtered by group)
-  writeTasksSnapshot(group.folder, isMain, mapTasksForSnapshot(getAllTasks()));
+  writeTasksSnapshot(
+    runtimeGroupFolder,
+    isMain,
+    mapTasksForSnapshot(getAllTasks()),
+    group.folder,
+  );
 
   // Update available groups snapshot (main group only can see all groups)
   const availableGroups = getAvailableGroups();
   writeGroupsSnapshot(
-    group.folder,
+    runtimeGroupFolder,
     isMain,
     availableGroups,
     new Set([
@@ -1097,17 +1103,17 @@ async function runAgent(
   );
 
   // Update agent registry for all groups
-  buildAgentRegistry();
+  buildAgentRegistry([runtimeGroupFolder]);
 
   // Wrap onOutput to track session ID and resumeAt from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          sessions[runtimeGroupFolder] = output.newSessionId;
+          setSession(runtimeGroupFolder, output.newSessionId);
         }
         if (output.resumeAt) {
-          resumePositions[group.folder] = output.resumeAt;
+          resumePositions[runtimeGroupFolder] = output.resumeAt;
         }
         await onOutput(output);
       }
@@ -1121,8 +1127,9 @@ async function runAgent(
       {
         prompt,
         sessionId,
-        resumeAt: resumePositions[group.folder],
+        resumeAt: resumePositions[runtimeGroupFolder],
         groupFolder: group.folder,
+        runtimeFolder: runtimeGroupFolder,
         chatJid,
         isMain,
         discordGuildId: group.discordGuildId,
@@ -1135,7 +1142,7 @@ async function runAgent(
           processKeyJid,
           proc,
           containerName,
-          group.folder,
+          runtimeGroupFolder,
           backend,
           'message',
         ),
@@ -1143,11 +1150,11 @@ async function runAgent(
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      sessions[runtimeGroupFolder] = output.newSessionId;
+      setSession(runtimeGroupFolder, output.newSessionId);
     }
     if (output.resumeAt) {
-      resumePositions[group.folder] = output.resumeAt;
+      resumePositions[runtimeGroupFolder] = output.resumeAt;
     }
 
     if (output.status === 'error') {
@@ -1401,7 +1408,7 @@ function recoverPendingMessages(): void {
  * Build agent registry and write it to all groups' IPC dirs.
  * Every agent can discover every other agent's name, purpose, backend, and dev URL.
  */
-function buildAgentRegistry(): void {
+function buildAgentRegistry(extraFolders: string[] = []): void {
   // Build registry from agents (new system) with channel route info
   const agentToChannels =
     buildAgentToChannelsMapFromSubscriptions(channelSubscriptions);
@@ -1454,6 +1461,9 @@ function buildAgentRegistry(): void {
   }
   for (const group of Object.values(registeredGroups)) {
     folders.add(group.folder);
+  }
+  for (const folder of extraFolders) {
+    if (folder) folders.add(folder);
   }
 
   for (const folder of folders) {
