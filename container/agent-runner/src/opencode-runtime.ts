@@ -170,10 +170,26 @@ let openCodeServer: { close(): void } | null = null;
 async function startOpenCodeServer(
   env: Record<string, string | undefined>,
   model?: string,
+  mcpEnv?: Record<string, string>,
 ): Promise<OpenCodeClient> {
   // createOpencodeServer reads process.env only. Apply merged env first.
   for (const [key, value] of Object.entries(env)) {
     if (value !== undefined) process.env[key] = value;
+  }
+
+  const mcpServerPath = path.join(import.meta.dir, 'ipc-mcp-stdio.ts');
+  const config: Record<string, unknown> = {};
+  if (model) config.model = model;
+  if (mcpEnv) {
+    config.mcp = {
+      omniclaw: {
+        type: 'local',
+        command: ['bun', mcpServerPath],
+        environment: mcpEnv,
+        enabled: true,
+        timeout: 30000,
+      },
+    };
   }
 
   const { createOpencode } = await import('@opencode-ai/sdk');
@@ -181,7 +197,7 @@ async function startOpenCodeServer(
     hostname: OPENCODE_HOST,
     port: OPENCODE_PORT,
     timeout: SERVER_STARTUP_TIMEOUT,
-    config: model ? { model } : undefined,
+    config: Object.keys(config).length > 0 ? config : undefined,
   });
   openCodeServer = opencode.server;
   log(`OpenCode server is healthy at ${opencode.server.url}`);
@@ -549,9 +565,20 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
     ? `${forcedModel.providerID}/${forcedModel.modelID}`
     : undefined;
 
+  // Build MCP env so the omniclaw channel tools (send_message, react_to_message,
+  // format_mention, schedule_task, etc.) are available inside OpenCode sessions.
+  const mcpEnv: Record<string, string> = {
+    OMNICLAW_CHAT_JID: containerInput.chatJid,
+    OMNICLAW_GROUP_FOLDER: containerInput.groupFolder,
+    OMNICLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+  };
+  if (containerInput.discordGuildId) mcpEnv.OMNICLAW_DISCORD_GUILD_ID = containerInput.discordGuildId;
+  if (containerInput.serverFolder) mcpEnv.OMNICLAW_SERVER_FOLDER = containerInput.serverFolder;
+  if (containerInput.channels) mcpEnv.OMNICLAW_CHANNELS = JSON.stringify(containerInput.channels);
+
   let client: OpenCodeClient;
   try {
-    client = await startOpenCodeServer(sdkEnv, forcedModelArg);
+    client = await startOpenCodeServer(sdkEnv, forcedModelArg, mcpEnv);
     await client.session.status();
     log('Connected to OpenCode server');
   } catch (err) {
