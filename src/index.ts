@@ -1311,7 +1311,7 @@ async function startMessageLoop(): Promise<void> {
               lastAgentTimestamp[chatJid] =
                 messagesToSend[messagesToSend.length - 1].timestamp;
               saveState();
-              const typingCh = findChannelForJid(chatJid);
+              const typingCh = findChannelForJid(chatJid, group.discordBotId);
               if (typingCh?.setTyping)
                 typingCh
                   .setTyping(chatJid, true)
@@ -1349,7 +1349,7 @@ async function startMessageLoop(): Promise<void> {
               lastAgentTimestamp[dispatchJid] =
                 messagesToSend[messagesToSend.length - 1].timestamp;
               saveState();
-              const typingCh = findChannelForJid(chatJid);
+              const typingCh = findChannelForJid(chatJid, sub.discordBotId);
               if (typingCh?.setTyping)
                 typingCh
                   .setTyping(chatJid, true)
