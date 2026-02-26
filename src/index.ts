@@ -157,22 +157,25 @@ function buildRegisteredGroupFromSubscription(
   sub: ChannelSubscription,
 ): RegisteredGroup | undefined {
   const agent = agents[sub.agentId];
-  if (!agent) return undefined;
   const fallback = registeredGroups[channelJid];
+  if (!agent && !fallback) return undefined;
+
+  const resolvedBotId = sub.discordBotId || fallback?.discordBotId;
+  const runtimeDefault = getDiscordRuntimeDefault(resolvedBotId);
   return {
-    name: agent.name,
-    folder: agent.folder,
+    name: agent?.name || fallback?.name || sub.agentId,
+    folder: agent?.folder || fallback?.folder || sub.agentId,
     trigger: sub.trigger,
     added_at: sub.createdAt,
-    containerConfig: agent.containerConfig,
+    containerConfig: agent?.containerConfig || fallback?.containerConfig,
     requiresTrigger: sub.requiresTrigger,
-    heartbeat: agent.heartbeat,
-    discordBotId: sub.discordBotId || fallback?.discordBotId,
+    heartbeat: agent?.heartbeat || fallback?.heartbeat,
+    discordBotId: resolvedBotId,
     discordGuildId: sub.discordGuildId || fallback?.discordGuildId,
-    serverFolder: agent.serverFolder || fallback?.serverFolder,
-    backend: agent.backend,
-    agentRuntime: agent.agentRuntime,
-    description: agent.description || fallback?.description,
+    serverFolder: agent?.serverFolder || fallback?.serverFolder,
+    backend: agent?.backend || fallback?.backend || 'apple-container',
+    agentRuntime: agent?.agentRuntime || fallback?.agentRuntime || runtimeDefault,
+    description: agent?.description || fallback?.description,
   };
 }
 
@@ -187,8 +190,6 @@ function getDiscordBotIdForJid(jid: string): string | undefined {
   if (primarySub?.discordBotId) return primarySub.discordBotId;
   const routeBotId = channelRoutes[jid]?.discordBotId;
   if (routeBotId) return routeBotId;
-  const groupBotId = registeredGroups[jid]?.discordBotId;
-  if (groupBotId) return groupBotId;
   return DISCORD_DEFAULT_BOT_ID;
 }
 
@@ -271,6 +272,68 @@ function refreshChannelSubscriptions(): void {
   }
 }
 
+function refreshRegisteredGroupsFromCanonicalState(): { synthesized: number; legacyOnly: number } {
+  const legacyGroups = getAllRegisteredGroups();
+  const nextGroups: Record<string, RegisteredGroup> = {};
+  let synthesized = 0;
+  let legacyOnly = 0;
+
+  const allJids = new Set<string>([
+    ...Object.keys(channelRoutes),
+    ...Object.keys(channelSubscriptions),
+  ]);
+
+  for (const jid of allJids) {
+    const subs = channelSubscriptions[jid] || [];
+    const preferredSub =
+      subs.find((s) => s.isPrimary) ||
+      subs[0];
+    const route = channelRoutes[jid];
+    const legacy = legacyGroups[jid];
+    const agentId = preferredSub?.agentId || route?.agentId;
+    const agent = agentId ? agents[agentId] : undefined;
+
+    if (!agent && !legacy) continue;
+
+    const discordBotId = preferredSub?.discordBotId || route?.discordBotId || legacy?.discordBotId;
+    const runtimeDefault = getDiscordRuntimeDefault(discordBotId);
+    nextGroups[jid] = {
+      name: agent?.name || legacy?.name || agentId || jid,
+      folder: agent?.folder || legacy?.folder || agentId || jid,
+      trigger: preferredSub?.trigger || route?.trigger || legacy?.trigger || `@${ASSISTANT_NAME}`,
+      added_at: preferredSub?.createdAt || route?.createdAt || legacy?.added_at || new Date().toISOString(),
+      containerConfig: agent?.containerConfig || legacy?.containerConfig,
+      requiresTrigger:
+        preferredSub?.requiresTrigger ??
+        route?.requiresTrigger ??
+        legacy?.requiresTrigger ??
+        true,
+      heartbeat: agent?.heartbeat || legacy?.heartbeat,
+      discordBotId,
+      discordGuildId: preferredSub?.discordGuildId || route?.discordGuildId || legacy?.discordGuildId,
+      serverFolder: agent?.serverFolder || legacy?.serverFolder,
+      backend: (agent?.backend || legacy?.backend || 'apple-container') as BackendType,
+      agentRuntime: agent?.agentRuntime || legacy?.agentRuntime || runtimeDefault,
+      description: agent?.description || legacy?.description,
+      autoRespondToQuestions: legacy?.autoRespondToQuestions,
+      autoRespondKeywords: legacy?.autoRespondKeywords,
+      streamIntermediates: legacy?.streamIntermediates,
+    };
+    synthesized++;
+  }
+
+  // Keep legacy-only rows as a compatibility fallback while non-Discord channels
+  // are still wired around registeredGroups.
+  for (const [jid, group] of Object.entries(legacyGroups)) {
+    if (nextGroups[jid]) continue;
+    nextGroups[jid] = group;
+    legacyOnly++;
+  }
+
+  registeredGroups = nextGroups;
+  return { synthesized, legacyOnly };
+}
+
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
@@ -281,59 +344,12 @@ function loadState(): void {
     lastAgentTimestamp = {};
   }
   sessions = getAllSessions();
-  registeredGroups = getAllRegisteredGroups();
 
   // Load agent-channel decoupling state (auto-migrated from registered_groups)
   agents = getAllAgents();
   channelRoutes = getAllChannelRoutes();
   refreshChannelSubscriptions();
-
-  // Backfill registeredGroups from channel_routes + agents.
-  // The registered_groups table has UNIQUE(folder), so it can only hold one JID
-  // per agent. But agents can have multiple channel routes (e.g. DM + group).
-  // Merge any missing JIDs so message routing works for all channels.
-  let backfilled = 0;
-  for (const [jid, route] of Object.entries(channelRoutes)) {
-    const agent = agents[route.agentId];
-    if (!agent) continue;
-
-    if (!registeredGroups[jid]) {
-        registeredGroups[jid] = {
-          name: agent.name,
-          folder: agent.folder,
-          trigger: route.trigger,
-          added_at: route.createdAt,
-          containerConfig: agent.containerConfig,
-          requiresTrigger: route.requiresTrigger,
-          backend: agent.backend as BackendType,
-          agentRuntime: agent.agentRuntime,
-          description: agent.description,
-          discordBotId: route.discordBotId,
-          discordGuildId: route.discordGuildId,
-          serverFolder: agent.serverFolder,
-          heartbeat: agent.heartbeat,
-        };
-        backfilled++;
-      continue;
-    }
-
-    // Hydrate missing in-memory fields from route/agent for pre-existing
-    // registered_groups rows. This keeps old DBs working during migration.
-    const existing = registeredGroups[jid];
-    const hydrated: RegisteredGroup = {
-      ...existing,
-      backend: existing.backend || (agent.backend as BackendType),
-      agentRuntime: existing.agentRuntime || agent.agentRuntime,
-      discordBotId: existing.discordBotId || route.discordBotId,
-      discordGuildId: existing.discordGuildId || route.discordGuildId,
-      serverFolder: existing.serverFolder || agent.serverFolder,
-      description: existing.description || agent.description,
-    };
-    registeredGroups[jid] = hydrated;
-    if (hydrated.discordBotId && hydrated.discordBotId !== existing.discordBotId) {
-      setRegisteredGroup(jid, hydrated);
-    }
-  }
+  const { synthesized, legacyOnly } = refreshRegisteredGroupsFromCanonicalState();
 
   // Register JID→folder mappings in the queue so multiple JIDs
   // for the same agent share one container (GroupState keyed by folder).
@@ -348,7 +364,8 @@ function loadState(): void {
       agentCount: Object.keys(agents).length,
       routeCount: Object.keys(channelRoutes).length,
       subscriptionChannelCount: Object.keys(channelSubscriptions).length,
-      backfilled,
+      synthesizedGroups: synthesized,
+      legacyOnlyGroups: legacyOnly,
     },
     'State loaded',
   );
@@ -806,7 +823,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
 
   let output: 'success' | 'error';
   try {
-    output = await runAgent(group, prompt, chatJid, async (result) => {
+    output = await runAgent(group, prompt, chatJid, dispatchJid, async (result) => {
       // Wrap in try/catch to prevent unhandled rejections
       // Adopted from [Upstream PR #243] - Critical stability fix
       try {
@@ -844,7 +861,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
           } else if (text) {
             // Route to the chatJid from the container output (multi-channel support).
             // Falls back to the original launch chatJid for single-channel agents.
-            const targetJid = result.chatJid || chatJid;
+            const targetJid = parseDispatchKey(result.chatJid || chatJid).channelJid;
             const targetChannel = findChannelForJid(targetJid, group.discordBotId) || channel;
             if (targetChannel) {
               const formatted = formatOutbound(
@@ -986,6 +1003,7 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  processKeyJid: string = chatJid,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
@@ -1053,15 +1071,7 @@ async function runAgent(
         agentRuntime: group.agentRuntime,
         channels: agentChannels,
       },
-      (proc, containerName) =>
-        queue.registerProcess(
-          chatJid,
-          proc,
-          containerName,
-          group.folder,
-          backend,
-          'message',
-        ),
+      (proc, containerName) => queue.registerProcess(processKeyJid, proc, containerName, group.folder, backend, 'message'),
       wrappedOnOutput,
     );
 
@@ -1096,6 +1106,26 @@ function selectSubscriptionsForMessage(
   if (subs.length === 0) return [];
 
   const hasAllAgents = groupMessages.some((m) => /@allagents/i.test(m.content));
+  const directBotMentions = subs.filter((sub) => {
+    const agent = agents[sub.agentId];
+    const triggerHandle = sub.trigger.replace(/^@/, '');
+    const handles = [
+      agent?.name,
+      sub.discordBotId,
+      triggerHandle,
+    ]
+      .filter((v): v is string => Boolean(v && v.trim()))
+      .map((v) => v.trim().toLowerCase());
+    if (handles.length === 0) return false;
+
+    return groupMessages.some((m) => {
+      const text = m.content.toLowerCase();
+      return handles.some((handle) => {
+        const mentionPattern = new RegExp(`(^|\\s)@${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|\\s|$)`, 'i');
+        return mentionPattern.test(text);
+      });
+    });
+  });
   const explicitMatches = subs.filter((sub) => {
     const triggerPattern = buildTriggerPattern(sub.trigger);
     return groupMessages.some((m) => triggerPattern.test(m.content.trim()));
@@ -1104,6 +1134,8 @@ function selectSubscriptionsForMessage(
   let selected: ChannelSubscription[];
   if (hasAllAgents) {
     selected = [...subs];
+  } else if (directBotMentions.length > 0) {
+    selected = directBotMentions;
   } else if (explicitMatches.length > 0) {
     selected = explicitMatches;
   } else {
