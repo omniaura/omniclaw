@@ -155,7 +155,11 @@ const channelListDesc = isMultiChannel
 
 server.tool(
   'send_message',
-  `Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group. You can also send to other agents by specifying target_jid (check agent_registry.json for available agents and their JIDs).${channelListDesc}`,
+  `Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. You can also send to other agents by specifying target_jid (check agent_registry.json for available agents and their JIDs).
+
+IMPORTANT: Your final text response is ALSO sent to the user automatically. If send_message already contains your complete response, stay silent afterwards — wrap any remaining acknowledgment (e.g. "Done!", "Sent!") in <internal> tags so it isn't delivered as a duplicate message.
+
+Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.${channelListDesc}`,
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
@@ -184,7 +188,7 @@ server.tool(
 
     const channelName = channelByJid.get(targetJid)?.name;
     const targetDesc = channelName || (targetJid !== getCurrentChatJid() ? targetJid : '');
-    return { content: [{ type: 'text' as const, text: `Message sent${targetDesc ? ` to ${targetDesc}` : ''}.` }] };
+    return { content: [{ type: 'text' as const, text: `Message sent${targetDesc ? ` to ${targetDesc}` : ''}. If this was your final response, stay silent — wrap any remaining text in <internal> tags to avoid a duplicate.` }] };
   },
 );
 
