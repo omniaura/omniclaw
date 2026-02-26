@@ -1,4 +1,5 @@
 import { Bot } from 'grammy';
+import telegramifyMarkdown from 'telegramify-markdown';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
@@ -301,13 +302,21 @@ export class TelegramChannel implements Channel {
         ? { reply_parameters: { message_id: parsedReplyId } }
         : {};
 
+      // Convert Markdown to Telegram's MarkdownV2 format for proper rendering
+      // (bold, italic, code blocks, links). Must convert before splitting to
+      // avoid breaking escaped sequences at chunk boundaries.
+      const formatted = telegramifyMarkdown(text, 'escape');
+
       // Telegram has a 4096 character limit per message — split if needed.
       // Preserve leading whitespace so code blocks / indented content aren't mangled.
-      const chunks = splitMessage(text, 4096, {
+      const chunks = splitMessage(formatted, 4096, {
         preserveLeadingWhitespace: true,
       });
       for (let i = 0; i < chunks.length; i++) {
-        const opts = i === 0 ? replyParams : {};
+        const opts = {
+          parse_mode: 'MarkdownV2' as const,
+          ...(i === 0 ? replyParams : {}),
+        };
         await this.bot.api.sendMessage(numericId, chunks[i], opts);
       }
       logger.info({ jid, length: text.length }, 'Telegram message sent');
