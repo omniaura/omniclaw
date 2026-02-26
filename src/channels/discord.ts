@@ -736,6 +736,7 @@ export class DiscordChannel implements Channel {
 
     if (!content) return;
 
+    const effectiveTrigger = group?.trigger || `@${ASSISTANT_NAME}`;
     // Smart auto-respond: check if we should respond without explicit mention
     const hasTrigger = TRIGGER_PATTERN.test(content);
     if (!hasTrigger && !isDM) {
@@ -745,7 +746,7 @@ export class DiscordChannel implements Channel {
           { chatJid, sender: senderName },
           'Reply to bot — treating as triggered',
         );
-        content = `@${ASSISTANT_NAME} ${content}`;
+        content = `${effectiveTrigger} ${content}`;
       } else if (isThread && message.channel.ownerId === botId) {
         // Auto-trigger in threads created by this bot — no @mention needed.
         // Use per-group trigger name for consistency with multi-agent setups.
@@ -777,7 +778,7 @@ export class DiscordChannel implements Channel {
           'Auto-responding based on group config',
         );
         // Prepend trigger so message gets processed
-        content = `@${ASSISTANT_NAME} ${content}`;
+        content = `${effectiveTrigger} ${content}`;
       }
     }
 
