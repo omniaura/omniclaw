@@ -16,7 +16,7 @@
 Agents execute in Apple Container (lightweight Linux VMs), providing:
 - **Process isolation** - Container processes cannot affect the host
 - **Filesystem isolation** - Only explicitly mounted directories are visible
-- **Non-root execution** - Runs as unprivileged `node` user (uid 1000)
+- **Non-root execution** - Runs as unprivileged `bun` user (uid 1000)
 - **Ephemeral containers** - Fresh environment per invocation (`--rm`)
 
 This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted.
