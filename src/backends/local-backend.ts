@@ -5,6 +5,7 @@
  */
 
 import { $ } from 'bun';
+import { createHash } from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -341,6 +342,18 @@ function buildVolumeMounts(
   return mounts;
 }
 
+function makeContainerName(baseFolder: string, runtimeFolder: string): string {
+  const baseSafe = baseFolder.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 24);
+  if (runtimeFolder === baseFolder) {
+    return `omniclaw-${baseSafe}-${Date.now()}`;
+  }
+  const digest = createHash('sha1')
+    .update(runtimeFolder)
+    .digest('hex')
+    .slice(0, 8);
+  return `omniclaw-${baseSafe}-d${digest}-${Date.now()}`;
+}
+
 interface ContainerArgsOpts {
   mounts: VolumeMount[];
   containerName: string;
@@ -431,8 +444,7 @@ export class LocalBackend implements AgentBackend {
       input.isScheduledTask,
       runtimeFolder,
     );
-    const safeName = runtimeFolder.replace(/[^a-zA-Z0-9-]/g, '-');
-    const containerName = `omniclaw-${safeName}-${Date.now()}`;
+    const containerName = makeContainerName(folder, runtimeFolder);
     const containerArgs = buildContainerArgs({
       mounts,
       containerName,
