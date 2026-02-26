@@ -10,7 +10,9 @@ import {
 // we use consume to drain all tracked entries between tests.
 // The functions are pure enough that we test them as-is.
 
-function makeMeta(overrides: Partial<PendingShareRequest> = {}): PendingShareRequest {
+function makeMeta(
+  overrides: Partial<PendingShareRequest> = {},
+): PendingShareRequest {
   return {
     sourceJid: 'source@g.us',
     sourceName: 'Source Group',

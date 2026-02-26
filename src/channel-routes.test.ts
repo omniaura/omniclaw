@@ -34,11 +34,15 @@ describe('resolveAgentForChannel', () => {
   });
 
   it('resolves a Discord channel JID to the correct agent', () => {
-    expect(resolveAgentForChannel('dc:456', sampleRoutes)).toBe('agent-discord');
+    expect(resolveAgentForChannel('dc:456', sampleRoutes)).toBe(
+      'agent-discord',
+    );
   });
 
   it('resolves a Telegram channel JID to the correct agent', () => {
-    expect(resolveAgentForChannel('tg:-1001234', sampleRoutes)).toBe('agent-main');
+    expect(resolveAgentForChannel('tg:-1001234', sampleRoutes)).toBe(
+      'agent-main',
+    );
   });
 
   it('returns undefined for unknown JID', () => {

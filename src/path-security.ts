@@ -14,7 +14,10 @@ import path from 'path';
  * @param label - Human-readable label for error messages
  * @throws Error if path contains traversal segments
  */
-export function rejectTraversalSegments(relativePath: string, label: string): void {
+export function rejectTraversalSegments(
+  relativePath: string,
+  label: string,
+): void {
   // Normalize to handle different separators and resolve ./ segments
   const normalized = path.normalize(relativePath);
 
@@ -43,7 +46,11 @@ export function rejectTraversalSegments(relativePath: string, label: string): vo
  * @param label - Human-readable label for error messages
  * @throws Error if the resolved path escapes the parent
  */
-export function assertPathWithin(resolved: string, parent: string, label: string): void {
+export function assertPathWithin(
+  resolved: string,
+  parent: string,
+  label: string,
+): void {
   const normalizedResolved = path.resolve(resolved);
   const normalizedParent = path.resolve(parent);
   if (

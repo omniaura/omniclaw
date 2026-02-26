@@ -11,7 +11,11 @@ mockModule.module('../logger.js', () => ({
   },
 }));
 
-import { StreamParser, OUTPUT_START_MARKER, OUTPUT_END_MARKER } from './stream-parser.js';
+import {
+  StreamParser,
+  OUTPUT_START_MARKER,
+  OUTPUT_END_MARKER,
+} from './stream-parser.js';
 import type { ContainerOutput } from './types.js';
 
 function makeOutput(overrides: Partial<ContainerOutput> = {}): ContainerOutput {
@@ -89,20 +93,28 @@ describe('StreamParser', () => {
       await feedAndAwait(parser, full.slice(mid));
       // Now it should be parsed
       expect(outputFn).toHaveBeenCalledTimes(1);
-      expect((outputFn.mock.calls[0][0] as ContainerOutput).result).toBe('split');
+      expect((outputFn.mock.calls[0][0] as ContainerOutput).result).toBe(
+        'split',
+      );
     });
 
     it('parses multiple output blocks in a single chunk', async () => {
       parser = createParser();
       const first = makeOutput({ result: 'first' });
       const second = makeOutput({ result: 'second' });
-      const combined = wrapMarkers(JSON.stringify(first)) + wrapMarkers(JSON.stringify(second));
+      const combined =
+        wrapMarkers(JSON.stringify(first)) +
+        wrapMarkers(JSON.stringify(second));
 
       await feedAndAwait(parser, combined);
 
       expect(outputFn).toHaveBeenCalledTimes(2);
-      expect((outputFn.mock.calls[0][0] as ContainerOutput).result).toBe('first');
-      expect((outputFn.mock.calls[1][0] as ContainerOutput).result).toBe('second');
+      expect((outputFn.mock.calls[0][0] as ContainerOutput).result).toBe(
+        'first',
+      );
+      expect((outputFn.mock.calls[1][0] as ContainerOutput).result).toBe(
+        'second',
+      );
     });
 
     it('parses multiple output blocks across interleaved chunks', async () => {
@@ -128,15 +140,25 @@ describe('StreamParser', () => {
     it('handles noise before and after markers', async () => {
       parser = createParser();
       const output = makeOutput({ result: 'between noise' });
-      await feedAndAwait(parser, 'prefix noise\n' + wrapMarkers(JSON.stringify(output)) + 'suffix noise\n');
+      await feedAndAwait(
+        parser,
+        'prefix noise\n' +
+          wrapMarkers(JSON.stringify(output)) +
+          'suffix noise\n',
+      );
 
       expect(outputFn).toHaveBeenCalledTimes(1);
-      expect((outputFn.mock.calls[0][0] as ContainerOutput).result).toBe('between noise');
+      expect((outputFn.mock.calls[0][0] as ContainerOutput).result).toBe(
+        'between noise',
+      );
     });
 
     it('handles malformed JSON gracefully (does not throw)', async () => {
       parser = createParser();
-      await feedAndAwait(parser, `${OUTPUT_START_MARKER}\n{not valid json\n${OUTPUT_END_MARKER}\n`);
+      await feedAndAwait(
+        parser,
+        `${OUTPUT_START_MARKER}\n{not valid json\n${OUTPUT_END_MARKER}\n`,
+      );
 
       // Should not have called output (invalid JSON)
       expect(outputFn).not.toHaveBeenCalled();
@@ -168,8 +190,14 @@ describe('StreamParser', () => {
 
     it('tracks the last newSessionId across multiple outputs', async () => {
       parser = createParser();
-      await feedAndAwait(parser, wrapMarkers(JSON.stringify(makeOutput({ newSessionId: 'first' }))));
-      await feedAndAwait(parser, wrapMarkers(JSON.stringify(makeOutput({ newSessionId: 'second' }))));
+      await feedAndAwait(
+        parser,
+        wrapMarkers(JSON.stringify(makeOutput({ newSessionId: 'first' }))),
+      );
+      await feedAndAwait(
+        parser,
+        wrapMarkers(JSON.stringify(makeOutput({ newSessionId: 'second' }))),
+      );
 
       expect(parser.getState().newSessionId).toBe('second');
     });
@@ -393,7 +421,9 @@ describe('StreamParser', () => {
       parser = createParser({ onOutput: undefined });
       const output = makeOutput({ result: 'noisy' });
       parser.feedStdout(
-        'noise before\n' + wrapMarkers(JSON.stringify(output)) + 'noise after\n'
+        'noise before\n' +
+          wrapMarkers(JSON.stringify(output)) +
+          'noise after\n',
       );
 
       const result = parser.parseFinalOutput();
@@ -425,8 +455,12 @@ describe('StreamParser', () => {
       parser = createParser({ onOutput: slowOutputFn });
 
       // Feed both outputs synchronously
-      parser.feedStdout(wrapMarkers(JSON.stringify(makeOutput({ result: 'first' }))));
-      parser.feedStdout(wrapMarkers(JSON.stringify(makeOutput({ result: 'second' }))));
+      parser.feedStdout(
+        wrapMarkers(JSON.stringify(makeOutput({ result: 'first' }))),
+      );
+      parser.feedStdout(
+        wrapMarkers(JSON.stringify(makeOutput({ result: 'second' }))),
+      );
 
       // Wait for async chain to complete
       await parser.getState().outputChain;

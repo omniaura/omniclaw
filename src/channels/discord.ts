@@ -449,9 +449,8 @@ export class DiscordChannel implements Channel {
 
     // Detect thread messages: route via parent channel for group lookup
     const isThread = !isDM && message.channel.isThread();
-    const threadParentId = isThread && message.channel.parent
-      ? message.channel.parent.id
-      : null;
+    const threadParentId =
+      isThread && message.channel.parent ? message.channel.parent.id : null;
 
     // Allow bot messages through only if they contain our trigger (agent-to-agent comms).
     // This prevents infinite loops — bots must explicitly @mention us.
@@ -657,7 +656,15 @@ export class DiscordChannel implements Channel {
         const threadName = message.channel.name || 'thread';
         const agentName = group?.trigger?.replace(/^@/, '') || ASSISTANT_NAME;
         const groupTriggerPattern = buildTriggerPattern(group?.trigger);
-        logger.info({ chatJid, threadId: message.channelId, threadName, sender: senderName }, 'Auto-triggering in bot-created thread');
+        logger.info(
+          {
+            chatJid,
+            threadId: message.channelId,
+            threadName,
+            sender: senderName,
+          },
+          'Auto-triggering in bot-created thread',
+        );
         // Check original content before prepending thread context to avoid double trigger prefix
         const hasGroupTrigger = groupTriggerPattern.test(content);
         content = `[In thread: ${threadName}] ${content}`;
@@ -792,4 +799,3 @@ async function resolveChannel(
   }
   return null;
 }
-

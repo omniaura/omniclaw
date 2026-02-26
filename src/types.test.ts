@@ -72,7 +72,11 @@ describe('types.ts conversion functions', () => {
     });
 
     it('preserves heartbeat config', () => {
-      const heartbeat = { enabled: true, interval: '*/5 * * * *', scheduleType: 'cron' as const };
+      const heartbeat = {
+        enabled: true,
+        interval: '*/5 * * * *',
+        scheduleType: 'cron' as const,
+      };
       const group = makeGroup({ heartbeat });
       const agent = registeredGroupToAgent('jid@g.us', group);
       expect(agent.heartbeat).toEqual(heartbeat);

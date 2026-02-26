@@ -54,7 +54,11 @@ describe('agents.ts', () => {
     });
 
     it('preserves heartbeat config', () => {
-      const heartbeat = { enabled: true, interval: '300000', scheduleType: 'interval' as const };
+      const heartbeat = {
+        enabled: true,
+        interval: '300000',
+        scheduleType: 'interval' as const,
+      };
       const agent = makeAgent({ heartbeat });
       const group = agentToRegisteredGroup(agent, 'jid@g.us');
       expect(group.heartbeat).toEqual(heartbeat);

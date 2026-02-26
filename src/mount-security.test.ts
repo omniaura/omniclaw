@@ -168,10 +168,7 @@ describe('validateMount with allowlist', () => {
 
   it('rejects mount matching default blocked pattern (.ssh)', () => {
     writeAllowlist(baseAllowlist);
-    const result = validateMount(
-      { hostPath: TEMP_ROOT + '/.ssh' },
-      true,
-    );
+    const result = validateMount({ hostPath: TEMP_ROOT + '/.ssh' }, true);
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain('blocked pattern');
     expect(result.reason).toContain('.ssh');
@@ -212,7 +209,10 @@ describe('validateMount with allowlist', () => {
   it('uses explicit containerPath when provided', () => {
     writeAllowlist(baseAllowlist);
     const result = validateMount(
-      { hostPath: TEMP_ROOT + '/projects/my-app', containerPath: 'custom-name' },
+      {
+        hostPath: TEMP_ROOT + '/projects/my-app',
+        containerPath: 'custom-name',
+      },
       true,
     );
     expect(result.allowed).toBe(true);
@@ -409,26 +409,19 @@ describe('loadMountAllowlist edge cases', () => {
 
   it('merges default blocked patterns with custom ones', () => {
     writeAllowlist({
-      allowedRoots: [
-        { path: TEMP_ROOT, allowReadWrite: false },
-      ],
+      allowedRoots: [{ path: TEMP_ROOT, allowReadWrite: false }],
       blockedPatterns: ['my-custom-secret'],
       nonMainReadOnly: true,
     });
     // .ssh should be blocked by defaults
-    const sshResult = validateMount(
-      { hostPath: TEMP_ROOT + '/.ssh' },
-      true,
-    );
+    const sshResult = validateMount({ hostPath: TEMP_ROOT + '/.ssh' }, true);
     expect(sshResult.allowed).toBe(false);
     expect(sshResult.reason).toContain('.ssh');
   });
 
   it('caches allowlist across calls', () => {
     writeAllowlist({
-      allowedRoots: [
-        { path: TEMP_ROOT + '/projects', allowReadWrite: false },
-      ],
+      allowedRoots: [{ path: TEMP_ROOT + '/projects', allowReadWrite: false }],
       blockedPatterns: [],
       nonMainReadOnly: true,
     });
@@ -479,8 +472,8 @@ describe('validateAdditionalMounts', () => {
     writeAllowlist(allowlist);
     const validated = validateAdditionalMounts(
       [
-        { hostPath: TEMP_ROOT + '/projects/my-app' },   // allowed
-        { hostPath: '/nonexistent/path' },               // rejected
+        { hostPath: TEMP_ROOT + '/projects/my-app' }, // allowed
+        { hostPath: '/nonexistent/path' }, // rejected
         { hostPath: TEMP_ROOT + '/projects/my-app', containerPath: '../bad' }, // rejected
       ],
       'test-group',

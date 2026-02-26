@@ -75,36 +75,50 @@ describe('backends/types.ts', () => {
   describe('getContainerConfig', () => {
     it('returns containerConfig from an Agent', () => {
       const config = { timeout: 60000, memory: 2048 };
-      expect(getContainerConfig(makeAgent({ containerConfig: config }))).toEqual(config);
+      expect(
+        getContainerConfig(makeAgent({ containerConfig: config })),
+      ).toEqual(config);
     });
 
     it('returns containerConfig from a RegisteredGroup', () => {
       const config = { timeout: 120000 };
-      expect(getContainerConfig(makeGroup({ containerConfig: config }))).toEqual(config);
+      expect(
+        getContainerConfig(makeGroup({ containerConfig: config })),
+      ).toEqual(config);
     });
 
     it('returns undefined when no containerConfig', () => {
-      expect(getContainerConfig(makeAgent({ containerConfig: undefined }))).toBeUndefined();
+      expect(
+        getContainerConfig(makeAgent({ containerConfig: undefined })),
+      ).toBeUndefined();
     });
   });
 
   describe('getServerFolder', () => {
     it('returns serverFolder from an Agent', () => {
-      expect(getServerFolder(makeAgent({ serverFolder: 'servers/discord' }))).toBe('servers/discord');
+      expect(
+        getServerFolder(makeAgent({ serverFolder: 'servers/discord' })),
+      ).toBe('servers/discord');
     });
 
     it('returns serverFolder from a RegisteredGroup', () => {
-      expect(getServerFolder(makeGroup({ serverFolder: 'servers/wa' }))).toBe('servers/wa');
+      expect(getServerFolder(makeGroup({ serverFolder: 'servers/wa' }))).toBe(
+        'servers/wa',
+      );
     });
 
     it('returns undefined when no serverFolder', () => {
-      expect(getServerFolder(makeAgent({ serverFolder: undefined }))).toBeUndefined();
+      expect(
+        getServerFolder(makeAgent({ serverFolder: undefined })),
+      ).toBeUndefined();
     });
   });
 
   describe('getBackendType', () => {
     it('returns backend from an Agent directly', () => {
-      expect(getBackendType(makeAgent({ backend: 'apple-container' }))).toBe('apple-container');
+      expect(getBackendType(makeAgent({ backend: 'apple-container' }))).toBe(
+        'apple-container',
+      );
     });
 
     it('returns backend from a RegisteredGroup', () => {
@@ -112,16 +126,22 @@ describe('backends/types.ts', () => {
     });
 
     it('defaults to apple-container for RegisteredGroup without backend', () => {
-      expect(getBackendType(makeGroup({ backend: undefined }))).toBe('apple-container');
+      expect(getBackendType(makeGroup({ backend: undefined }))).toBe(
+        'apple-container',
+      );
     });
 
     it('returns each backend type correctly for Agent', () => {
-      expect(getBackendType(makeAgent({ backend: 'apple-container' }))).toBe('apple-container');
+      expect(getBackendType(makeAgent({ backend: 'apple-container' }))).toBe(
+        'apple-container',
+      );
       expect(getBackendType(makeAgent({ backend: 'docker' }))).toBe('docker');
     });
 
     it('returns each backend type correctly for RegisteredGroup', () => {
-      expect(getBackendType(makeGroup({ backend: 'apple-container' }))).toBe('apple-container');
+      expect(getBackendType(makeGroup({ backend: 'apple-container' }))).toBe(
+        'apple-container',
+      );
       expect(getBackendType(makeGroup({ backend: 'docker' }))).toBe('docker');
     });
   });

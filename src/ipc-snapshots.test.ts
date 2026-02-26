@@ -3,7 +3,11 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-import { mapTasksForSnapshot, writeTasksSnapshot, writeGroupsSnapshot } from './ipc-snapshots.js';
+import {
+  mapTasksForSnapshot,
+  writeTasksSnapshot,
+  writeGroupsSnapshot,
+} from './ipc-snapshots.js';
 import type { ScheduledTask } from './types.js';
 
 function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
@@ -81,26 +85,70 @@ describe('ipc-snapshots', () => {
       fs.mkdirSync(ipcDir, { recursive: true });
 
       const allTasks = [
-        { id: 't1', groupFolder: 'alpha', prompt: 'a', schedule_type: 'interval', schedule_value: '1000', status: 'active', next_run: null },
-        { id: 't2', groupFolder: 'beta', prompt: 'b', schedule_type: 'cron', schedule_value: '0 9 * * *', status: 'active', next_run: null },
-        { id: 't3', groupFolder: 'alpha', prompt: 'c', schedule_type: 'once', schedule_value: '2025-01-01', status: 'paused', next_run: null },
+        {
+          id: 't1',
+          groupFolder: 'alpha',
+          prompt: 'a',
+          schedule_type: 'interval',
+          schedule_value: '1000',
+          status: 'active',
+          next_run: null,
+        },
+        {
+          id: 't2',
+          groupFolder: 'beta',
+          prompt: 'b',
+          schedule_type: 'cron',
+          schedule_value: '0 9 * * *',
+          status: 'active',
+          next_run: null,
+        },
+        {
+          id: 't3',
+          groupFolder: 'alpha',
+          prompt: 'c',
+          schedule_type: 'once',
+          schedule_value: '2025-01-01',
+          status: 'paused',
+          next_run: null,
+        },
       ];
 
       // writeTasksSnapshot uses DATA_DIR internally, so we test the filtering logic directly
       const isMain = false;
-      const filtered = isMain ? allTasks : allTasks.filter((t) => t.groupFolder === groupFolder);
+      const filtered = isMain
+        ? allTasks
+        : allTasks.filter((t) => t.groupFolder === groupFolder);
       expect(filtered).toHaveLength(2);
       expect(filtered.every((t) => t.groupFolder === 'alpha')).toBe(true);
     });
 
     it('shows all tasks for main group', () => {
       const allTasks = [
-        { id: 't1', groupFolder: 'alpha', prompt: 'a', schedule_type: 'interval', schedule_value: '1000', status: 'active', next_run: null },
-        { id: 't2', groupFolder: 'beta', prompt: 'b', schedule_type: 'cron', schedule_value: '0 9 * * *', status: 'active', next_run: null },
+        {
+          id: 't1',
+          groupFolder: 'alpha',
+          prompt: 'a',
+          schedule_type: 'interval',
+          schedule_value: '1000',
+          status: 'active',
+          next_run: null,
+        },
+        {
+          id: 't2',
+          groupFolder: 'beta',
+          prompt: 'b',
+          schedule_type: 'cron',
+          schedule_value: '0 9 * * *',
+          status: 'active',
+          next_run: null,
+        },
       ];
 
       const isMain = true;
-      const filtered = isMain ? allTasks : allTasks.filter((t) => t.groupFolder === 'main');
+      const filtered = isMain
+        ? allTasks
+        : allTasks.filter((t) => t.groupFolder === 'main');
       expect(filtered).toHaveLength(2);
     });
   });
@@ -117,8 +165,18 @@ describe('ipc-snapshots', () => {
 
     it('returns all groups for main group', () => {
       const groups = [
-        { jid: 'j1', name: 'G1', lastActivity: '2025-01-01', isRegistered: true },
-        { jid: 'j2', name: 'G2', lastActivity: '2025-01-02', isRegistered: false },
+        {
+          jid: 'j1',
+          name: 'G1',
+          lastActivity: '2025-01-01',
+          isRegistered: true,
+        },
+        {
+          jid: 'j2',
+          name: 'G2',
+          lastActivity: '2025-01-02',
+          isRegistered: false,
+        },
       ];
       const isMain = true;
       const visibleGroups = isMain ? groups : [];

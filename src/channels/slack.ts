@@ -3,7 +3,12 @@ import { WebClient } from '@slack/web-api';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN, escapeRegex } from '../config.js';
 import { logger } from '../logger.js';
-import { Channel, OnChatMetadata, OnInboundMessage, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  OnChatMetadata,
+  OnInboundMessage,
+  RegisteredGroup,
+} from '../types.js';
 import { splitMessage as splitMessageShared } from './utils.js';
 
 // JID format: "slack:{channelId}" for channels/DMs
@@ -24,13 +29,19 @@ function splitMessage(text: string, maxLen = 4000): string[] {
 }
 
 /** Resolve a Slack user ID to a display name, falling back to the provided default. */
-async function resolveSlackUserName(client: WebClient, userId: string, fallback: string): Promise<string> {
+async function resolveSlackUserName(
+  client: WebClient,
+  userId: string,
+  fallback: string,
+): Promise<string> {
   try {
     const info = await client.users.info({ user: userId });
-    return info.user?.profile?.display_name ||
+    return (
+      info.user?.profile?.display_name ||
       info.user?.profile?.real_name ||
       info.user?.name ||
-      fallback;
+      fallback
+    );
   } catch {
     return fallback;
   }
@@ -42,7 +53,9 @@ async function resolveMentions(
   client: WebClient,
 ): Promise<{ text: string; mentions: Array<{ id: string; name: string }> }> {
   const mentionRegex = /<@([A-Z0-9]+)>/g;
-  const userIds = [...new Set([...text.matchAll(mentionRegex)].map((m) => m[1]))];
+  const userIds = [
+    ...new Set([...text.matchAll(mentionRegex)].map((m) => m[1])),
+  ];
   const mentions: Array<{ id: string; name: string }> = [];
 
   for (const userId of userIds) {
@@ -57,12 +70,17 @@ async function resolveMentions(
 }
 
 export interface SlackChannelOpts {
-  token: string;        // Bot token (xoxb-...)
-  appToken: string;     // App-level token for Socket Mode (xapp-...)
+  token: string; // Bot token (xoxb-...)
+  appToken: string; // App-level token for Socket Mode (xapp-...)
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
-  onReaction?: (chatJid: string, messageId: string, emoji: string, userName: string) => void;
+  onReaction?: (
+    chatJid: string,
+    messageId: string,
+    emoji: string,
+    userName: string,
+  ) => void;
 }
 
 export class SlackChannel implements Channel {
@@ -99,7 +117,8 @@ export class SlackChannel implements Channel {
 
     // Register reaction handler (for share-request approvals etc.)
     this.app.event('reaction_added', async ({ event }) => {
-      const channelId = event.item.type === 'message' ? event.item.channel : null;
+      const channelId =
+        event.item.type === 'message' ? event.item.channel : null;
       if (!channelId) return;
 
       const chatJid = channelIdToJid(channelId);
@@ -108,7 +127,11 @@ export class SlackChannel implements Channel {
 
       const emoji = `:${event.reaction}:`;
 
-      const userName = await resolveSlackUserName(this.client, event.user, event.user);
+      const userName = await resolveSlackUserName(
+        this.client,
+        event.user,
+        event.user,
+      );
 
       this.opts.onReaction?.(chatJid, messageId, emoji, userName);
     });
@@ -121,7 +144,10 @@ export class SlackChannel implements Channel {
       const authResult = await this.client.auth.test();
       this.botUserId = authResult.user_id as string;
       const botName = authResult.user || ASSISTANT_NAME;
-      logger.info({ botUserId: this.botUserId, botName }, 'Slack bot connected');
+      logger.info(
+        { botUserId: this.botUserId, botName },
+        'Slack bot connected',
+      );
     } catch (err) {
       logger.warn({ err }, 'Failed to fetch Slack bot user ID');
     }
@@ -129,7 +155,11 @@ export class SlackChannel implements Channel {
     this.connected = true;
   }
 
-  async sendMessage(jid: string, text: string, replyToMessageId?: string): Promise<string | void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    replyToMessageId?: string,
+  ): Promise<string | void> {
     const channelId = jidToChannelId(jid);
     if (!channelId) {
       logger.warn({ jid }, 'Invalid Slack JID — cannot send message');
@@ -144,7 +174,8 @@ export class SlackChannel implements Channel {
       for (let i = 0; i < chunks.length; i++) {
         // First chunk threads under the trigger message (replyToMessageId).
         // Subsequent chunks thread under the first chunk so they form a single thread.
-        const threadTs = i === 0 ? replyToMessageId : (firstTs ?? replyToMessageId);
+        const threadTs =
+          i === 0 ? replyToMessageId : (firstTs ?? replyToMessageId);
         const result = await this.client.chat.postMessage({
           channel: channelId,
           text: chunks[i],
@@ -176,26 +207,48 @@ export class SlackChannel implements Channel {
     logger.info('Slack bot disconnected');
   }
 
-  async addReaction(jid: string, messageId: string, emoji: string): Promise<void> {
+  async addReaction(
+    jid: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void> {
     const channelId = jidToChannelId(jid);
     if (!channelId) return;
     // Strip surrounding colons if passed as :emoji:
     const name = emoji.replace(/^:|:$/g, '');
     try {
-      await this.client.reactions.add({ channel: channelId, timestamp: messageId, name });
+      await this.client.reactions.add({
+        channel: channelId,
+        timestamp: messageId,
+        name,
+      });
     } catch (err) {
-      logger.warn({ jid, messageId, emoji, err }, 'Failed to add Slack reaction');
+      logger.warn(
+        { jid, messageId, emoji, err },
+        'Failed to add Slack reaction',
+      );
     }
   }
 
-  async removeReaction(jid: string, messageId: string, emoji: string): Promise<void> {
+  async removeReaction(
+    jid: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void> {
     const channelId = jidToChannelId(jid);
     if (!channelId) return;
     const name = emoji.replace(/^:|:$/g, '');
     try {
-      await this.client.reactions.remove({ channel: channelId, timestamp: messageId, name });
+      await this.client.reactions.remove({
+        channel: channelId,
+        timestamp: messageId,
+        name,
+      });
     } catch (err) {
-      logger.warn({ jid, messageId, emoji, err }, 'Failed to remove Slack reaction');
+      logger.warn(
+        { jid, messageId, emoji, err },
+        'Failed to remove Slack reaction',
+      );
     }
   }
 
@@ -214,7 +267,10 @@ export class SlackChannel implements Channel {
     return { channelId, ts: messageId };
   }
 
-  async sendToThread(thread: { channelId: string; ts: string }, text: string): Promise<void> {
+  async sendToThread(
+    thread: { channelId: string; ts: string },
+    text: string,
+  ): Promise<void> {
     const chunks = splitMessage(text);
     for (const chunk of chunks) {
       try {
@@ -241,7 +297,8 @@ export class SlackChannel implements Channel {
     // Ignore bot messages (including our own)
     if (event.subtype === 'bot_message') return;
     if ('bot_id' in event && event.bot_id) return;
-    if (this.botUserId && 'user' in event && event.user === this.botUserId) return;
+    if (this.botUserId && 'user' in event && event.user === this.botUserId)
+      return;
 
     // Only process text messages
     if (!('text' in event) || !event.text) return;
@@ -253,10 +310,17 @@ export class SlackChannel implements Channel {
     const timestamp = new Date(parseFloat(event.ts) * 1000).toISOString();
 
     const senderUserId = 'user' in event ? event.user : 'unknown';
-    const senderName = await resolveSlackUserName(this.client, senderUserId, senderUserId);
+    const senderName = await resolveSlackUserName(
+      this.client,
+      senderUserId,
+      senderUserId,
+    );
 
     // Resolve <@USERID> mentions to display names
-    const { text: resolvedText, mentions } = await resolveMentions(event.text, this.client);
+    const { text: resolvedText, mentions } = await resolveMentions(
+      event.text,
+      this.client,
+    );
     let content = resolvedText;
 
     // Translate @BotName mention into our internal trigger format
@@ -272,7 +336,11 @@ export class SlackChannel implements Channel {
     }
 
     // Prepend thread context if this is a threaded reply
-    if ('thread_ts' in event && event.thread_ts && event.thread_ts !== event.ts) {
+    if (
+      'thread_ts' in event &&
+      event.thread_ts &&
+      event.thread_ts !== event.ts
+    ) {
       // This message is a reply in a thread — note context for the agent
       content = `[Thread reply] ${content}`;
     }
@@ -290,7 +358,10 @@ export class SlackChannel implements Channel {
     // Only process registered groups
     const group = this.opts.registeredGroups()[chatJid];
     if (!group) {
-      logger.debug({ chatJid, channelName }, 'Message from unregistered Slack channel — ignoring');
+      logger.debug(
+        { chatJid, channelName },
+        'Message from unregistered Slack channel — ignoring',
+      );
       return;
     }
 
@@ -306,6 +377,9 @@ export class SlackChannel implements Channel {
       mentions: mentions.map((m) => ({ ...m, platform: 'slack' as const })),
     });
 
-    logger.info({ chatJid, channelName, sender: senderName }, 'Slack message stored');
+    logger.info(
+      { chatJid, channelName, sender: senderName },
+      'Slack message stored',
+    );
   }
 }

@@ -52,13 +52,30 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
-import { resolveAgentForChannel, buildAgentToChannelsMap } from './channel-routes.js';
+import {
+  resolveAgentForChannel,
+  buildAgentToChannelsMap,
+} from './channel-routes.js';
 import { GroupQueue } from './group-queue.js';
 import { consumeShareRequest, startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound, getAgentName } from './router.js';
+import {
+  findChannel,
+  formatMessages,
+  formatOutbound,
+  getAgentName,
+} from './router.js';
 import { reconcileHeartbeats, startSchedulerLoop } from './task-scheduler.js';
 import { createThreadStreamer } from './thread-streaming.js';
-import { Agent, BackendType, Channel, ChannelRoute, NewMessage, RegisteredGroup, registeredGroupToAgent, registeredGroupToRoute } from './types.js';
+import {
+  Agent,
+  BackendType,
+  Channel,
+  ChannelRoute,
+  NewMessage,
+  RegisteredGroup,
+  registeredGroupToAgent,
+  registeredGroupToRoute,
+} from './types.js';
 import { findMainGroupJid } from './group-helpers.js';
 import { logger } from './logger.js';
 import { Effect } from 'effect';
@@ -184,10 +201,7 @@ function loadState(): void {
 
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
-  setRouterState(
-    'last_agent_timestamp',
-    JSON.stringify(lastAgentTimestamp),
-  );
+  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -264,7 +278,12 @@ Then read the code directly — don't ask the admin to copy files for you.
   setChannelRoute(route);
 
   logger.info(
-    { jid, name: group.name, folder: group.folder, serverFolder: group.serverFolder },
+    {
+      jid,
+      name: group.name,
+      folder: group.folder,
+      serverFolder: group.serverFolder,
+    },
     'Group registered',
   );
 }
@@ -329,7 +348,10 @@ async function backfillDiscordGuildIds(discord: DiscordChannel): Promise<void> {
     }
 
     if (!guildId) {
-      logger.warn({ jid, name: group.name }, 'Could not resolve Discord guild ID');
+      logger.warn(
+        { jid, name: group.name },
+        'Could not resolve Discord guild ID',
+      );
       continue;
     }
 
@@ -342,7 +364,11 @@ async function backfillDiscordGuildIds(discord: DiscordChannel): Promise<void> {
     }
 
     // Update the group
-    const updated: RegisteredGroup = { ...group, discordGuildId: guildId, serverFolder };
+    const updated: RegisteredGroup = {
+      ...group,
+      discordGuildId: guildId,
+      serverFolder,
+    };
     registeredGroups[jid] = updated;
     setRegisteredGroup(jid, updated);
 
@@ -382,7 +408,9 @@ export function getAvailableGroups(): import('./ipc-snapshots.js').AvailableGrou
 }
 
 /** @internal - exported for testing */
-export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): void {
+export function _setRegisteredGroups(
+  groups: Record<string, RegisteredGroup>,
+): void {
   registeredGroups = groups;
 }
 
@@ -397,10 +425,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(
-    chatJid,
-    sinceTimestamp,
-  ).filter((m) => m.content.trim().length > 0);
+  const missedMessages = getMessagesSince(chatJid, sinceTimestamp).filter(
+    (m) => m.content.trim().length > 0,
+  );
 
   if (missedMessages.length === 0) return true;
 
@@ -465,14 +492,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       await channel.setTyping(chatJid, true);
       typingInterval = setInterval(() => {
         channel.setTyping!(chatJid, true).catch((err) => {
-          log.debug({ err, chatJid }, 'Typing indicator refresh failed (non-fatal)');
+          log.debug(
+            { err, chatJid },
+            'Typing indicator refresh failed (non-fatal)',
+          );
         });
       }, 8_000);
     } catch (err) {
-      log.debug(
-        { error: err },
-        'Typing indicator failed to start',
-      );
+      log.debug({ error: err }, 'Typing indicator failed to start');
     }
   }
 
@@ -491,17 +518,28 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Redact sensitive data from error messages before logging
   function redactSensitiveData(text: string): string {
-    return text
-      // Redact bearer tokens
-      .replace(/Bearer\s+[A-Za-z0-9_\-\.]{20,}/gi, 'Bearer [REDACTED]')
-      // Redact API keys (common patterns: sk-..., key_..., etc.)
-      .replace(/\b(?:sk|key|api)[_-][A-Za-z0-9_\-]{16,}/gi, '[API_KEY_REDACTED]')
-      // Redact long hex strings (likely tokens/secrets)
-      .replace(/\b[a-f0-9]{32,}\b/gi, '[HEX_TOKEN_REDACTED]')
-      // Redact JWT tokens
-      .replace(/eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/g, '[JWT_REDACTED]')
-      // Redact common password/secret field values in JSON
-      .replace(/"(?:password|secret|token|apikey)":\s*"[^"]+"/gi, '"$1":"[REDACTED]"');
+    return (
+      text
+        // Redact bearer tokens
+        .replace(/Bearer\s+[A-Za-z0-9_\-\.]{20,}/gi, 'Bearer [REDACTED]')
+        // Redact API keys (common patterns: sk-..., key_..., etc.)
+        .replace(
+          /\b(?:sk|key|api)[_-][A-Za-z0-9_\-]{16,}/gi,
+          '[API_KEY_REDACTED]',
+        )
+        // Redact long hex strings (likely tokens/secrets)
+        .replace(/\b[a-f0-9]{32,}\b/gi, '[HEX_TOKEN_REDACTED]')
+        // Redact JWT tokens
+        .replace(
+          /eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/g,
+          '[JWT_REDACTED]',
+        )
+        // Redact common password/secret field values in JSON
+        .replace(
+          /"(?:password|secret|token|apikey)":\s*"[^"]+"/gi,
+          '"$1":"[REDACTED]"',
+        )
+    );
   }
 
   // Thread streaming via shared helper
@@ -516,23 +554,40 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // 2. content contains the trigger pattern anywhere — catches explicit @mentions
   //    and DM/auto-respond messages where "@Omni" is prepended to content.
   const agentName = (group.trigger ?? `@${ASSISTANT_NAME}`).replace(/^@/, '');
-  const groupTriggerRe = new RegExp(`@${agentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+  const groupTriggerRe = new RegExp(
+    `@${agentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+    'i',
+  );
   // Bot names to match in the mentions array: the per-group agent name AND the global
   // assistant name. Replies-to-bot store the bot's display name (ASSISTANT_NAME) in mentions.
-  const botNames = new Set([agentName.toLowerCase(), ASSISTANT_NAME.toLowerCase()]);
-  const isTriggerMessage = (m: { content: string; mentions?: Array<{ name: string }> }): boolean =>
+  const botNames = new Set([
+    agentName.toLowerCase(),
+    ASSISTANT_NAME.toLowerCase(),
+  ]);
+  const isTriggerMessage = (m: {
+    content: string;
+    mentions?: Array<{ name: string }>;
+  }): boolean =>
     groupTriggerRe.test(m.content) ||
     TRIGGER_PATTERN.test(m.content) ||
-    (m.mentions?.some((mention) => botNames.has(mention.name.toLowerCase())) ?? false);
+    (m.mentions?.some((mention) => botNames.has(mention.name.toLowerCase())) ??
+      false);
   const triggeringMessage = missedMessages.findLast(isTriggerMessage);
   // Always reply to the last message in the batch, not the triggering message.
   // triggeringMessage is used to decide whether to process; the reply should
   // thread to what the user most recently said.
-  const lastMessageId = missedMessages[missedMessages.length - 1]?.id || triggeringMessage?.id || null;
-  const triggeringMessageId = lastMessageId && /^(synth|react|notify)-/.test(lastMessageId) ? null : lastMessageId;
+  const lastMessageId =
+    missedMessages[missedMessages.length - 1]?.id ||
+    triggeringMessage?.id ||
+    null;
+  const triggeringMessageId =
+    lastMessageId && /^(synth|react|notify)-/.test(lastMessageId)
+      ? null
+      : lastMessageId;
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
-  const threadName = lastContent
-    .replace(TRIGGER_PATTERN, '').trim().slice(0, 80) || 'Agent working...';
+  const threadName =
+    lastContent.replace(TRIGGER_PATTERN, '').trim().slice(0, 80) ||
+    'Agent working...';
 
   const streamer = createThreadStreamer(
     {
@@ -554,16 +609,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       // Adopted from [Upstream PR #243] - Critical stability fix
       try {
         if (result.intermediate && result.result) {
-          const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+          const raw =
+            typeof result.result === 'string'
+              ? result.result
+              : JSON.stringify(result.result);
           await streamer.handleIntermediate(raw);
           return;
         }
 
         // Final output — send to main channel as before
         if (result.result) {
-          const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+          const raw =
+            typeof result.result === 'string'
+              ? result.result
+              : JSON.stringify(result.result);
           // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-          const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+          const text = raw
+            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+            .trim();
           log.info(`Agent output: ${raw.slice(0, 200)}`);
 
           // Suppress system/auth errors — log them but don't send to channels
@@ -571,7 +634,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           const isSystemError = systemErrorPatterns.some((p) => p.test(text));
           if (isSystemError) {
             const redactedText = redactSensitiveData(text.slice(0, 300));
-            log.error(`Suppressed system error (not sent to user): ${redactedText}`);
+            log.error(
+              `Suppressed system error (not sent to user): ${redactedText}`,
+            );
             hadError = true;
             // Skip sending to channel but continue processing
           } else if (text) {
@@ -580,11 +645,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             const targetJid = result.chatJid || chatJid;
             const targetChannel = findChannel(channels, targetJid) || channel;
             if (targetChannel) {
-              const formatted = formatOutbound(targetChannel, text, getAgentName(group));
+              const formatted = formatOutbound(
+                targetChannel,
+                text,
+                getAgentName(group),
+              );
               if (formatted) {
                 // Don't use triggeringMessageId for cross-channel responses — it belongs to the original chat
-                const replyId = targetJid === chatJid ? triggeringMessageId : null;
-                await targetChannel.sendMessage(targetJid, formatted, replyId || undefined);
+                const replyId =
+                  targetJid === chatJid ? triggeringMessageId : null;
+                await targetChannel.sendMessage(
+                  targetJid,
+                  formatted,
+                  replyId || undefined,
+                );
                 outputSentToUser = true;
                 // Stop typing refresh — prevents the 8s interval from
                 // re-triggering typing AFTER the response is visible.
@@ -624,9 +698,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // Stop the typing keep-alive loop — must be in finally to prevent stuck
     // typing indicators when runAgent throws or the process is interrupted.
     if (typingInterval) clearInterval(typingInterval);
-    if (channel?.setTyping) await channel.setTyping(chatJid, false).catch((err) => {
-      logger.debug({ err, chatJid }, 'Failed to clear typing indicator');
-    });
+    if (channel?.setTyping)
+      await channel.setTyping(chatJid, false).catch((err) => {
+        logger.debug({ err, chatJid }, 'Failed to clear typing indicator');
+      });
     if (idleTimer) clearTimeout(idleTimer);
   }
 
@@ -637,7 +712,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
       consecutiveErrors[chatJid] = 0;
-      log.warn('Agent error after output was sent, skipping cursor rollback to prevent duplicates');
+      log.warn(
+        'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
+      );
       return true;
     }
 
@@ -654,12 +731,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
       // Notify the user so the message isn't silently dropped (fixes #94)
       if (channel) {
-        const errorMsg = "Sorry, I hit a server error a few times and couldn't process your message. Please try again.";
-        const formatted = formatOutbound(channel, errorMsg, getAgentName(group));
+        const errorMsg =
+          "Sorry, I hit a server error a few times and couldn't process your message. Please try again.";
+        const formatted = formatOutbound(
+          channel,
+          errorMsg,
+          getAgentName(group),
+        );
         if (formatted) {
-          channel.sendMessage(chatJid, formatted, triggeringMessageId || undefined).catch((err) => {
-            log.warn({ err }, 'Failed to send error notification to user');
-          });
+          channel
+            .sendMessage(chatJid, formatted, triggeringMessageId || undefined)
+            .catch((err) => {
+              log.warn({ err }, 'Failed to send error notification to user');
+            });
         }
       }
 
@@ -670,7 +754,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
-    log.warn({ errorCount }, 'Agent error, rolled back message cursor for retry');
+    log.warn(
+      { errorCount },
+      'Agent error, rolled back message cursor for retry',
+    );
     return false;
   }
 
@@ -709,7 +796,10 @@ async function runAgent(
     for (const folder of expired) {
       delete sessions[folder];
     }
-    logger.info({ expired, trigger: group.folder }, 'Expired stale sessions before agent run');
+    logger.info(
+      { expired, trigger: group.folder },
+      'Expired stale sessions before agent run',
+    );
   }
 
   const sessionId = sessions[group.folder];
@@ -759,7 +849,15 @@ async function runAgent(
         serverFolder: group.serverFolder,
         channels: agentChannels,
       },
-      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder, backend, 'message'),
+      (proc, containerName) =>
+        queue.registerProcess(
+          chatJid,
+          proc,
+          containerName,
+          group.folder,
+          backend,
+          'message',
+        ),
       wrappedOnOutput,
     );
 
@@ -798,10 +896,7 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(
-        jids,
-        lastTimestamp,
-      );
+      const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp);
 
       if (messages.length > 0) {
         logger.info({ count: messages.length }, 'New messages');
@@ -863,12 +958,21 @@ async function startMessageLoop(): Promise<void> {
             saveState();
             // Show typing indicator while the container processes the piped message
             const typingCh = findChannel(channels, chatJid);
-            if (typingCh?.setTyping) typingCh.setTyping(chatJid, true).catch((err) =>
-              logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-            );
+            if (typingCh?.setTyping)
+              typingCh
+                .setTyping(chatJid, true)
+                .catch((err) =>
+                  logger.warn(
+                    { chatJid, err },
+                    'Failed to set typing indicator',
+                  ),
+                );
           } else {
             // No active container — enqueue for a new one
-            logger.info({ chatJid, count: messagesToSend.length }, 'No active container, enqueuing for new one');
+            logger.info(
+              { chatJid, count: messagesToSend.length },
+              'No active container, enqueuing for new one',
+            );
             queue.enqueueMessageCheck(chatJid);
           }
         }
@@ -934,7 +1038,10 @@ function buildAgentRegistry(): void {
         description: group.description || '',
         backend: group.backend || 'apple-container',
         isMain: group.folder === MAIN_GROUP_FOLDER,
-        isLocal: !group.backend || group.backend === 'apple-container' || group.backend === 'docker',
+        isLocal:
+          !group.backend ||
+          group.backend === 'apple-container' ||
+          group.backend === 'docker',
         trigger: group.trigger,
       });
     }
@@ -954,7 +1061,10 @@ function buildAgentRegistry(): void {
   for (const folder of folders) {
     const groupIpcDir = path.join(DATA_DIR, 'ipc', folder);
     fs.mkdirSync(groupIpcDir, { recursive: true });
-    fs.writeFileSync(path.join(groupIpcDir, 'agent_registry.json'), registryJson);
+    fs.writeFileSync(
+      path.join(groupIpcDir, 'agent_registry.json'),
+      registryJson,
+    );
   }
 }
 
@@ -962,7 +1072,11 @@ function buildAgentRegistry(): void {
  * Handle share-request approval via reaction emoji.
  * Returns true if the reaction was consumed (was a tracked share request).
  */
-function handleShareRequestApproval(messageId: string, emoji: string, channelName: string): boolean {
+function handleShareRequestApproval(
+  messageId: string,
+  emoji: string,
+  channelName: string,
+): boolean {
   const request = consumeShareRequest(messageId);
   if (!request) return false;
 
@@ -970,7 +1084,12 @@ function handleShareRequestApproval(messageId: string, emoji: string, channelNam
   if (!mainJid) return false;
 
   logger.info(
-    { messageId, emoji, sourceGroup: request.sourceGroup, sourceName: request.sourceName },
+    {
+      messageId,
+      emoji,
+      sourceGroup: request.sourceGroup,
+      sourceName: request.sourceName,
+    },
     `Share request approved via ${channelName} reaction`,
   );
 
@@ -1031,7 +1150,10 @@ async function handleReactionNotification(
     is_from_me: false,
   };
 
-  const piped = await queue.sendMessage(chatJid, formatMessages([reactionMessage]));
+  const piped = await queue.sendMessage(
+    chatJid,
+    formatMessages([reactionMessage]),
+  );
   if (!piped) {
     storeMessage(reactionMessage);
     queue.enqueueMessageCheck(chatJid);
@@ -1071,29 +1193,39 @@ async function main(): Promise<void> {
   // --- Parallel startup: backends + channels concurrently ---
   const startupT0 = Date.now();
 
-  const initBackends = Effect.promise(() => initializeBackends(registeredGroups));
+  const initBackends = Effect.promise(() =>
+    initializeBackends(registeredGroups),
+  );
 
   const WHATSAPP_RETRY_INTERVAL_MS = 60_000; // 1 minute between retries
   const WHATSAPP_MAX_RETRIES = 30; // give up after ~30 minutes
 
-  const createWhatsAppChannel = () => new WhatsAppChannel({
-    onMessage: (chatJid, msg) => storeMessage(msg),
-    onChatMetadata: (chatJid, timestamp) => storeChatMetadata(chatJid, timestamp),
-    registeredGroups: () => registeredGroups,
-    onReaction: (chatJid, messageId, emoji) => {
-      if (!emoji.startsWith('👍') && emoji !== '❤️' && emoji !== '✅') return;
-      handleShareRequestApproval(messageId, emoji, 'WhatsApp');
-    },
-  });
+  const createWhatsAppChannel = () =>
+    new WhatsAppChannel({
+      onMessage: (chatJid, msg) => storeMessage(msg),
+      onChatMetadata: (chatJid, timestamp) =>
+        storeChatMetadata(chatJid, timestamp),
+      registeredGroups: () => registeredGroups,
+      onReaction: (chatJid, messageId, emoji) => {
+        if (!emoji.startsWith('👍') && emoji !== '❤️' && emoji !== '✅') return;
+        handleShareRequestApproval(messageId, emoji, 'WhatsApp');
+      },
+    });
 
   /** Retry WhatsApp connection in the background with backoff */
   const scheduleWhatsAppRetry = (attempt = 1) => {
     if (attempt > WHATSAPP_MAX_RETRIES) {
-      logger.error({ attempts: attempt - 1 }, 'WhatsApp retry limit reached — giving up. Restart the service to try again.');
+      logger.error(
+        { attempts: attempt - 1 },
+        'WhatsApp retry limit reached — giving up. Restart the service to try again.',
+      );
       return;
     }
     const delayMs = Math.min(WHATSAPP_RETRY_INTERVAL_MS * attempt, 5 * 60_000); // cap at 5 min
-    logger.info({ attempt, delayMs, maxRetries: WHATSAPP_MAX_RETRIES }, `Scheduling WhatsApp reconnect in ${Math.round(delayMs / 1000)}s`);
+    logger.info(
+      { attempt, delayMs, maxRetries: WHATSAPP_MAX_RETRIES },
+      `Scheduling WhatsApp reconnect in ${Math.round(delayMs / 1000)}s`,
+    );
     setTimeout(async () => {
       try {
         const wa = createWhatsAppChannel();
@@ -1112,11 +1244,16 @@ async function main(): Promise<void> {
     const wa = createWhatsAppChannel();
     yield* Effect.tryPromise(() => wa.connect());
     return wa;
-  }).pipe(Effect.catchAll((err) => {
-    logger.error({ err }, 'Failed to connect WhatsApp (continuing without WhatsApp)');
-    scheduleWhatsAppRetry();
-    return Effect.succeed(null);
-  }));
+  }).pipe(
+    Effect.catchAll((err) => {
+      logger.error(
+        { err },
+        'Failed to connect WhatsApp (continuing without WhatsApp)',
+      );
+      scheduleWhatsAppRetry();
+      return Effect.succeed(null);
+    }),
+  );
 
   const connectDiscord = DISCORD_BOT_TOKEN
     ? Effect.gen(function* () {
@@ -1124,37 +1261,58 @@ async function main(): Promise<void> {
           token: DISCORD_BOT_TOKEN,
           onReaction: async (chatJid, messageId, emoji, userName) => {
             if (emoji.startsWith('👍') || emoji === '❤️' || emoji === '✅') {
-              if (handleShareRequestApproval(messageId, emoji, 'Discord')) return;
+              if (handleShareRequestApproval(messageId, emoji, 'Discord'))
+                return;
             }
-            await handleReactionNotification(chatJid, messageId, emoji, userName, 'Discord');
+            await handleReactionNotification(
+              chatJid,
+              messageId,
+              emoji,
+              userName,
+              'Discord',
+            );
           },
         });
         yield* Effect.tryPromise(() => discord.connect());
         yield* Effect.tryPromise(() => backfillDiscordGuildIds(discord));
         return discord as Channel;
-      }).pipe(Effect.catchAll((err) => {
-        logger.error({ err }, 'Failed to connect Discord bot (continuing without Discord)');
-        return Effect.succeed(null);
-      }))
+      }).pipe(
+        Effect.catchAll((err) => {
+          logger.error(
+            { err },
+            'Failed to connect Discord bot (continuing without Discord)',
+          );
+          return Effect.succeed(null);
+        }),
+      )
     : Effect.succeed(null);
 
   const connectTelegram = TELEGRAM_BOT_TOKEN
     ? Effect.gen(function* () {
         const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, {
           onMessage: (chatJid, msg) => storeMessage(msg),
-          onChatMetadata: (chatJid, timestamp, name) => storeChatMetadata(chatJid, timestamp, name),
+          onChatMetadata: (chatJid, timestamp, name) =>
+            storeChatMetadata(chatJid, timestamp, name),
           registeredGroups: () => registeredGroups,
         });
         yield* Effect.tryPromise(() => telegram.connect());
         return telegram as Channel;
-      }).pipe(Effect.catchAll((err) => {
-        logger.error({ err }, 'Failed to connect Telegram bot (continuing without Telegram)');
-        return Effect.succeed(null);
-      }))
+      }).pipe(
+        Effect.catchAll((err) => {
+          logger.error(
+            { err },
+            'Failed to connect Telegram bot (continuing without Telegram)',
+          );
+          return Effect.succeed(null);
+        }),
+      )
     : Effect.succeed(null);
 
   const [, wa, discord, telegram] = await Effect.runPromise(
-    Effect.all([initBackends, connectWhatsApp, connectDiscord, connectTelegram], { concurrency: 'unbounded' }),
+    Effect.all(
+      [initBackends, connectWhatsApp, connectDiscord, connectTelegram],
+      { concurrency: 'unbounded' },
+    ),
   );
 
   whatsapp = wa;
@@ -1162,7 +1320,14 @@ async function main(): Promise<void> {
   if (discord) channels.push(discord);
   if (telegram) channels.push(telegram);
 
-  logger.info({ op: 'startup', durationMs: Date.now() - startupT0, channelCount: channels.length }, 'Startup complete');
+  logger.info(
+    {
+      op: 'startup',
+      durationMs: Date.now() - startupT0,
+      channelCount: channels.length,
+    },
+    'Startup complete',
+  );
 
   // Conditionally connect Slack (requires both bot token and app-level socket-mode token)
   if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
@@ -1171,19 +1336,34 @@ async function main(): Promise<void> {
         token: SLACK_BOT_TOKEN,
         appToken: SLACK_APP_TOKEN,
         onMessage: (chatJid, msg) => storeMessage(msg),
-        onChatMetadata: (chatJid, timestamp, name) => storeChatMetadata(chatJid, timestamp, name),
+        onChatMetadata: (chatJid, timestamp, name) =>
+          storeChatMetadata(chatJid, timestamp, name),
         registeredGroups: () => registeredGroups,
         onReaction: async (chatJid, messageId, emoji, userName) => {
-          if (emoji === ':thumbsup:' || emoji === ':+1:' || emoji === ':heart:' || emoji === ':white_check_mark:') {
+          if (
+            emoji === ':thumbsup:' ||
+            emoji === ':+1:' ||
+            emoji === ':heart:' ||
+            emoji === ':white_check_mark:'
+          ) {
             if (handleShareRequestApproval(messageId, emoji, 'Slack')) return;
           }
-          await handleReactionNotification(chatJid, messageId, emoji, userName, 'Slack');
+          await handleReactionNotification(
+            chatJid,
+            messageId,
+            emoji,
+            userName,
+            'Slack',
+          );
         },
       });
       await slack.connect();
       channels.push(slack);
     } catch (err) {
-      logger.error({ err }, 'Failed to connect Slack bot (continuing without Slack)');
+      logger.error(
+        { err },
+        'Failed to connect Slack bot (continuing without Slack)',
+      );
     }
   }
 
@@ -1196,7 +1376,15 @@ async function main(): Promise<void> {
     getSessions: () => sessions,
     getResumePositions: () => resumePositions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder, lane) => queue.registerProcess(groupJid, proc, containerName, groupFolder, undefined, lane),
+    onProcess: (groupJid, proc, containerName, groupFolder, lane) =>
+      queue.registerProcess(
+        groupJid,
+        proc,
+        containerName,
+        groupFolder,
+        undefined,
+        lane,
+      ),
     sendMessage: async (jid, rawText) => {
       const ch = findChannel(channels, jid);
       if (!ch) {
@@ -1204,7 +1392,11 @@ async function main(): Promise<void> {
         return;
       }
       const group = registeredGroups[jid];
-      const text = formatOutbound(ch, rawText, group ? getAgentName(group) : undefined);
+      const text = formatOutbound(
+        ch,
+        rawText,
+        group ? getAgentName(group) : undefined,
+      );
       if (text) {
         const msgId = await ch.sendMessage(jid, text);
         return msgId ? String(msgId) : undefined;
@@ -1220,7 +1412,11 @@ async function main(): Promise<void> {
         return;
       }
       const group = registeredGroups[jid];
-      const text = formatOutbound(ch, rawText, group ? getAgentName(group) : undefined);
+      const text = formatOutbound(
+        ch,
+        rawText,
+        group ? getAgentName(group) : undefined,
+      );
       if (text) return await ch.sendMessage(jid, text);
     },
     notifyGroup: (jid, text) => {
@@ -1244,12 +1440,18 @@ async function main(): Promise<void> {
       registeredGroups[jid] = group;
       setRegisteredGroup(jid, group);
     },
-    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: (force) =>
+      whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    writeGroupsSnapshot: (gf, im, ag, rj) =>
+      writeGroupsSnapshot(gf, im, ag, rj),
     findChannel: (jid) => findChannel(channels, jid),
     writeTasksSnapshot: (groupFolder, isMainGroup) => {
-      writeTasksSnapshot(groupFolder, isMainGroup, mapTasksForSnapshot(getAllTasks()));
+      writeTasksSnapshot(
+        groupFolder,
+        isMainGroup,
+        mapTasksForSnapshot(getAllTasks()),
+      );
     },
   });
 
@@ -1264,7 +1466,8 @@ async function main(): Promise<void> {
 // Guard: only run when executed directly, not when imported by tests
 const isDirectRun =
   process.argv[1] &&
-  new URL(import.meta.url).pathname === new URL(`file://${process.argv[1]}`).pathname;
+  new URL(import.meta.url).pathname ===
+    new URL(`file://${process.argv[1]}`).pathname;
 
 if (isDirectRun) {
   main().catch((err) => {

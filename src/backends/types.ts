@@ -3,7 +3,12 @@
  * Defines the AgentBackend interface that all backends implement.
  */
 
-import { Agent, type BackendType, ContainerProcess, RegisteredGroup } from '../types.js';
+import {
+  Agent,
+  type BackendType,
+  ContainerProcess,
+  RegisteredGroup,
+} from '../types.js';
 
 export type { BackendType };
 
@@ -29,7 +34,9 @@ export function isAgent(entity: AgentOrGroup): entity is Agent {
 }
 
 /** Get containerConfig from either type. */
-export function getContainerConfig(entity: AgentOrGroup): RegisteredGroup['containerConfig'] {
+export function getContainerConfig(
+  entity: AgentOrGroup,
+): RegisteredGroup['containerConfig'] {
   return entity.containerConfig;
 }
 
@@ -101,7 +108,11 @@ export interface AgentBackend {
 
   /** Send a follow-up message to an active agent via IPC. Returns true if sent.
    *  opts.chatJid is included so the container can route responses to the correct channel. */
-  sendMessage(groupFolder: string, text: string, opts?: { chatJid?: string }): boolean;
+  sendMessage(
+    groupFolder: string,
+    text: string,
+    opts?: { chatJid?: string },
+  ): boolean;
 
   /** Signal an active agent to wind down. Optional inputSubdir for task lane isolation. */
   closeStdin(groupFolder: string, inputSubdir?: string): void;
@@ -113,7 +124,11 @@ export interface AgentBackend {
   readFile(groupFolder: string, relativePath: string): Promise<Buffer | null>;
 
   /** Write a file to a group's workspace. Path is relative to /workspace/group/. */
-  writeFile(groupFolder: string, relativePath: string, content: Buffer | string): Promise<void>;
+  writeFile(
+    groupFolder: string,
+    relativePath: string,
+    content: Buffer | string,
+  ): Promise<void>;
 
   /** Initialize the backend (called once at startup). */
   initialize(): Promise<void>;

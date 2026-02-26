@@ -37,13 +37,13 @@ export interface ContainerProcess {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
-  memory?: number;  // Container memory in MB. Default: 4096
+  memory?: number; // Container memory in MB. Default: 4096
   networkMode?: 'full' | 'none'; // Default: 'none' for non-main, 'full' for main
 }
 
 export interface HeartbeatConfig {
   enabled: boolean;
-  interval: string;        // cron expression or ms interval
+  interval: string; // cron expression or ms interval
   scheduleType: 'cron' | 'interval';
 }
 
@@ -59,10 +59,10 @@ export interface RegisteredGroup {
   autoRespondToQuestions?: boolean; // Respond to messages ending with '?' (default: false)
   autoRespondKeywords?: string[]; // Keywords that trigger response without mention (e.g., ["omni", "help"])
   heartbeat?: HeartbeatConfig;
-  discordGuildId?: string;  // Discord guild/server ID (for server-level context)
-  serverFolder?: string;    // e.g., "servers/omniaura-discord" (shared across channels in same server)
-  backend?: BackendType;     // Which backend runs this group's agent (default: apple-container)
-  description?: string;      // What this agent does (for agent registry)
+  discordGuildId?: string; // Discord guild/server ID (for server-level context)
+  serverFolder?: string; // e.g., "servers/omniaura-discord" (shared across channels in same server)
+  backend?: BackendType; // Which backend runs this group's agent (default: apple-container)
+  description?: string; // What this agent does (for agent registry)
   streamIntermediates?: boolean; // Stream intermediate output (thinking, tool calls) to channel threads. Default: false
 }
 
@@ -113,7 +113,11 @@ export interface TaskRunLog {
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string, replyToMessageId?: string): Promise<string | void>;
+  sendMessage(
+    jid: string,
+    text: string,
+    replyToMessageId?: string,
+  ): Promise<string | void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
@@ -138,7 +142,11 @@ export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 // Callback for chat metadata discovery.
 // name is optional — channels that deliver names inline (Telegram) pass it here;
 // channels that sync names separately (WhatsApp syncGroupMetadata) omit it.
-export type OnChatMetadata = (chatJid: string, timestamp: string, name?: string) => void;
+export type OnChatMetadata = (
+  chatJid: string,
+  timestamp: string,
+  name?: string,
+) => void;
 
 // --- Agent-Channel Decoupling ---
 
@@ -147,16 +155,16 @@ export type OnChatMetadata = (chatJid: string, timestamp: string, name?: string)
  * Replaces RegisteredGroup as the primary routing unit.
  */
 export interface Agent {
-  id: string;                    // "main", "omniaura-discord"
+  id: string; // "main", "omniaura-discord"
   name: string;
   description?: string;
-  folder: string;                // Workspace folder (= id for backwards compat)
+  folder: string; // Workspace folder (= id for backwards compat)
   backend: BackendType;
   containerConfig?: ContainerConfig;
   heartbeat?: HeartbeatConfig;
-  isAdmin: boolean;              // Local agent = true (can approve tasks, access local FS)
-  isLocal: boolean;              // Runs on local machine (Apple Container)
-  serverFolder?: string;         // Shared server context (e.g., "servers/omniaura-discord")
+  isAdmin: boolean; // Local agent = true (can approve tasks, access local FS)
+  isLocal: boolean; // Runs on local machine (Apple Container)
+  serverFolder?: string; // Shared server context (e.g., "servers/omniaura-discord")
   createdAt: string;
 }
 
@@ -165,8 +173,8 @@ export interface Agent {
  * Multiple channels can route to the same agent.
  */
 export interface ChannelRoute {
-  channelJid: string;            // "dc:123", "tg:-100...", "123@g.us"
-  agentId: string;               // FK to Agent.id
+  channelJid: string; // "dc:123", "tg:-100...", "123@g.us"
+  agentId: string; // FK to Agent.id
   trigger: string;
   requiresTrigger: boolean;
   discordGuildId?: string;
@@ -176,7 +184,10 @@ export interface ChannelRoute {
 /**
  * Convert a RegisteredGroup + JID into an Agent (for migration).
  */
-export function registeredGroupToAgent(jid: string, group: RegisteredGroup): Agent {
+export function registeredGroupToAgent(
+  jid: string,
+  group: RegisteredGroup,
+): Agent {
   const isMainGroup = group.folder === 'main';
   const backendType = group.backend || 'apple-container';
   return {
@@ -197,7 +208,10 @@ export function registeredGroupToAgent(jid: string, group: RegisteredGroup): Age
 /**
  * Convert a RegisteredGroup + JID into a ChannelRoute (for migration).
  */
-export function registeredGroupToRoute(jid: string, group: RegisteredGroup): ChannelRoute {
+export function registeredGroupToRoute(
+  jid: string,
+  group: RegisteredGroup,
+): ChannelRoute {
   return {
     channelJid: jid,
     agentId: group.folder,

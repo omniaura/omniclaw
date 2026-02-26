@@ -153,8 +153,12 @@ describe('TRIGGER_PATTERN', () => {
   });
 
   it('is case insensitive', () => {
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME.toLowerCase()} hello`)).toBe(true);
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME.toUpperCase()} hello`)).toBe(true);
+    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME.toLowerCase()} hello`)).toBe(
+      true,
+    );
+    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME.toUpperCase()} hello`)).toBe(
+      true,
+    );
   });
 
   it('does not match in the middle of a message', () => {

@@ -125,7 +125,11 @@ describe('processTaskIpc: configure_heartbeat', () => {
     // First enable it
     groups['other@g.us'] = {
       ...OTHER_GROUP,
-      heartbeat: { enabled: true, interval: '1800000', scheduleType: 'interval' },
+      heartbeat: {
+        enabled: true,
+        interval: '1800000',
+        scheduleType: 'interval',
+      },
     };
 
     await processTaskIpc(
@@ -382,7 +386,9 @@ describe('processTaskIpc: delegate_task', () => {
     expect(sentMessages[0].jid).toBe('main@g.us');
     expect(sentMessages[0].text).toContain('Task Request');
     expect(sentMessages[0].text).toContain('Other');
-    expect(sentMessages[0].text).toContain('Please run git pull on the main repo');
+    expect(sentMessages[0].text).toContain(
+      'Please run git pull on the main repo',
+    );
   });
 
   it('includes files info when provided', async () => {
@@ -512,12 +518,7 @@ describe('processTaskIpc: unknown type', () => {
 
 describe('processTaskIpc: refresh_groups', () => {
   it('main group can trigger refresh', async () => {
-    await processTaskIpc(
-      { type: 'refresh_groups' },
-      'main',
-      true,
-      deps,
-    );
+    await processTaskIpc({ type: 'refresh_groups' }, 'main', true, deps);
 
     expect(syncCalled).toBe(true);
   });
@@ -749,7 +750,12 @@ describe('Agent CRUD', () => {
 
   it('getAllAgents returns all agents', () => {
     setAgent(testAgent);
-    setAgent({ ...testAgent, id: 'agent-2', name: 'Second Agent', folder: 'second-folder' });
+    setAgent({
+      ...testAgent,
+      id: 'agent-2',
+      name: 'Second Agent',
+      folder: 'second-folder',
+    });
     const agents = getAllAgents();
     expect(Object.keys(agents)).toHaveLength(2);
     expect(agents['agent-1'].name).toBe('Test Agent');
@@ -766,7 +772,11 @@ describe('Agent CRUD', () => {
   it('stores and retrieves agent with heartbeat config', () => {
     setAgent({
       ...testAgent,
-      heartbeat: { enabled: true, interval: '3600000', scheduleType: 'interval' },
+      heartbeat: {
+        enabled: true,
+        interval: '3600000',
+        scheduleType: 'interval',
+      },
     });
     const agent = getAgent('agent-1');
     expect(agent!.heartbeat).toBeDefined();
@@ -830,15 +840,27 @@ describe('ChannelRoute CRUD', () => {
 
   it('getAllChannelRoutes returns all routes', () => {
     setChannelRoute(testRoute);
-    setChannelRoute({ ...testRoute, channelJid: 'channel2@g.us', agentId: 'agent-2' });
+    setChannelRoute({
+      ...testRoute,
+      channelJid: 'channel2@g.us',
+      agentId: 'agent-2',
+    });
     const routes = getAllChannelRoutes();
     expect(Object.keys(routes)).toHaveLength(2);
   });
 
   it('getRoutesForAgent returns routes for a specific agent', () => {
     setChannelRoute(testRoute);
-    setChannelRoute({ ...testRoute, channelJid: 'channel2@g.us', agentId: 'agent-1' });
-    setChannelRoute({ ...testRoute, channelJid: 'channel3@g.us', agentId: 'agent-2' });
+    setChannelRoute({
+      ...testRoute,
+      channelJid: 'channel2@g.us',
+      agentId: 'agent-1',
+    });
+    setChannelRoute({
+      ...testRoute,
+      channelJid: 'channel3@g.us',
+      agentId: 'agent-2',
+    });
 
     const routes = getRoutesForAgent('agent-1');
     expect(routes).toHaveLength(2);
@@ -936,7 +958,9 @@ describe('splitMessage', () => {
     const chunks = splitMessage(text, 100, true);
     const reconstructed = chunks.join(' ');
     // Due to split logic removing leading space/newline, we verify content preservation differently
-    expect(chunks.join('').length + chunks.length - 1).toBeGreaterThanOrEqual(text.length - chunks.length);
+    expect(chunks.join('').length + chunks.length - 1).toBeGreaterThanOrEqual(
+      text.length - chunks.length,
+    );
     // Every chunk should be non-empty
     for (const chunk of chunks) {
       expect(chunk.length).toBeGreaterThan(0);

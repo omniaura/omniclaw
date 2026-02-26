@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  mock,
+  spyOn,
+} from 'bun:test';
 
 import { createLogger, type Logger } from './logger.js';
 
@@ -41,7 +49,10 @@ describe('logger', () => {
     it('suppresses messages below the configured level', () => {
       // Non-TTY mode (JSON output) - force non-TTY for consistent testing
       const origTTY = process.stderr.isTTY;
-      Object.defineProperty(process.stderr, 'isTTY', { value: false, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: false,
+        configurable: true,
+      });
 
       const logger = createLogger({}, 'warn');
       logger.debug('should be suppressed');
@@ -51,12 +62,18 @@ describe('logger', () => {
       // But error/fatal are never suppressed
       expect(stderrOutput.length).toBe(0);
 
-      Object.defineProperty(process.stderr, 'isTTY', { value: origTTY, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: origTTY,
+        configurable: true,
+      });
     });
 
     it('passes messages at or above the configured level', () => {
       const origTTY = process.stderr.isTTY;
-      Object.defineProperty(process.stderr, 'isTTY', { value: false, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: false,
+        configurable: true,
+      });
 
       const logger = createLogger({}, 'warn');
       logger.warn('warning message');
@@ -66,12 +83,18 @@ describe('logger', () => {
       expect(parsed.level).toBe('warn');
       expect(parsed.msg).toBe('warning message');
 
-      Object.defineProperty(process.stderr, 'isTTY', { value: origTTY, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: origTTY,
+        configurable: true,
+      });
     });
 
     it('never suppresses error messages regardless of level', () => {
       const origTTY = process.stderr.isTTY;
-      Object.defineProperty(process.stderr, 'isTTY', { value: false, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: false,
+        configurable: true,
+      });
 
       const logger = createLogger({}, 'fatal');
       logger.error('critical error');
@@ -80,12 +103,18 @@ describe('logger', () => {
       const parsed = JSON.parse(stderrOutput[0]);
       expect(parsed.level).toBe('error');
 
-      Object.defineProperty(process.stderr, 'isTTY', { value: origTTY, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: origTTY,
+        configurable: true,
+      });
     });
 
     it('never suppresses fatal messages regardless of level', () => {
       const origTTY = process.stderr.isTTY;
-      Object.defineProperty(process.stderr, 'isTTY', { value: false, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: false,
+        configurable: true,
+      });
 
       const logger = createLogger({}, 'fatal');
       logger.fatal('system crash');
@@ -94,7 +123,10 @@ describe('logger', () => {
       const parsed = JSON.parse(stderrOutput[0]);
       expect(parsed.level).toBe('fatal');
 
-      Object.defineProperty(process.stderr, 'isTTY', { value: origTTY, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: origTTY,
+        configurable: true,
+      });
     });
   });
 
@@ -103,11 +135,17 @@ describe('logger', () => {
 
     beforeEach(() => {
       origTTY = process.stderr.isTTY;
-      Object.defineProperty(process.stderr, 'isTTY', { value: false, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: false,
+        configurable: true,
+      });
     });
 
     afterEach(() => {
-      Object.defineProperty(process.stderr, 'isTTY', { value: origTTY, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: origTTY,
+        configurable: true,
+      });
     });
 
     it('outputs valid JSON records', () => {
@@ -146,11 +184,17 @@ describe('logger', () => {
 
     beforeEach(() => {
       origTTY = process.stderr.isTTY;
-      Object.defineProperty(process.stderr, 'isTTY', { value: false, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: false,
+        configurable: true,
+      });
     });
 
     afterEach(() => {
-      Object.defineProperty(process.stderr, 'isTTY', { value: origTTY, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: origTTY,
+        configurable: true,
+      });
     });
 
     it('inherits parent defaults', () => {
@@ -190,11 +234,17 @@ describe('logger', () => {
 
     beforeEach(() => {
       origTTY = process.stderr.isTTY;
-      Object.defineProperty(process.stderr, 'isTTY', { value: false, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: false,
+        configurable: true,
+      });
     });
 
     afterEach(() => {
-      Object.defineProperty(process.stderr, 'isTTY', { value: origTTY, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: origTTY,
+        configurable: true,
+      });
     });
 
     it('flattens Error objects to message string', () => {
@@ -255,11 +305,17 @@ describe('logger', () => {
 
     beforeEach(() => {
       origTTY = process.stderr.isTTY;
-      Object.defineProperty(process.stderr, 'isTTY', { value: false, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: false,
+        configurable: true,
+      });
     });
 
     afterEach(() => {
-      Object.defineProperty(process.stderr, 'isTTY', { value: origTTY, configurable: true });
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: origTTY,
+        configurable: true,
+      });
     });
 
     it('supports logger.info("message") without fields', () => {
