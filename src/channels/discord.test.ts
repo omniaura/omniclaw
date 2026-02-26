@@ -37,22 +37,20 @@ describe('Discord jidToChannelId', () => {
 // --- DiscordChannel.ownsJid ---
 
 describe('DiscordChannel.ownsJid', () => {
-  // We can't instantiate DiscordChannel without a real token, but the method
-  // is simple enough to verify from the source: it checks jid.startsWith('dc:')
-  // So we test the pattern directly.
+  const channel = new DiscordChannel({ token: 'test-token-not-used' });
 
   it('matches dc: prefixed JIDs', () => {
-    expect('dc:123456'.startsWith('dc:')).toBe(true);
+    expect(channel.ownsJid('dc:123456')).toBe(true);
   });
 
   it('matches dc:dm: prefixed JIDs', () => {
-    expect('dc:dm:user123'.startsWith('dc:')).toBe(true);
+    expect(channel.ownsJid('dc:dm:user123')).toBe(true);
   });
 
   it('does not match non-Discord JIDs', () => {
-    expect('slack:C123'.startsWith('dc:')).toBe(false);
-    expect('tg:123'.startsWith('dc:')).toBe(false);
-    expect('main@g.us'.startsWith('dc:')).toBe(false);
+    expect(channel.ownsJid('slack:C123')).toBe(false);
+    expect(channel.ownsJid('tg:123')).toBe(false);
+    expect(channel.ownsJid('main@g.us')).toBe(false);
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 
-import { jidToChannelId, channelIdToJid } from './slack.js';
+import { jidToChannelId, channelIdToJid, SlackChannel } from './slack.js';
 
 // --- jidToChannelId ---
 
@@ -69,17 +69,20 @@ describe('Slack JID roundtrip', () => {
   });
 });
 
-// --- ownsJid pattern ---
+// --- SlackChannel.ownsJid ---
 
-describe('Slack ownsJid pattern', () => {
+describe('SlackChannel.ownsJid', () => {
+  const ownsJid = (jid: string) =>
+    SlackChannel.prototype.ownsJid.call({} as SlackChannel, jid);
+
   it('matches slack: prefixed JIDs', () => {
-    expect('slack:C123'.startsWith('slack:')).toBe(true);
-    expect('slack:D456'.startsWith('slack:')).toBe(true);
+    expect(ownsJid('slack:C123')).toBe(true);
+    expect(ownsJid('slack:D456')).toBe(true);
   });
 
   it('does not match non-Slack JIDs', () => {
-    expect('dc:123'.startsWith('slack:')).toBe(false);
-    expect('tg:456'.startsWith('slack:')).toBe(false);
-    expect('main@g.us'.startsWith('slack:')).toBe(false);
+    expect(ownsJid('dc:123')).toBe(false);
+    expect(ownsJid('tg:456')).toBe(false);
+    expect(ownsJid('main@g.us')).toBe(false);
   });
 });

@@ -3,6 +3,7 @@ import { describe, it, expect } from 'bun:test';
 import {
   isTelegramReactionEmoji,
   VALID_TELEGRAM_REACTIONS,
+  TelegramChannel,
 } from './telegram.js';
 
 // --- isTelegramReactionEmoji ---
@@ -130,7 +131,7 @@ describe('VALID_TELEGRAM_REACTIONS', () => {
   });
 
   it('contains common reaction emojis', () => {
-    const commonEmojis = ['👍', '👎', '❤', '🔥', '🎉', '💯', '🤔'];
+    const commonEmojis = ['👍', '👎', '❤', '🔥', '🎉', '💯', '🤔'] as const;
     for (const emoji of commonEmojis) {
       expect(VALID_TELEGRAM_REACTIONS).toContain(emoji);
     }
@@ -147,24 +148,27 @@ describe('VALID_TELEGRAM_REACTIONS', () => {
     }
   });
 
-  it('is frozen (readonly)', () => {
-    // The array is declared as readonly — attempting to push should be a type error.
-    // At runtime, readonly arrays in TS are regular arrays, so we verify the const assertion.
+  it('is an array (readonly at type level)', () => {
+    // The array is declared as `readonly` via `as const` — a compile-time guarantee.
+    // At runtime we can only verify it's an array.
     expect(Array.isArray(VALID_TELEGRAM_REACTIONS)).toBe(true);
   });
 });
 
-// --- TelegramChannel.ownsJid pattern ---
+// --- TelegramChannel.ownsJid ---
 
-describe('Telegram ownsJid pattern', () => {
+describe('TelegramChannel.ownsJid', () => {
+  const ownsJid = (jid: string) =>
+    TelegramChannel.prototype.ownsJid.call({} as TelegramChannel, jid);
+
   it('matches tg: prefixed JIDs', () => {
-    expect('tg:12345'.startsWith('tg:')).toBe(true);
-    expect('tg:-100123456789'.startsWith('tg:')).toBe(true);
+    expect(ownsJid('tg:12345')).toBe(true);
+    expect(ownsJid('tg:-100123456789')).toBe(true);
   });
 
   it('does not match non-Telegram JIDs', () => {
-    expect('dc:123'.startsWith('tg:')).toBe(false);
-    expect('slack:C123'.startsWith('tg:')).toBe(false);
-    expect('main@g.us'.startsWith('tg:')).toBe(false);
+    expect(ownsJid('dc:123')).toBe(false);
+    expect(ownsJid('slack:C123')).toBe(false);
+    expect(ownsJid('main@g.us')).toBe(false);
   });
 });
