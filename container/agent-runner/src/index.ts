@@ -902,6 +902,8 @@ async function runQuery(
       sessionId
     ) {
       log(`Session ${sessionId} appears stale (error_during_execution before init), will retry as fresh session`);
+      ipcPolling = false;
+      stream.end();
       return { newSessionId: undefined, lastAssistantUuid: undefined, closedDuringQuery, sessionStale: true };
     }
 
@@ -1045,33 +1047,27 @@ Please review these changes to understand your new capabilities and fixes.
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      let effectiveResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
 
       // Handle stale session: discard session state and retry as fresh [Upstream PR #503]
-      if (queryResult.sessionStale) {
+      if (effectiveResult.sessionStale) {
         log('Retrying query as fresh session (stale session discarded)');
         sessionId = undefined;
         resumeAt = undefined;
-        const freshResult = await runQuery(prompt, undefined, mcpServerPath, containerInput, sdkEnv, undefined);
-        if (freshResult.newSessionId) sessionId = freshResult.newSessionId;
-        if (freshResult.lastAssistantUuid) resumeAt = freshResult.lastAssistantUuid;
-        if (freshResult.closedDuringQuery) {
-          log('Close sentinel consumed during fresh retry, exiting');
-          break;
-        }
-      } else {
-        if (queryResult.newSessionId) {
-          sessionId = queryResult.newSessionId;
-        }
-        if (queryResult.lastAssistantUuid) {
-          resumeAt = queryResult.lastAssistantUuid;
-        }
+        effectiveResult = await runQuery(prompt, undefined, mcpServerPath, containerInput, sdkEnv, undefined);
+      }
+
+      if (effectiveResult.newSessionId) {
+        sessionId = effectiveResult.newSessionId;
+      }
+      if (effectiveResult.lastAssistantUuid) {
+        resumeAt = effectiveResult.lastAssistantUuid;
       }
 
       // If _close was consumed during the query, exit immediately.
       // Don't emit a session-update marker (it would reset the host's
       // idle timer and cause a 30-min delay before the next _close).
-      if (queryResult.closedDuringQuery) {
+      if (effectiveResult.closedDuringQuery) {
         log('Close sentinel consumed during query, exiting');
         break;
       }
