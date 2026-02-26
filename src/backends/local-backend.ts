@@ -339,10 +339,20 @@ function buildVolumeMounts(
   return mounts;
 }
 
-function buildContainerArgs(
-  mounts: VolumeMount[],
-  containerName: string,
-): string[] {
+interface ContainerArgsOpts {
+  mounts: VolumeMount[];
+  containerName: string;
+  isMain: boolean;
+  networkMode?: 'full' | 'none';
+}
+
+/** @internal Exported for testing */
+export function buildContainerArgs({
+  mounts,
+  containerName,
+  isMain,
+  networkMode,
+}: ContainerArgsOpts): string[] {
   const isDocker = LOCAL_RUNTIME === 'docker';
   const args: string[] = [
     'run',
@@ -357,6 +367,14 @@ function buildContainerArgs(
   if (isDocker) {
     args.push('--pids-limit', '256');
     args.push('--security-opt', 'no-new-privileges:true');
+
+    // Network isolation: non-main containers have no network access by default.
+    // Main containers retain full network (needed for WebFetch/WebSearch).
+    // Per-group override via containerConfig.networkMode.
+    const effectiveNetwork = networkMode ?? (isMain ? 'full' : 'none');
+    if (effectiveNetwork === 'none') {
+      args.push('--network', 'none');
+    }
   }
 
   // Pass host timezone so container's local time matches the user's
@@ -411,7 +429,12 @@ export class LocalBackend implements AgentBackend {
     );
     const safeName = folder.replace(/[^a-zA-Z0-9-]/g, '-');
     const containerName = `omniclaw-${safeName}-${Date.now()}`;
-    const containerArgs = buildContainerArgs(mounts, containerName);
+    const containerArgs = buildContainerArgs({
+      mounts,
+      containerName,
+      isMain: input.isMain,
+      networkMode: containerCfg?.networkMode,
+    });
     const configTimeout = containerCfg?.timeout || CONTAINER_TIMEOUT;
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
