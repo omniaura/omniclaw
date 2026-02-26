@@ -850,6 +850,9 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
     lastMessageId && /^(synth|react|notify)-/.test(lastMessageId)
       ? null
       : lastMessageId;
+  // Use reply threading only for the first outbound message in this run.
+  // Subsequent outputs should not keep replying to the original trigger.
+  let replyAnchorMessageId: string | null = triggeringMessageId;
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
   const threadName =
     lastContent.replace(TRIGGER_PATTERN, '').trim().slice(0, 80) ||
@@ -927,12 +930,13 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
                 if (formatted) {
                   // Don't use triggeringMessageId for cross-channel responses — it belongs to the original chat
                   const replyId =
-                    targetJid === chatJid ? triggeringMessageId : null;
+                    targetJid === chatJid ? replyAnchorMessageId : null;
                   await targetChannel.sendMessage(
                     targetJid,
                     formatted,
                     replyId || undefined,
                   );
+                  if (replyAnchorMessageId) replyAnchorMessageId = null;
                   outputSentToUser = true;
                   // Stop typing refresh — prevents the 8s interval from
                   // re-triggering typing AFTER the response is visible.
