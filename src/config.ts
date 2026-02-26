@@ -82,6 +82,16 @@ export function buildTriggerPattern(trigger?: string): RegExp {
 // Allow overriding the Anthropic model (e.g. switch to cheaper model)
 export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || undefined;
 
+// Log cleanup
+export const LOG_CLEANUP_INTERVAL = parseInt(
+  process.env.LOG_CLEANUP_INTERVAL || '3600000',
+  10,
+); // 1 hour
+export const LOG_MAX_TOTAL_SIZE = parseInt(
+  process.env.LOG_MAX_TOTAL_SIZE || '209715200',
+  10,
+); // 200MB — delete oldest logs when total exceeds this
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =

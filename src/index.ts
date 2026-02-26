@@ -56,6 +56,7 @@ import { resolveAgentForChannel, buildAgentToChannelsMap } from './channel-route
 import { GroupQueue } from './group-queue.js';
 import { consumeShareRequest, startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound, getAgentName } from './router.js';
+import { startLogCleanupLoop } from './log-cleanup.js';
 import { reconcileHeartbeats, startSchedulerLoop } from './task-scheduler.js';
 import { createThreadStreamer } from './thread-streaming.js';
 import { Agent, BackendType, Channel, ChannelRoute, NewMessage, RegisteredGroup, registeredGroupToAgent, registeredGroupToRoute } from './types.js';
@@ -1161,6 +1162,8 @@ async function main(): Promise<void> {
   if (telegram) channels.push(telegram);
 
   logger.info({ op: 'startup', durationMs: Date.now() - startupT0, channelCount: channels.length }, 'Startup complete');
+
+  startLogCleanupLoop(path.resolve(process.cwd(), 'logs'));
 
   // Conditionally connect Slack (requires both bot token and app-level socket-mode token)
   if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
