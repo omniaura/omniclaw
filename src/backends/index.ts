@@ -6,6 +6,12 @@
 import { logger } from '../logger.js';
 import { Agent, RegisteredGroup } from '../types.js';
 import { LocalBackend } from './local-backend.js';
+import {
+  AgentBackend,
+  AgentOrGroup,
+  BackendType,
+  getBackendType,
+} from './types.js';
 
 const DEFAULT_BACKEND: BackendType = 'apple-container';
 
