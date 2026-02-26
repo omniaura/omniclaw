@@ -847,8 +847,10 @@ async function startMessageLoop(): Promise<void> {
             chatJid,
             lastAgentTimestamp[chatJid] || '',
           );
-          const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
+          // If no new messages after cursor, skip — falling back to
+          // groupMessages would re-send already-processed messages.
+          if (allPending.length === 0) continue;
+          const messagesToSend = allPending;
           const formatted = formatMessages(messagesToSend);
 
           if (await queue.sendMessage(chatJid, formatted)) {

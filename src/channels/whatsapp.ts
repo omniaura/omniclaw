@@ -229,81 +229,85 @@ export class WhatsAppChannel implements Channel {
     // Store message handler for later removal
     this.messageHandler = async ({ messages }) => {
       for (const msg of messages) {
-        if (!msg.message) continue;
-        const rawJid = msg.key.remoteJid;
-        if (!rawJid || rawJid === 'status@broadcast') continue;
+        try {
+          if (!msg.message) continue;
+          const rawJid = msg.key.remoteJid;
+          if (!rawJid || rawJid === 'status@broadcast') continue;
 
-        // Skip echoes of our own sent messages (prevents self-chat loop)
-        if (msg.key.id && this.sentMessageIds.has(msg.key.id)) {
-          this.sentMessageIds.delete(msg.key.id);
-          continue;
-        }
-
-        // Translate LID JID to phone JID if applicable
-        const chatJid = await this.translateJid(rawJid);
-
-        const timestamp = new Date(
-          Number(msg.messageTimestamp) * 1000,
-        ).toISOString();
-
-        // Always notify about chat metadata for group discovery
-        this.opts.onChatMetadata(chatJid, timestamp);
-
-        // Only deliver full message for registered groups
-        const groups = this.opts.registeredGroups();
-        if (groups[chatJid]) {
-          // Cache raw message for outbound quoting
-          const msgId = msg.key.id || '';
-          if (msgId) {
-            this.messageCache.set(msgId, { msg, ts: Date.now() });
-            this.pruneMessageCache();
+          // Skip echoes of our own sent messages (prevents self-chat loop)
+          if (msg.key.id && this.sentMessageIds.has(msg.key.id)) {
+            this.sentMessageIds.delete(msg.key.id);
+            continue;
           }
 
-          let content =
-            msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
-            '';
+          // Translate LID JID to phone JID if applicable
+          const chatJid = await this.translateJid(rawJid);
 
-          // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          if (!content) continue;
+          const timestamp = new Date(
+            Number(msg.messageTimestamp) * 1000,
+          ).toISOString();
 
-          const sender = msg.key.participant || msg.key.remoteJid || '';
-          const senderName = msg.pushName || sender.split('@')[0];
+          // Always notify about chat metadata for group discovery
+          this.opts.onChatMetadata(chatJid, timestamp);
 
-          // Prepend reply context so the agent knows what's being replied to
-          const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
-          if (contextInfo?.quotedMessage || contextInfo?.stanzaId) {
-            const qm = contextInfo.quotedMessage;
-            let quotedText = qm?.conversation
-              || qm?.extendedTextMessage?.text
-              || qm?.imageMessage?.caption
-              || qm?.videoMessage?.caption
-              || '';
-            // Self-chat: WhatsApp strips quoted body to "". Fall back to our sent message cache.
-            if (!quotedText && contextInfo.stanzaId) {
-              quotedText = this.sentMessageTexts.get(contextInfo.stanzaId) || '';
+          // Only deliver full message for registered groups
+          const groups = this.opts.registeredGroups();
+          if (groups[chatJid]) {
+            // Cache raw message for outbound quoting
+            const msgId = msg.key.id || '';
+            if (msgId) {
+              this.messageCache.set(msgId, { msg, ts: Date.now() });
+              this.pruneMessageCache();
             }
-            if (quotedText) {
-              const truncated = quotedText.length > 200 ? quotedText.slice(0, 200) + '…' : quotedText;
-              const quotedSender = contextInfo.participant?.split('@')[0] || 'someone';
-              content = `[Replying to ${quotedSender}: "${truncated}"]\n${content}`;
+
+            let content =
+              msg.message?.conversation ||
+              msg.message?.extendedTextMessage?.text ||
+              msg.message?.imageMessage?.caption ||
+              msg.message?.videoMessage?.caption ||
+              '';
+
+            // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
+            if (!content) continue;
+
+            const sender = msg.key.participant || msg.key.remoteJid || '';
+            const senderName = msg.pushName || sender.split('@')[0];
+
+            // Prepend reply context so the agent knows what's being replied to
+            const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
+            if (contextInfo?.quotedMessage || contextInfo?.stanzaId) {
+              const qm = contextInfo.quotedMessage;
+              let quotedText = qm?.conversation
+                || qm?.extendedTextMessage?.text
+                || qm?.imageMessage?.caption
+                || qm?.videoMessage?.caption
+                || '';
+              // Self-chat: WhatsApp strips quoted body to "". Fall back to our sent message cache.
+              if (!quotedText && contextInfo.stanzaId) {
+                quotedText = this.sentMessageTexts.get(contextInfo.stanzaId) || '';
+              }
+              if (quotedText) {
+                const truncated = quotedText.length > 200 ? quotedText.slice(0, 200) + '…' : quotedText;
+                const quotedSender = contextInfo.participant?.split('@')[0] || 'someone';
+                content = `[Replying to ${quotedSender}: "${truncated}"]\n${content}`;
+              }
             }
+
+            this.opts.onMessage(chatJid, {
+              id: msgId,
+              chat_jid: chatJid,
+              sender,
+              sender_name: senderName,
+              content,
+              timestamp,
+              // Always false here: bot echoes were already filtered by sentMessageIds above.
+              // WhatsApp's fromMe is true for ALL self-chat messages (protocol quirk),
+              // which would cause the DB query to drop real user messages.
+              is_from_me: false,
+            });
           }
-
-          this.opts.onMessage(chatJid, {
-            id: msgId,
-            chat_jid: chatJid,
-            sender,
-            sender_name: senderName,
-            content,
-            timestamp,
-            // Always false here: bot echoes were already filtered by sentMessageIds above.
-            // WhatsApp's fromMe is true for ALL self-chat messages (protocol quirk),
-            // which would cause the DB query to drop real user messages.
-            is_from_me: false,
-          });
+        } catch (err) {
+          logger.error({ err, msgId: msg.key?.id }, 'Error processing WhatsApp message');
         }
       }
     };
