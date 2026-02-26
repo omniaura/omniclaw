@@ -83,9 +83,7 @@ describe('Discord shouldAutoRespond', () => {
     it('trims content before checking for trailing ?', () => {
       const group = makeGroup({ autoRespondToQuestions: true });
       // content.trim().endsWith('?') — trailing whitespace is trimmed first
-      expect(channel.shouldAutoRespond('What time is it?  ', group)).toBe(
-        true,
-      );
+      expect(channel.shouldAutoRespond('What time is it?  ', group)).toBe(true);
       expect(channel.shouldAutoRespond('  What time is it?  ', group)).toBe(
         true,
       );
