@@ -164,7 +164,10 @@ function parseDispatchKey(key: string): {
   };
 }
 
-function getRuntimeGroupFolder(baseFolder: string, processKeyJid: string): string {
+function getRuntimeGroupFolder(
+  baseFolder: string,
+  processKeyJid: string,
+): string {
   const { agentId } = parseDispatchKey(processKeyJid);
   if (!agentId) return baseFolder;
   const digest = createHash('sha1')

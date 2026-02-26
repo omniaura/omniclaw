@@ -192,7 +192,11 @@ function buildVolumeMounts(
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const sessionsBase = path.join(DATA_DIR, 'sessions');
-  const groupSessionsDir = path.join(sessionsBase, runtimeFolderName, '.claude');
+  const groupSessionsDir = path.join(
+    sessionsBase,
+    runtimeFolderName,
+    '.claude',
+  );
   assertPathWithin(groupSessionsDir, sessionsBase, 'sessions directory');
 
   fs.mkdirSync(groupSessionsDir, { recursive: true });
@@ -238,7 +242,11 @@ function buildVolumeMounts(
   // to the same SQLite file and DB corruption.
   const hostOpenCodeDir = path.join(homeDir, '.local', 'share', 'opencode');
   if (fs.existsSync(hostOpenCodeDir)) {
-    const containerOcDir = path.join(DATA_DIR, 'opencode-data', runtimeFolderName);
+    const containerOcDir = path.join(
+      DATA_DIR,
+      'opencode-data',
+      runtimeFolderName,
+    );
     fs.mkdirSync(containerOcDir, { recursive: true });
     for (const authFile of ['auth.json', 'mcp-auth.json']) {
       const src = path.join(hostOpenCodeDir, authFile);
