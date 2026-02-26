@@ -857,7 +857,7 @@ describe('processTaskIpc: cancel_task', () => {
       deps,
     );
 
-    expect(getTaskById('task-cancel-1')).toBeUndefined();
+    expect(getTaskById('task-cancel-1')).toBeNull();
   });
 
   it('group can cancel its own task', async () => {
@@ -870,7 +870,7 @@ describe('processTaskIpc: cancel_task', () => {
       deps,
     );
 
-    expect(getTaskById('task-cancel-own')).toBeUndefined();
+    expect(getTaskById('task-cancel-own')).toBeNull();
   });
 
   it('non-main group cannot cancel another groups task', async () => {
