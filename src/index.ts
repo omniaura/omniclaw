@@ -52,10 +52,7 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
-import {
-  resolveAgentForChannel,
-  buildAgentToChannelsMap,
-} from './channel-routes.js';
+import { buildAgentToChannelsMap } from './channel-routes.js';
 import { GroupQueue } from './group-queue.js';
 import { consumeShareRequest, startIpcWatcher } from './ipc.js';
 import {
