@@ -251,9 +251,8 @@ Ask the user:
 > Provide your Discord bot token. If you don't have one:
 > 1. Go to https://discord.com/developers/applications
 > 2. Create a new application → Bot → Reset Token → Copy it
-> 3. Under **Bot → Privileged Gateway Intents**, enable ALL THREE:
+> 3. Under **Bot → Privileged Gateway Intents**, enable BOTH:
 >    - **Presence Intent**
->    - **Server Members Intent** (required for `@AllAgents` feature)
 >    - **Message Content Intent** (required to read message text)
 > 4. Invite the bot to your server using OAuth2 → URL Generator (scopes: `bot`, permissions: `Send Messages`, `Read Message History`)
 
