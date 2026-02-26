@@ -557,7 +557,9 @@ describe('processTaskIpc: register_group with discord', () => {
 
     expect(groups['dc:channel123']).toBeDefined();
     expect(groups['dc:channel123'].discordGuildId).toBe('123456789012345678');
-    expect(groups['dc:channel123'].serverFolder).toBe('servers/123456789012345678');
+    expect(groups['dc:channel123'].serverFolder).toBe(
+      'servers/123456789012345678',
+    );
   });
 
   it('rejects non-numeric discord_guild_id to prevent path traversal', async () => {
