@@ -1,6 +1,6 @@
 # OmniClaw Roadmap
 
-Last updated: 2026-02-24
+Last updated: 2026-02-25
 
 ## Guiding Principles
 
@@ -48,25 +48,27 @@ Last updated: 2026-02-24
 
 ### Near-term (Active / Next Up)
 
-#### Security Fixes (#76, #77, #78)
-Three open security issues requiring attention:
-- **#78**: S3 key construction lacks agentId validation — allows cross-agent data access
-- **#77**: `read_context` MCP tool path traversal via topic parameter
-- **#76**: S3 credentials embedded in Hetzner cloud-init plaintext (High severity)
+#### Effect.ts Migration (#18 — Top Priority)
+Migrate the codebase from ad-hoc async/error handling to Effect.ts for structured concurrency, typed errors, and dependency injection. Currently at ~12% coverage (7/57 source files).
 
-#### Graceful Shutdown (#82)
-No SIGTERM/SIGINT handler — process exits uncleanly on service stop. Add signal handlers to drain in-flight work and close connections.
+**Completed modules:** logger-layer, message-queue, user-registry, partial adoption in `index.ts` and `group-queue.ts`. Reference patterns in `src/effect/`.
+
+**Approach:**
+- Module-by-module, leaf modules first (pure logic, no channel I/O)
+- 1–2 modules per PR to keep reviews manageable
+- Target: 100% adoption across all source files
+
+#### Security Fixes (#104)
+- ~~**#78**: S3 key construction lacks agentId validation~~ — Resolved: S3 code removed in PR #89
+- ~~**#76**: S3 credentials in Hetzner cloud-init~~ — Resolved: S3 code removed in PR #89
+- ~~**#77**: `read_context` path traversal~~ — Closed
+- **#104**: Discord attachment filename allows path traversal write outside media directory (closed)
 
 #### Health Checks (#83)
 No liveness probe for the long-running orchestrator process. Add a health check endpoint or mechanism for service managers to detect hangs.
 
 #### IPC Error Feedback (#74)
 IPC reactions are fire-and-forget — agents get no error feedback on failure. Surface errors back to the agent so it can retry or inform the user.
-
-#### Documentation Fixes (#79, #80, #81)
-- **#81**: Remove stale `SIMPLIFICATION_SUMMARY.md`
-- **#80**: SPEC.md references nonexistent `src/shared/` directory
-- **#79**: SECURITY.md refers to 'node' user but container runs as 'bun'
 
 #### Versioned DB Migrations (#4)
 SQLite schema changes are currently handled ad-hoc. Need a proper migration framework so schema updates are versioned, reversible, and safe to apply.
@@ -90,6 +92,14 @@ Run OmniClaw across multiple machines (e.g., Mac Mini as main orchestrator + Mac
 - Route agents to specific machines by hardware capability
 - Keep the main orchestrator as single source of truth
 - Leverage existing `share_request` for cross-machine context, not a dedicated file bus
+
+#### Multi-Token Channel Support (#100, #101, #102)
+Support multiple bot/app token pairs per channel type within a single OmniClaw process:
+- **#100**: Multiple Slack bot/app tokens
+- **#101**: Multiple Telegram bot tokens
+- **#102**: Multiple Discord bot tokens
+
+Currently each channel type is limited to one set of credentials. Multi-token support enables running several bots (e.g., separate personalities or teams) from a single instance.
 
 #### Codebase Simplification (Ongoing)
 Significant progress made (475+ lines of dead code removed, duplicated handlers extracted). Continue:
@@ -121,6 +131,12 @@ Structured logs exist but there's no dashboard or alerting. Consider:
 ---
 
 ## Completed Recently
+
+### Feb 25, 2026
+- Graceful shutdown: SIGTERM/SIGINT handlers (#82 — closed)
+- Documentation fixes: removed stale `SIMPLIFICATION_SUMMARY.md` (#81), fixed SPEC.md `src/shared/` references (#80), fixed SECURITY.md 'node' vs 'bun' user (#79) — all closed
+- Security: Discord attachment path traversal (#104 — closed)
+- Security: S3 issues #76, #78 resolved by removing S3 code entirely (PR #89)
 
 ### Feb 23-24, 2026
 Major hardening push — 30+ PRs merged in 48 hours:
