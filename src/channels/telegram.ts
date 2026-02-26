@@ -12,7 +12,7 @@ import { splitMessage } from './utils.js';
 
 type TelegramReactionEmoji =
   import('@grammyjs/types').ReactionTypeEmoji['emoji'];
-const VALID_TELEGRAM_REACTIONS: readonly TelegramReactionEmoji[] = [
+export const VALID_TELEGRAM_REACTIONS: readonly TelegramReactionEmoji[] = [
   '👍',
   '👎',
   '❤',
@@ -87,7 +87,7 @@ const VALID_TELEGRAM_REACTIONS: readonly TelegramReactionEmoji[] = [
   '🤷‍♀',
   '😡',
 ];
-function isTelegramReactionEmoji(v: string): v is TelegramReactionEmoji {
+export function isTelegramReactionEmoji(v: string): v is TelegramReactionEmoji {
   return (VALID_TELEGRAM_REACTIONS as readonly string[]).includes(v);
 }
 
