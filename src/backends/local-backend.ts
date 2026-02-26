@@ -677,8 +677,9 @@ export class LocalBackend implements AgentBackend {
   }
 
   closeStdin(groupFolder: string, inputSubdir: string = 'input'): void {
-    const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, inputSubdir);
-    assertPathWithin(inputDir, path.join(DATA_DIR, 'ipc'), 'closeStdin');
+    const ipcBase = path.join(DATA_DIR, 'ipc');
+    const inputDir = path.join(ipcBase, groupFolder, inputSubdir);
+    assertPathWithin(inputDir, ipcBase, 'closeStdin');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
       fs.writeFileSync(path.join(inputDir, '_close'), '');
@@ -688,12 +689,13 @@ export class LocalBackend implements AgentBackend {
   }
 
   writeIpcData(groupFolder: string, filename: string, data: string): void {
-    const groupIpcDir = path.join(DATA_DIR, 'ipc', groupFolder);
-    assertPathWithin(groupIpcDir, path.join(DATA_DIR, 'ipc'), 'writeIpcData');
-    const targetFile = path.join(groupIpcDir, filename);
-    assertPathWithin(targetFile, groupIpcDir, 'writeIpcData filename');
+    const ipcBase = path.join(DATA_DIR, 'ipc');
+    const groupIpcDir = path.join(ipcBase, groupFolder);
+    assertPathWithin(groupIpcDir, ipcBase, 'writeIpcData');
+    const filePath = path.join(groupIpcDir, filename);
+    assertPathWithin(filePath, groupIpcDir, 'writeIpcData filename');
     fs.mkdirSync(groupIpcDir, { recursive: true });
-    fs.writeFileSync(targetFile, data);
+    fs.writeFileSync(filePath, data);
   }
 
   async readFile(

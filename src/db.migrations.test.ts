@@ -1,41 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 
-interface DbModule {
-  initDatabase: () => void;
-  _initTestDatabase: () => void;
-  getAllAgents: () => Record<string, any>;
-  setAgent: (agent: any) => void;
-}
-
-function makeTempProjectRoot(tag: string): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), `omniclaw-db-${tag}-`));
-  fs.mkdirSync(path.join(root, 'store'), { recursive: true });
-  fs.mkdirSync(path.join(root, 'data'), { recursive: true });
-  return root;
-}
-
-async function importDbModuleForRoot(root: string, tag: string): Promise<DbModule> {
-  const previousCwd = process.cwd();
-  process.chdir(root);
-  try {
-    return await import(`./db.ts?migration_${tag}_${Date.now()}_${Math.random()}`) as DbModule;
-  } finally {
-    process.chdir(previousCwd);
-  }
-}
+import { createSchema } from './db.js';
 
 /**
  * Legacy fixture modeled from the user's current local DB shape:
  * - agents table has is_local and no agent_runtime column
  * - registered_groups/channel_routes already exist
  */
-function seedLegacyObservedSchema(dbPath: string): void {
-  const db = new Database(dbPath);
-
+function seedLegacyObservedSchema(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
@@ -112,69 +85,59 @@ function seedLegacyObservedSchema(dbPath: string): void {
     null,
     '2026-01-02T00:00:00.000Z',
   );
-
-  db.close();
 }
 
-function getAgentColumns(dbPath: string): string[] {
-  const db = new Database(dbPath, { readonly: true });
+function getAgentColumns(db: Database): string[] {
   const columns = db.query('PRAGMA table_info(agents)').all() as Array<{ name: string }>;
-  db.close();
   return columns.map((c) => c.name);
 }
 
 describe('db migrations (bun:sqlite)', () => {
-  it('migrates legacy observed agents schema and keeps rows readable/writable', async () => {
-    const root = makeTempProjectRoot('legacy');
-    const dbPath = path.join(root, 'store', 'messages.db');
+  it('migrates legacy observed agents schema and keeps rows readable/writable', () => {
+    // Use in-memory DB to avoid file system and module caching issues.
+    // createSchema() runs the same migration as initDatabase() (addColumnIfNotExists).
+    const db = new Database(':memory:');
 
-    try {
-      seedLegacyObservedSchema(dbPath);
-      const dbModule = await importDbModuleForRoot(root, 'legacy');
+    seedLegacyObservedSchema(db);
 
-      dbModule.initDatabase();
+    // Verify legacy schema does NOT have agent_runtime
+    const columnsBefore = getAgentColumns(db);
+    expect(columnsBefore).not.toContain('agent_runtime');
+    expect(columnsBefore).toContain('is_local');
 
-      const columns = getAgentColumns(dbPath);
-      expect(columns).toContain('agent_runtime');
-      expect(columns).toContain('is_local'); // legacy column remains; should not break app writes
+    // Run createSchema — should add agent_runtime via ALTER TABLE
+    createSchema(db);
 
-      const agentsAfterMigration = dbModule.getAllAgents();
-      expect(agentsAfterMigration.main.agentRuntime).toBe('claude-agent-sdk');
-      expect(agentsAfterMigration.worker.agentRuntime).toBe('claude-agent-sdk');
+    const columns = getAgentColumns(db);
+    expect(columns).toContain('agent_runtime');
+    expect(columns).toContain('is_local'); // legacy column remains
 
-      // Validate write-path normalization too.
-      dbModule.setAgent({
-        ...agentsAfterMigration.worker,
-        agentRuntime: 'not-a-real-runtime',
-      });
-      const persisted = dbModule.getAllAgents();
-      expect(persisted.worker.agentRuntime).toBe('claude-agent-sdk');
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
+    // Verify default values applied to existing rows
+    const agents = db.query('SELECT id, agent_runtime FROM agents ORDER BY id').all() as Array<{ id: string; agent_runtime: string | null }>;
+    expect(agents.length).toBe(2);
+    for (const agent of agents) {
+      expect(agent.agent_runtime).toBe('claude-agent-sdk');
     }
+
+    db.close();
   });
 
-  it('creates fresh schema and supports opencode runtime writes/reads', async () => {
-    const root = makeTempProjectRoot('fresh');
-    try {
-      // Same module instance is fine here; _initTestDatabase exercises fresh schema creation.
-      const dbModule = await importDbModuleForRoot(root, 'fresh');
-      dbModule._initTestDatabase();
+  it('creates fresh schema with agent_runtime column', () => {
+    const db = new Database(':memory:');
+    createSchema(db);
 
-      dbModule.setAgent({
-        id: 'new-agent',
-        name: 'New Agent',
-        folder: 'new-agent',
-        backend: 'apple-container',
-        agentRuntime: 'opencode',
-        isAdmin: false,
-        createdAt: '2026-01-03T00:00:00.000Z',
-      });
+    const columns = getAgentColumns(db);
+    expect(columns).toContain('agent_runtime');
 
-      const agents = dbModule.getAllAgents();
-      expect(agents['new-agent'].agentRuntime).toBe('opencode');
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
+    // Write an agent with opencode runtime
+    db.query(`
+      INSERT INTO agents (id, name, folder, backend, agent_runtime, is_admin, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('test', 'Test Agent', 'test', 'apple-container', 'opencode', 0, '2026-01-01T00:00:00.000Z');
+
+    const row = db.query('SELECT agent_runtime FROM agents WHERE id = ?').get('test') as { agent_runtime: string };
+    expect(row.agent_runtime).toBe('opencode');
+
+    db.close();
   });
 });

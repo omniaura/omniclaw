@@ -540,20 +540,32 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
 
   // Create or resume session
   let sessionId: string;
+  let isResumedSession = false;
   try {
     if (containerInput.sessionId) {
       try {
         const existing = await client.session.get({ path: { id: containerInput.sessionId } });
-        sessionId = existing.data?.id || containerInput.sessionId;
+        const resolvedId = existing.data?.id || containerInput.sessionId;
+        if (!resolvedId) {
+          throw new Error('Session exists but returned empty ID');
+        }
+        sessionId = resolvedId;
+        isResumedSession = true;
         log(`Resumed session: ${sessionId}`);
       } catch {
         const newSession = await client.session.create({ body: {} });
-        sessionId = newSession.data?.id || '';
+        if (!newSession.data?.id) {
+          throw new Error('Session created but returned no ID');
+        }
+        sessionId = newSession.data.id;
         log(`Previous session not found, created new: ${sessionId}`);
       }
     } else {
       const newSession = await client.session.create({ body: {} });
-      sessionId = newSession.data?.id || '';
+      if (!newSession.data?.id) {
+        throw new Error('Session created but returned no ID');
+      }
+      sessionId = newSession.data.id;
       log(`Created new session: ${sessionId}`);
     }
   } catch (err) {
@@ -568,21 +580,27 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
     process.exit(1);
   }
 
-  // Inject system context (CLAUDE.md etc.) as a no-reply setup prompt
-  const systemContext = buildSystemContext(containerInput);
-  if (systemContext) {
-    try {
-      await client.session.prompt({
-        path: { id: sessionId },
-        body: {
-          noReply: true,
-          parts: [{ type: 'text', text: systemContext }],
-        },
-      });
-      log('Injected system context');
-    } catch (err) {
-      log(`Failed to inject system context (continuing): ${err instanceof Error ? err.message : String(err)}`);
+  // Inject system context (CLAUDE.md etc.) as a no-reply setup prompt.
+  // Only inject on NEW sessions — resumed sessions already have context
+  // from the original setup prompt. Re-injecting would duplicate CLAUDE.md.
+  if (!isResumedSession) {
+    const systemContext = buildSystemContext(containerInput);
+    if (systemContext) {
+      try {
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            noReply: true,
+            parts: [{ type: 'text', text: systemContext }],
+          },
+        });
+        log('Injected system context');
+      } catch (err) {
+        log(`Failed to inject system context (continuing): ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
+  } else {
+    log('Skipping system context injection (resumed session)');
   }
 
   // Build initial prompt

@@ -177,7 +177,8 @@ function addColumnIfNotExists(
   }
 }
 
-function createSchema(database: Database): void {
+/** @internal exported for migration tests */
+export function createSchema(database: Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
       jid TEXT PRIMARY KEY,
