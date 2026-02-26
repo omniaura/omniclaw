@@ -464,8 +464,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     try {
       await channel.setTyping(chatJid, true);
       typingInterval = setInterval(() => {
-        channel.setTyping!(chatJid, true).catch(() => {
-          // Non-fatal — typing indicator is best-effort
+        channel.setTyping!(chatJid, true).catch((err) => {
+          log.debug({ err, chatJid }, 'Typing indicator refresh failed (non-fatal)');
         });
       }, 8_000);
     } catch (err) {

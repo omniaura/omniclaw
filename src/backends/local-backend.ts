@@ -366,7 +366,8 @@ export class LocalBackend implements AgentBackend {
           clearTimeout(killTimer);
           container.kill(9);
         }
-      }).catch(() => {
+      }).catch((err) => {
+        log.debug({ err }, 'Graceful container stop failed, force killing');
         clearTimeout(killTimer);
         container.kill(9);
       });
