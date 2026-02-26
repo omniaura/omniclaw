@@ -80,6 +80,12 @@ export interface ContainerInput {
   agentRuntime?: AgentRuntime;
   /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
   channels?: ChannelInfo[];
+  /** Agent's display name (e.g. "OCPeyton"). Injected into system prompt for self-awareness. */
+  agentName?: string;
+  /** Agent's Discord bot ID. Injected into system prompt so agent knows its own bot identity. */
+  discordBotId?: string;
+  /** Agent's trigger word/phrase (e.g. "@OCPeyton"). */
+  agentTrigger?: string;
 }
 
 export interface ContainerOutput {

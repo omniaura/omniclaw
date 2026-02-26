@@ -45,8 +45,9 @@ import {
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<string | void>;
-  /** Store a message in a group's DB and enqueue it for agent processing */
-  notifyGroup: (jid: string, text: string) => void;
+  /** Store a message in a group's DB and enqueue it for agent processing.
+   * Pass sourceFolder to tag the message so the source agent doesn't echo it. */
+  notifyGroup: (jid: string, text: string, sourceFolder?: string) => void;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   updateGroup: (jid: string, group: RegisteredGroup) => void;
@@ -272,9 +273,11 @@ export async function processMessageIpc(
     const isRegisteredTarget = !!targetGroup;
     if (isMain || isSelf || isRegisteredTarget) {
       await deps.sendMessage(msgChatJid, msgText);
-      // Cross-group message: also wake up the target agent
+      // Cross-group message: also wake up the target agent.
+      // Pass sourceGroup so the notify message is tagged — the source
+      // agent won't see its own IPC message echoed back at it.
       if (targetGroup && targetGroup.folder !== sourceGroup) {
-        deps.notifyGroup(msgChatJid, msgText);
+        deps.notifyGroup(msgChatJid, msgText, sourceGroup);
       }
       logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
       return { action: 'handled' };

@@ -37,6 +37,9 @@ interface ContainerInput {
   secrets?: Record<string, string>;
   agentRuntime?: AgentRuntime;
   channels?: ChannelInfo[];
+  agentName?: string;
+  discordBotId?: string;
+  agentTrigger?: string;
 }
 
 interface ContainerOutput {
@@ -509,6 +512,18 @@ function buildSystemContext(containerInput: ContainerInput): string | null {
     }
   }
 
+  // Agent identity block so the agent always knows who it is
+  if (containerInput.agentName) {
+    const identityParts = [`You are **${containerInput.agentName}**.`];
+    if (containerInput.agentTrigger) {
+      identityParts.push(`Your trigger is \`${containerInput.agentTrigger}\`.`);
+    }
+    if (containerInput.discordBotId) {
+      identityParts.push(`Your Discord Bot ID is \`${containerInput.discordBotId}\`.`);
+    }
+    parts.push(`## Your Identity\n${identityParts.join(' ')}`);
+  }
+
   if (parts.length === 0) return null;
   return parts.join('\n\n---\n\n');
 }
@@ -575,6 +590,9 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
   if (containerInput.discordGuildId) mcpEnv.OMNICLAW_DISCORD_GUILD_ID = containerInput.discordGuildId;
   if (containerInput.serverFolder) mcpEnv.OMNICLAW_SERVER_FOLDER = containerInput.serverFolder;
   if (containerInput.channels) mcpEnv.OMNICLAW_CHANNELS = JSON.stringify(containerInput.channels);
+  if (containerInput.agentName) mcpEnv.OMNICLAW_AGENT_NAME = containerInput.agentName;
+  if (containerInput.discordBotId) mcpEnv.OMNICLAW_AGENT_BOT_ID = containerInput.discordBotId;
+  if (containerInput.agentTrigger) mcpEnv.OMNICLAW_AGENT_TRIGGER = containerInput.agentTrigger;
 
   let client: OpenCodeClient;
   try {

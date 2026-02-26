@@ -685,7 +685,10 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
 
   const sinceTimestamp = lastAgentTimestamp[dispatchJid] || '';
   const missedMessages = getMessagesSince(chatJid, sinceTimestamp).filter(
-    (m) => m.content.trim().length > 0,
+    (m) =>
+      m.content.trim().length > 0 &&
+      // Skip IPC notify messages tagged as sent by this agent (self-echo prevention)
+      (!agentId || m.sender !== `agent:${agentId}`),
   );
 
   if (missedMessages.length === 0) return true;
@@ -1145,6 +1148,9 @@ async function runAgent(
         serverFolder: group.serverFolder,
         agentRuntime: group.agentRuntime,
         channels: agentChannels,
+        agentName: group.name,
+        discordBotId: group.discordBotId,
+        agentTrigger: group.trigger,
       },
       (proc, containerName) =>
         queue.registerProcess(
@@ -1340,8 +1346,13 @@ async function startMessageLoop(): Promise<void> {
               chatJid,
               lastAgentTimestamp[dispatchJid] || '',
             );
-            const messagesToSend =
-              allPending.length > 0 ? allPending : groupMessages;
+            // Filter out messages this agent sent via IPC (tagged sender: 'agent:<id>')
+            // to prevent self-echo compute waste.
+            const filteredPending = allPending.filter(
+              (m) => m.sender !== `agent:${sub.agentId}`,
+            );
+            if (filteredPending.length === 0) continue;
+            const messagesToSend = filteredPending;
             const formatted = formatMessages(messagesToSend);
 
             if (await queue.sendMessage(dispatchJid, formatted)) {
@@ -1467,6 +1478,10 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
         agentRuntime: group.agentRuntime || 'claude-agent-sdk',
         isMain: group.folder === MAIN_GROUP_FOLDER,
         trigger: group.trigger,
+        sendTo:
+          group.requiresTrigger !== false
+            ? `target_jid="${jid}", text must start with "${group.trigger} "`
+            : `target_jid="${jid}"`,
       });
     }
   }
@@ -1899,14 +1914,15 @@ async function main(): Promise<void> {
       );
       if (text) return await ch.sendMessage(jid, text);
     },
-    notifyGroup: (jid, text) => {
+    notifyGroup: (jid, text, sourceFolder?) => {
       // Prefix with the group's trigger so it passes requiresTrigger filter
       const group = registeredGroups[jid];
       const trigger = group?.trigger || `@${ASSISTANT_NAME}`;
       storeMessage({
         id: `notify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         chat_jid: jid,
-        sender: 'system',
+        // Tag with source agent so routing skips echoing back to it
+        sender: sourceFolder ? `agent:${sourceFolder}` : 'system',
         sender_name: 'Omni (Main)',
         content: `${trigger} ${text}`,
         timestamp: new Date().toISOString(),

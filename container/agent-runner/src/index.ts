@@ -43,6 +43,12 @@ interface ContainerInput {
   agentRuntime?: AgentRuntime;
   /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
   channels?: ChannelInfo[];
+  /** Agent's display name (e.g. "OCPeyton"). Injected into system prompt for self-awareness. */
+  agentName?: string;
+  /** Agent's Discord bot ID. Injected into system prompt so agent knows its own bot identity. */
+  discordBotId?: string;
+  /** Agent's trigger word/phrase (e.g. "@OCPeyton"). */
+  agentTrigger?: string;
 }
 
 interface ContainerOutput {
@@ -715,6 +721,19 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
+  // Append agent identity so the agent always knows who it is
+  if (containerInput.agentName) {
+    const identityParts = [`You are **${containerInput.agentName}**.`];
+    if (containerInput.agentTrigger) {
+      identityParts.push(`Your trigger is \`${containerInput.agentTrigger}\`.`);
+    }
+    if (containerInput.discordBotId) {
+      identityParts.push(`Your Discord Bot ID is \`${containerInput.discordBotId}\`.`);
+    }
+    const identityBlock = `\n\n## Your Identity\n${identityParts.join(' ')}`;
+    globalClaudeMd = globalClaudeMd ? globalClaudeMd + identityBlock : identityBlock.trim();
+  }
+
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
@@ -769,6 +788,9 @@ async function runQuery(
             ...(containerInput.discordGuildId ? { OMNICLAW_DISCORD_GUILD_ID: containerInput.discordGuildId } : {}),
             ...(containerInput.serverFolder ? { OMNICLAW_SERVER_FOLDER: containerInput.serverFolder } : {}),
             ...(containerInput.channels ? { OMNICLAW_CHANNELS: JSON.stringify(containerInput.channels) } : {}),
+            ...(containerInput.agentName ? { OMNICLAW_AGENT_NAME: containerInput.agentName } : {}),
+            ...(containerInput.discordBotId ? { OMNICLAW_AGENT_BOT_ID: containerInput.discordBotId } : {}),
+            ...(containerInput.agentTrigger ? { OMNICLAW_AGENT_TRIGGER: containerInput.agentTrigger } : {}),
           },
         },
       },
