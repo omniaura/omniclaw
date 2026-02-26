@@ -231,13 +231,23 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Optional shared OpenCode auth/config from the host.
-  // If present, mounting this path lets `opencode` inside the container reuse
-  // host `/connect` credentials (including OpenAI provider auth).
+  // Optional shared OpenCode auth from the host.
+  // We copy only auth.json / mcp-auth.json into a per-group isolated dir so
+  // the container inherits credentials without sharing the host opencode.db.
+  // Mounting the whole host dir with readonly:false caused concurrent writes
+  // to the same SQLite file and DB corruption.
   const hostOpenCodeDir = path.join(homeDir, '.local', 'share', 'opencode');
   if (fs.existsSync(hostOpenCodeDir)) {
+    const containerOcDir = path.join(DATA_DIR, 'opencode-data', runtimeFolderName);
+    fs.mkdirSync(containerOcDir, { recursive: true });
+    for (const authFile of ['auth.json', 'mcp-auth.json']) {
+      const src = path.join(hostOpenCodeDir, authFile);
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, path.join(containerOcDir, authFile));
+      }
+    }
     mounts.push({
-      hostPath: hostOpenCodeDir,
+      hostPath: containerOcDir,
       containerPath: '/home/bun/.local/share/opencode',
       readonly: false,
     });
