@@ -317,7 +317,7 @@ export class DiscordChannel implements Channel {
   /**
    * Check if message should auto-respond based on group config
    */
-  private shouldAutoRespond(content: string, group: RegisteredGroup): boolean {
+  shouldAutoRespond(content: string, group: RegisteredGroup): boolean {
     // Check for question ending with '?'
     if (group.autoRespondToQuestions && content.trim().endsWith('?')) {
       return true;
@@ -721,7 +721,7 @@ export class DiscordChannel implements Channel {
 }
 
 /** Convert a dc: JID to a Discord channel ID (guild channels only) */
-function jidToChannelId(jid: string): string | null {
+export function jidToChannelId(jid: string): string | null {
   if (jid.startsWith('dc:dm:')) return null; // DMs use user ID, not channel ID
   if (jid.startsWith('dc:')) return jid.slice(3);
   return null;

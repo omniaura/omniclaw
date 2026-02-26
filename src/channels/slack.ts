@@ -14,12 +14,12 @@ import { splitMessage as splitMessageShared } from './utils.js';
 // JID format: "slack:{channelId}" for channels/DMs
 // e.g. "slack:C12345678" for a channel, "slack:D12345678" for a DM
 
-function jidToChannelId(jid: string): string | null {
+export function jidToChannelId(jid: string): string | null {
   if (!jid.startsWith('slack:')) return null;
   return jid.slice('slack:'.length);
 }
 
-function channelIdToJid(channelId: string): string {
+export function channelIdToJid(channelId: string): string {
   return `slack:${channelId}`;
 }
 
