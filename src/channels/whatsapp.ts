@@ -23,6 +23,13 @@ import {
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+// Circuit breaker: force process restart if too many reconnects in a short window.
+// Fixes 408 timeout loops after Mac sleep or network drops where reconnect →
+// AwaitingInitialSync timeout → disconnect cycles for hours without processing messages.
+// [Upstream PR #534]
+const RECONNECT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_RECONNECTS_BEFORE_RESTART = 3;
+
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
@@ -48,6 +55,8 @@ export class WhatsAppChannel implements Channel {
   private reconnectAttempt = 0;
   private static readonly RECONNECT_BASE_MS = 2_000;
   private static readonly RECONNECT_MAX_MS = 5 * 60_000; // 5 min cap
+  // Circuit breaker: track reconnect timestamps within sliding window
+  private reconnectTimestamps: number[] = [];
 
   // Track IDs of messages we sent so the upsert handler can ignore echoes (self-chat loop fix)
   private sentMessageIds = new Set<string>();
@@ -151,6 +160,25 @@ export class WhatsAppChannel implements Channel {
         );
 
         if (shouldReconnect) {
+          // Circuit breaker: exit process if too many reconnects in window
+          const now = Date.now();
+          this.reconnectTimestamps.push(now);
+          this.reconnectTimestamps = this.reconnectTimestamps.filter(
+            (t) => now - t < RECONNECT_WINDOW_MS,
+          );
+          if (
+            this.reconnectTimestamps.length >= MAX_RECONNECTS_BEFORE_RESTART
+          ) {
+            logger.error(
+              {
+                count: this.reconnectTimestamps.length,
+                windowMs: RECONNECT_WINDOW_MS,
+              },
+              'Too many reconnections in window — restarting process',
+            );
+            process.exit(1);
+          }
+
           this.reconnectAttempt++;
           const delay = Math.min(
             WhatsAppChannel.RECONNECT_BASE_MS *
@@ -158,7 +186,11 @@ export class WhatsAppChannel implements Channel {
             WhatsAppChannel.RECONNECT_MAX_MS,
           );
           logger.info(
-            { attempt: this.reconnectAttempt, delayMs: delay },
+            {
+              attempt: this.reconnectAttempt,
+              delayMs: delay,
+              reconnectsInWindow: this.reconnectTimestamps.length,
+            },
             `WhatsApp disconnected — reconnecting in ${Math.round(delay / 1000)}s`,
           );
           setTimeout(() => {
@@ -178,6 +210,7 @@ export class WhatsAppChannel implements Channel {
       } else if (connection === 'open') {
         this.connected = true;
         this.reconnectAttempt = 0;
+        this.reconnectTimestamps = [];
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
