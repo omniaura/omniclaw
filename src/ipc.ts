@@ -144,7 +144,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   { file, sourceGroup, reason: result.reason },
                   'Rejected IPC message file',
                 );
-                quarantineIpcFile(filePath, ipcBaseDir, result.reason, sourceGroup);
+                quarantineIpcFile(
+                  filePath,
+                  ipcBaseDir,
+                  result.reason,
+                  sourceGroup,
+                );
                 continue;
               }
               const data = result.data as IpcMessagePayload;
@@ -159,17 +164,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 const emoji = data.emoji;
                 const ch = deps.findChannel?.(chatJid);
                 if (data.remove) {
-                  await (ch?.removeReaction?.(
-                    chatJid,
-                    messageId,
-                    emoji,
-                  ) ?? Promise.resolve());
+                  await (ch?.removeReaction?.(chatJid, messageId, emoji) ??
+                    Promise.resolve());
                 } else {
-                  await (ch?.addReaction?.(
-                    chatJid,
-                    messageId,
-                    emoji,
-                  ) ?? Promise.resolve());
+                  await (ch?.addReaction?.(chatJid, messageId, emoji) ??
+                    Promise.resolve());
                 }
                 logger.info(
                   {
@@ -224,16 +223,40 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 }
                 // Write response back so the agent can read the result
                 if (data.requestId) {
-                  const safeRequestId = String(data.requestId).replace(/[^a-zA-Z0-9_-]/g, '');
+                  const safeRequestId = String(data.requestId).replace(
+                    /[^a-zA-Z0-9_-]/g,
+                    '',
+                  );
                   if (!safeRequestId) {
-                    logger.warn({ requestId: data.requestId }, 'format_mention: requestId sanitized to empty string — skipping response');
+                    logger.warn(
+                      { requestId: data.requestId },
+                      'format_mention: requestId sanitized to empty string — skipping response',
+                    );
                     break;
                   }
-                  const responseDir = path.join(ipcBaseDir, sourceGroup, 'responses');
+                  const responseDir = path.join(
+                    ipcBaseDir,
+                    sourceGroup,
+                    'responses',
+                  );
                   fs.mkdirSync(responseDir, { recursive: true });
-                  const responseFile = path.join(responseDir, `${safeRequestId}.json`);
+                  const responseFile = path.join(
+                    responseDir,
+                    `${safeRequestId}.json`,
+                  );
                   const tempPath = `${responseFile}.tmp`;
-                  fs.writeFileSync(tempPath, JSON.stringify({ type: 'format_mention_response', requestId: safeRequestId, result: formattedMention }, null, 2));
+                  fs.writeFileSync(
+                    tempPath,
+                    JSON.stringify(
+                      {
+                        type: 'format_mention_response',
+                        requestId: safeRequestId,
+                        result: formattedMention,
+                      },
+                      null,
+                      2,
+                    ),
+                  );
                   fs.renameSync(tempPath, responseFile);
                 }
                 logger.info(
@@ -249,7 +272,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 continue;
               }
               if (data.type === 'ssh_pubkey' && data.pubkey) {
-                logger.info({ folder: sourceGroup, pubkey: data.pubkey }, 'Agent generated new SSH key');
+                logger.info(
+                  { folder: sourceGroup, pubkey: data.pubkey },
+                  'Agent generated new SSH key',
+                );
                 fs.unlinkSync(filePath);
                 continue;
               }
@@ -258,7 +284,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 const msgChatJid = data.chatJid;
                 const msgText = stripInternalTags(data.text);
                 if (!msgText) {
-                  logger.debug({ chatJid: data.chatJid, sourceGroup }, 'IPC message suppressed (internal-only)');
+                  logger.debug(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'IPC message suppressed (internal-only)',
+                  );
                   fs.unlinkSync(filePath);
                   continue;
                 }
@@ -313,7 +342,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 { file, sourceGroup, reason: taskResult.reason },
                 'Rejected IPC task file',
               );
-              quarantineIpcFile(filePath, ipcBaseDir, taskResult.reason, sourceGroup);
+              quarantineIpcFile(
+                filePath,
+                ipcBaseDir,
+                taskResult.reason,
+                sourceGroup,
+              );
               continue;
             }
             try {
@@ -366,28 +400,44 @@ export async function processTaskIpc(
     resume_task: 'resume',
     cancel_task: 'cancel',
   };
-  const handleTaskLifecycle = (action: string, taskId: string | undefined, srcGroup: string, isMainGroup: boolean) => {
+  const handleTaskLifecycle = (
+    action: string,
+    taskId: string | undefined,
+    srcGroup: string,
+    isMainGroup: boolean,
+  ) => {
     const verb = TASK_ACTION_VERBS[action] ?? action;
     if (!taskId) {
-      logger.warn({ action, sourceGroup: srcGroup }, `Task ${verb} attempt with missing taskId`);
+      logger.warn(
+        { action, sourceGroup: srcGroup },
+        `Task ${verb} attempt with missing taskId`,
+      );
       return;
     }
     const task = getTaskById(taskId);
     const label = TASK_ACTION_LABELS[action] ?? action;
     if (!task) {
-      logger.warn({ taskId, sourceGroup: srcGroup }, `Task ${verb} attempt but task not found`);
+      logger.warn(
+        { taskId, sourceGroup: srcGroup },
+        `Task ${verb} attempt but task not found`,
+      );
       return;
     }
     if (isMainGroup || task.group_folder === srcGroup) {
       if (action === 'cancel_task') {
         deleteTask(taskId);
       } else {
-        updateTask(taskId, { status: action === 'pause_task' ? 'paused' : 'active' });
+        updateTask(taskId, {
+          status: action === 'pause_task' ? 'paused' : 'active',
+        });
       }
       logger.info({ taskId, sourceGroup: srcGroup }, `Task ${label} via IPC`);
       refreshTasksSnapshot();
     } else {
-      logger.warn({ taskId, sourceGroup: srcGroup }, `Unauthorized task ${verb} attempt`);
+      logger.warn(
+        { taskId, sourceGroup: srcGroup },
+        `Unauthorized task ${verb} attempt`,
+      );
     }
   };
 
@@ -614,7 +664,10 @@ export async function processTaskIpc(
             rejectTraversalSegments(file, 'share_request.files');
             validFiles.push(file);
           } catch (err) {
-            logger.warn({ file, sourceGroup, error: err }, 'Rejected share_request file path');
+            logger.warn(
+              { file, sourceGroup, error: err },
+              'Rejected share_request file path',
+            );
           }
         }
 
@@ -655,7 +708,10 @@ export async function processTaskIpc(
             rejectTraversalSegments(file, 'share_request.request_files');
             validRequestFiles.push(file);
           } catch (err) {
-            logger.warn({ file, sourceGroup, error: err }, 'Rejected share_request request_files path');
+            logger.warn(
+              { file, sourceGroup, error: err },
+              'Rejected share_request request_files path',
+            );
           }
         }
 
@@ -663,7 +719,11 @@ export async function processTaskIpc(
           registeredGroups,
           data.target_agent!,
         );
-        if (targetGroupEntry && sourceGroupEntry && validRequestFiles.length > 0) {
+        if (
+          targetGroupEntry &&
+          sourceGroupEntry &&
+          validRequestFiles.length > 0
+        ) {
           const result = await transferFiles({
             sourceGroup: targetGroupEntry[1],
             targetGroup: sourceGroupEntry[1],

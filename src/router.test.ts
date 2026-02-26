@@ -51,7 +51,9 @@ describe('getAgentName', () => {
   });
 
   it('falls back to ASSISTANT_NAME when trigger is undefined', () => {
-    expect(getAgentName(makeGroup({ trigger: undefined }))).toBe(ASSISTANT_NAME);
+    expect(getAgentName(makeGroup({ trigger: undefined }))).toBe(
+      ASSISTANT_NAME,
+    );
   });
 
   it('falls back to ASSISTANT_NAME when trigger is empty', () => {
@@ -93,4 +95,3 @@ describe('findChannel', () => {
     expect(findChannel([], 'abc@g.us')).toBeUndefined();
   });
 });
-

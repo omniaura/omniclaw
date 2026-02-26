@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  readdirSync,
+} from 'node:fs';
 import path from 'path';
 import os from 'os';
 
@@ -90,12 +98,17 @@ describe('readIpcJsonFile', () => {
 
   it('reads files with unicode content', () => {
     const filePath = path.join(tmpDir, 'unicode.json');
-    writeFileSync(filePath, JSON.stringify({ text: '🎉 こんにちは 안녕하세요' }));
+    writeFileSync(
+      filePath,
+      JSON.stringify({ text: '🎉 こんにちは 안녕하세요' }),
+    );
 
     const result = readIpcJsonFile(filePath);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect((result.data as { text: string }).text).toBe('🎉 こんにちは 안녕하세요');
+      expect((result.data as { text: string }).text).toBe(
+        '🎉 こんにちは 안녕하세요',
+      );
     }
   });
 
@@ -115,7 +128,9 @@ describe('readIpcJsonFile', () => {
     const MAX_SIZE = 1024 * 1024;
     // Build JSON and verify byte length is under limit before writing
     const jsonOverhead = Buffer.byteLength(JSON.stringify({ d: '' }));
-    const content = JSON.stringify({ d: 'a'.repeat(MAX_SIZE - jsonOverhead - 1) });
+    const content = JSON.stringify({
+      d: 'a'.repeat(MAX_SIZE - jsonOverhead - 1),
+    });
     expect(Buffer.byteLength(content)).toBeLessThan(MAX_SIZE);
     writeFileSync(filePath, content);
 

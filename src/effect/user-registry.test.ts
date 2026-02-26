@@ -13,7 +13,9 @@ import {
  * providing the live layer. Does NOT touch disk — load/save are
  * never called in these tests (in-memory only).
  */
-function runWithRegistry<E, A>(effect: Effect.Effect<A, E, UserRegistryService>) {
+function runWithRegistry<E, A>(
+  effect: Effect.Effect<A, E, UserRegistryService>,
+) {
   return Effect.runPromise(Effect.provide(effect, UserRegistryServiceLive));
 }
 

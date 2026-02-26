@@ -200,7 +200,8 @@ export const makeMessageQueue = (
         // Attempt to send via backend (wrap in try to catch sync exceptions)
         const sendResult = yield* _(
           Effect.try({
-            try: () => targetBackend.sendMessage(targetFolder, text, { chatJid }),
+            try: () =>
+              targetBackend.sendMessage(targetFolder, text, { chatJid }),
             catch: (error) =>
               new MessageSendError({
                 groupJid,
@@ -223,7 +224,10 @@ export const makeMessageQueue = (
         }
 
         // Log success
-        logger.debug({ groupJid, textLength: text.length }, 'Message sent via Effect');
+        logger.debug(
+          { groupJid, textLength: text.length },
+          'Message sent via Effect',
+        );
       });
 
     // Retry schedule: exponential backoff
@@ -241,22 +245,26 @@ export const makeMessageQueue = (
     ): Effect.Effect<void, MessageSendError | ConcurrencyLimitError> =>
       Effect.gen(function* (_) {
         // Atomic check-and-increment for concurrency limit
-        const incrementResult: Effect.Effect<void, ConcurrencyLimitError> = yield* _(
-          Ref.modify<number, Effect.Effect<void, ConcurrencyLimitError>>(activeCount, (current) => {
-            if (current >= config.maxConcurrent) {
-              return [
-                Effect.fail(
-                  new ConcurrencyLimitError({
-                    activeCount: current,
-                    maxConcurrent: config.maxConcurrent,
-                  }),
-                ),
-                current,
-              ] as const;
-            }
-            return [Effect.void, current + 1] as const;
-          }),
-        );
+        const incrementResult: Effect.Effect<void, ConcurrencyLimitError> =
+          yield* _(
+            Ref.modify<number, Effect.Effect<void, ConcurrencyLimitError>>(
+              activeCount,
+              (current) => {
+                if (current >= config.maxConcurrent) {
+                  return [
+                    Effect.fail(
+                      new ConcurrencyLimitError({
+                        activeCount: current,
+                        maxConcurrent: config.maxConcurrent,
+                      }),
+                    ),
+                    current,
+                  ] as const;
+                }
+                return [Effect.void, current + 1] as const;
+              },
+            ),
+          );
 
         // If concurrency limit exceeded, fail early
         yield* _(incrementResult);
@@ -281,11 +289,19 @@ export const makeMessageQueue = (
             Effect.timeout(config.sendTimeoutMs),
             // Catch defects (non-retryable) and convert back to typed failure
             Effect.catchAllDefect((defect) => {
-              if (typeof defect === 'object' && defect !== null && '_tag' in defect && defect._tag === 'MessageSendError') {
+              if (
+                typeof defect === 'object' &&
+                defect !== null &&
+                '_tag' in defect &&
+                defect._tag === 'MessageSendError'
+              ) {
                 return Effect.fail(defect as MessageSendError);
               }
               // Unknown defect
-              logger.error({ groupJid, defect }, 'Unknown defect in message send');
+              logger.error(
+                { groupJid, defect },
+                'Unknown defect in message send',
+              );
               return Effect.fail(
                 new MessageSendError({
                   groupJid,
@@ -303,7 +319,10 @@ export const makeMessageQueue = (
                 return Effect.fail(error);
               }
               // Timeout or other error
-              logger.error({ groupJid, error }, 'Message send timeout or unknown error');
+              logger.error(
+                { groupJid, error },
+                'Message send timeout or unknown error',
+              );
               return Effect.fail(
                 new MessageSendError({
                   groupJid,
@@ -328,8 +347,10 @@ export const makeMessageQueue = (
       updateGroupState(groupJid, { backend, groupFolder });
 
     // Set active status
-    const setActive = (groupJid: string, active: boolean): Effect.Effect<void> =>
-      updateGroupState(groupJid, { active });
+    const setActive = (
+      groupJid: string,
+      active: boolean,
+    ): Effect.Effect<void> => updateGroupState(groupJid, { active });
 
     // Get stats
     const getStats = (): Effect.Effect<{
@@ -358,7 +379,4 @@ export const makeMessageQueue = (
  * Live layer for MessageQueue
  */
 export const MessageQueueLive = (config?: Partial<MessageQueueConfig>) =>
-  Layer.effect(
-    MessageQueue,
-    makeMessageQueue({ ...defaultConfig, ...config }),
-  );
+  Layer.effect(MessageQueue, makeMessageQueue({ ...defaultConfig, ...config }));

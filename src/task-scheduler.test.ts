@@ -284,7 +284,11 @@ describe('DB task lifecycle', () => {
         created_at: '2024-01-01T00:00:00.000Z',
       });
 
-      updateTaskAfterRun('run-task', '2025-06-01T00:00:00.000Z', 'Success: done');
+      updateTaskAfterRun(
+        'run-task',
+        '2025-06-01T00:00:00.000Z',
+        'Success: done',
+      );
       const task = getTaskById('run-task');
       expect(task!.next_run).toBe('2025-06-01T00:00:00.000Z');
       expect(task!.last_run).toBeTruthy();

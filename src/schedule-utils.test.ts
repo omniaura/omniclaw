@@ -200,7 +200,9 @@ describe('schedule-utils', () => {
 
     it('succeeds with ISO timestamp for valid once schedule', () => {
       const result = Effect.runSync(
-        calculateNextRunEffect('once', '2025-06-01T12:00:00.000Z').pipe(Effect.either),
+        calculateNextRunEffect('once', '2025-06-01T12:00:00.000Z').pipe(
+          Effect.either,
+        ),
       );
       expect(Either.isRight(result)).toBe(true);
       if (Either.isRight(result)) {
@@ -221,7 +223,9 @@ describe('schedule-utils', () => {
 
     it('fails with ScheduleValidationError for unknown schedule type', () => {
       const result = Effect.runSync(
-        calculateNextRunEffect('bogus' as ScheduleType, '123').pipe(Effect.either),
+        calculateNextRunEffect('bogus' as ScheduleType, '123').pipe(
+          Effect.either,
+        ),
       );
       expect(Either.isLeft(result)).toBe(true);
       if (Either.isLeft(result)) {

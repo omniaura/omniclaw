@@ -24,14 +24,25 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
-import { Channel, ContainerProcess, RegisteredGroup, ScheduledTask } from './types.js';
+import {
+  Channel,
+  ContainerProcess,
+  RegisteredGroup,
+  ScheduledTask,
+} from './types.js';
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   getResumePositions: () => Record<string, string>;
   queue: GroupQueue;
-  onProcess: (groupJid: string, proc: ContainerProcess, containerName: string, groupFolder: string, lane: 'task') => void;
+  onProcess: (
+    groupJid: string,
+    proc: ContainerProcess,
+    containerName: string,
+    groupFolder: string,
+    lane: 'task',
+  ) => void;
   sendMessage: (jid: string, text: string) => Promise<string | void>;
   findChannel: (jid: string) => Channel | undefined;
 }
@@ -98,9 +109,15 @@ export function reconcileHeartbeats(
     if (group.heartbeat?.enabled) {
       if (!existing) {
         // Create heartbeat task
-        const nextRun = calculateNextRun(group.heartbeat.scheduleType, group.heartbeat.interval);
+        const nextRun = calculateNextRun(
+          group.heartbeat.scheduleType,
+          group.heartbeat.interval,
+        );
         if (!nextRun) {
-          logger.warn({ groupFolder: group.folder, interval: group.heartbeat.interval }, 'Invalid heartbeat schedule');
+          logger.warn(
+            { groupFolder: group.folder, interval: group.heartbeat.interval },
+            'Invalid heartbeat schedule',
+          );
           continue;
         }
 
@@ -116,7 +133,10 @@ export function reconcileHeartbeats(
           status: 'active',
           created_at: new Date().toISOString(),
         });
-        logger.info({ taskId, groupFolder: group.folder }, 'Heartbeat task created');
+        logger.info(
+          { taskId, groupFolder: group.folder },
+          'Heartbeat task created',
+        );
       } else {
         // Update schedule if it changed
         if (
@@ -125,9 +145,15 @@ export function reconcileHeartbeats(
         ) {
           // Delete and recreate with new schedule
           deleteTask(taskId);
-          const nextRun = calculateNextRun(group.heartbeat.scheduleType, group.heartbeat.interval);
+          const nextRun = calculateNextRun(
+            group.heartbeat.scheduleType,
+            group.heartbeat.interval,
+          );
           if (!nextRun) {
-            logger.warn({ groupFolder: group.folder }, 'Invalid heartbeat schedule on update');
+            logger.warn(
+              { groupFolder: group.folder },
+              'Invalid heartbeat schedule on update',
+            );
             continue;
           }
           createTask({
@@ -142,14 +168,20 @@ export function reconcileHeartbeats(
             status: 'active',
             created_at: new Date().toISOString(),
           });
-          logger.info({ taskId, groupFolder: group.folder }, 'Heartbeat task updated');
+          logger.info(
+            { taskId, groupFolder: group.folder },
+            'Heartbeat task updated',
+          );
         }
       }
       heartbeatTasks.delete(taskId);
     } else if (existing) {
       // Heartbeat disabled or removed — delete the task
       deleteTask(taskId);
-      logger.info({ taskId, groupFolder: group.folder }, 'Heartbeat task removed');
+      logger.info(
+        { taskId, groupFolder: group.folder },
+        'Heartbeat task removed',
+      );
       heartbeatTasks.delete(taskId);
     }
   }
@@ -169,7 +201,11 @@ async function runTask(
   const groupDir = path.join(GROUPS_DIR, task.group_folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const log = logger.child({ op: 'taskRun', taskId: task.id, group: task.group_folder });
+  const log = logger.child({
+    op: 'taskRun',
+    taskId: task.id,
+    group: task.group_folder,
+  });
   log.info('Running scheduled task');
 
   const groups = deps.registeredGroups();
@@ -220,9 +256,10 @@ async function runTask(
   // For group-context tasks, pass resumeAt so the container can skip replaying
   // the full session history and resume from the last known position.
   const sessionId = undefined;
-  const resumeAt = task.context_mode === 'group'
-    ? deps.getResumePositions()[task.group_folder]
-    : undefined;
+  const resumeAt =
+    task.context_mode === 'group'
+      ? deps.getResumePositions()[task.group_folder]
+      : undefined;
 
   // [Upstream PR #354] After the task produces a result, close the container
   // promptly. Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min)
@@ -246,7 +283,10 @@ async function runTask(
   if (!isHeartbeat && group.streamIntermediates && channel?.createThread) {
     const preview = prompt.slice(0, 80).replace(/\n/g, ' ');
     try {
-      const msgId = await deps.sendMessage(task.chat_jid, `Running scheduled task: ${preview}...`);
+      const msgId = await deps.sendMessage(
+        task.chat_jid,
+        `Running scheduled task: ${preview}...`,
+      );
       parentMessageId = msgId ? String(msgId) : null;
     } catch {
       // Announcement failed — continue without thread
@@ -282,12 +322,20 @@ async function runTask(
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
       },
-      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder, 'task'),
+      (proc, containerName) =>
+        deps.onProcess(
+          task.chat_jid,
+          proc,
+          containerName,
+          task.group_folder,
+          'task',
+        ),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.intermediate && streamedOutput.result) {
-          const raw = typeof streamedOutput.result === 'string'
-            ? streamedOutput.result
-            : JSON.stringify(streamedOutput.result);
+          const raw =
+            typeof streamedOutput.result === 'string'
+              ? streamedOutput.result
+              : JSON.stringify(streamedOutput.result);
           await streamer.handleIntermediate(raw);
           return;
         }
@@ -335,9 +383,10 @@ async function runTask(
   });
 
   // Calculate next run time (null for one-shot 'once' tasks)
-  const nextRun = task.schedule_type === 'once'
-    ? null
-    : calculateNextRun(task.schedule_type, task.schedule_value);
+  const nextRun =
+    task.schedule_type === 'once'
+      ? null
+      : calculateNextRun(task.schedule_type, task.schedule_value);
 
   const resultSummary = error
     ? `Error: ${error}`
@@ -375,9 +424,13 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         // re-discovered on subsequent ticks while it's running/queued.
         // 'once' tasks (no recurrence) get next_run set to null which
         // also removes them from getDueTasks results.
-        const nextRun = currentTask.schedule_type === 'once'
-          ? null
-          : calculateNextRun(currentTask.schedule_type, currentTask.schedule_value);
+        const nextRun =
+          currentTask.schedule_type === 'once'
+            ? null
+            : calculateNextRun(
+                currentTask.schedule_type,
+                currentTask.schedule_value,
+              );
         advanceTaskNextRun(currentTask.id, nextRun);
 
         const promptPreview = currentTask.id.startsWith('heartbeat-')

@@ -57,12 +57,18 @@ const WHITE = '\x1b[37m';
 
 function levelColor(level: LogLevel): string {
   switch (level) {
-    case 'fatal': return RED;
-    case 'error': return RED;
-    case 'warn': return YELLOW;
-    case 'info': return GREEN;
-    case 'debug': return DIM;
-    case 'trace': return DIM;
+    case 'fatal':
+      return RED;
+    case 'error':
+      return RED;
+    case 'warn':
+      return YELLOW;
+    case 'info':
+      return GREEN;
+    case 'debug':
+      return DIM;
+    case 'trace':
+      return DIM;
   }
 }
 
@@ -119,7 +125,10 @@ function flattenError(
     out.err = err.message;
     const code = (err as Error & { code?: string | number }).code;
     if (code != null) out.errCode = code;
-    if (process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace') {
+    if (
+      process.env.LOG_LEVEL === 'debug' ||
+      process.env.LOG_LEVEL === 'trace'
+    ) {
       out.errStack = err.stack;
     }
   } else if (typeof err === 'object') {
@@ -141,10 +150,7 @@ function writeJSON(record: Record<string, unknown>): void {
   process.stderr.write(JSON.stringify(record) + '\n');
 }
 
-function writePretty(
-  level: LogLevel,
-  record: Record<string, unknown>,
-): void {
+function writePretty(level: LogLevel, record: Record<string, unknown>): void {
   const ts = formatTimestamp(record.ts as number);
   const tag = (record.container || record.group || '-') as string;
   const op = record.op as string | undefined;
@@ -165,11 +171,13 @@ function writePretty(
   if (record.turns != null) suffix += ` turns=${record.turns}`;
   if (record.costUsd != null) suffix += ` $${record.costUsd}`;
   if (record.exitCode != null) suffix += ` exit=${record.exitCode}`;
-  if (record.err && typeof record.err === 'string') suffix += ` ERR: ${record.err}`;
+  if (record.err && typeof record.err === 'string')
+    suffix += ` ERR: ${record.err}`;
 
-  const levelTag = level === 'error' || level === 'fatal' || level === 'warn'
-    ? ` ${level.toUpperCase()}`
-    : '';
+  const levelTag =
+    level === 'error' || level === 'fatal' || level === 'warn'
+      ? ` ${level.toUpperCase()}`
+      : '';
 
   process.stderr.write(
     `${DIM}${ts}${RST} ${BOLD}${(tag as string).slice(0, 16).padEnd(16)}${RST} ${color}${levelTag}${levelTag ? ' ' : ''}${msg}${suffix}${RST}\n`,
@@ -180,9 +188,13 @@ function writePretty(
 // Logger factory
 // ---------------------------------------------------------------------------
 
-function createLogger(defaults: Record<string, unknown> = {}, levelOverride?: string): Logger {
+function createLogger(
+  defaults: Record<string, unknown> = {},
+  levelOverride?: string,
+): Logger {
   const effectiveLevel = levelOverride || process.env.LOG_LEVEL || 'debug';
-  const minLevel = LEVEL_VALUES[effectiveLevel as LogLevel] ?? LEVEL_VALUES.info;
+  const minLevel =
+    LEVEL_VALUES[effectiveLevel as LogLevel] ?? LEVEL_VALUES.info;
 
   function write(
     level: LogLevel,

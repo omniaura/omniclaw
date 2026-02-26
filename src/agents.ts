@@ -10,7 +10,10 @@ import type { Agent, RegisteredGroup } from './types.js';
  * Convert an Agent back to a RegisteredGroup for backwards compatibility.
  * Used during the transition period while both systems coexist.
  */
-export function agentToRegisteredGroup(agent: Agent, channelJid: string): RegisteredGroup {
+export function agentToRegisteredGroup(
+  agent: Agent,
+  channelJid: string,
+): RegisteredGroup {
   return {
     name: agent.name,
     folder: agent.folder,

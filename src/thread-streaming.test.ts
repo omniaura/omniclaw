@@ -3,7 +3,10 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-import { createThreadStreamer, type ThreadStreamContext } from './thread-streaming.js';
+import {
+  createThreadStreamer,
+  type ThreadStreamContext,
+} from './thread-streaming.js';
 
 // Mock GROUPS_DIR to use temp directory
 let tmpDir: string;
@@ -17,7 +20,9 @@ describe('thread-streaming', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function makeCtx(overrides: Partial<ThreadStreamContext> = {}): ThreadStreamContext {
+  function makeCtx(
+    overrides: Partial<ThreadStreamContext> = {},
+  ): ThreadStreamContext {
     return {
       channel: undefined,
       chatJid: 'jid@g.us',
@@ -103,8 +108,15 @@ describe('thread-streaming', () => {
 
       await streamer.handleIntermediate('thinking about it...');
 
-      expect(mockChannel.createThread).toHaveBeenCalledWith('jid@g.us', 'msg-456', 'Agent Thoughts');
-      expect(mockChannel.sendToThread).toHaveBeenCalledWith(mockThread, 'thinking about it...');
+      expect(mockChannel.createThread).toHaveBeenCalledWith(
+        'jid@g.us',
+        'msg-456',
+        'Agent Thoughts',
+      );
+      expect(mockChannel.sendToThread).toHaveBeenCalledWith(
+        mockThread,
+        'thinking about it...',
+      );
     });
 
     it('only creates the thread once for multiple intermediates', async () => {
@@ -142,7 +154,9 @@ describe('thread-streaming', () => {
         isConnected: () => true,
         ownsJid: () => true,
         disconnect: async () => {},
-        createThread: mock(async () => { throw new Error('Discord error'); }),
+        createThread: mock(async () => {
+          throw new Error('Discord error');
+        }),
         sendToThread: mock(async () => {}),
       };
 
@@ -171,7 +185,9 @@ describe('thread-streaming', () => {
         ownsJid: () => true,
         disconnect: async () => {},
         createThread: mock(async () => mockThread),
-        sendToThread: mock(async () => { throw new Error('Send failed'); }),
+        sendToThread: mock(async () => {
+          throw new Error('Send failed');
+        }),
       };
 
       const ctx = makeCtx({
@@ -189,15 +205,19 @@ describe('thread-streaming', () => {
     // These tests lock in the canonical slug specification for thought log filenames.
     // The slug algorithm: trim → slice(0,50) → replace non-alphanumeric with '-' → lowercase → fallback to 'query'
     function slugify(label: string): string {
-      return label
-        .trim()
-        .slice(0, 50)
-        .replace(/[^a-z0-9]+/gi, '-')
-        .toLowerCase() || 'query';
+      return (
+        label
+          .trim()
+          .slice(0, 50)
+          .replace(/[^a-z0-9]+/gi, '-')
+          .toLowerCase() || 'query'
+      );
     }
 
     it('sanitizes label to filesystem-safe slug', () => {
-      expect(slugify('What is the meaning of life?!@#$%')).toBe('what-is-the-meaning-of-life-');
+      expect(slugify('What is the meaning of life?!@#$%')).toBe(
+        'what-is-the-meaning-of-life-',
+      );
     });
 
     it('falls back to "query" for empty label', () => {

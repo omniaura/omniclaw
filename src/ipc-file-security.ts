@@ -57,7 +57,9 @@ export type IpcReadResult<T = unknown> =
  * 4. Size check - reject files exceeding MAX_IPC_FILE_SIZE
  * 5. Chunked reads with running byte total - catches growth-during-read attacks
  */
-export function readIpcJsonFile<T = unknown>(filePath: string): IpcReadResult<T> {
+export function readIpcJsonFile<T = unknown>(
+  filePath: string,
+): IpcReadResult<T> {
   // Layer 1: Pre-open symlink check via lstat
   let lstat: Stats;
   try {
@@ -97,7 +99,10 @@ export function readIpcJsonFile<T = unknown>(filePath: string): IpcReadResult<T>
     // Layer 3: Post-open fstat to guard against TOCTOU race
     const fstat = fstatSync(fd);
     if (!fstat.isFile()) {
-      return { ok: false, reason: 'fd is not a regular file after open (TOCTOU)' };
+      return {
+        ok: false,
+        reason: 'fd is not a regular file after open (TOCTOU)',
+      };
     }
 
     // Layer 4: Size check
@@ -178,7 +183,10 @@ export function quarantineIpcFile(
   try {
     mkdirSync(quarantineDir, { recursive: true });
     const timestamp = Date.now();
-    const destPath = path.join(quarantineDir, `${sourceGroup}-${timestamp}-${fileName}`);
+    const destPath = path.join(
+      quarantineDir,
+      `${sourceGroup}-${timestamp}-${fileName}`,
+    );
     renameSync(filePath, destPath);
     logger.warn(
       { file: fileName, sourceGroup, reason, quarantined: destPath },

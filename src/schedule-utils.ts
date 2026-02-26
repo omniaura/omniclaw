@@ -44,7 +44,9 @@ export const calculateNextRunEffect = (
     case 'cron':
       return Effect.try({
         try: () => {
-          const interval = CronExpressionParser.parse(scheduleValue, { tz: TIMEZONE });
+          const interval = CronExpressionParser.parse(scheduleValue, {
+            tz: TIMEZONE,
+          });
           const iso = interval.next().toISOString();
           if (iso === null) {
             throw new Error('CronDate.toISOString() returned null');

@@ -157,7 +157,9 @@ describe('storeMessage with sender_user_id and mentions', () => {
     const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z');
     expect(messages).toHaveLength(1);
     expect(messages[0].sender_user_id).toBe('user123');
-    expect(messages[0].mentions).toEqual([{ id: 'user456', name: 'Bob', platform: 'discord' }]);
+    expect(messages[0].mentions).toEqual([
+      { id: 'user456', name: 'Bob', platform: 'discord' },
+    ]);
   });
 
   it('stores undefined sender_user_id and mentions when not provided', () => {
@@ -197,7 +199,9 @@ describe('storeMessage with sender_user_id and mentions', () => {
     const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z');
     expect(messages).toHaveLength(1);
     expect(messages[0].sender_user_id).toBe('user111');
-    expect(messages[0].mentions).toEqual([{ id: 'user222', name: 'Eve', platform: 'discord' }]);
+    expect(messages[0].mentions).toEqual([
+      { id: 'user222', name: 'Eve', platform: 'discord' },
+    ]);
   });
 });
 
@@ -208,10 +212,34 @@ describe('getMessagesSince', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
     const msgs = [
-      { id: 'm1', content: 'first', ts: '2024-01-01T00:00:01.000Z', sender: 'Alice', is_from_me: false },
-      { id: 'm2', content: 'second', ts: '2024-01-01T00:00:02.000Z', sender: 'Bob', is_from_me: false },
-      { id: 'm3', content: 'Andy: bot reply', ts: '2024-01-01T00:00:03.000Z', sender: 'Bot', is_from_me: true },
-      { id: 'm4', content: 'third', ts: '2024-01-01T00:00:04.000Z', sender: 'Carol', is_from_me: false },
+      {
+        id: 'm1',
+        content: 'first',
+        ts: '2024-01-01T00:00:01.000Z',
+        sender: 'Alice',
+        is_from_me: false,
+      },
+      {
+        id: 'm2',
+        content: 'second',
+        ts: '2024-01-01T00:00:02.000Z',
+        sender: 'Bob',
+        is_from_me: false,
+      },
+      {
+        id: 'm3',
+        content: 'Andy: bot reply',
+        ts: '2024-01-01T00:00:03.000Z',
+        sender: 'Bot',
+        is_from_me: true,
+      },
+      {
+        id: 'm4',
+        content: 'third',
+        ts: '2024-01-01T00:00:04.000Z',
+        sender: 'Carol',
+        is_from_me: false,
+      },
     ];
     for (const m of msgs) {
       store({
@@ -254,10 +282,34 @@ describe('getNewMessages', () => {
     storeChatMetadata('group2@g.us', '2024-01-01T00:00:00.000Z');
 
     const msgs = [
-      { id: 'a1', chat: 'group1@g.us', content: 'g1 msg1', ts: '2024-01-01T00:00:01.000Z', is_from_me: false },
-      { id: 'a2', chat: 'group2@g.us', content: 'g2 msg1', ts: '2024-01-01T00:00:02.000Z', is_from_me: false },
-      { id: 'a3', chat: 'group1@g.us', content: 'Andy: reply', ts: '2024-01-01T00:00:03.000Z', is_from_me: true },
-      { id: 'a4', chat: 'group1@g.us', content: 'g1 msg2', ts: '2024-01-01T00:00:04.000Z', is_from_me: false },
+      {
+        id: 'a1',
+        chat: 'group1@g.us',
+        content: 'g1 msg1',
+        ts: '2024-01-01T00:00:01.000Z',
+        is_from_me: false,
+      },
+      {
+        id: 'a2',
+        chat: 'group2@g.us',
+        content: 'g2 msg1',
+        ts: '2024-01-01T00:00:02.000Z',
+        is_from_me: false,
+      },
+      {
+        id: 'a3',
+        chat: 'group1@g.us',
+        content: 'Andy: reply',
+        ts: '2024-01-01T00:00:03.000Z',
+        is_from_me: true,
+      },
+      {
+        id: 'a4',
+        chat: 'group1@g.us',
+        content: 'g1 msg2',
+        ts: '2024-01-01T00:00:04.000Z',
+        is_from_me: false,
+      },
     ];
     for (const m of msgs) {
       store({

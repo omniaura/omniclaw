@@ -139,13 +139,20 @@ function buildVolumeMounts(
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(settingsFile, JSON.stringify({
-      env: {
-        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-        CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-      },
-    }, null, 2) + '\n');
+    fs.writeFileSync(
+      settingsFile,
+      JSON.stringify(
+        {
+          env: {
+            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+          },
+        },
+        null,
+        2,
+      ) + '\n',
+    );
   }
 
   // Sync skills
@@ -190,7 +197,16 @@ function buildVolumeMounts(
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL', 'GITHUB_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'CLAUDE_MODEL'];
+    const allowedVars = [
+      'CLAUDE_CODE_OAUTH_TOKEN',
+      'ANTHROPIC_API_KEY',
+      'ANTHROPIC_BASE_URL',
+      'ANTHROPIC_MODEL',
+      'GITHUB_TOKEN',
+      'GIT_AUTHOR_NAME',
+      'GIT_AUTHOR_EMAIL',
+      'CLAUDE_MODEL',
+    ];
     const filteredLines = envContent.split('\n').filter((line) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return false;
@@ -212,8 +228,18 @@ function buildVolumeMounts(
 
   // Agent-runner source: copy to per-group writable location so each group
   // can customize tools without modifying host code or affecting other groups.
-  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
-  const groupAgentRunnerDir = path.join(DATA_DIR, 'sessions', folder, 'agent-runner-src');
+  const agentRunnerSrc = path.join(
+    projectRoot,
+    'container',
+    'agent-runner',
+    'src',
+  );
+  const groupAgentRunnerDir = path.join(
+    DATA_DIR,
+    'sessions',
+    folder,
+    'agent-runner-src',
+  );
   let hasGroupDir = fs.existsSync(groupAgentRunnerDir);
   if (!hasGroupDir && fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
@@ -248,12 +274,21 @@ export interface ContainerArgsOpts {
 }
 
 /** @internal Exported for testing */
-export function buildContainerArgs({ mounts, containerName, isMain, networkMode }: ContainerArgsOpts): string[] {
+export function buildContainerArgs({
+  mounts,
+  containerName,
+  isMain,
+  networkMode,
+}: ContainerArgsOpts): string[] {
   const isDocker = LOCAL_RUNTIME === 'docker';
   const args: string[] = [
-    'run', '-i', '--rm',
-    '--memory', CONTAINER_MEMORY,
-    '--name', containerName,
+    'run',
+    '-i',
+    '--rm',
+    '--memory',
+    CONTAINER_MEMORY,
+    '--name',
+    containerName,
   ];
 
   if (isDocker) {
@@ -314,7 +349,11 @@ export class LocalBackend implements AgentBackend {
     const groupDir = path.join(GROUPS_DIR, folder);
     fs.mkdirSync(groupDir, { recursive: true });
 
-    const mounts = buildVolumeMounts(group, input.isMain, input.isScheduledTask);
+    const mounts = buildVolumeMounts(
+      group,
+      input.isMain,
+      input.isScheduledTask,
+    );
     const safeName = folder.replace(/[^a-zA-Z0-9-]/g, '-');
     const containerName = `omniclaw-${safeName}-${Date.now()}`;
     const containerArgs = buildContainerArgs({
@@ -337,17 +376,15 @@ export class LocalBackend implements AgentBackend {
     log.debug(
       {
         mounts: mounts.map(
-          (m) => `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
+          (m) =>
+            `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
         ),
         containerArgs: containerArgs.join(' '),
       },
       'Container mount configuration',
     );
 
-    log.info(
-      { isMain: input.isMain },
-      'Spawning container agent',
-    );
+    log.info({ isMain: input.isMain }, 'Spawning container agent');
 
     const logsDir = path.join(GROUPS_DIR, folder, 'logs');
     fs.mkdirSync(logsDir, { recursive: true });
@@ -381,18 +418,20 @@ export class LocalBackend implements AgentBackend {
       log.error('Container timeout, stopping gracefully');
       const stopProc = Bun.spawn([LOCAL_RUNTIME, 'stop', containerName]);
       const killTimer = setTimeout(() => container.kill(9), 15000);
-      stopProc.exited.then((code) => {
-        if (code === 0) {
-          clearTimeout(killTimer);
-        } else {
+      stopProc.exited
+        .then((code) => {
+          if (code === 0) {
+            clearTimeout(killTimer);
+          } else {
+            clearTimeout(killTimer);
+            container.kill(9);
+          }
+        })
+        .catch((err) => {
+          log.debug({ err }, 'Graceful container stop failed, force killing');
           clearTimeout(killTimer);
           container.kill(9);
-        }
-      }).catch((err) => {
-        log.debug({ err }, 'Graceful container stop failed, force killing');
-        clearTimeout(killTimer);
-        container.kill(9);
-      });
+        });
     };
 
     const parser = new StreamParser({
@@ -448,25 +487,36 @@ export class LocalBackend implements AgentBackend {
 
     const duration = Date.now() - startTime;
     const state = parser.getState();
-    const exitLog = log.child({ op: 'containerExit', exitCode, durationMs: duration });
+    const exitLog = log.child({
+      op: 'containerExit',
+      exitCode,
+      durationMs: duration,
+    });
 
     if (state.timedOut) {
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
       const timeoutLog = path.join(logsDir, `container-${ts}.log`);
-      fs.writeFileSync(timeoutLog, [
-        `=== Container Run Log (TIMEOUT) ===`,
-        `Timestamp: ${new Date().toISOString()}`,
-        `Group: ${groupName}`,
-        `Container: ${containerName}`,
-        `Duration: ${duration}ms`,
-        `Exit Code: ${exitCode}`,
-        `Had Streaming Output: ${state.hadStreamingOutput}`,
-      ].join('\n'));
+      fs.writeFileSync(
+        timeoutLog,
+        [
+          `=== Container Run Log (TIMEOUT) ===`,
+          `Timestamp: ${new Date().toISOString()}`,
+          `Group: ${groupName}`,
+          `Container: ${containerName}`,
+          `Duration: ${duration}ms`,
+          `Exit Code: ${exitCode}`,
+          `Had Streaming Output: ${state.hadStreamingOutput}`,
+        ].join('\n'),
+      );
 
       if (state.hadStreamingOutput) {
         exitLog.info('Container timed out after output (idle cleanup)');
         await state.outputChain;
-        return { status: 'success', result: null, newSessionId: state.newSessionId };
+        return {
+          status: 'success',
+          result: null,
+          newSessionId: state.newSessionId,
+        };
       }
 
       exitLog.error({ timedOut: true }, 'Container timed out with no output');
@@ -480,7 +530,8 @@ export class LocalBackend implements AgentBackend {
     // Write log file
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const logFile = path.join(logsDir, `container-${timestamp}.log`);
-    const isVerbose = process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
+    const isVerbose =
+      process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
 
     const logLines = [
       `=== Container Run Log ===`,
@@ -506,7 +557,10 @@ export class LocalBackend implements AgentBackend {
         ``,
         `=== Mounts ===`,
         mounts
-          .map((m) => `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`)
+          .map(
+            (m) =>
+              `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
+          )
           .join('\n'),
         ``,
         `=== Stderr${state.stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
@@ -555,7 +609,11 @@ export class LocalBackend implements AgentBackend {
         { newSessionId: state.newSessionId },
         'Container completed (streaming mode)',
       );
-      return { status: 'success', result: null, newSessionId: state.newSessionId };
+      return {
+        status: 'success',
+        result: null,
+        newSessionId: state.newSessionId,
+      };
     }
 
     // Legacy mode: parse last output marker pair
@@ -579,14 +637,25 @@ export class LocalBackend implements AgentBackend {
     }
   }
 
-  sendMessage(groupFolder: string, text: string, opts?: { chatJid?: string }): boolean {
+  sendMessage(
+    groupFolder: string,
+    text: string,
+    opts?: { chatJid?: string },
+  ): boolean {
     const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
       const filepath = path.join(inputDir, filename);
       const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text, ...(opts?.chatJid ? { chatJid: opts.chatJid } : {}) }));
+      fs.writeFileSync(
+        tempPath,
+        JSON.stringify({
+          type: 'message',
+          text,
+          ...(opts?.chatJid ? { chatJid: opts.chatJid } : {}),
+        }),
+      );
       fs.renameSync(tempPath, filepath);
       return true;
     } catch {
@@ -610,7 +679,10 @@ export class LocalBackend implements AgentBackend {
     fs.writeFileSync(path.join(groupIpcDir, filename), data);
   }
 
-  async readFile(groupFolder: string, relativePath: string): Promise<Buffer | null> {
+  async readFile(
+    groupFolder: string,
+    relativePath: string,
+  ): Promise<Buffer | null> {
     const groupDir = path.join(GROUPS_DIR, groupFolder);
     const fullPath = path.join(groupDir, relativePath);
     assertPathWithin(fullPath, groupDir, 'readFile');
@@ -621,7 +693,11 @@ export class LocalBackend implements AgentBackend {
     }
   }
 
-  async writeFile(groupFolder: string, relativePath: string, content: Buffer | string): Promise<void> {
+  async writeFile(
+    groupFolder: string,
+    relativePath: string,
+    content: Buffer | string,
+  ): Promise<void> {
     const groupDir = path.join(GROUPS_DIR, groupFolder);
     const fullPath = path.join(groupDir, relativePath);
     assertPathWithin(fullPath, groupDir, 'writeFile');
@@ -640,16 +716,33 @@ export class LocalBackend implements AgentBackend {
       logger.info('Starting Apple Container system...');
       const start = await $`container system start`.quiet().nothrow();
       if (start.exitCode !== 0) {
-        logger.error({ stderr: start.stderr.toString() }, 'Failed to start Apple Container system');
+        logger.error(
+          { stderr: start.stderr.toString() },
+          'Failed to start Apple Container system',
+        );
         this.printContainerSystemError();
-        throw new Error('Apple Container system is required but failed to start');
+        throw new Error(
+          'Apple Container system is required but failed to start',
+        );
       }
     }
 
     // Probe to verify containers actually work
-    const probeProc = Bun.spawn([LOCAL_RUNTIME, 'run', '--rm', '--entrypoint', '/bin/echo', CONTAINER_IMAGE, 'ok'], {
-      stdout: 'pipe', stderr: 'pipe',
-    });
+    const probeProc = Bun.spawn(
+      [
+        LOCAL_RUNTIME,
+        'run',
+        '--rm',
+        '--entrypoint',
+        '/bin/echo',
+        CONTAINER_IMAGE,
+        'ok',
+      ],
+      {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
     const probeStdout = await new Response(probeProc.stdout).text();
     const probeExitCode = await probeProc.exited;
     const probe = { exitCode: probeExitCode, text: () => probeStdout };
@@ -661,25 +754,48 @@ export class LocalBackend implements AgentBackend {
 
     if (isDocker) {
       // Docker daemon is always running; a failed probe is a hard error
-      logger.error({ exitCode: probe.exitCode, output: probe.text().trim() }, 'Docker container probe failed');
-      throw new Error('Docker container probe failed — check that the image exists and Docker is running');
+      logger.error(
+        { exitCode: probe.exitCode, output: probe.text().trim() },
+        'Docker container probe failed',
+      );
+      throw new Error(
+        'Docker container probe failed — check that the image exists and Docker is running',
+      );
     }
 
     // Probe failed — fall back to full stop/sleep/start cycle (Apple Container only)
-    logger.warn({ exitCode: probe.exitCode, output: probe.text().trim() }, 'Container probe failed, performing full restart cycle...');
+    logger.warn(
+      { exitCode: probe.exitCode, output: probe.text().trim() },
+      'Container probe failed, performing full restart cycle...',
+    );
     await $`container system stop`.quiet().nothrow();
     await Bun.sleep(3000);
 
     const retry = await $`container system start`.quiet().nothrow();
     if (retry.exitCode !== 0) {
-      logger.error({ stderr: retry.stderr.toString() }, 'Failed to start Apple Container system on retry');
+      logger.error(
+        { stderr: retry.stderr.toString() },
+        'Failed to start Apple Container system on retry',
+      );
       this.printContainerSystemError();
       throw new Error('Apple Container system failed to start on retry');
     }
 
-    const probe2Proc = Bun.spawn([LOCAL_RUNTIME, 'run', '--rm', '--entrypoint', '/bin/echo', CONTAINER_IMAGE, 'ok'], {
-      stdout: 'pipe', stderr: 'pipe',
-    });
+    const probe2Proc = Bun.spawn(
+      [
+        LOCAL_RUNTIME,
+        'run',
+        '--rm',
+        '--entrypoint',
+        '/bin/echo',
+        CONTAINER_IMAGE,
+        'ok',
+      ],
+      {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
     const probe2Stdout = await new Response(probe2Proc.stdout).text();
     const probe2ExitCode = await probe2Proc.exited;
     const probe2 = { exitCode: probe2ExitCode, text: () => probe2Stdout };
@@ -695,20 +811,32 @@ export class LocalBackend implements AgentBackend {
   }
 
   private printContainerSystemError(): void {
-    logger.error('FATAL: Container system failed to start. Run `container system start` and restart the application. See the project README for installation instructions.');
+    logger.error(
+      'FATAL: Container system failed to start. Run `container system start` and restart the application. See the project README for installation instructions.',
+    );
   }
 
   private async cleanupOrphanedContainers(): Promise<void> {
     try {
       let orphans: string[];
       if (LOCAL_RUNTIME === 'docker') {
-        const lsResult = await $`docker ps --filter name=omniclaw- --format {{.Names}}`.quiet();
-        orphans = lsResult.text().split('\n').map((s) => s.trim()).filter(Boolean);
+        const lsResult =
+          await $`docker ps --filter name=omniclaw- --format {{.Names}}`.quiet();
+        orphans = lsResult
+          .text()
+          .split('\n')
+          .map((s) => s.trim())
+          .filter(Boolean);
       } else {
         const lsResult = await $`container ls --format json`.quiet();
-        const containers: { status: string; configuration: { id: string } }[] = JSON.parse(lsResult.text() || '[]');
+        const containers: { status: string; configuration: { id: string } }[] =
+          JSON.parse(lsResult.text() || '[]');
         orphans = containers
-          .filter((c) => c.status === 'running' && c.configuration.id.startsWith('omniclaw-'))
+          .filter(
+            (c) =>
+              c.status === 'running' &&
+              c.configuration.id.startsWith('omniclaw-'),
+          )
           .map((c) => c.configuration.id);
       }
       // Defense-in-depth: validate container names before passing to Bun.spawn.
@@ -725,12 +853,18 @@ export class LocalBackend implements AgentBackend {
       });
       await Promise.all(
         safeOrphans.map((name) => {
-          const proc = Bun.spawn([LOCAL_RUNTIME, 'stop', name], { stdout: 'ignore', stderr: 'ignore' });
+          const proc = Bun.spawn([LOCAL_RUNTIME, 'stop', name], {
+            stdout: 'ignore',
+            stderr: 'ignore',
+          });
           return proc.exited;
         }),
       );
       if (safeOrphans.length > 0) {
-        logger.info({ count: safeOrphans.length, names: safeOrphans }, 'Stopped orphaned containers');
+        logger.info(
+          { count: safeOrphans.length, names: safeOrphans },
+          'Stopped orphaned containers',
+        );
       }
     } catch (err) {
       logger.warn({ err }, 'Failed to clean up orphaned containers');

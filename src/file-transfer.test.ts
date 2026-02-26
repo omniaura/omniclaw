@@ -27,7 +27,11 @@ function createMockBackend(name: string): AgentBackend & {
   _written: Array<{ folder: string; path: string; content: Buffer | string }>;
 } {
   const files = new Map<string, Buffer>();
-  const written: Array<{ folder: string; path: string; content: Buffer | string }> = [];
+  const written: Array<{
+    folder: string;
+    path: string;
+    content: Buffer | string;
+  }> = [];
 
   return {
     name,
@@ -36,7 +40,11 @@ function createMockBackend(name: string): AgentBackend & {
     readFile: async (_folder: string, relativePath: string) => {
       return files.get(relativePath) ?? null;
     },
-    writeFile: async (folder: string, relativePath: string, content: Buffer | string) => {
+    writeFile: async (
+      folder: string,
+      relativePath: string,
+      content: Buffer | string,
+    ) => {
       written.push({ folder, path: relativePath, content });
     },
     initialize: async () => {},
@@ -105,7 +113,9 @@ describe('transferFiles', () => {
       expect(result.errors).toHaveLength(0);
       expect(mockTargetBackend._written).toHaveLength(1);
       expect(mockTargetBackend._written[0].folder).toBe('target-group');
-      expect(mockTargetBackend._written[0].path).toBe('shared/source-group/data.json');
+      expect(mockTargetBackend._written[0].path).toBe(
+        'shared/source-group/data.json',
+      );
     });
 
     it('transfers multiple files', async () => {
@@ -124,11 +134,16 @@ describe('transferFiles', () => {
       expect(result.errors).toHaveLength(0);
       expect(mockTargetBackend._written).toHaveLength(3);
       // Note: path.basename strips directory, so dir/c.txt → c.txt
-      expect(mockTargetBackend._written[2].path).toBe('shared/source-group/c.txt');
+      expect(mockTargetBackend._written[2].path).toBe(
+        'shared/source-group/c.txt',
+      );
     });
 
     it('uses basename for destination path (strips directories)', async () => {
-      mockSourceBackend._files.set('deeply/nested/dir/report.md', Buffer.from('# Report'));
+      mockSourceBackend._files.set(
+        'deeply/nested/dir/report.md',
+        Buffer.from('# Report'),
+      );
 
       const result = await transferFiles({
         sourceGroup,
@@ -138,7 +153,9 @@ describe('transferFiles', () => {
       });
 
       expect(result.transferred).toBe(1);
-      expect(mockTargetBackend._written[0].path).toBe('shared/source-group/report.md');
+      expect(mockTargetBackend._written[0].path).toBe(
+        'shared/source-group/report.md',
+      );
     });
   });
 
@@ -160,7 +177,9 @@ describe('transferFiles', () => {
       // In pull mode, target is source of data, source is destination
       expect(mockSourceBackend._written).toHaveLength(1);
       expect(mockSourceBackend._written[0].folder).toBe('source-group');
-      expect(mockSourceBackend._written[0].path).toBe('shared/target-group/context.md');
+      expect(mockSourceBackend._written[0].path).toBe(
+        'shared/target-group/context.md',
+      );
     });
   });
 
@@ -268,7 +287,9 @@ describe('transferFiles', () => {
       expect(result.transferred).toBe(1);
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0]).toContain('traversal');
-      expect(mockTargetBackend._written[0].path).toBe('shared/source-group/good.txt');
+      expect(mockTargetBackend._written[0].path).toBe(
+        'shared/source-group/good.txt',
+      );
     });
 
     it('rejects absolute paths', async () => {
@@ -327,7 +348,8 @@ describe('transferFiles', () => {
       mockSourceBackend._files.set('b.txt', Buffer.from('bbb'));
 
       let callCount = 0;
-      const originalReadFile = mockSourceBackend.readFile.bind(mockSourceBackend);
+      const originalReadFile =
+        mockSourceBackend.readFile.bind(mockSourceBackend);
       mockSourceBackend.readFile = async (folder: string, path: string) => {
         callCount++;
         if (callCount === 1) throw new Error('Transient error');

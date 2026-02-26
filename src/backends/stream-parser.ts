@@ -56,7 +56,11 @@ export class StreamParser {
 
     this.startupTimer = setTimeout(() => {
       logger.error(
-        { group: opts.groupName, container: opts.containerName, timeoutMs: opts.startupTimeoutMs },
+        {
+          group: opts.groupName,
+          container: opts.containerName,
+          timeoutMs: opts.startupTimeoutMs,
+        },
         'Container produced no stderr output during startup — likely stuck, killing',
       );
       this.handleTimeout();
@@ -120,14 +124,18 @@ export class StreamParser {
     if (this.opts.onOutput) {
       this.parseBuffer += chunk;
       let startIdx: number;
-      while ((startIdx = this.parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
+      while (
+        (startIdx = this.parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1
+      ) {
         const endIdx = this.parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
         if (endIdx === -1) break; // Incomplete pair, wait for more data
 
         const jsonStr = this.parseBuffer
           .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
           .trim();
-        this.parseBuffer = this.parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
+        this.parseBuffer = this.parseBuffer.slice(
+          endIdx + OUTPUT_END_MARKER.length,
+        );
 
         try {
           const parsed: ContainerOutput = JSON.parse(jsonStr);
@@ -137,7 +145,9 @@ export class StreamParser {
           this.state.hadStreamingOutput = true;
           this.resetTimeout();
           const onOutput = this.opts.onOutput;
-          this.state.outputChain = this.state.outputChain.then(() => onOutput(parsed));
+          this.state.outputChain = this.state.outputChain.then(() =>
+            onOutput(parsed),
+          );
         } catch (err) {
           logger.warn(
             { group: this.opts.groupName, error: err },

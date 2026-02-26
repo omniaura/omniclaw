@@ -12,6 +12,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install
       - run: npx tsc --noEmit
+      - run: bun run format:check
 
   test:
     runs-on: ubuntu-latest

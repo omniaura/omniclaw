@@ -20,9 +20,21 @@ function makeGroup(overrides: Partial<RegisteredGroup> = {}): RegisteredGroup {
 
 describe('group-helpers', () => {
   const groups: Record<string, RegisteredGroup> = {
-    'jid-main@g.us': makeGroup({ name: 'Main', folder: 'main', trigger: '@omni' }),
-    'jid-dev@g.us': makeGroup({ name: 'Dev', folder: 'dev-chat', trigger: '@dev' }),
-    'jid-omniclaw@g.us': makeGroup({ name: 'OmniClaw', folder: 'omniclaw', trigger: '@claw' }),
+    'jid-main@g.us': makeGroup({
+      name: 'Main',
+      folder: 'main',
+      trigger: '@omni',
+    }),
+    'jid-dev@g.us': makeGroup({
+      name: 'Dev',
+      folder: 'dev-chat',
+      trigger: '@dev',
+    }),
+    'jid-omniclaw@g.us': makeGroup({
+      name: 'OmniClaw',
+      folder: 'omniclaw',
+      trigger: '@claw',
+    }),
   };
 
   describe('findJidByFolder', () => {

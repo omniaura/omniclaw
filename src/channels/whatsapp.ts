@@ -12,13 +12,14 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 
 import { STORE_DIR } from '../config.js';
-import {
-  getLastGroupSync,
-  setLastGroupSync,
-  updateChatName,
-} from '../db.js';
+import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -123,7 +124,9 @@ export class WhatsAppChannel implements Channel {
         const msg =
           'WhatsApp authentication required. Run /setup in Claude Code.';
         logger.error(msg);
-        $`osascript -e ${`display notification "${msg}" with title "OmniClaw" sound name "Basso"`}`.quiet().nothrow();
+        $`osascript -e ${`display notification "${msg}" with title "OmniClaw" sound name "Basso"`}`
+          .quiet()
+          .nothrow();
         // Reject the connect() promise so the caller can handle gracefully
         if (this.connectReject) {
           this.connectReject(new Error(msg));
@@ -134,17 +137,30 @@ export class WhatsAppChannel implements Channel {
 
       if (connection === 'close') {
         this.connected = false;
-        const reason = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
+        const reason = (
+          lastDisconnect?.error as { output?: { statusCode?: number } }
+        )?.output?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
-        logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
+        logger.info(
+          {
+            reason,
+            shouldReconnect,
+            queuedMessages: this.outgoingQueue.length,
+          },
+          'Connection closed',
+        );
 
         if (shouldReconnect) {
           this.reconnectAttempt++;
           const delay = Math.min(
-            WhatsAppChannel.RECONNECT_BASE_MS * 2 ** (this.reconnectAttempt - 1),
+            WhatsAppChannel.RECONNECT_BASE_MS *
+              2 ** (this.reconnectAttempt - 1),
             WhatsAppChannel.RECONNECT_MAX_MS,
           );
-          logger.info({ attempt: this.reconnectAttempt, delayMs: delay }, `WhatsApp disconnected — reconnecting in ${Math.round(delay / 1000)}s`);
+          logger.info(
+            { attempt: this.reconnectAttempt, delayMs: delay },
+            `WhatsApp disconnected — reconnecting in ${Math.round(delay / 1000)}s`,
+          );
           setTimeout(() => {
             this.connectInternal().catch((err) => {
               logger.error({ err }, 'WhatsApp reconnect attempt failed');
@@ -174,10 +190,16 @@ export class WhatsAppChannel implements Channel {
         // will show a stuck typing indicator until we explicitly send "paused".
         if (this.activeTypingJids.size > 0) {
           const staleJids = [...this.activeTypingJids];
-          logger.info({ jids: staleJids }, 'Clearing stale typing indicators after reconnect');
+          logger.info(
+            { jids: staleJids },
+            'Clearing stale typing indicators after reconnect',
+          );
           for (const jid of staleJids) {
             this.sock.sendPresenceUpdate('paused', jid).catch((err) => {
-              logger.warn({ err, jid }, 'Failed to clear stale typing indicator');
+              logger.warn(
+                { err, jid },
+                'Failed to clear stale typing indicator',
+              );
             });
           }
           // Don't clear the set — the agent is still running and will re-assert
@@ -277,18 +299,24 @@ export class WhatsAppChannel implements Channel {
             const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
             if (contextInfo?.quotedMessage || contextInfo?.stanzaId) {
               const qm = contextInfo.quotedMessage;
-              let quotedText = qm?.conversation
-                || qm?.extendedTextMessage?.text
-                || qm?.imageMessage?.caption
-                || qm?.videoMessage?.caption
-                || '';
+              let quotedText =
+                qm?.conversation ||
+                qm?.extendedTextMessage?.text ||
+                qm?.imageMessage?.caption ||
+                qm?.videoMessage?.caption ||
+                '';
               // Self-chat: WhatsApp strips quoted body to "". Fall back to our sent message cache.
               if (!quotedText && contextInfo.stanzaId) {
-                quotedText = this.sentMessageTexts.get(contextInfo.stanzaId) || '';
+                quotedText =
+                  this.sentMessageTexts.get(contextInfo.stanzaId) || '';
               }
               if (quotedText) {
-                const truncated = quotedText.length > 200 ? quotedText.slice(0, 200) + '…' : quotedText;
-                const quotedSender = contextInfo.participant?.split('@')[0] || 'someone';
+                const truncated =
+                  quotedText.length > 200
+                    ? quotedText.slice(0, 200) + '…'
+                    : quotedText;
+                const quotedSender =
+                  contextInfo.participant?.split('@')[0] || 'someone';
                 content = `[Replying to ${quotedSender}: "${truncated}"]\n${content}`;
               }
             }
@@ -307,7 +335,10 @@ export class WhatsAppChannel implements Channel {
             });
           }
         } catch (err) {
-          logger.error({ err, msgId: msg.key?.id }, 'Error processing WhatsApp message');
+          logger.error(
+            { err, msgId: msg.key?.id },
+            'Error processing WhatsApp message',
+          );
         }
       }
     };
@@ -324,14 +355,23 @@ export class WhatsAppChannel implements Channel {
     this.sock.ev.on('messages.reaction', this.reactionHandler);
   }
 
-  async sendMessage(jid: string, text: string, replyToMessageId?: string): Promise<string | void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    replyToMessageId?: string,
+  ): Promise<string | void> {
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text });
-      logger.info({ jid, length: text.length, queueSize: this.outgoingQueue.length }, 'WA disconnected, message queued');
+      logger.info(
+        { jid, length: text.length, queueSize: this.outgoingQueue.length },
+        'WA disconnected, message queued',
+      );
       return;
     }
     try {
-      const cached = replyToMessageId ? this.messageCache.get(replyToMessageId) : undefined;
+      const cached = replyToMessageId
+        ? this.messageCache.get(replyToMessageId)
+        : undefined;
       const opts = cached ? { quoted: cached.msg } : undefined;
       const sent = await this.sock.sendMessage(jid, { text }, opts);
       const sentId = sent?.key?.id;
@@ -352,7 +392,10 @@ export class WhatsAppChannel implements Channel {
     } catch (err) {
       // If send fails, queue it for retry on reconnect
       this.outgoingQueue.push({ jid, text });
-      logger.warn({ jid, err, queueSize: this.outgoingQueue.length }, 'Failed to send, message queued');
+      logger.warn(
+        { jid, err, queueSize: this.outgoingQueue.length },
+        'Failed to send, message queued',
+      );
     }
   }
 
@@ -427,7 +470,10 @@ export class WhatsAppChannel implements Channel {
     // Check local cache first
     const cached = this.lidToPhoneMap[lidUser];
     if (cached) {
-      logger.debug({ lidJid: jid, phoneJid: cached }, 'Translated LID to phone JID (cached)');
+      logger.debug(
+        { lidJid: jid, phoneJid: cached },
+        'Translated LID to phone JID (cached)',
+      );
       return cached;
     }
 
@@ -437,7 +483,10 @@ export class WhatsAppChannel implements Channel {
       if (pn) {
         const phoneJid = `${pn.split('@')[0].split(':')[0]}@s.whatsapp.net`;
         this.lidToPhoneMap[lidUser] = phoneJid;
-        logger.info({ lidJid: jid, phoneJid }, 'Translated LID to phone JID (signalRepository)');
+        logger.info(
+          { lidJid: jid, phoneJid },
+          'Translated LID to phone JID (signalRepository)',
+        );
         return phoneJid;
       }
     } catch (err) {
@@ -451,7 +500,10 @@ export class WhatsAppChannel implements Channel {
     if (this.flushing || this.outgoingQueue.length === 0) return;
     this.flushing = true;
     try {
-      logger.info({ count: this.outgoingQueue.length }, 'Flushing outgoing message queue');
+      logger.info(
+        { count: this.outgoingQueue.length },
+        'Flushing outgoing message queue',
+      );
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
         await this.sendMessage(item.jid, item.text);
@@ -471,7 +523,9 @@ export class WhatsAppChannel implements Channel {
     }
     // Cap at max size — evict oldest
     if (this.messageCache.size > WhatsAppChannel.MESSAGE_CACHE_MAX) {
-      const entries = [...this.messageCache.entries()].sort((a, b) => a[1].ts - b[1].ts);
+      const entries = [...this.messageCache.entries()].sort(
+        (a, b) => a[1].ts - b[1].ts,
+      );
       const toRemove = entries.length - WhatsAppChannel.MESSAGE_CACHE_MAX;
       for (let i = 0; i < toRemove; i++) {
         this.messageCache.delete(entries[i][0]);
