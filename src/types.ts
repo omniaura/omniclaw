@@ -62,9 +62,10 @@ export interface RegisteredGroup {
   autoRespondToQuestions?: boolean; // Respond to messages ending with '?' (default: false)
   autoRespondKeywords?: string[]; // Keywords that trigger response without mention (e.g., ["omni", "help"])
   heartbeat?: HeartbeatConfig;
-  discordGuildId?: string; // Discord guild/server ID (for server-level context)
-  serverFolder?: string; // e.g., "servers/omniaura-discord" (shared across channels in same server)
-  backend?: BackendType; // Which container backend runs this group's agent (default: apple-container)
+  discordBotId?: string; // Stable Discord bot identity key (e.g., "CLAUDE", "OPENCODE")
+  discordGuildId?: string;  // Discord guild/server ID (for server-level context)
+  serverFolder?: string;    // e.g., "servers/omniaura-discord" (shared across channels in same server)
+  backend?: BackendType;     // Which container backend runs this group's agent (default: apple-container)
   agentRuntime?: AgentRuntime; // Which agent runtime runs inside the container (default: claude-agent-sdk)
   description?: string; // What this agent does (for agent registry)
   streamIntermediates?: boolean; // Stream intermediate output (thinking, tool calls) to channel threads. Default: false
@@ -181,6 +182,23 @@ export interface ChannelRoute {
   agentId: string; // FK to Agent.id
   trigger: string;
   requiresTrigger: boolean;
+  discordBotId?: string;
+  discordGuildId?: string;
+  createdAt: string;
+}
+
+/**
+ * Multi-agent channel subscription.
+ * Multiple agents can subscribe to the same channel.
+ */
+export interface ChannelSubscription {
+  channelJid: string;
+  agentId: string;
+  trigger: string;
+  requiresTrigger: boolean;
+  priority: number;
+  isPrimary: boolean;
+  discordBotId?: string;
   discordGuildId?: string;
   createdAt: string;
 }
@@ -221,6 +239,7 @@ export function registeredGroupToRoute(
     agentId: group.folder,
     trigger: group.trigger,
     requiresTrigger: group.requiresTrigger !== false,
+    discordBotId: group.discordBotId,
     discordGuildId: group.discordGuildId,
     createdAt: group.added_at,
   };
@@ -253,6 +272,7 @@ export interface IpcTaskPayload {
   groupFolder?: string;
   chatJid?: string;
   targetJid?: string;
+  channel_jid?: string;
   // For register_group
   jid?: string;
   name?: string;
@@ -260,6 +280,7 @@ export interface IpcTaskPayload {
   trigger?: string;
   requiresTrigger?: boolean;
   containerConfig?: ContainerConfig;
+  discord_bot_id?: string;
   discord_guild_id?: string;
   // For configure_heartbeat
   enabled?: boolean;

@@ -15,12 +15,15 @@ import {
   getAgent,
   getAllAgents,
   setChannelRoute,
+  setChannelSubscription,
+  getSubscriptionsForChannel,
+  removeChannelSubscription,
   getChannelRoute,
   getAllChannelRoutes,
   getRoutesForAgent,
 } from './db.js';
 import { processTaskIpc, IpcDeps } from './ipc.js';
-import { RegisteredGroup, Agent, ChannelRoute } from './types.js';
+import { RegisteredGroup, Agent, ChannelRoute, ChannelSubscription } from './types.js';
 
 // --- Shared test fixtures ---
 
@@ -598,6 +601,42 @@ describe('processTaskIpc: register_group with discord', () => {
     expect(groups['new@g.us'].backend).toBe('docker');
   });
 
+  it('sets discordBotId when discord_bot_id provided', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'dc:channel999',
+        name: 'Discord OpenCode',
+        folder: 'dc-opencode',
+        trigger: '@Bot',
+        discord_bot_id: 'OPENCODE',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    expect(groups['dc:channel999'].discordBotId).toBe('OPENCODE');
+  });
+
+  it('sets agentRuntime when agent_runtime provided', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'dc:channel555',
+        name: 'Discord Runtime',
+        folder: 'dc-runtime',
+        trigger: '@Bot',
+        agent_runtime: 'opencode',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    expect(groups['dc:channel555'].agentRuntime).toBe('opencode');
+  });
+
   it('sets description when provided', async () => {
     await processTaskIpc(
       {
@@ -614,6 +653,66 @@ describe('processTaskIpc: register_group with discord', () => {
     );
 
     expect(groups['new@g.us'].description).toBe('A group for testing');
+  });
+});
+
+describe('processTaskIpc: channel subscriptions', () => {
+  it('subscribe_channel adds a second agent to same channel', async () => {
+    setChannelSubscription({
+      channelJid: 'dc:777',
+      agentId: 'other-group',
+      trigger: '@Other',
+      requiresTrigger: true,
+      priority: 100,
+      isPrimary: true,
+      createdAt: '2024-01-01T00:00:00.000Z',
+    });
+    await processTaskIpc(
+      {
+        type: 'subscribe_channel',
+        channel_jid: 'dc:777',
+        target_agent: 'third-group',
+      },
+      'main',
+      true,
+      deps,
+    );
+    const subs = getSubscriptionsForChannel('dc:777');
+    expect(subs.map((s) => s.agentId).sort()).toEqual(['other-group', 'third-group']);
+  });
+
+  it('unsubscribe_channel removes targeted subscription', async () => {
+    setChannelSubscription({
+      channelJid: 'dc:888',
+      agentId: 'other-group',
+      trigger: '@Other',
+      requiresTrigger: true,
+      priority: 100,
+      isPrimary: true,
+      createdAt: '2024-01-01T00:00:00.000Z',
+    });
+    setChannelSubscription({
+      channelJid: 'dc:888',
+      agentId: 'third-group',
+      trigger: '@Third',
+      requiresTrigger: true,
+      priority: 100,
+      isPrimary: false,
+      createdAt: '2024-01-01T00:00:00.000Z',
+    });
+    await processTaskIpc(
+      {
+        type: 'unsubscribe_channel',
+        channel_jid: 'dc:888',
+        target_agent: 'third-group',
+      },
+      'main',
+      true,
+      deps,
+    );
+    const subs = getSubscriptionsForChannel('dc:888');
+    expect(subs).toHaveLength(1);
+    expect(subs[0].agentId).toBe('other-group');
   });
 });
 
@@ -901,10 +1000,46 @@ describe('ChannelRoute CRUD', () => {
     expect(route!.discordGuildId).toBe('guild-123');
   });
 
+  it('stores and retrieves route with discordBotId', () => {
+    setChannelRoute({ ...testRoute, discordBotId: 'OPENCODE' });
+    const route = getChannelRoute('channel@g.us');
+    expect(route!.discordBotId).toBe('OPENCODE');
+  });
+
   it('handles route without discordGuildId', () => {
     setChannelRoute(testRoute);
     const route = getChannelRoute('channel@g.us');
     expect(route!.discordGuildId).toBeUndefined();
+  });
+});
+
+describe('ChannelSubscription CRUD', () => {
+  const testSub: ChannelSubscription = {
+    channelJid: 'dc:123',
+    agentId: 'agent-1',
+    trigger: '@Bot',
+    requiresTrigger: true,
+    priority: 100,
+    isPrimary: true,
+    createdAt: '2024-01-01T00:00:00.000Z',
+  };
+
+  it('creates and retrieves subscriptions for channel', () => {
+    setChannelSubscription(testSub);
+    setChannelSubscription({ ...testSub, agentId: 'agent-2', isPrimary: false, priority: 200 });
+    const subs = getSubscriptionsForChannel('dc:123');
+    expect(subs).toHaveLength(2);
+    expect(subs[0].agentId).toBe('agent-1');
+    expect(subs[1].agentId).toBe('agent-2');
+  });
+
+  it('removes one subscription without affecting others', () => {
+    setChannelSubscription(testSub);
+    setChannelSubscription({ ...testSub, agentId: 'agent-2', isPrimary: false });
+    removeChannelSubscription('dc:123', 'agent-2');
+    const subs = getSubscriptionsForChannel('dc:123');
+    expect(subs).toHaveLength(1);
+    expect(subs[0].agentId).toBe('agent-1');
   });
 });
 

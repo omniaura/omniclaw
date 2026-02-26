@@ -258,6 +258,20 @@ Ask the user:
 
 If they paste the token, use the Write tool or a text editor to append `DISCORD_BOT_TOKEN=<token>` to `.env`. Do **not** echo the token via shell command, as it would leak into shell history.
 
+For multi-bot support (recommended), collect:
+- A bot ID (uppercase letters/numbers/underscores), e.g. `CLAUDE` or `OPENCODE`
+- Optional runtime default for that bot ID: `claude-agent-sdk` or `opencode`
+- Whether this bot should be the default for unassigned Discord channels
+
+Then update `.env`:
+- Ensure `DISCORD_BOT_IDS` includes the bot ID (comma-separated list)
+- Set `DISCORD_BOT_<BOT_ID>_TOKEN=<token>`
+- Optionally set `DISCORD_BOT_<BOT_ID>_RUNTIME=<runtime>`
+- Optionally set `DISCORD_BOT_DEFAULT=<BOT_ID>` for default Discord routing
+
+Backwards compatibility rule:
+- Never remove or overwrite an existing `DISCORD_BOT_TOKEN` unless user explicitly asks.
+
 #### Register Discord Channel
 
 The Discord channel JID format is `dc:<channel_id>`. Ask the user for the Discord channel ID:
@@ -275,6 +289,18 @@ sqlite3 store/messages.db "INSERT OR REPLACE INTO registered_groups (jid, name, 
 Create the group folder:
 ```bash
 mkdir -p groups/<FOLDER_NAME>/logs
+```
+
+Preferred registration path (keeps agents/channel_routes in sync):
+```bash
+./.claude/skills/setup/scripts/06-register-channel.sh \
+  --jid "dc:<CHANNEL_ID>" \
+  --name "<AGENT_NAME>" \
+  --trigger "@<TRIGGER>" \
+  --folder "<FOLDER_NAME>" \
+  --discord-bot-id "<BOT_ID>" \
+  --agent-runtime "<claude-agent-sdk|opencode>" \
+  --assistant-name "<AssistantName>"
 ```
 
 Restart the service to connect to Discord:

@@ -1,8 +1,76 @@
 import os from 'os';
 import path from 'path';
 
+export type AgentRuntime = 'claude-agent-sdk' | 'opencode';
+
+export interface DiscordBotConfig {
+  id: string;
+  token: string;
+  runtime?: AgentRuntime;
+}
+
+export function parseEnvList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(/[\n,]/)
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+}
+
+function parseAgentRuntime(value: string | undefined): AgentRuntime | undefined {
+  if (!value) return undefined;
+  if (value === 'claude-agent-sdk' || value === 'opencode') return value;
+  return undefined;
+}
+
+function sanitizeBotId(raw: string): string {
+  return raw
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+export function buildDiscordBotConfigFromEnv(env: NodeJS.ProcessEnv): {
+  bots: DiscordBotConfig[];
+  defaultBotId?: string;
+} {
+  const ids = parseEnvList(env.DISCORD_BOT_IDS)
+    .map(sanitizeBotId)
+    .filter((id) => id.length > 0);
+
+  if (ids.length > 0) {
+    const bots: DiscordBotConfig[] = [];
+    for (const id of ids) {
+      const token = env[`DISCORD_BOT_${id}_TOKEN`]?.trim();
+      if (!token) continue;
+      const runtime = parseAgentRuntime(env[`DISCORD_BOT_${id}_RUNTIME`]);
+      bots.push({ id, token, runtime });
+    }
+    if (bots.length === 0) return { bots: [] };
+    const preferredDefault = sanitizeBotId(env.DISCORD_BOT_DEFAULT || '');
+    const defaultBotId = bots.some((b) => b.id === preferredDefault)
+      ? preferredDefault
+      : bots[0].id;
+    return { bots, defaultBotId };
+  }
+
+  const token = (env.DISCORD_BOT_TOKEN || '').trim();
+  const bots = token
+    ? [{ id: 'PRIMARY', token, runtime: undefined as AgentRuntime | undefined }]
+    : [];
+  return {
+    bots,
+    defaultBotId: bots[0]?.id,
+  };
+}
+
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Omni';
-export const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || '';
+const discordEnv = buildDiscordBotConfigFromEnv(process.env);
+export const DISCORD_BOTS = discordEnv.bots;
+export const DISCORD_DEFAULT_BOT_ID = discordEnv.defaultBotId;
+export const DISCORD_BOT_IDS = DISCORD_BOTS.map((b) => b.id);
+export const DISCORD_BOT_TOKEN = DISCORD_BOTS[0]?.token || '';
 export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 // Slack: bot token (xoxb-...) + app-level token for Socket Mode (xapp-...)
 export const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
@@ -86,4 +154,3 @@ export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || undefined;
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
-

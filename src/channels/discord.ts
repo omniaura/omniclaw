@@ -81,7 +81,9 @@ function updateUserRegistry(
 }
 
 export interface DiscordChannelOpts {
+  botId: string;
   token: string;
+  multiBotMode?: boolean;
   onReaction?: (
     chatJid: string,
     messageId: string,
@@ -93,13 +95,16 @@ export interface DiscordChannelOpts {
 export class DiscordChannel implements Channel {
   name = 'discord';
   prefixAssistantName = false;
+  readonly botId: string;
 
   private client: Client;
   private connected = false;
   private opts: DiscordChannelOpts;
+  private ownedJids = new Set<string>();
 
   constructor(opts: DiscordChannelOpts) {
     this.opts = opts;
+    this.botId = opts.botId;
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -117,7 +122,7 @@ export class DiscordChannel implements Channel {
       this.client.once(Events.ClientReady, (readyClient) => {
         this.connected = true;
         logger.info(
-          { username: readyClient.user.tag, id: readyClient.user.id },
+          { username: readyClient.user.tag, id: readyClient.user.id, botId: this.botId },
           'Discord bot connected',
         );
         logger.info({ tag: readyClient.user.tag }, 'Discord bot ready');
@@ -188,6 +193,7 @@ export class DiscordChannel implements Channel {
         lastMessageId = sent.id;
       }
       logger.info({ jid, length: text.length }, 'Discord message sent');
+      this.ownedJids.add(jid);
       return lastMessageId;
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Discord message');
@@ -199,7 +205,10 @@ export class DiscordChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    return jid.startsWith('dc:');
+    if (!jid.startsWith('dc:')) return false;
+    // Backward-compatible single-bot behavior: one Discord client owns all dc: JIDs.
+    if (!this.opts.multiBotMode) return true;
+    return this.ownedJids.has(jid);
   }
 
   async disconnect(): Promise<void> {
@@ -666,6 +675,9 @@ export class DiscordChannel implements Channel {
     // Clean up media files older than 24 hours
     this.cleanupOldMedia(group.folder);
 
+    // Mark this JID as owned by this bot only after we accept/process the message.
+    this.ownedJids.add(chatJid);
+
     // Store message — startMessageLoop() will pick it up
     storeMessage({
       id: msgId,
@@ -716,6 +728,7 @@ export class DiscordChannel implements Channel {
     const chatJid = isDM
       ? `dc:dm:${user.id}`
       : `dc:${reaction.message.channelId}`;
+    this.ownedJids.add(chatJid);
     const emoji = reaction.emoji.name || '';
 
     const userName = user.displayName || user.username || 'Someone';

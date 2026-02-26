@@ -4,8 +4,9 @@ import {
   resolveAgentForChannel,
   getChannelJidsForAgent,
   buildAgentToChannelsMap,
+  buildAgentToChannelsMapFromSubscriptions,
 } from './channel-routes.js';
-import type { ChannelRoute } from './types.js';
+import type { ChannelRoute, ChannelSubscription } from './types.js';
 
 // --- Test Data ---
 
@@ -121,5 +122,46 @@ describe('buildAgentToChannelsMap', () => {
     const map = buildAgentToChannelsMap(routes);
     expect(map.size).toBe(1);
     expect(map.get('single-agent')).toHaveLength(3);
+  });
+});
+
+describe('buildAgentToChannelsMapFromSubscriptions', () => {
+  it('groups unique channels by agent from subscriptions', () => {
+    const subs: Record<string, ChannelSubscription[]> = {
+      'dc:1': [
+        {
+          channelJid: 'dc:1',
+          agentId: 'a1',
+          trigger: '@A1',
+          requiresTrigger: true,
+          priority: 100,
+          isPrimary: true,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          channelJid: 'dc:1',
+          agentId: 'a2',
+          trigger: '@A2',
+          requiresTrigger: true,
+          priority: 100,
+          isPrimary: false,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+      'dc:2': [
+        {
+          channelJid: 'dc:2',
+          agentId: 'a1',
+          trigger: '@A1',
+          requiresTrigger: true,
+          priority: 100,
+          isPrimary: true,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    };
+    const map = buildAgentToChannelsMapFromSubscriptions(subs);
+    expect(map.get('a1')).toEqual(['dc:1', 'dc:2']);
+    expect(map.get('a2')).toEqual(['dc:1']);
   });
 });

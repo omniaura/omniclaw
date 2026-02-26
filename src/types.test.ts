@@ -135,6 +135,12 @@ describe('types.ts conversion functions', () => {
       expect(route.discordGuildId).toBe('guild-123');
     });
 
+    it('preserves discordBotId', () => {
+      const group = makeGroup({ discordBotId: 'OPENCODE' });
+      const route = registeredGroupToRoute('dc:456', group);
+      expect(route.discordBotId).toBe('OPENCODE');
+    });
+
     it('handles WhatsApp JIDs', () => {
       const group = makeGroup();
       const route = registeredGroupToRoute('120363@g.us', group);

@@ -14,12 +14,14 @@ import { getAgentName, findChannel } from './router.js';
 // --- Mock Channel factory ---
 
 function makeChannel(opts: {
+  name?: string;
   jids: string[];
   connected?: boolean;
   sentMessages?: Array<{ jid: string; text: string }>;
 }): Channel {
   const sent = opts.sentMessages ?? [];
   return {
+    name: opts.name ?? 'test',
     ownsJid: (jid: string) => opts.jids.includes(jid),
     isConnected: () => opts.connected ?? true,
     sendMessage: async (jid: string, text: string) => {
@@ -93,5 +95,14 @@ describe('findChannel', () => {
 
   it('handles empty channels array', () => {
     expect(findChannel([], 'abc@g.us')).toBeUndefined();
+  });
+
+  it('falls back to first Discord channel when none own a Discord JID', () => {
+    const wa = makeChannel({ name: 'whatsapp', jids: ['abc@g.us'] });
+    const dc1 = makeChannel({ name: 'discord', jids: [] });
+    const dc2 = makeChannel({ name: 'discord', jids: [] });
+
+    const result = findChannel([wa, dc1, dc2], 'dc:123');
+    expect(result).toBe(dc1);
   });
 });

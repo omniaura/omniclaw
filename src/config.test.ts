@@ -2,8 +2,10 @@ import { describe, it, expect } from 'bun:test';
 
 import {
   ASSISTANT_NAME,
+  buildDiscordBotConfigFromEnv,
   escapeRegex,
   buildTriggerPattern,
+  parseEnvList,
   TRIGGER_PATTERN,
 } from './config.js';
 
@@ -66,6 +68,69 @@ describe('escapeRegex', () => {
 
   it('handles empty string', () => {
     expect(escapeRegex('')).toBe('');
+  });
+});
+
+// --- parseEnvList ---
+
+describe('parseEnvList', () => {
+  it('returns empty array for undefined', () => {
+    expect(parseEnvList(undefined)).toEqual([]);
+  });
+
+  it('returns empty array for empty string', () => {
+    expect(parseEnvList('')).toEqual([]);
+  });
+
+  it('parses comma-separated values', () => {
+    expect(parseEnvList('a,b,c')).toEqual(['a', 'b', 'c']);
+  });
+
+  it('parses newline-separated values', () => {
+    expect(parseEnvList('a\nb\nc')).toEqual(['a', 'b', 'c']);
+  });
+
+  it('parses mixed separators and trims whitespace', () => {
+    expect(parseEnvList(' a, b\n c ,\n d ')).toEqual(['a', 'b', 'c', 'd']);
+  });
+});
+
+describe('buildDiscordBotConfigFromEnv', () => {
+  it('parses prefixed Discord bot config with default ID', () => {
+    const parsed = buildDiscordBotConfigFromEnv({
+      DISCORD_BOT_IDS: 'CLAUDE,OPENCODE',
+      DISCORD_BOT_CLAUDE_TOKEN: 'token-a',
+      DISCORD_BOT_OPENCODE_TOKEN: 'token-b',
+      DISCORD_BOT_OPENCODE_RUNTIME: 'opencode',
+      DISCORD_BOT_DEFAULT: 'OPENCODE',
+    });
+
+    expect(parsed.bots).toEqual([
+      { id: 'CLAUDE', token: 'token-a', runtime: undefined },
+      { id: 'OPENCODE', token: 'token-b', runtime: 'opencode' },
+    ]);
+    expect(parsed.defaultBotId).toBe('OPENCODE');
+  });
+
+  it('falls back default ID to first configured bot when DISCORD_BOT_DEFAULT is missing', () => {
+    const parsed = buildDiscordBotConfigFromEnv({
+      DISCORD_BOT_IDS: 'CLAUDE,OPENCODE',
+      DISCORD_BOT_CLAUDE_TOKEN: 'token-a',
+      DISCORD_BOT_OPENCODE_TOKEN: 'token-b',
+    });
+
+    expect(parsed.defaultBotId).toBe('CLAUDE');
+  });
+
+  it('supports legacy DISCORD_BOT_TOKEN', () => {
+    const parsed = buildDiscordBotConfigFromEnv({
+      DISCORD_BOT_TOKEN: 'legacy-token',
+    });
+
+    expect(parsed.bots).toEqual([
+      { id: 'PRIMARY', token: 'legacy-token', runtime: undefined },
+    ]);
+    expect(parsed.defaultBotId).toBe('PRIMARY');
   });
 });
 

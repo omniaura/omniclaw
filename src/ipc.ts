@@ -12,6 +12,9 @@ import { AvailableGroup } from './ipc-snapshots.js';
 import {
   createTask,
   deleteTask,
+  getSubscriptionsForChannel,
+  removeChannelSubscription,
+  setChannelSubscription,
   getTaskById,
   setRegisteredGroup,
   updateTask,
@@ -583,8 +586,10 @@ export async function processTaskIpc(
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
           backend: data.backend,
+          agentRuntime: data.agent_runtime,
           description: data.group_description,
           requiresTrigger: data.requiresTrigger,
+          discordBotId: data.discord_bot_id,
         };
 
         // If a Discord guild ID is provided, validate it and compute serverFolder
@@ -608,6 +613,59 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'subscribe_channel': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized subscribe_channel attempt blocked');
+        break;
+      }
+      if (!data.channel_jid || !data.target_agent) {
+        logger.warn({ data }, 'subscribe_channel missing required fields');
+        break;
+      }
+      const targetEntry = findGroupByFolder(registeredGroups, data.target_agent);
+      if (!targetEntry) {
+        logger.warn({ targetAgent: data.target_agent }, 'subscribe_channel target agent not found');
+        break;
+      }
+      const targetGroup = targetEntry[1];
+      const subs = getSubscriptionsForChannel(data.channel_jid);
+      const existing = subs.find((s) => s.agentId === targetGroup.folder);
+      const now = new Date().toISOString();
+      setChannelSubscription({
+        channelJid: data.channel_jid,
+        agentId: targetGroup.folder,
+        trigger: data.trigger || targetGroup.trigger || `@${targetGroup.name}`,
+        requiresTrigger: data.requiresTrigger !== false,
+        priority: 100,
+        isPrimary: existing?.isPrimary ?? false,
+        discordBotId: data.discord_bot_id || targetGroup.discordBotId,
+        discordGuildId: data.discord_guild_id || targetGroup.discordGuildId,
+        createdAt: existing?.createdAt || now,
+      });
+      logger.info(
+        { channelJid: data.channel_jid, agentId: targetGroup.folder },
+        'Channel subscription upserted via IPC',
+      );
+      break;
+    }
+
+    case 'unsubscribe_channel': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized unsubscribe_channel attempt blocked');
+        break;
+      }
+      if (!data.channel_jid || !data.target_agent) {
+        logger.warn({ data }, 'unsubscribe_channel missing required fields');
+        break;
+      }
+      removeChannelSubscription(data.channel_jid, data.target_agent);
+      logger.info(
+        { channelJid: data.channel_jid, agentId: data.target_agent },
+        'Channel subscription removed via IPC',
+      );
+      break;
+    }
 
     case 'configure_heartbeat': {
       if (data.enabled === undefined) {

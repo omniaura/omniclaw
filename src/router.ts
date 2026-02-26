@@ -59,5 +59,14 @@ export function findChannel(
   channels: Channel[],
   jid: string,
 ): Channel | undefined {
-  return channels.find((c) => c.ownsJid(jid));
+  const owned = channels.find((c) => c.ownsJid(jid));
+  if (owned) return owned;
+
+  // Multi-Discord mode: if no instance has learned this JID yet,
+  // fall back to the first connected Discord channel.
+  if (jid.startsWith('dc:')) {
+    return channels.find((c) => c.name === 'discord');
+  }
+
+  return undefined;
 }
