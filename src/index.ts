@@ -691,7 +691,9 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   // Use buildTriggerPattern(group.trigger) so @PeytonOmni / @OmarOmni groups
   // aren't silently dropped by the global @Omni TRIGGER_PATTERN (mirrors the
   // same fix already applied in startMessageLoop by PR #138).
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  // For dispatch-selected agent runs, trigger routing already happened in
+  // selectSubscriptionsForMessage(). Don't re-apply trigger gating here.
+  if (!agentId && !isMainGroup && group.requiresTrigger !== false) {
     const groupTriggerPattern = buildTriggerPattern(group.trigger);
     const hasTrigger = missedMessages.some((m) =>
       groupTriggerPattern.test(m.content.trim()),
