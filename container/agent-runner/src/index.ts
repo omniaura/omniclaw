@@ -297,7 +297,7 @@ function createPreCompactHook(): HookCallback {
 // Secrets to strip from Bash tool subprocess environments.
 // These are needed by claude-code for API auth but should never
 // be visible to commands Kit runs.
-const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_OAUTH_TOKEN'];
 
 /**
  * createSanitizeBashHook
@@ -672,7 +672,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; sessionStale?: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -892,6 +892,21 @@ async function runQuery(
       log(`Session initialized: ${newSessionId}`);
     }
 
+    // Detect stale session: if we get error_during_execution before system/init,
+    // the session transcript no longer exists (e.g. container was recreated).
+    // Discard the stale session and retry as fresh. [Upstream PR #503]
+    if (
+      message.type === 'system' &&
+      (message as { subtype?: string }).subtype === 'error_during_execution' &&
+      !newSessionId &&
+      sessionId
+    ) {
+      log(`Session ${sessionId} appears stale (error_during_execution before init), will retry as fresh session`);
+      ipcPolling = false;
+      stream.end();
+      return { newSessionId: undefined, lastAssistantUuid: undefined, closedDuringQuery, sessionStale: true };
+    }
+
     if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
       const tn = message as { task_id: string; status: string; summary: string };
       log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
@@ -1032,18 +1047,27 @@ Please review these changes to understand your new capabilities and fixes.
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
-      if (queryResult.newSessionId) {
-        sessionId = queryResult.newSessionId;
+      let effectiveResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+
+      // Handle stale session: discard session state and retry as fresh [Upstream PR #503]
+      if (effectiveResult.sessionStale) {
+        log('Retrying query as fresh session (stale session discarded)');
+        sessionId = undefined;
+        resumeAt = undefined;
+        effectiveResult = await runQuery(prompt, undefined, mcpServerPath, containerInput, sdkEnv, undefined);
       }
-      if (queryResult.lastAssistantUuid) {
-        resumeAt = queryResult.lastAssistantUuid;
+
+      if (effectiveResult.newSessionId) {
+        sessionId = effectiveResult.newSessionId;
+      }
+      if (effectiveResult.lastAssistantUuid) {
+        resumeAt = effectiveResult.lastAssistantUuid;
       }
 
       // If _close was consumed during the query, exit immediately.
       // Don't emit a session-update marker (it would reset the host's
       // idle timer and cause a 30-min delay before the next _close).
-      if (queryResult.closedDuringQuery) {
+      if (effectiveResult.closedDuringQuery) {
         log('Close sentinel consumed during query, exiting');
         break;
       }
