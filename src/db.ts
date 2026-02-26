@@ -352,28 +352,17 @@ export function storeChatMetadata(
   name?: string,
   discordGuildId?: string,
 ): void {
-  if (name) {
-    // Update with name, preserving existing timestamp if newer
-    db.query(
-      `
-      INSERT INTO chats (jid, name, last_message_time, discord_guild_id) VALUES (?, ?, ?, ?)
-      ON CONFLICT(jid) DO UPDATE SET
-        name = excluded.name,
-        last_message_time = MAX(last_message_time, excluded.last_message_time),
-        discord_guild_id = COALESCE(excluded.discord_guild_id, discord_guild_id)
-    `,
-    ).run(chatJid, name, timestamp, discordGuildId || null);
-  } else {
-    // Update timestamp only, preserve existing name if any
-    db.query(
-      `
-      INSERT INTO chats (jid, name, last_message_time, discord_guild_id) VALUES (?, ?, ?, ?)
-      ON CONFLICT(jid) DO UPDATE SET
-        last_message_time = MAX(last_message_time, excluded.last_message_time),
-        discord_guild_id = COALESCE(excluded.discord_guild_id, discord_guild_id)
-    `,
-    ).run(chatJid, chatJid, timestamp, discordGuildId || null);
-  }
+  // When name is provided, update it on conflict; otherwise preserve existing name
+  const nameClause = name ? 'name = excluded.name,' : '';
+  db.query(
+    `
+    INSERT INTO chats (jid, name, last_message_time, discord_guild_id) VALUES (?, ?, ?, ?)
+    ON CONFLICT(jid) DO UPDATE SET
+      ${nameClause}
+      last_message_time = MAX(last_message_time, excluded.last_message_time),
+      discord_guild_id = COALESCE(excluded.discord_guild_id, discord_guild_id)
+  `,
+  ).run(chatJid, name || chatJid, timestamp, discordGuildId || null);
 }
 
 /**
@@ -462,6 +451,21 @@ export function storeMessage(msg: NewMessage): void {
   );
 }
 
+/** DB row type with nullable JSON fields that need conversion to NewMessage */
+type MessageRow = NewMessage & {
+  mentions: string | null;
+  sender_user_id: string | null;
+};
+
+/** Convert a raw DB message row to a NewMessage (parse mentions JSON, null→undefined) */
+function mapMessageRow(row: MessageRow): NewMessage {
+  return {
+    ...row,
+    sender_user_id: row.sender_user_id ?? undefined,
+    mentions: row.mentions ? JSON.parse(row.mentions) : undefined,
+  };
+}
+
 export function getNewMessages(
   jids: string[],
   lastTimestamp: string,
@@ -477,19 +481,13 @@ export function getNewMessages(
     ORDER BY timestamp
   `;
 
-  const rows = db.prepare(sql).all(lastTimestamp, ...jids) as Array<
-    NewMessage & { mentions: string | null; sender_user_id: string | null }
-  >;
+  const rows = db.prepare(sql).all(lastTimestamp, ...jids) as MessageRow[];
 
   let newTimestamp = lastTimestamp;
   const messages: NewMessage[] = rows.map((row) => {
     if (new Date(row.timestamp) > new Date(newTimestamp))
       newTimestamp = row.timestamp;
-    return {
-      ...row,
-      sender_user_id: row.sender_user_id ?? undefined,
-      mentions: row.mentions ? JSON.parse(row.mentions) : undefined,
-    };
+    return mapMessageRow(row);
   });
 
   return { messages, newTimestamp };
@@ -506,14 +504,8 @@ export function getMessagesSince(
     WHERE chat_jid = ? AND timestamp > ? AND (is_from_me IS NULL OR is_from_me = 0)
     ORDER BY timestamp
   `;
-  const rows = db.prepare(sql).all(chatJid, sinceTimestamp) as Array<
-    NewMessage & { mentions: string | null; sender_user_id: string | null }
-  >;
-  return rows.map((row) => ({
-    ...row,
-    sender_user_id: row.sender_user_id ?? undefined,
-    mentions: row.mentions ? JSON.parse(row.mentions) : undefined,
-  }));
+  const rows = db.prepare(sql).all(chatJid, sinceTimestamp) as MessageRow[];
+  return rows.map(mapMessageRow);
 }
 
 export function createTask(
