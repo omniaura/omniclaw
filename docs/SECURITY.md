@@ -16,10 +16,12 @@
 Agents execute in Apple Container (lightweight Linux VMs), providing:
 - **Process isolation** - Container processes cannot affect the host
 - **Filesystem isolation** - Only explicitly mounted directories are visible
+- **Network isolation** - Non-main containers run with `--network none` (Docker), preventing data exfiltration. Main containers retain full network access for WebFetch/WebSearch tools. Per-group override via `containerConfig.networkMode: 'full' | 'none'`
 - **Non-root execution** - Runs as unprivileged `bun` user (uid 1000)
 - **Ephemeral containers** - Fresh environment per invocation (`--rm`)
+- **Resource limits** - `--pids-limit 256` (fork bomb prevention), `--no-new-privileges` (privilege escalation prevention)
 
-This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted.
+This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted and what's accessible via network.
 
 ### 2. Read-Only Project Root
 

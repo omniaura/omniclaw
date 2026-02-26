@@ -38,6 +38,7 @@ export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
   memory?: number;  // Container memory in MB. Default: 4096
+  networkMode?: 'full' | 'none'; // Default: 'none' for non-main, 'full' for main
 }
 
 export interface HeartbeatConfig {
