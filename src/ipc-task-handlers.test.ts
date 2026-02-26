@@ -733,12 +733,7 @@ describe('processTaskIpc: pause_task', () => {
   });
 
   it('handles missing taskId gracefully', async () => {
-    await processTaskIpc(
-      { type: 'pause_task' } as any,
-      'main',
-      true,
-      deps,
-    );
+    await processTaskIpc({ type: 'pause_task' } as any, 'main', true, deps);
 
     // Should not throw
     expect(taskSnapshots).toHaveLength(0);
@@ -834,12 +829,7 @@ describe('processTaskIpc: resume_task', () => {
   });
 
   it('handles missing taskId gracefully', async () => {
-    await processTaskIpc(
-      { type: 'resume_task' } as any,
-      'main',
-      true,
-      deps,
-    );
+    await processTaskIpc({ type: 'resume_task' } as any, 'main', true, deps);
 
     expect(taskSnapshots).toHaveLength(0);
   });
@@ -867,7 +857,7 @@ describe('processTaskIpc: cancel_task', () => {
       deps,
     );
 
-    expect(getTaskById('task-cancel-1')).toBeNull();
+    expect(getTaskById('task-cancel-1')).toBeUndefined();
   });
 
   it('group can cancel its own task', async () => {
@@ -880,7 +870,7 @@ describe('processTaskIpc: cancel_task', () => {
       deps,
     );
 
-    expect(getTaskById('task-cancel-own')).toBeNull();
+    expect(getTaskById('task-cancel-own')).toBeUndefined();
   });
 
   it('non-main group cannot cancel another groups task', async () => {
@@ -898,12 +888,7 @@ describe('processTaskIpc: cancel_task', () => {
   });
 
   it('handles missing taskId gracefully', async () => {
-    await processTaskIpc(
-      { type: 'cancel_task' } as any,
-      'main',
-      true,
-      deps,
-    );
+    await processTaskIpc({ type: 'cancel_task' } as any, 'main', true, deps);
 
     expect(taskSnapshots).toHaveLength(0);
   });
