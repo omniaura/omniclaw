@@ -43,8 +43,9 @@ export class WhatsAppChannel implements Channel {
   private static readonly MESSAGE_CACHE_MAX = 500;
   private static readonly MESSAGE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
   // Reconnect backoff state — resets to 0 on successful open
+  // [Upstream PR #466] exponential backoff: 2s → 4s → 8s → ... capped at 5min
   private reconnectAttempt = 0;
-  private static readonly RECONNECT_BASE_MS = 3_000;
+  private static readonly RECONNECT_BASE_MS = 2_000;
   private static readonly RECONNECT_MAX_MS = 5 * 60_000; // 5 min cap
 
   // Track IDs of messages we sent so the upsert handler can ignore echoes (self-chat loop fix)
