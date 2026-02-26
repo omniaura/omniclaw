@@ -505,8 +505,9 @@ export class WhatsAppChannel implements Channel {
         'Flushing outgoing message queue',
       );
       while (this.outgoingQueue.length > 0) {
-        const item = this.outgoingQueue.shift()!;
+        const item = this.outgoingQueue[0];
         await this.sendMessage(item.jid, item.text);
+        this.outgoingQueue.shift();
       }
     } finally {
       this.flushing = false;

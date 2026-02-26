@@ -483,7 +483,8 @@ export function getNewMessages(
 
   let newTimestamp = lastTimestamp;
   const messages: NewMessage[] = rows.map((row) => {
-    if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
+    if (new Date(row.timestamp) > new Date(newTimestamp))
+      newTimestamp = row.timestamp;
     return {
       ...row,
       sender_user_id: row.sender_user_id ?? undefined,
