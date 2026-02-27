@@ -302,4 +302,228 @@ describe('db migrations (bun:sqlite)', () => {
 
     db.close();
   });
+
+  it('migrates a realistic multi-agent multi-channel setup', () => {
+    // Mirrors the real upgrade scenario: one Discord bot with several channels
+    // spread across two agents, plus several legacy-only registered_groups that
+    // have no channel_routes entry (manual/older channels never routed through
+    // the new system). After migration every channel_route should become a
+    // channel_subscription; legacy-only channels must not appear.
+    const db = new Database(':memory:');
+    seedLegacyObservedSchema(db);
+
+    // Two agents in the agents table
+    const insertAgent = db.prepare(`
+      INSERT INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, is_local, server_folder, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertAgent.run(
+      'ditto-discord',
+      'Ditto Discord',
+      'frontend/backend',
+      'ditto-discord',
+      'apple-container',
+      null,
+      null,
+      0,
+      1,
+      'servers/omni-aura',
+      '2026-02-11T17:54:36.399Z',
+    );
+    insertAgent.run(
+      'landing-astro-discord',
+      'Landing Astro',
+      '',
+      'landing-astro-discord',
+      'apple-container',
+      null,
+      null,
+      0,
+      1,
+      'servers/omni-aura',
+      '2026-02-20T00:00:00.000Z',
+    );
+
+    // Seven registered_groups — the full legacy table a typical upgrader would have.
+    // Some have channel_routes; others are legacy-only (no routes).
+    // discord_bot_id doesn't exist yet — it's added by the migration itself
+    const insertGroup = db.prepare(`
+      INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger, discord_guild_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const GUILD = '753336633083953213';
+    // Channels that DO have routes
+    insertGroup.run(
+      'dc:940321040482074705',
+      'Ditto Discord',
+      'ditto-discord',
+      '@PeytonOmni',
+      '2026-02-11T00:00:00.000Z',
+      1,
+      GUILD,
+    );
+    insertGroup.run(
+      'dc:1475568899452964874',
+      'Spec',
+      'spec-discord',
+      '@PeytonOmni',
+      '2026-02-20T00:00:00.000Z',
+      1,
+      GUILD,
+    );
+    insertGroup.run(
+      'dc:1475601379400745101',
+      'Backend',
+      'backend-discord',
+      '@PeytonOmni',
+      '2026-02-20T00:00:00.000Z',
+      1,
+      GUILD,
+    );
+    insertGroup.run(
+      'dc:1475576563176181964',
+      'Landing Astro',
+      'landing-astro-discord',
+      '@PeytonOmni',
+      '2026-02-20T00:00:00.000Z',
+      1,
+      GUILD,
+    );
+    // Channels with NO routes (legacy-only, never migrated)
+    insertGroup.run(
+      'dc:1474995286903361772',
+      'Agentflow',
+      'agentflow-discord',
+      '@PeytonOmni',
+      '2026-02-15T00:00:00.000Z',
+      1,
+      GUILD,
+    );
+    insertGroup.run(
+      'dc:1475009887846010963',
+      'OmniClaw',
+      'omniclaw-discord',
+      '@PeytonOmni',
+      '2026-02-15T00:00:00.000Z',
+      1,
+      GUILD,
+    );
+    insertGroup.run(
+      'dc:1475934713461080116',
+      'Solid Grab',
+      'solid-grab-discord',
+      '@PeytonOmni',
+      '2026-02-15T00:00:00.000Z',
+      1,
+      GUILD,
+    );
+
+    // channel_routes: ditto-discord owns 3 channels, landing-astro-discord owns 1
+    const insertRoute = db.prepare(`
+      INSERT INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_guild_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    insertRoute.run(
+      'dc:940321040482074705',
+      'ditto-discord',
+      '@PeytonOmni',
+      1,
+      GUILD,
+      '2026-02-11T17:54:36.399Z',
+    );
+    insertRoute.run(
+      'dc:1475568899452964874',
+      'ditto-discord',
+      '@PeytonOmni',
+      1,
+      GUILD,
+      '2026-02-23 19:17:03',
+    );
+    insertRoute.run(
+      'dc:1475601379400745101',
+      'ditto-discord',
+      '@PeytonOmni',
+      1,
+      GUILD,
+      '2026-02-23 21:15:03',
+    );
+    insertRoute.run(
+      'dc:1475576563176181964',
+      'landing-astro-discord',
+      '@PeytonOmni',
+      1,
+      GUILD,
+      '2026-02-24 00:00:00',
+    );
+
+    createSchema(db);
+
+    type SubRow = {
+      channel_jid: string;
+      agent_id: string;
+      trigger_pattern: string;
+      requires_trigger: number;
+      priority: number;
+      is_primary: number;
+      discord_guild_id: string | null;
+    };
+
+    const subs = db
+      .query(
+        `
+        SELECT channel_jid, agent_id, trigger_pattern, requires_trigger, priority, is_primary, discord_guild_id
+        FROM channel_subscriptions
+        ORDER BY channel_jid, agent_id
+      `,
+      )
+      .all() as SubRow[];
+
+    // Exactly 4 rows — one per route. Legacy-only channels must not appear.
+    expect(subs).toHaveLength(4);
+
+    // Every migrated row should be marked primary with correct defaults
+    for (const row of subs) {
+      expect(row.trigger_pattern).toBe('@PeytonOmni');
+      expect(row.requires_trigger).toBe(1);
+      expect(row.priority).toBe(100);
+      expect(row.is_primary).toBe(1);
+      expect(row.discord_guild_id).toBe(GUILD);
+    }
+
+    // Each agent owns the right channels
+    const byChannel = Object.fromEntries(
+      subs.map((r) => [r.channel_jid, r.agent_id]),
+    );
+    expect(byChannel['dc:940321040482074705']).toBe('ditto-discord');
+    expect(byChannel['dc:1475568899452964874']).toBe('ditto-discord');
+    expect(byChannel['dc:1475601379400745101']).toBe('ditto-discord');
+    expect(byChannel['dc:1475576563176181964']).toBe('landing-astro-discord');
+
+    // Legacy-only channels must NOT have leaked into channel_subscriptions
+    const legacyJids = [
+      'dc:1474995286903361772',
+      'dc:1475009887846010963',
+      'dc:1475934713461080116',
+    ];
+    for (const jid of legacyJids) {
+      expect(byChannel[jid]).toBeUndefined();
+    }
+
+    // Migration marker set
+    const marker = db
+      .query(
+        `SELECT value FROM router_state WHERE key = 'channel_subscriptions_migrated'`,
+      )
+      .get() as { value: string };
+    expect(marker.value).toBe('1');
+
+    // Idempotency
+    createSchema(db);
+    const count = db
+      .query('SELECT COUNT(*) AS cnt FROM channel_subscriptions')
+      .get() as { cnt: number };
+    expect(count.cnt).toBe(4);
+
+    db.close();
+  });
 });
