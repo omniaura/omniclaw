@@ -99,12 +99,20 @@ let currentChatJid = '';
 
 function setCurrentChat(chatJid: string): void {
   currentChatJid = chatJid;
-  try { fs.writeFileSync('/tmp/current_chat_jid', chatJid); } catch { /* ignore */ }
+  try {
+    fs.writeFileSync('/tmp/current_chat_jid', chatJid);
+  } catch {
+    /* ignore */
+  }
 }
 
 function shouldClose(): boolean {
   if (fs.existsSync(ipcCloseFile)) {
-    try { fs.unlinkSync(ipcCloseFile); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(ipcCloseFile);
+    } catch {
+      /* ignore */
+    }
     return true;
   }
   return false;
@@ -113,8 +121,9 @@ function shouldClose(): boolean {
 function drainIpcInput(): IpcMessage[] {
   try {
     fs.mkdirSync(ipcInputDir, { recursive: true });
-    const files = fs.readdirSync(ipcInputDir)
-      .filter(f => f.endsWith('.json'))
+    const files = fs
+      .readdirSync(ipcInputDir)
+      .filter((f) => f.endsWith('.json'))
       .sort();
 
     const messages: IpcMessage[] = [];
@@ -128,8 +137,14 @@ function drainIpcInput(): IpcMessage[] {
           if (data.chatJid) setCurrentChat(data.chatJid);
         }
       } catch (err) {
-        log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
-        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+        log(
+          `Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        try {
+          fs.unlinkSync(filePath);
+        } catch {
+          /* ignore */
+        }
       }
     }
     return messages;
@@ -140,7 +155,7 @@ function drainIpcInput(): IpcMessage[] {
 }
 
 function formatIpcMessages(messages: IpcMessage[]): string {
-  return messages.map(m => m.text).join('\n');
+  return messages.map((m) => m.text).join('\n');
 }
 
 function waitForIpcMessage(): Promise<string | null> {
@@ -218,7 +233,9 @@ function stopOpenCodeServer(): void {
 
 interface OpenCodeClient {
   session: {
-    create(opts: { body: Record<string, unknown> }): Promise<{ data?: { id: string } }>;
+    create(opts: {
+      body: Record<string, unknown>;
+    }): Promise<{ data?: { id: string } }>;
     get(opts: { path: { id: string } }): Promise<{ data?: { id: string } }>;
     prompt(opts: {
       path: { id: string };
@@ -271,7 +288,9 @@ export function extractResponseText(result: any): string | null {
     if (text) return text;
     const deepCandidates = collectCandidateStrings(data.parts).slice(0, 6);
     if (deepCandidates.length > 0) return deepCandidates.join('\n');
-    const partTypes = data.parts.map((p: any) => p?.type || 'unknown').join(', ');
+    const partTypes = data.parts
+      .map((p: any) => p?.type || 'unknown')
+      .join(', ');
     log(`OpenCode prompt returned non-text parts only: [${partTypes}]`);
     try {
       log(`OpenCode info snapshot: ${JSON.stringify(data.info).slice(0, 800)}`);
@@ -305,7 +324,10 @@ export function extractResponseText(result: any): string | null {
 export function extractTextFromParts(parts: any[]): string | null {
   const extracted: string[] = [];
   for (const p of parts) {
-    if ((p?.type === 'text' || p?.type === 'reasoning') && typeof p.text === 'string') {
+    if (
+      (p?.type === 'text' || p?.type === 'reasoning') &&
+      typeof p.text === 'string'
+    ) {
       extracted.push(p.text);
     }
     // Tool outputs (bash stdout, file contents, etc.) are intentionally excluded
@@ -315,7 +337,11 @@ export function extractTextFromParts(parts: any[]): string | null {
 }
 
 /** @internal exported for testing */
-export function collectCandidateStrings(value: any, out: string[] = [], depth: number = 0): string[] {
+export function collectCandidateStrings(
+  value: any,
+  out: string[] = [],
+  depth: number = 0,
+): string[] {
   if (value == null || depth > 5) return out;
   if (typeof value === 'string') {
     const trimmed = value.trim();
@@ -329,7 +355,8 @@ export function collectCandidateStrings(value: any, out: string[] = [], depth: n
   if (typeof value === 'object') {
     const preferredKeys = ['text', 'output', 'content', 'message', 'reason'];
     for (const key of preferredKeys) {
-      if (key in value) collectCandidateStrings((value as any)[key], out, depth + 1);
+      if (key in value)
+        collectCandidateStrings((value as any)[key], out, depth + 1);
     }
     for (const [k, v] of Object.entries(value)) {
       if (preferredKeys.includes(k)) continue;
@@ -349,12 +376,16 @@ export function extractTextFromMessage(msg: any): string | null {
 }
 
 /** @internal exported for testing */
-export function extractLatestAssistantFromMessages(messages: any[]): string | null {
+export function extractLatestAssistantFromMessages(
+  messages: any[],
+): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     // OpenCode messages endpoint commonly returns [{ info, parts }]
     if (msg?.info?.role === 'assistant') {
-      const text = extractTextFromParts(Array.isArray(msg.parts) ? msg.parts : []);
+      const text = extractTextFromParts(
+        Array.isArray(msg.parts) ? msg.parts : [],
+      );
       if (text) return text;
     }
     if (msg?.role === 'assistant' || msg?.type === 'assistant') {
@@ -408,7 +439,11 @@ async function runOpenCodePrompt(
   prompt: string,
   timeoutMs: number,
   forcedModel?: { providerID: string; modelID: string },
-): Promise<{ sessionId: string; closedDuringPrompt: boolean; promptSucceeded: boolean }> {
+): Promise<{
+  sessionId: string;
+  closedDuringPrompt: boolean;
+  promptSucceeded: boolean;
+}> {
   let closedDuringPrompt = false;
 
   // Poll IPC for follow-up messages during the prompt
@@ -451,8 +486,12 @@ async function runOpenCodePrompt(
           if (loggedToolIds.has(id)) return;
           const toolName: string = p.tool ?? p.name ?? p.toolName ?? 'tool';
           const stateInput = p.state?.input;
-          const input = stateInput != null ? JSON.stringify(stateInput).slice(0, 120) : '';
-          const output = typeof p.state?.output === 'string' ? p.state.output.slice(0, 200) : '';
+          const input =
+            stateInput != null ? JSON.stringify(stateInput).slice(0, 120) : '';
+          const output =
+            typeof p.state?.output === 'string'
+              ? p.state.output.slice(0, 200)
+              : '';
           if (output) {
             log(`[tool] ${toolName}(${input}) → ${output}`);
             loggedToolIds.add(id);
@@ -481,7 +520,11 @@ async function runOpenCodePrompt(
         },
       }),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`OpenCode prompt timed out after ${timeoutMs}ms`)), timeoutMs),
+        setTimeout(
+          () =>
+            reject(new Error(`OpenCode prompt timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        ),
       ),
     ]);
 
@@ -492,7 +535,8 @@ async function runOpenCodePrompt(
       responseText = await waitForAssistantText(client, sessionId);
     }
     if (!responseText) {
-      responseText = 'I processed your message but did not generate a text response.';
+      responseText =
+        'I processed your message but did not generate a text response.';
     }
     log(`Prompt completed, response: ${responseText.slice(0, 200)}...`);
 
@@ -557,13 +601,18 @@ function buildSystemContext(containerInput: ContainerInput): string | null {
   }
 
   // Agent identity injection as fallback for agents without /workspace/agent/CLAUDE.md
-  if (containerInput.agentName && !fs.existsSync('/workspace/agent/CLAUDE.md')) {
+  if (
+    containerInput.agentName &&
+    !fs.existsSync('/workspace/agent/CLAUDE.md')
+  ) {
     const identityParts = [`You are **${containerInput.agentName}**.`];
     if (containerInput.agentTrigger) {
       identityParts.push(`Your trigger is \`${containerInput.agentTrigger}\`.`);
     }
     if (containerInput.discordBotId) {
-      identityParts.push(`Your Discord Bot ID is \`${containerInput.discordBotId}\`.`);
+      identityParts.push(
+        `Your Discord Bot ID is \`${containerInput.discordBotId}\`.`,
+      );
     }
     parts.push(`## Your Identity\n${identityParts.join(' ')}`);
   }
@@ -576,7 +625,9 @@ function buildSystemContext(containerInput: ContainerInput): string | null {
  * Main entry point for the OpenCode runtime.
  * Called from the agent-runner's main() when agentRuntime === 'opencode'.
  */
-export async function runOpenCodeRuntime(containerInput: ContainerInput): Promise<void> {
+export async function runOpenCodeRuntime(
+  containerInput: ContainerInput,
+): Promise<void> {
   log(`Starting OpenCode runtime for group: ${containerInput.groupFolder}`);
 
   // Configure IPC directories
@@ -588,7 +639,11 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
   fs.mkdirSync(ipcInputDir, { recursive: true });
 
   // Clean up stale _close sentinel
-  try { fs.unlinkSync(ipcCloseFile); } catch { /* ignore */ }
+  try {
+    fs.unlinkSync(ipcCloseFile);
+  } catch {
+    /* ignore */
+  }
 
   // Initialize current chat JID
   setCurrentChat(containerInput.chatJid);
@@ -615,7 +670,9 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
     };
   }
   if (forcedModel) {
-    log(`Forcing OpenCode model: ${forcedModel.providerID}/${forcedModel.modelID}`);
+    log(
+      `Forcing OpenCode model: ${forcedModel.providerID}/${forcedModel.modelID}`,
+    );
   } else {
     log('OpenCode model not forced (using provider default)');
   }
@@ -630,12 +687,18 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
     OMNICLAW_GROUP_FOLDER: containerInput.groupFolder,
     OMNICLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
   };
-  if (containerInput.discordGuildId) mcpEnv.OMNICLAW_DISCORD_GUILD_ID = containerInput.discordGuildId;
-  if (containerInput.serverFolder) mcpEnv.OMNICLAW_SERVER_FOLDER = containerInput.serverFolder;
-  if (containerInput.channels) mcpEnv.OMNICLAW_CHANNELS = JSON.stringify(containerInput.channels);
-  if (containerInput.agentName) mcpEnv.OMNICLAW_AGENT_NAME = containerInput.agentName;
-  if (containerInput.discordBotId) mcpEnv.OMNICLAW_AGENT_BOT_ID = containerInput.discordBotId;
-  if (containerInput.agentTrigger) mcpEnv.OMNICLAW_AGENT_TRIGGER = containerInput.agentTrigger;
+  if (containerInput.discordGuildId)
+    mcpEnv.OMNICLAW_DISCORD_GUILD_ID = containerInput.discordGuildId;
+  if (containerInput.serverFolder)
+    mcpEnv.OMNICLAW_SERVER_FOLDER = containerInput.serverFolder;
+  if (containerInput.channels)
+    mcpEnv.OMNICLAW_CHANNELS = JSON.stringify(containerInput.channels);
+  if (containerInput.agentName)
+    mcpEnv.OMNICLAW_AGENT_NAME = containerInput.agentName;
+  if (containerInput.discordBotId)
+    mcpEnv.OMNICLAW_AGENT_BOT_ID = containerInput.discordBotId;
+  if (containerInput.agentTrigger)
+    mcpEnv.OMNICLAW_AGENT_TRIGGER = containerInput.agentTrigger;
 
   let client: OpenCodeClient;
   try {
@@ -656,8 +719,14 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
 
   // Ensure cleanup on exit
   process.on('exit', stopOpenCodeServer);
-  process.on('SIGTERM', () => { stopOpenCodeServer(); process.exit(0); });
-  process.on('SIGINT', () => { stopOpenCodeServer(); process.exit(0); });
+  process.on('SIGTERM', () => {
+    stopOpenCodeServer();
+    process.exit(0);
+  });
+  process.on('SIGINT', () => {
+    stopOpenCodeServer();
+    process.exit(0);
+  });
 
   // Create or resume session
   let sessionId: string;
@@ -665,7 +734,9 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
   try {
     if (containerInput.sessionId) {
       try {
-        const existing = await client.session.get({ path: { id: containerInput.sessionId } });
+        const existing = await client.session.get({
+          path: { id: containerInput.sessionId },
+        });
         const resolvedId = existing.data?.id || containerInput.sessionId;
         if (!resolvedId) {
           throw new Error('Session exists but returned empty ID');
@@ -718,7 +789,9 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
         });
         log('Injected system context');
       } catch (err) {
-        log(`Failed to inject system context (continuing): ${err instanceof Error ? err.message : String(err)}`);
+        log(
+          `Failed to inject system context (continuing): ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
   } else {
@@ -744,7 +817,13 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
     while (true) {
       log(`Sending prompt (session: ${sessionId}, ${prompt.length} chars)...`);
 
-      const result = await runOpenCodePrompt(client, sessionId, prompt, timeoutMs, forcedModel);
+      const result = await runOpenCodePrompt(
+        client,
+        sessionId,
+        prompt,
+        timeoutMs,
+        forcedModel,
+      );
       sessionId = result.sessionId;
 
       if (result.closedDuringPrompt) {
@@ -767,7 +846,9 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
         break;
       }
 
-      log(`Got new message (${nextMessage.length} chars), sending follow-up prompt`);
+      log(
+        `Got new message (${nextMessage.length} chars), sending follow-up prompt`,
+      );
       prompt = nextMessage;
     }
   } catch (err) {

@@ -1147,9 +1147,10 @@ async function runAgent(
     const subAgentId = (channelSubscriptions[chatJid] || [])[0]?.agentId;
     // Prefer the canonical agent ID from subscriptions. Fall back to looking up
     // the agent by folder, so this stays correct even if agent.id diverges from folder.
-    const agentId = subAgentId
-      ?? Object.values(agents).find((a) => a.folder === group.folder)?.id
-      ?? group.folder;
+    const agentId =
+      subAgentId ??
+      Object.values(agents).find((a) => a.folder === group.folder)?.id ??
+      group.folder;
     const agentChannels = buildChannelsForAgent(agentId);
     const output = await backend.runAgent(
       group,

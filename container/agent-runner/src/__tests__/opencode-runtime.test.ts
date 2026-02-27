@@ -28,7 +28,9 @@ describe('extractTextFromParts', () => {
       { type: 'reasoning', text: 'Let me think...' },
       { type: 'text', text: 'The answer is 42.' },
     ];
-    expect(extractTextFromParts(parts)).toBe('Let me think...\nThe answer is 42.');
+    expect(extractTextFromParts(parts)).toBe(
+      'Let me think...\nThe answer is 42.',
+    );
   });
 
   it('ignores tool parts (no tool output in user-facing response)', () => {
@@ -44,9 +46,7 @@ describe('extractTextFromParts', () => {
   });
 
   it('returns null when all parts are tools', () => {
-    const parts = [
-      { type: 'tool', state: { output: 'some output' } },
-    ];
+    const parts = [{ type: 'tool', state: { output: 'some output' } }];
     expect(extractTextFromParts(parts)).toBeNull();
   });
 
@@ -128,9 +128,7 @@ describe('extractTextFromMessage', () => {
 
   it('extracts from parts array (OpenCode format)', () => {
     const msg = {
-      parts: [
-        { type: 'text', text: 'from parts' },
-      ],
+      parts: [{ type: 'text', text: 'from parts' }],
     };
     expect(extractTextFromMessage(msg)).toBe('from parts');
   });
@@ -152,7 +150,9 @@ describe('extractLatestAssistantFromMessages', () => {
       { role: 'user', content: 'thanks' },
       { role: 'assistant', content: 'second response' },
     ];
-    expect(extractLatestAssistantFromMessages(messages)).toBe('second response');
+    expect(extractLatestAssistantFromMessages(messages)).toBe(
+      'second response',
+    );
   });
 
   it('returns null for empty messages', () => {
@@ -160,9 +160,7 @@ describe('extractLatestAssistantFromMessages', () => {
   });
 
   it('returns null when no assistant messages', () => {
-    const messages = [
-      { role: 'user', content: 'hello' },
-    ];
+    const messages = [{ role: 'user', content: 'hello' }];
     expect(extractLatestAssistantFromMessages(messages)).toBeNull();
   });
 
@@ -173,13 +171,13 @@ describe('extractLatestAssistantFromMessages', () => {
         parts: [{ type: 'text', text: 'opencode response' }],
       },
     ];
-    expect(extractLatestAssistantFromMessages(messages)).toBe('opencode response');
+    expect(extractLatestAssistantFromMessages(messages)).toBe(
+      'opencode response',
+    );
   });
 
   it('handles type: assistant format', () => {
-    const messages = [
-      { type: 'assistant', content: 'typed response' },
-    ];
+    const messages = [{ type: 'assistant', content: 'typed response' }];
     expect(extractLatestAssistantFromMessages(messages)).toBe('typed response');
   });
 });
@@ -245,9 +243,7 @@ describe('extractResponseText', () => {
         messages: [
           {
             role: 'assistant',
-            content: [
-              { type: 'text', text: 'structured answer' },
-            ],
+            content: [{ type: 'text', text: 'structured answer' }],
           },
         ],
       },
@@ -259,9 +255,7 @@ describe('extractResponseText', () => {
     const result = {
       data: {
         info: { role: 'assistant' },
-        parts: [
-          { type: 'text', text: 'sdk response' },
-        ],
+        parts: [{ type: 'text', text: 'sdk response' }],
       },
     };
     expect(extractResponseText(result)).toBe('sdk response');
@@ -271,9 +265,7 @@ describe('extractResponseText', () => {
     const result = {
       data: {
         info: { role: 'assistant' },
-        parts: [
-          { type: 'custom', content: 'deep text' },
-        ],
+        parts: [{ type: 'custom', content: 'deep text' }],
       },
     };
     // collectCandidateStrings picks up all string values from object fields,
@@ -296,7 +288,9 @@ describe('OpenCode runtime IPC protocol', () => {
   afterEach(() => {
     try {
       fs.rmSync(TEST_IPC_DIR, { recursive: true, force: true });
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   });
 
   it('creates IPC input directory', () => {
@@ -305,7 +299,10 @@ describe('OpenCode runtime IPC protocol', () => {
 
   it('reads and deletes IPC message files', () => {
     const msgPath = path.join(TEST_IPC_DIR, '001.json');
-    fs.writeFileSync(msgPath, JSON.stringify({ type: 'message', text: 'hello' }));
+    fs.writeFileSync(
+      msgPath,
+      JSON.stringify({ type: 'message', text: 'hello' }),
+    );
 
     expect(fs.existsSync(msgPath)).toBe(true);
     const data = JSON.parse(fs.readFileSync(msgPath, 'utf-8'));
@@ -323,28 +320,43 @@ describe('OpenCode runtime IPC protocol', () => {
 
   it('handles chatJid in IPC messages', () => {
     const msgPath = path.join(TEST_IPC_DIR, '001.json');
-    fs.writeFileSync(msgPath, JSON.stringify({
-      type: 'message',
-      text: 'hello from discord',
-      chatJid: 'dc:123456',
-    }));
+    fs.writeFileSync(
+      msgPath,
+      JSON.stringify({
+        type: 'message',
+        text: 'hello from discord',
+        chatJid: 'dc:123456',
+      }),
+    );
 
     const data = JSON.parse(fs.readFileSync(msgPath, 'utf-8'));
     expect(data.chatJid).toBe('dc:123456');
   });
 
   it('sorts IPC files chronologically', () => {
-    fs.writeFileSync(path.join(TEST_IPC_DIR, '003.json'), JSON.stringify({ type: 'message', text: 'third' }));
-    fs.writeFileSync(path.join(TEST_IPC_DIR, '001.json'), JSON.stringify({ type: 'message', text: 'first' }));
-    fs.writeFileSync(path.join(TEST_IPC_DIR, '002.json'), JSON.stringify({ type: 'message', text: 'second' }));
+    fs.writeFileSync(
+      path.join(TEST_IPC_DIR, '003.json'),
+      JSON.stringify({ type: 'message', text: 'third' }),
+    );
+    fs.writeFileSync(
+      path.join(TEST_IPC_DIR, '001.json'),
+      JSON.stringify({ type: 'message', text: 'first' }),
+    );
+    fs.writeFileSync(
+      path.join(TEST_IPC_DIR, '002.json'),
+      JSON.stringify({ type: 'message', text: 'second' }),
+    );
 
-    const files = fs.readdirSync(TEST_IPC_DIR)
-      .filter(f => f.endsWith('.json'))
+    const files = fs
+      .readdirSync(TEST_IPC_DIR)
+      .filter((f) => f.endsWith('.json'))
       .sort();
 
     expect(files).toEqual(['001.json', '002.json', '003.json']);
-    const messages = files.map(f => {
-      const data = JSON.parse(fs.readFileSync(path.join(TEST_IPC_DIR, f), 'utf-8'));
+    const messages = files.map((f) => {
+      const data = JSON.parse(
+        fs.readFileSync(path.join(TEST_IPC_DIR, f), 'utf-8'),
+      );
       return data.text;
     });
     expect(messages).toEqual(['first', 'second', 'third']);

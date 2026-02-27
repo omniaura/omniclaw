@@ -275,7 +275,11 @@ function buildVolumeMounts(
   if (fs.existsSync(hostOpenCodeDir)) {
     const openCodeDataBase = path.join(DATA_DIR, 'opencode-data');
     const containerOcDir = path.join(openCodeDataBase, runtimeFolderName);
-    assertPathWithin(containerOcDir, openCodeDataBase, 'opencode-data directory');
+    assertPathWithin(
+      containerOcDir,
+      openCodeDataBase,
+      'opencode-data directory',
+    );
     fs.mkdirSync(containerOcDir, { recursive: true });
     for (const authFile of ['auth.json', 'mcp-auth.json']) {
       const src = path.join(hostOpenCodeDir, authFile);
