@@ -721,8 +721,9 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
-  // Append agent identity so the agent always knows who it is
-  if (containerInput.agentName) {
+  // Append agent identity as a fallback for agents without /workspace/agent/CLAUDE.md
+  // When the agent has an identity file, the SDK auto-loads it via additionalDirectories
+  if (containerInput.agentName && !fs.existsSync('/workspace/agent/CLAUDE.md')) {
     const identityParts = [`You are **${containerInput.agentName}**.`];
     if (containerInput.agentTrigger) {
       identityParts.push(`Your trigger is \`${containerInput.agentTrigger}\`.`);
@@ -734,9 +735,14 @@ async function runQuery(
     globalClaudeMd = globalClaudeMd ? globalClaudeMd + identityBlock : identityBlock.trim();
   }
 
-  // Discover additional directories mounted at /workspace/extra/*
-  // These are passed to the SDK so their CLAUDE.md files are loaded automatically
+  // Discover additional directories for CLAUDE.md auto-loading:
+  // 1. Context layers: /workspace/agent, /workspace/server, /workspace/category
+  // 2. Extra mounts: /workspace/extra/*
   const extraDirs: string[] = [];
+  const contextDirs = ['/workspace/agent', '/workspace/server', '/workspace/category'];
+  for (const dir of contextDirs) {
+    if (fs.existsSync(dir)) extraDirs.push(dir);
+  }
   const extraBase = '/workspace/extra';
   if (fs.existsSync(extraBase)) {
     for (const entry of fs.readdirSync(extraBase)) {

@@ -69,6 +69,12 @@ export interface RegisteredGroup {
   agentRuntime?: AgentRuntime; // Which agent runtime runs inside the container (default: claude-agent-sdk)
   description?: string; // What this agent does (for agent registry)
   streamIntermediates?: boolean; // Stream intermediate output (thinking, tool calls) to channel threads. Default: false
+  /** Channel workspace folder. Mounted at /workspace/group/. Falls back to agent folder if unset. */
+  channelFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant/spec'
+  /** Category team workspace. Mounted read-write at /workspace/category/. */
+  categoryFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant'
+  /** Agent identity folder. Mounted read-write at /workspace/agent/. */
+  agentContextFolder?: string; // e.g., 'agents/peytonomi'
 }
 
 export interface NewMessage {
@@ -171,6 +177,8 @@ export interface Agent {
   isAdmin: boolean; // Local agent = true (can approve tasks, access local FS)
   serverFolder?: string; // Shared server context (e.g., "servers/omniaura-discord")
   createdAt: string;
+  /** Agent identity + global notes folder, mounted read-write at /workspace/agent/. */
+  agentContextFolder?: string; // e.g., 'agents/peytonomi'
 }
 
 /**
@@ -201,6 +209,10 @@ export interface ChannelSubscription {
   discordBotId?: string;
   discordGuildId?: string;
   createdAt: string;
+  /** Channel workspace folder. Overrides agent folder as /workspace/group/ mount when set. */
+  channelFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant/spec'
+  /** Category team workspace folder, mounted at /workspace/category/. */
+  categoryFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant'
 }
 
 /**

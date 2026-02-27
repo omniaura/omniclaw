@@ -111,6 +111,11 @@ function buildVolumeMounts(
   isMain: boolean,
   isScheduledTask: boolean = false,
   runtimeFolder?: string,
+  contextFolders?: {
+    channelFolder?: string;
+    categoryFolder?: string;
+    agentContextFolder?: string;
+  },
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const homeDir = getHomeDir();
@@ -157,9 +162,11 @@ function buildVolumeMounts(
       readonly: false,
     });
   } else {
-    // Other groups only get their own folder
-    const groupPath = path.join(GROUPS_DIR, folder);
+    // Channel workspace: use channelFolder if set, otherwise fall back to groupFolder
+    const workspaceFolder = contextFolders?.channelFolder || folder;
+    const groupPath = path.join(GROUPS_DIR, workspaceFolder);
     assertPathWithin(groupPath, GROUPS_DIR, 'group folder');
+    fs.mkdirSync(groupPath, { recursive: true });
 
     mounts.push({
       hostPath: groupPath,
@@ -173,6 +180,30 @@ function buildVolumeMounts(
         hostPath: globalDir,
         containerPath: '/workspace/global',
         readonly: true,
+      });
+    }
+
+    // Agent identity + global notes (read-write: agent can evolve its own identity)
+    if (contextFolders?.agentContextFolder) {
+      const agentDir = path.join(GROUPS_DIR, contextFolders.agentContextFolder);
+      assertPathWithin(agentDir, GROUPS_DIR, 'agent context folder');
+      fs.mkdirSync(agentDir, { recursive: true });
+      mounts.push({
+        hostPath: agentDir,
+        containerPath: '/workspace/agent',
+        readonly: false,
+      });
+    }
+
+    // Category team workspace (read-write: agents share knowledge across channels)
+    if (contextFolders?.categoryFolder) {
+      const categoryDir = path.join(GROUPS_DIR, contextFolders.categoryFolder);
+      assertPathWithin(categoryDir, GROUPS_DIR, 'category folder');
+      fs.mkdirSync(categoryDir, { recursive: true });
+      mounts.push({
+        hostPath: categoryDir,
+        containerPath: '/workspace/category',
+        readonly: false,
       });
     }
 
@@ -461,6 +492,11 @@ export class LocalBackend implements AgentBackend {
       input.isMain,
       input.isScheduledTask,
       runtimeFolder,
+      {
+        channelFolder: input.channelFolder,
+        categoryFolder: input.categoryFolder,
+        agentContextFolder: input.agentContextFolder,
+      },
     );
     const containerName = makeContainerName(folder, runtimeFolder);
     const containerArgs = buildContainerArgs({

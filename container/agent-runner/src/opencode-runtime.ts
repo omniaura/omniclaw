@@ -493,15 +493,21 @@ async function runOpenCodePrompt(
 
 /**
  * Build system context to inject into the session.
- * This includes CLAUDE.md content and other group-specific instructions.
+ * Reads CLAUDE.md from all context layers in order from most stable to most specific:
+ * agent identity → server → category → channel (group) → global
  */
 function buildSystemContext(containerInput: ContainerInput): string | null {
   const parts: string[] = [];
 
-  // Group CLAUDE.md
-  const groupClaudeMd = '/workspace/group/CLAUDE.md';
-  if (fs.existsSync(groupClaudeMd)) {
-    parts.push(fs.readFileSync(groupClaudeMd, 'utf-8'));
+  // Context layers: ordered from most stable (agent identity) to most specific (channel)
+  const layers = [
+    '/workspace/agent/CLAUDE.md',
+    '/workspace/server/CLAUDE.md',
+    '/workspace/category/CLAUDE.md',
+    '/workspace/group/CLAUDE.md',
+  ];
+  for (const p of layers) {
+    if (fs.existsSync(p)) parts.push(fs.readFileSync(p, 'utf-8'));
   }
 
   // Global CLAUDE.md (non-main agents only)
@@ -512,8 +518,8 @@ function buildSystemContext(containerInput: ContainerInput): string | null {
     }
   }
 
-  // Agent identity block so the agent always knows who it is
-  if (containerInput.agentName) {
+  // Agent identity injection as fallback for agents without /workspace/agent/CLAUDE.md
+  if (containerInput.agentName && !fs.existsSync('/workspace/agent/CLAUDE.md')) {
     const identityParts = [`You are **${containerInput.agentName}**.`];
     if (containerInput.agentTrigger) {
       identityParts.push(`Your trigger is \`${containerInput.agentTrigger}\`.`);

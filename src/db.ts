@@ -52,6 +52,7 @@ interface AgentRow {
   is_admin: number;
   server_folder: string | null;
   created_at: string;
+  agent_context_folder: string | null;
 }
 
 /** Row type for channel_routes table SELECT * queries */
@@ -75,6 +76,8 @@ interface ChannelSubscriptionRow {
   discord_bot_id: string | null;
   discord_guild_id: string | null;
   created_at: string;
+  channel_folder: string | null;
+  category_folder: string | null;
 }
 
 /** Safely parse JSON, returning undefined on null input or parse error */
@@ -164,6 +167,7 @@ function mapRowToAgent(row: AgentRow): Agent {
     isAdmin: row.is_admin === 1,
     serverFolder: row.server_folder || undefined,
     createdAt: row.created_at,
+    agentContextFolder: row.agent_context_folder || undefined,
   };
 }
 
@@ -193,6 +197,8 @@ function mapRowToChannelSubscription(
     discordBotId: row.discord_bot_id || undefined,
     discordGuildId: row.discord_guild_id || undefined,
     createdAt: row.created_at,
+    channelFolder: row.channel_folder || undefined,
+    categoryFolder: row.category_folder || undefined,
   };
 }
 
@@ -386,6 +392,21 @@ export function createSchema(database: Database): void {
     'agent_runtime',
     'TEXT',
     "'claude-agent-sdk'",
+  );
+
+  // New context layer columns (agent/server/category/channel architecture)
+  addColumnIfNotExists(database, 'agents', 'agent_context_folder', 'TEXT');
+  addColumnIfNotExists(
+    database,
+    'channel_subscriptions',
+    'channel_folder',
+    'TEXT',
+  );
+  addColumnIfNotExists(
+    database,
+    'channel_subscriptions',
+    'category_folder',
+    'TEXT',
   );
 
   // Auto-migrate from registered_groups → agents + channel_routes
@@ -1013,8 +1034,8 @@ export function getAllAgents(): Record<string, Agent> {
 export function setAgent(agent: Agent): void {
   db.query(
     `
-    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, heartbeat, is_admin, server_folder, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, heartbeat, is_admin, server_folder, created_at, agent_context_folder)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     agent.id,
@@ -1028,6 +1049,7 @@ export function setAgent(agent: Agent): void {
     agent.isAdmin ? 1 : 0,
     agent.serverFolder || null,
     agent.createdAt,
+    agent.agentContextFolder || null,
   );
 }
 
@@ -1122,8 +1144,8 @@ export function setChannelSubscription(sub: ChannelSubscription): void {
   db.query(
     `
     INSERT OR REPLACE INTO channel_subscriptions
-    (channel_jid, agent_id, trigger_pattern, requires_trigger, priority, is_primary, discord_bot_id, discord_guild_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (channel_jid, agent_id, trigger_pattern, requires_trigger, priority, is_primary, discord_bot_id, discord_guild_id, created_at, channel_folder, category_folder)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     sub.channelJid,
@@ -1135,6 +1157,8 @@ export function setChannelSubscription(sub: ChannelSubscription): void {
     sub.discordBotId || null,
     sub.discordGuildId || null,
     sub.createdAt,
+    sub.channelFolder || null,
+    sub.categoryFolder || null,
   );
 }
 

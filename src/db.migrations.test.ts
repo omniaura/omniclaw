@@ -303,6 +303,121 @@ describe('db migrations (bun:sqlite)', () => {
     db.close();
   });
 
+  it('adds agent_context_folder to agents and channel_folder/category_folder to channel_subscriptions', () => {
+    const db = new Database(':memory:');
+    seedLegacyObservedSchema(db);
+
+    // Verify legacy schema does NOT have the new columns
+    const agentColsBefore = getAgentColumns(db);
+    expect(agentColsBefore).not.toContain('agent_context_folder');
+
+    // Run migration
+    createSchema(db);
+
+    // agents table should have agent_context_folder
+    const agentCols = getAgentColumns(db);
+    expect(agentCols).toContain('agent_context_folder');
+
+    // channel_subscriptions should have channel_folder and category_folder
+    const subCols = getTableColumns(db, 'channel_subscriptions');
+    expect(subCols).toContain('channel_folder');
+    expect(subCols).toContain('category_folder');
+
+    // New columns should default to NULL for existing rows
+    const agents = db
+      .query('SELECT id, agent_context_folder FROM agents ORDER BY id')
+      .all() as Array<{ id: string; agent_context_folder: string | null }>;
+    expect(agents.length).toBeGreaterThan(0);
+    for (const agent of agents) {
+      expect(agent.agent_context_folder).toBeNull();
+    }
+
+    db.close();
+  });
+
+  it('persists and reads back new context folder fields', () => {
+    const db = new Database(':memory:');
+    createSchema(db);
+
+    // Insert an agent with agent_context_folder
+    db.query(
+      `INSERT INTO agents (id, name, folder, backend, agent_runtime, is_admin, created_at, agent_context_folder)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'peytonomi-discord',
+      'PeytonOmni',
+      'peytonomi-discord',
+      'apple-container',
+      'claude-agent-sdk',
+      0,
+      '2026-01-01T00:00:00.000Z',
+      'agents/peytonomi',
+    );
+
+    const agentRow = db
+      .query('SELECT agent_context_folder FROM agents WHERE id = ?')
+      .get('peytonomi-discord') as { agent_context_folder: string | null };
+    expect(agentRow.agent_context_folder).toBe('agents/peytonomi');
+
+    // Insert a subscription with channel_folder and category_folder
+    db.query(
+      `INSERT INTO channel_subscriptions
+       (channel_jid, agent_id, trigger_pattern, requires_trigger, priority, is_primary, created_at, channel_folder, category_folder)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'dc:111222333',
+      'peytonomi-discord',
+      '@PeytonOmni',
+      1,
+      100,
+      1,
+      '2026-01-01T00:00:00.000Z',
+      'servers/omni-aura/ditto-assistant/spec',
+      'servers/omni-aura/ditto-assistant',
+    );
+
+    const subRow = db
+      .query(
+        'SELECT channel_folder, category_folder FROM channel_subscriptions WHERE channel_jid = ?',
+      )
+      .get('dc:111222333') as {
+      channel_folder: string | null;
+      category_folder: string | null;
+    };
+    expect(subRow.channel_folder).toBe(
+      'servers/omni-aura/ditto-assistant/spec',
+    );
+    expect(subRow.category_folder).toBe('servers/omni-aura/ditto-assistant');
+
+    // Verify NULL is accepted (backward compat)
+    db.query(
+      `INSERT INTO channel_subscriptions
+       (channel_jid, agent_id, trigger_pattern, requires_trigger, priority, is_primary, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'dc:444555666',
+      'peytonomi-discord',
+      '@PeytonOmni',
+      1,
+      100,
+      0,
+      '2026-01-01T00:00:00.000Z',
+    );
+
+    const nullRow = db
+      .query(
+        'SELECT channel_folder, category_folder FROM channel_subscriptions WHERE channel_jid = ?',
+      )
+      .get('dc:444555666') as {
+      channel_folder: string | null;
+      category_folder: string | null;
+    };
+    expect(nullRow.channel_folder).toBeNull();
+    expect(nullRow.category_folder).toBeNull();
+
+    db.close();
+  });
+
   it('migrates a realistic multi-agent multi-channel setup', () => {
     // Mirrors the real upgrade scenario: one Discord bot with several channels
     // spread across two agents, plus several legacy-only registered_groups that

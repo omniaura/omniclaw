@@ -86,6 +86,12 @@ export interface ContainerInput {
   discordBotId?: string;
   /** Agent's trigger word/phrase (e.g. "@OCPeyton"). */
   agentTrigger?: string;
+  /** Agent's identity + global notes folder, mounted read-write at /workspace/agent/ */
+  agentContextFolder?: string; // e.g., 'agents/peytonomi'
+  /** Channel workspace folder. If set, overrides groupFolder as /workspace/group/ mount. */
+  channelFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant/spec'
+  /** Category team workspace, mounted read-write at /workspace/category/ (shared across channels in same category) */
+  categoryFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant'
 }
 
 export interface ContainerOutput {

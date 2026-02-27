@@ -9,6 +9,8 @@ Run setup scripts automatically. Only pause when user action is required (WhatsA
 
 **Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. scanning a QR code, pasting a secret token). If a dependency is missing, install it. If a service won't start, diagnose and repair. Ask the user for permission when needed, then do the work.
 
+> **Upgrading an existing multi-agent Discord/Slack setup?** Run `/migrate-to-channels` to restructure workspaces into the new agent/server/category/channel context architecture.
+
 **UX Note:** Use `AskUserQuestion` for all user-facing questions.
 
 ## 1. Check Environment

@@ -208,6 +208,9 @@ function buildRegisteredGroupFromSubscription(
     agentRuntime:
       agent?.agentRuntime || fallback?.agentRuntime || runtimeDefault,
     description: agent?.description || fallback?.description,
+    channelFolder: sub.channelFolder || undefined,
+    categoryFolder: sub.categoryFolder || undefined,
+    agentContextFolder: agent?.agentContextFolder || undefined,
   };
 }
 
@@ -363,6 +366,9 @@ function refreshRegisteredGroupsFromCanonicalState(): {
       autoRespondToQuestions: legacy?.autoRespondToQuestions,
       autoRespondKeywords: legacy?.autoRespondKeywords,
       streamIntermediates: legacy?.streamIntermediates,
+      channelFolder: preferredSub?.channelFolder,
+      categoryFolder: preferredSub?.categoryFolder,
+      agentContextFolder: agent?.agentContextFolder,
     };
     synthesized++;
   }
@@ -1064,8 +1070,12 @@ function buildChannelsForAgent(agentFolder: string): ChannelInfo[] | undefined {
 
   return jids.map((jid, i) => {
     const group = registeredGroups[jid];
-    // Generate a human-readable name: use chat metadata or fall back to JID
-    const name = group?.name || jid;
+    // Derive human-readable name: use last segment of channelFolder if available,
+    // otherwise fall back to group name or JID
+    const channelFolderName = group?.channelFolder
+      ? group.channelFolder.split('/').pop()
+      : undefined;
+    const name = channelFolderName || group?.name || jid;
     return { id: String(i + 1), jid, name };
   });
 }
@@ -1151,6 +1161,9 @@ async function runAgent(
         agentName: group.name,
         discordBotId: group.discordBotId,
         agentTrigger: group.trigger,
+        channelFolder: group.channelFolder,
+        categoryFolder: group.categoryFolder,
+        agentContextFolder: group.agentContextFolder,
       },
       (proc, containerName) =>
         queue.registerProcess(
