@@ -82,10 +82,34 @@ export class WhatsAppChannel implements Channel {
     this.opts = opts;
   }
 
+  /** How long to wait for the initial WhatsApp connection before giving up. */
+  private static readonly CONNECT_TIMEOUT_MS = 30_000;
+
   async connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       this.connectReject = reject;
-      this.connectInternal(resolve).catch(reject);
+
+      // Defense-in-depth: if the WhatsApp server is unreachable or the TLS
+      // handshake stalls, resolve (not reject) after 30s so the caller isn't
+      // blocked forever.  The socket will keep trying to connect in the
+      // background via connectInternal's reconnect logic, and messages will
+      // queue in outgoingQueue until it succeeds.
+      // See: https://github.com/qwibitai/nanoclaw/issues/553
+      const timeout = setTimeout(() => {
+        logger.warn(
+          { timeoutMs: WhatsAppChannel.CONNECT_TIMEOUT_MS },
+          'WhatsApp connect timed out — continuing without WhatsApp (will retry in background)',
+        );
+        resolve();
+      }, WhatsAppChannel.CONNECT_TIMEOUT_MS);
+
+      this.connectInternal(() => {
+        clearTimeout(timeout);
+        resolve();
+      }).catch((err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
     });
   }
 
