@@ -548,7 +548,7 @@ describe('processTaskIpc: register_group with discord', () => {
         name: 'Discord Channel',
         folder: 'dc-channel',
         trigger: '@Bot',
-        discord_guild_id: 'guild456',
+        discord_guild_id: '123456789012345678',
       },
       'main',
       true,
@@ -556,8 +556,28 @@ describe('processTaskIpc: register_group with discord', () => {
     );
 
     expect(groups['dc:channel123']).toBeDefined();
-    expect(groups['dc:channel123'].discordGuildId).toBe('guild456');
-    expect(groups['dc:channel123'].serverFolder).toBe('servers/guild456');
+    expect(groups['dc:channel123'].discordGuildId).toBe('123456789012345678');
+    expect(groups['dc:channel123'].serverFolder).toBe(
+      'servers/123456789012345678',
+    );
+  });
+
+  it('rejects non-numeric discord_guild_id to prevent path traversal', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'dc:evil123',
+        name: 'Evil Channel',
+        folder: 'evil-channel',
+        trigger: '@Bot',
+        discord_guild_id: '../../etc',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    expect(groups['dc:evil123']).toBeUndefined();
   });
 
   it('sets backend when provided', async () => {

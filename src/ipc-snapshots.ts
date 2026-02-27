@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR } from './config.js';
+import { assertPathWithin } from './path-security.js';
 import type { ScheduledTask } from './types.js';
 
 export interface AvailableGroup {
@@ -44,7 +45,9 @@ export function writeTasksSnapshot(
     next_run: string | null;
   }>,
 ): void {
-  const groupIpcDir = path.join(DATA_DIR, 'ipc', groupFolder);
+  const ipcBase = path.join(DATA_DIR, 'ipc');
+  const groupIpcDir = path.join(ipcBase, groupFolder);
+  assertPathWithin(groupIpcDir, ipcBase, 'writeTasksSnapshot');
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
   const filteredTasks = isMain
@@ -61,7 +64,9 @@ export function writeGroupsSnapshot(
   groups: AvailableGroup[],
   registeredJids: Set<string>,
 ): void {
-  const groupIpcDir = path.join(DATA_DIR, 'ipc', groupFolder);
+  const ipcBase = path.join(DATA_DIR, 'ipc');
+  const groupIpcDir = path.join(ipcBase, groupFolder);
+  assertPathWithin(groupIpcDir, ipcBase, 'writeGroupsSnapshot');
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
   const visibleGroups = isMain ? groups : [];

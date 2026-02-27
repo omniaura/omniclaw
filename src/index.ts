@@ -75,6 +75,7 @@ import {
 } from './types.js';
 import { findMainGroupJid } from './group-helpers.js';
 import { logger } from './logger.js';
+import { assertPathWithin } from './path-security.js';
 import { Effect } from 'effect';
 
 // Global error handlers to prevent crashes from unhandled rejections/exceptions
@@ -296,7 +297,9 @@ function slugifyGuildName(guildName: string): string {
 
 /** Ensure the server-level shared directory exists and has a CLAUDE.md */
 function ensureServerDirectory(serverFolder: string): void {
-  const serverDir = path.join(DATA_DIR, '..', 'groups', serverFolder);
+  const groupsBase = path.join(DATA_DIR, '..', 'groups');
+  const serverDir = path.join(groupsBase, serverFolder);
+  assertPathWithin(serverDir, groupsBase, 'ensureServerDirectory');
   fs.mkdirSync(serverDir, { recursive: true });
 
   const claudeMdPath = path.join(serverDir, 'CLAUDE.md');
