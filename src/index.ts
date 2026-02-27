@@ -1228,11 +1228,13 @@ async function runAgent(
   }
 }
 
-/** Pre-compiled mention patterns per agent, invalidated when subscriptions change. */
+/** Pre-compiled mention patterns per subscription, invalidated when subscriptions change. */
 const mentionPatternCache = new Map<string, RegExp[]>();
 
 function getMentionPatterns(sub: ChannelSubscription): RegExp[] {
-  const cached = mentionPatternCache.get(sub.agentId);
+  // Key by composite to handle same agent with different triggers/bots across channels
+  const cacheKey = `${sub.agentId}|${sub.trigger}|${sub.discordBotId ?? ''}`;
+  const cached = mentionPatternCache.get(cacheKey);
   if (cached) return cached;
   const agent = agents[sub.agentId];
   const triggerHandle = sub.trigger.replace(/^@/, '');
@@ -1246,7 +1248,7 @@ function getMentionPatterns(sub: ChannelSubscription): RegExp[] {
         'i',
       ),
   );
-  mentionPatternCache.set(sub.agentId, patterns);
+  mentionPatternCache.set(cacheKey, patterns);
   return patterns;
 }
 
