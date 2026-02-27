@@ -43,11 +43,10 @@ Only ask the user for help if multiple retries fail with the same error.
 
 ## 2b. Initialize Database Schema
 
-Run `./.claude/skills/setup/scripts/02b-init-db.sh` and parse the status block.
+The database schema and migrations now run automatically on service startup via `initDatabase()`. No separate script is needed — just ensure `bun run build` succeeds and the service can start.
 
-- This step applies SQLite schema + migrations before any channel registration.
-- Expect `SUBSCRIPTIONS_TABLE=true` for current multi-agent routing support.
-- If failed, inspect `logs/setup.log`, fix the root cause, and re-run this script before continuing.
+- Schema + migrations apply automatically on first startup.
+- If startup fails with DB errors, inspect `logs/omniclaw.error.log` for the root cause.
 
 ## 3. Container Runtime
 
@@ -366,11 +365,7 @@ container builder stop && container builder rm && container builder start
 
 **Step 2 — Verify the DB schema is current**
 
-```bash
-./.claude/skills/setup/scripts/02b-init-db.sh
-```
-
-This is safe to run on an existing DB — it only adds missing tables/columns, never drops data. Check for `SUBSCRIPTIONS_TABLE=true` in the output.
+The DB schema and migrations run automatically on service startup via `initDatabase()`. To verify manually, just restart the service — it applies additive-only changes (new tables/columns) on boot, never drops data.
 
 **Step 3 — Restart the service**
 
