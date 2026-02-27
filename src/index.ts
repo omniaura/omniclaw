@@ -1256,12 +1256,6 @@ function selectSubscriptionsForMessage(
       const isMain = agent?.isAdmin === true;
       return isMain || s.requiresTrigger === false;
     });
-    if (selected.length === 0) {
-      logger.debug(
-        { chatJid, subCount: subs.length },
-        'All primary agents require trigger — no agents selected for untriggered message',
-      );
-    }
   }
 
   if (selected.length === 0) {

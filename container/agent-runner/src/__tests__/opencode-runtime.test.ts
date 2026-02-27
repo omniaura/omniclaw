@@ -276,7 +276,9 @@ describe('extractResponseText', () => {
         ],
       },
     };
-    expect(extractResponseText(result)).toBe('deep text');
+    // collectCandidateStrings picks up all string values from object fields,
+    // including 'content' (preferred key) and 'type' (general walk).
+    expect(extractResponseText(result)).toBe('deep text\ncustom');
   });
 });
 
