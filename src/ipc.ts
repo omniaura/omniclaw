@@ -104,6 +104,173 @@ export function consumeShareRequest(
   return entry;
 }
 
+/** Result of processing an IPC message. */
+export type MessageResult =
+  | { action: 'handled' }
+  | { action: 'suppressed'; reason: string }
+  | { action: 'blocked'; reason: string }
+  | { action: 'unknown' };
+
+/**
+ * Process a single IPC message payload. Extracted from startIpcWatcher to
+ * enable direct unit testing of message dispatch logic.
+ */
+export async function processMessageIpc(
+  data: IpcMessagePayload,
+  sourceGroup: string,
+  isMain: boolean,
+  ipcBaseDir: string,
+  registeredGroups: Record<string, RegisteredGroup>,
+  deps: IpcDeps,
+): Promise<MessageResult> {
+  // --- react_to_message ---
+  if (
+    data.type === 'react_to_message' &&
+    data.chatJid &&
+    data.messageId &&
+    data.emoji
+  ) {
+    const chatJid = data.chatJid;
+    const messageId = data.messageId;
+    const emoji = data.emoji;
+    const ch = deps.findChannel?.(chatJid);
+    if (data.remove) {
+      await (ch?.removeReaction?.(chatJid, messageId, emoji) ??
+        Promise.resolve());
+    } else {
+      await (ch?.addReaction?.(chatJid, messageId, emoji) ?? Promise.resolve());
+    }
+    logger.info(
+      {
+        chatJid,
+        messageId,
+        emoji,
+        remove: !!data.remove,
+        sourceGroup,
+      },
+      'IPC reaction processed',
+    );
+    return { action: 'handled' };
+  }
+
+  // --- format_mention ---
+  if (data.type === 'format_mention' && data.userName && data.platform) {
+    const userRegistryPath = path.join(ipcBaseDir, 'user_registry.json');
+    let formattedMention = `@${data.userName}`;
+    try {
+      if (fs.existsSync(userRegistryPath)) {
+        const registryData = JSON.parse(
+          fs.readFileSync(userRegistryPath, 'utf-8'),
+        );
+        const key = data.userName!.toLowerCase().trim();
+        const user = registryData[key];
+        if (user) {
+          switch (user.platform) {
+            case 'discord':
+            case 'slack':
+              formattedMention = `<@${user.id}>`;
+              break;
+            case 'whatsapp':
+              formattedMention = `@${user.id}`;
+              break;
+            default:
+              formattedMention = `@${user.name}`;
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err, userName: data.userName },
+        'format_mention: failed to read user registry',
+      );
+    }
+    // Write response back so the agent can read the result
+    if (data.requestId) {
+      const safeRequestId = String(data.requestId).replace(
+        /[^a-zA-Z0-9_-]/g,
+        '',
+      );
+      if (!safeRequestId) {
+        logger.warn(
+          { requestId: data.requestId },
+          'format_mention: requestId sanitized to empty string — skipping response',
+        );
+        return { action: 'blocked', reason: 'requestId sanitized to empty' };
+      }
+      const responseDir = path.join(ipcBaseDir, sourceGroup, 'responses');
+      fs.mkdirSync(responseDir, { recursive: true });
+      const responseFile = path.join(responseDir, `${safeRequestId}.json`);
+      const tempPath = `${responseFile}.tmp`;
+      fs.writeFileSync(
+        tempPath,
+        JSON.stringify(
+          {
+            type: 'format_mention_response',
+            requestId: safeRequestId,
+            result: formattedMention,
+          },
+          null,
+          2,
+        ),
+      );
+      fs.renameSync(tempPath, responseFile);
+    }
+    logger.info(
+      {
+        userName: data.userName,
+        platform: data.platform,
+        formattedMention,
+        sourceGroup,
+      },
+      'IPC format_mention processed',
+    );
+    return { action: 'handled' };
+  }
+
+  // --- ssh_pubkey ---
+  if (data.type === 'ssh_pubkey' && data.pubkey) {
+    logger.info(
+      { folder: sourceGroup, pubkey: data.pubkey },
+      'Agent generated new SSH key',
+    );
+    return { action: 'handled' };
+  }
+
+  // --- message ---
+  if (data.type === 'message' && data.chatJid && data.text) {
+    const msgChatJid = data.chatJid;
+    const msgText = stripInternalTags(data.text);
+    if (!msgText) {
+      logger.debug(
+        { chatJid: data.chatJid, sourceGroup },
+        'IPC message suppressed (internal-only)',
+      );
+      return { action: 'suppressed', reason: 'internal-only' };
+    }
+    // Authorization: any registered agent can message any other registered agent
+    const targetGroup = registeredGroups[msgChatJid];
+    const isSelf = targetGroup && targetGroup.folder === sourceGroup;
+    const isRegisteredTarget = !!targetGroup;
+    if (isMain || isSelf || isRegisteredTarget) {
+      await deps.sendMessage(msgChatJid, msgText);
+      // Cross-group message: also wake up the target agent
+      if (targetGroup && targetGroup.folder !== sourceGroup) {
+        deps.notifyGroup(msgChatJid, msgText);
+      }
+      logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
+      return { action: 'handled' };
+    } else {
+      logger.warn(
+        { chatJid: data.chatJid, sourceGroup },
+        'Unauthorized IPC message attempt blocked (target not registered)',
+      );
+      return { action: 'blocked', reason: 'target not registered' };
+    }
+  }
+
+  return { action: 'unknown' };
+}
+
 let ipcWatcherRunning = false;
 
 export function startIpcWatcher(deps: IpcDeps): void {
@@ -159,166 +326,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 continue;
               }
               const data = result.data as IpcMessagePayload;
-              if (
-                data.type === 'react_to_message' &&
-                data.chatJid &&
-                data.messageId &&
-                data.emoji
-              ) {
-                const chatJid = data.chatJid;
-                const messageId = data.messageId;
-                const emoji = data.emoji;
-                const ch = deps.findChannel?.(chatJid);
-                if (data.remove) {
-                  await (ch?.removeReaction?.(chatJid, messageId, emoji) ??
-                    Promise.resolve());
-                } else {
-                  await (ch?.addReaction?.(chatJid, messageId, emoji) ??
-                    Promise.resolve());
-                }
-                logger.info(
-                  {
-                    chatJid: data.chatJid,
-                    messageId: data.messageId,
-                    emoji: data.emoji,
-                    remove: !!data.remove,
-                    sourceGroup,
-                  },
-                  'IPC reaction processed',
-                );
-                fs.unlinkSync(filePath);
-                continue;
-              }
-              if (
-                data.type === 'format_mention' &&
-                data.userName &&
-                data.platform
-              ) {
-                // Look up user in registry and write response back to agent
-                const userRegistryPath = path.join(
-                  ipcBaseDir,
-                  'user_registry.json',
-                );
-                let formattedMention = `@${data.userName}`;
-                try {
-                  if (fs.existsSync(userRegistryPath)) {
-                    const registryData = JSON.parse(
-                      fs.readFileSync(userRegistryPath, 'utf-8'),
-                    );
-                    const key = data.userName!.toLowerCase().trim();
-                    const user = registryData[key];
-                    if (user) {
-                      switch (user.platform) {
-                        case 'discord':
-                        case 'slack':
-                          formattedMention = `<@${user.id}>`;
-                          break;
-                        case 'whatsapp':
-                          formattedMention = `@${user.id}`;
-                          break;
-                        default:
-                          formattedMention = `@${user.name}`;
-                      }
-                    }
-                  }
-                } catch (err) {
-                  logger.warn(
-                    { err, userName: data.userName },
-                    'format_mention: failed to read user registry',
-                  );
-                }
-                // Write response back so the agent can read the result
-                if (data.requestId) {
-                  const safeRequestId = String(data.requestId).replace(
-                    /[^a-zA-Z0-9_-]/g,
-                    '',
-                  );
-                  if (!safeRequestId) {
-                    logger.warn(
-                      { requestId: data.requestId },
-                      'format_mention: requestId sanitized to empty string — skipping response',
-                    );
-                    break;
-                  }
-                  const responseDir = path.join(
-                    ipcBaseDir,
-                    sourceGroup,
-                    'responses',
-                  );
-                  fs.mkdirSync(responseDir, { recursive: true });
-                  const responseFile = path.join(
-                    responseDir,
-                    `${safeRequestId}.json`,
-                  );
-                  const tempPath = `${responseFile}.tmp`;
-                  fs.writeFileSync(
-                    tempPath,
-                    JSON.stringify(
-                      {
-                        type: 'format_mention_response',
-                        requestId: safeRequestId,
-                        result: formattedMention,
-                      },
-                      null,
-                      2,
-                    ),
-                  );
-                  fs.renameSync(tempPath, responseFile);
-                }
-                logger.info(
-                  {
-                    userName: data.userName,
-                    platform: data.platform,
-                    formattedMention,
-                    sourceGroup,
-                  },
-                  'IPC format_mention processed',
-                );
-                fs.unlinkSync(filePath);
-                continue;
-              }
-              if (data.type === 'ssh_pubkey' && data.pubkey) {
-                logger.info(
-                  { folder: sourceGroup, pubkey: data.pubkey },
-                  'Agent generated new SSH key',
-                );
-                fs.unlinkSync(filePath);
-                continue;
-              }
-              if (data.type === 'message' && data.chatJid && data.text) {
-                // Strip <internal>...</internal> blocks before sending
-                const msgChatJid = data.chatJid;
-                const msgText = stripInternalTags(data.text);
-                if (!msgText) {
-                  logger.debug(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message suppressed (internal-only)',
-                  );
-                  fs.unlinkSync(filePath);
-                  continue;
-                }
-                // Authorization: any registered agent can message any other registered agent
-                const targetGroup = registeredGroups[msgChatJid];
-                const isSelf =
-                  targetGroup && targetGroup.folder === sourceGroup;
-                const isRegisteredTarget = !!targetGroup;
-                if (isMain || isSelf || isRegisteredTarget) {
-                  await deps.sendMessage(msgChatJid, msgText);
-                  // Cross-group message: also wake up the target agent
-                  if (targetGroup && targetGroup.folder !== sourceGroup) {
-                    deps.notifyGroup(msgChatJid, msgText);
-                  }
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message sent',
-                  );
-                } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC message attempt blocked (target not registered)',
-                  );
-                }
-              }
+              await processMessageIpc(
+                data,
+                sourceGroup,
+                isMain,
+                ipcBaseDir,
+                registeredGroups,
+                deps,
+              );
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
