@@ -1200,12 +1200,13 @@ async function main(): Promise<void> {
   // Register shutdown function for global error handlers
   shutdownFn = () => shutdown('SHUTDOWN_SIGNAL');
 
-  // --- Parallel startup: backends + channels concurrently ---
+  // --- Startup: initialize backends first, then start message loop, then connect channels ---
   const startupT0 = Date.now();
 
-  const initBackends = Effect.promise(() =>
-    initializeBackends(registeredGroups),
-  );
+  // Backends MUST be initialized before the message loop starts, because
+  // processGroupMessages → runAgent → resolveBackend() needs them.
+  await initializeBackends(registeredGroups);
+  logger.info({ durationMs: Date.now() - startupT0 }, 'Backends initialized');
 
   const WHATSAPP_RETRY_INTERVAL_MS = 60_000; // 1 minute between retries
   const WHATSAPP_MAX_RETRIES = 30; // give up after ~30 minutes
@@ -1318,64 +1319,83 @@ async function main(): Promise<void> {
       )
     : Effect.succeed(null);
 
-  const [, wa, discord, telegram] = await Effect.runPromise(
-    Effect.all(
-      [initBackends, connectWhatsApp, connectDiscord, connectTelegram],
-      { concurrency: 'unbounded' },
-    ),
-  );
+  // Start message loop BEFORE connecting channels — the loop polls the DB
+  // and spawns containers, which only needs backends (initialized above).
+  // Channel connections can take 30s+ (WhatsApp TLS handshake, Discord gateway)
+  // and should NOT block message processing for IPC/scheduled messages.
+  // See: https://github.com/qwibitai/nanoclaw/issues/553
+  queue.setProcessMessagesFn(processGroupMessages);
+  recoverPendingMessages();
+  startMessageLoop().catch((err) => {
+    logger.fatal({ err }, 'Message loop crashed unexpectedly');
+    process.exit(1);
+  });
 
-  whatsapp = wa;
-  if (whatsapp) channels.push(whatsapp);
-  if (discord) channels.push(discord);
-  if (telegram) channels.push(telegram);
+  // Connect channels concurrently in the background — don't block the message loop.
+  // Channels are only needed for sending responses and typing indicators;
+  // the message loop reads from the DB and works without them.
+  const connectChannels = async () => {
+    const [wa, discord, telegram] = await Effect.runPromise(
+      Effect.all([connectWhatsApp, connectDiscord, connectTelegram], { concurrency: 'unbounded' }),
+    );
 
-  logger.info(
-    {
-      op: 'startup',
-      durationMs: Date.now() - startupT0,
-      channelCount: channels.length,
-    },
-    'Startup complete',
-  );
+    whatsapp = wa;
+    if (whatsapp) channels.push(whatsapp);
+    if (discord) channels.push(discord);
+    if (telegram) channels.push(telegram);
 
-  // Conditionally connect Slack (requires both bot token and app-level socket-mode token)
-  if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
-    try {
-      const slack = new SlackChannel({
-        token: SLACK_BOT_TOKEN,
-        appToken: SLACK_APP_TOKEN,
-        onMessage: (chatJid, msg) => storeMessage(msg),
-        onChatMetadata: (chatJid, timestamp, name) =>
-          storeChatMetadata(chatJid, timestamp, name),
-        registeredGroups: () => registeredGroups,
-        onReaction: async (chatJid, messageId, emoji, userName) => {
-          if (
-            emoji === ':thumbsup:' ||
-            emoji === ':+1:' ||
-            emoji === ':heart:' ||
-            emoji === ':white_check_mark:'
-          ) {
-            if (handleShareRequestApproval(messageId, emoji, 'Slack')) return;
-          }
-          await handleReactionNotification(
-            chatJid,
-            messageId,
-            emoji,
-            userName,
-            'Slack',
-          );
-        },
-      });
-      await slack.connect();
-      channels.push(slack);
-    } catch (err) {
-      logger.error(
-        { err },
-        'Failed to connect Slack bot (continuing without Slack)',
-      );
+    logger.info(
+      {
+        op: 'startup',
+        durationMs: Date.now() - startupT0,
+        channelCount: channels.length,
+      },
+      'Channel connections complete',
+    );
+
+    // Conditionally connect Slack (requires both bot token and app-level socket-mode token)
+    if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
+      try {
+        const slack = new SlackChannel({
+          token: SLACK_BOT_TOKEN,
+          appToken: SLACK_APP_TOKEN,
+          onMessage: (chatJid, msg) => storeMessage(msg),
+          onChatMetadata: (chatJid, timestamp, name) =>
+            storeChatMetadata(chatJid, timestamp, name),
+          registeredGroups: () => registeredGroups,
+          onReaction: async (chatJid, messageId, emoji, userName) => {
+            if (
+              emoji === ':thumbsup:' ||
+              emoji === ':+1:' ||
+              emoji === ':heart:' ||
+              emoji === ':white_check_mark:'
+            ) {
+              if (handleShareRequestApproval(messageId, emoji, 'Slack')) return;
+            }
+            await handleReactionNotification(
+              chatJid,
+              messageId,
+              emoji,
+              userName,
+              'Slack',
+            );
+          },
+        });
+        await slack.connect();
+        channels.push(slack);
+      } catch (err) {
+        logger.error(
+          { err },
+          'Failed to connect Slack bot (continuing without Slack)',
+        );
+      }
     }
-  }
+  };
+
+  // Fire-and-forget: channels connect in background while message loop already runs
+  connectChannels().catch((err) => {
+    logger.error({ err }, 'Channel connection failed');
+  });
 
   // Reconcile heartbeat tasks with group config before starting scheduler
   reconcileHeartbeats(registeredGroups);
@@ -1465,12 +1485,6 @@ async function main(): Promise<void> {
     },
   });
 
-  queue.setProcessMessagesFn(processGroupMessages);
-  recoverPendingMessages();
-  startMessageLoop().catch((err) => {
-    logger.fatal({ err }, 'Message loop crashed unexpectedly');
-    process.exit(1);
-  });
 }
 
 // Guard: only run when executed directly, not when imported by tests
