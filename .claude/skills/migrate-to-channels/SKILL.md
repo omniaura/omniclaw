@@ -197,7 +197,40 @@ UPDATE channel_subscriptions SET is_primary = 1 WHERE agent_id = 'ditto-discord'
 UPDATE channel_subscriptions SET is_primary = 0 WHERE agent_id = 'ocpeyton-discord';
 ```
 
-### Step 8: Restart and verify
+### Step 8: Strip extra mounts from Discord agents
+
+Discord agents should not have host filesystem mounts. They should clone repos into their own workspace rather than reading from the host. Legacy `additionalMounts` in `registered_groups.container_config` give Discord agents access to the host filesystem, which can cause confusion (agents following stale docs to wrong paths) and is unnecessary security surface.
+
+**Remove `container_config` from all Discord registered_groups:**
+
+```sql
+-- NULL out container_config for all Discord channels (dc: prefix)
+UPDATE registered_groups
+SET container_config = NULL
+WHERE jid LIKE 'dc:%';
+```
+
+If any channel genuinely needs custom mounts (e.g., a local dev agent), restore only that channel's config explicitly:
+
+```sql
+UPDATE registered_groups
+SET container_config = '{"additionalMounts":[...]}'
+WHERE folder = 'local-dev-agent';
+```
+
+**Set `nonMainReadOnly: true` in the mount allowlist:**
+
+Edit `~/.config/omniclaw/mount-allowlist.json` and set:
+
+```json
+{
+  "nonMainReadOnly": true
+}
+```
+
+This is belt-and-suspenders: even if `container_config` is accidentally set again, the allowlist prevents any non-main agent from getting write access to extra mounts. Discord agents that need to read/write code should clone the repo into `/workspace/group/` or `/workspace/extra/` and work from there.
+
+### Step 9: Restart and verify
 
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist

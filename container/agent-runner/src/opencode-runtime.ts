@@ -433,6 +433,48 @@ async function runOpenCodePrompt(
   };
   setTimeout(pollIpc, IPC_POLL_MS);
 
+  // Poll session messages to log tool calls as they happen
+  const loggedToolIds = new Set<string>();
+  let loggedPartCount = 0;
+  const pollToolCalls = async () => {
+    if (!ipcPolling) return;
+    try {
+      const resp = await client.session.messages({ path: { id: sessionId } });
+      const payload = resp.data;
+      const messages: any[] = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.messages)
+          ? payload.messages
+          : [];
+      for (const msg of messages) {
+        if (msg?.info?.role !== 'assistant') continue;
+        const parts: any[] = Array.isArray(msg.parts) ? msg.parts : [];
+        parts.forEach((p, i) => {
+          if (p?.type !== 'tool') return;
+          const id = `${msg?.info?.id ?? 'msg'}:${i}`;
+          if (loggedToolIds.has(id)) return;
+          const toolName: string = p.tool ?? p.name ?? p.toolName ?? 'tool';
+          const stateInput = p.state?.input;
+          const input = stateInput != null ? JSON.stringify(stateInput).slice(0, 120) : '';
+          const output = typeof p.state?.output === 'string' ? p.state.output.slice(0, 200) : '';
+          if (output) {
+            log(`[tool] ${toolName}(${input}) → ${output}`);
+            loggedToolIds.add(id);
+            loggedPartCount++;
+          } else if (!loggedToolIds.has(`pending:${id}`)) {
+            log(`[tool] ${toolName}(${input}) ...`);
+            loggedToolIds.add(`pending:${id}`);
+            loggedPartCount++;
+          }
+        });
+      }
+    } catch {
+      // ignore polling errors
+    }
+    if (ipcPolling) setTimeout(pollToolCalls, 3000);
+  };
+  setTimeout(pollToolCalls, 3000);
+
   try {
     const result = await Promise.race([
       client.session.prompt({
