@@ -1,49 +1,117 @@
 /**
  * Path security utilities for OmniClaw.
  * Shared validation functions to prevent path traversal attacks.
+ *
+ * Effect-migrated: core logic uses Effect.ts with typed errors.
+ * Bridge functions maintain the original throwing API for non-Effect callers.
  */
 
+import { Effect } from 'effect';
+import * as S from '@effect/schema/Schema';
 import path from 'path';
 
+// ============================================================================
+// Error Types
+// ============================================================================
+
+export class PathTraversalError extends S.TaggedError<PathTraversalError>()(
+  'PathTraversalError',
+  {
+    path: S.String,
+    label: S.String,
+    reason: S.String,
+  },
+) {}
+
+// ============================================================================
+// Effect API
+// ============================================================================
+
 /**
- * Reject a relative path that contains directory traversal segments.
- * Works for all backends where the path is relative
- * to a workspace root.
- *
- * @param relativePath - The path to validate (relative to workspace root)
- * @param label - Human-readable label for error messages
- * @throws Error if path contains traversal segments
+ * Reject a relative path that contains directory traversal segments (Effect version).
+ * Fails with PathTraversalError if the path is unsafe.
  */
-export function rejectTraversalSegments(
+export const rejectTraversalSegmentsEffect = (
   relativePath: string,
   label: string,
-): void {
+): Effect.Effect<void, PathTraversalError> => {
   // Normalize to handle different separators and resolve ./ segments
   const normalized = path.normalize(relativePath);
 
   // Split into segments and check for any '..' component
   const segments = normalized.split(path.sep);
   if (segments.includes('..')) {
-    throw new Error(
-      `Path traversal detected in ${label}: "${relativePath}" contains '..' segments`,
+    return Effect.fail(
+      new PathTraversalError({
+        path: relativePath,
+        label,
+        reason: `Path traversal detected in ${label}: "${relativePath}" contains '..' segments`,
+      }),
     );
   }
 
   // Also reject absolute paths
   if (path.isAbsolute(relativePath)) {
-    throw new Error(
-      `Absolute path rejected in ${label}: "${relativePath}" must be relative`,
+    return Effect.fail(
+      new PathTraversalError({
+        path: relativePath,
+        label,
+        reason: `Absolute path rejected in ${label}: "${relativePath}" must be relative`,
+      }),
     );
   }
+
+  return Effect.void;
+};
+
+/**
+ * Validate that a resolved path stays within a parent directory (Effect version).
+ * Fails with PathTraversalError if the path escapes the parent.
+ */
+export const assertPathWithinEffect = (
+  resolved: string,
+  parent: string,
+  label: string,
+): Effect.Effect<void, PathTraversalError> => {
+  const normalizedResolved = path.resolve(resolved);
+  const normalizedParent = path.resolve(parent);
+  if (
+    !normalizedResolved.startsWith(normalizedParent + path.sep) &&
+    normalizedResolved !== normalizedParent
+  ) {
+    return Effect.fail(
+      new PathTraversalError({
+        path: resolved,
+        label,
+        reason: `Path traversal detected in ${label}: ${resolved} escapes ${parent}`,
+      }),
+    );
+  }
+
+  return Effect.void;
+};
+
+// ============================================================================
+// Bridge API (maintains original throwing signatures for non-Effect callers)
+// ============================================================================
+
+/**
+ * Reject a relative path that contains directory traversal segments.
+ * @throws Error if path contains traversal segments
+ */
+export function rejectTraversalSegments(
+  relativePath: string,
+  label: string,
+): void {
+  Effect.runSync(
+    rejectTraversalSegmentsEffect(relativePath, label).pipe(
+      Effect.catchAll((err) => Effect.die(new Error(err.reason))),
+    ),
+  );
 }
 
 /**
  * Validate that a resolved path stays within a parent directory.
- * Used for local filesystem operations where we can resolve real paths.
- *
- * @param resolved - The resolved full path to check
- * @param parent - The parent directory that must contain the path
- * @param label - Human-readable label for error messages
  * @throws Error if the resolved path escapes the parent
  */
 export function assertPathWithin(
@@ -51,14 +119,9 @@ export function assertPathWithin(
   parent: string,
   label: string,
 ): void {
-  const normalizedResolved = path.resolve(resolved);
-  const normalizedParent = path.resolve(parent);
-  if (
-    !normalizedResolved.startsWith(normalizedParent + path.sep) &&
-    normalizedResolved !== normalizedParent
-  ) {
-    throw new Error(
-      `Path traversal detected in ${label}: ${resolved} escapes ${parent}`,
-    );
-  }
+  Effect.runSync(
+    assertPathWithinEffect(resolved, parent, label).pipe(
+      Effect.catchAll((err) => Effect.die(new Error(err.reason))),
+    ),
+  );
 }
