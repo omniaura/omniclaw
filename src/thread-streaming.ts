@@ -19,9 +19,19 @@ export interface ThreadStreamer {
   writeThoughtLog(): void;
 }
 
+/** Maximum number of intermediate messages sent to a thread per query (#131) */
+const MAX_THREAD_MESSAGES = 20;
+
+/** Minimum delay (ms) between intermediate thread sends to avoid rate limits (#131) */
+const MIN_THREAD_SEND_INTERVAL_MS = 1000;
+
 /**
  * Create a ThreadStreamer that buffers intermediate output to a thought log
  * and optionally streams it to a channel thread (e.g. Discord).
+ *
+ * Safety guards (Issue #131):
+ * - Caps thread messages at MAX_THREAD_MESSAGES per query to prevent flooding
+ * - Enforces MIN_THREAD_SEND_INTERVAL_MS between sends to avoid 429 rate limits
  *
  * Graceful degradation: if thread creation fails, intermediates are still
  * captured in the thought log. No errors are thrown to the caller.
@@ -34,6 +44,9 @@ export function createThreadStreamer(
   const thoughtLogBuffer: string[] = [];
   let thread: unknown = null;
   let threadCreationAttempted = false;
+  let threadMessageCount = 0;
+  let threadCapLogged = false;
+  let lastSendTime = 0;
 
   const canStream =
     ctx.streamIntermediates &&
@@ -46,6 +59,18 @@ export function createThreadStreamer(
       thoughtLogBuffer.push(raw);
 
       if (!canStream) return;
+
+      // Cap thread messages to prevent flooding (#131)
+      if (threadMessageCount >= MAX_THREAD_MESSAGES) {
+        if (!threadCapLogged) {
+          threadCapLogged = true;
+          logger.info(
+            { group: ctx.groupName, count: threadMessageCount },
+            'Thread message cap reached — further intermediates logged only',
+          );
+        }
+        return;
+      }
 
       if (!threadCreationAttempted) {
         threadCreationAttempted = true;
@@ -62,7 +87,17 @@ export function createThreadStreamer(
 
       if (thread) {
         try {
+          // Enforce minimum interval between sends (#131)
+          const now = Date.now();
+          const elapsed = now - lastSendTime;
+          if (lastSendTime > 0 && elapsed < MIN_THREAD_SEND_INTERVAL_MS) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, MIN_THREAD_SEND_INTERVAL_MS - elapsed),
+            );
+          }
           await ctx.channel!.sendToThread!(thread, raw);
+          lastSendTime = Date.now();
+          threadMessageCount++;
         } catch {
           // Send failed — continue without thread output
         }
