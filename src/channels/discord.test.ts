@@ -37,7 +37,7 @@ describe('Discord jidToChannelId', () => {
 // --- DiscordChannel.ownsJid ---
 
 describe('DiscordChannel.ownsJid', () => {
-  const channel = new DiscordChannel({ token: 'test-token-not-used' });
+  const channel = new DiscordChannel({ token: 'test-token-not-used', botId: 'test-bot-id' });
 
   it('matches dc: prefixed JIDs', () => {
     expect(channel.ownsJid('dc:123456')).toBe(true);
@@ -60,7 +60,7 @@ describe('Discord shouldAutoRespond', () => {
   // shouldAutoRespond is an instance method, but we need a DiscordChannel instance.
   // Since the constructor requires a token, we create a minimal instance with a dummy token.
   // The method only uses `content` and `group` parameters — no actual Discord connection needed.
-  const channel = new DiscordChannel({ token: 'test-token-not-used' });
+  const channel = new DiscordChannel({ token: 'test-token-not-used', botId: 'test-bot-id' });
 
   function makeGroup(
     overrides: Partial<RegisteredGroup> = {},
