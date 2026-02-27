@@ -1345,15 +1345,6 @@ async function main(): Promise<void> {
     if (discord) channels.push(discord);
     if (telegram) channels.push(telegram);
 
-    logger.info(
-      {
-        op: 'startup',
-        durationMs: Date.now() - startupT0,
-        channelCount: channels.length,
-      },
-      'Channel connections complete',
-    );
-
     // Conditionally connect Slack (requires both bot token and app-level socket-mode token)
     if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
       try {
@@ -1391,6 +1382,15 @@ async function main(): Promise<void> {
         );
       }
     }
+
+    logger.info(
+      {
+        op: 'startup',
+        durationMs: Date.now() - startupT0,
+        channelCount: channels.length,
+      },
+      'Channel connections complete',
+    );
 
     // Recover pending messages AFTER channels are connected so that
     // findChannel() can route recovered output to the correct channel.
