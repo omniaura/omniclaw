@@ -127,7 +127,59 @@ mkdir -p groups/servers/{server}/{category}/{channel}
 
 Create a `CLAUDE.md` in each category folder documenting the project context shared across channels.
 
-### Step 5: Update subscriptions with channel/category folders
+### Step 5: Migrate legacy folder content to new channel dirs
+
+For each old flat group folder (e.g., `spec-discord/`, `agentflow-discord/`), copy its contents into the new channel workspace. Use `cp` — never `mv` at this stage, so the original is preserved as a fallback.
+
+```bash
+# Copy all files except logs/ from old folder to new channel dir
+find groups/spec-discord -maxdepth 1 -not -name 'logs' -not -path 'groups/spec-discord' \
+  -exec cp -r {} groups/servers/omni-aura/ditto-assistant/spec/ \;
+```
+
+Repeat for each old folder → new path mapping. After copying, verify the new dirs have the expected files.
+
+**If a channel has content in two legacy locations** (e.g., both `ocpeyton-discord/` and `landing-astro-discord/` map to the same new channel), merge them manually — copy one first, then copy the other, skipping any collisions.
+
+#### Offer to clean up old folders
+
+After all content is verified in the new locations, use `AskUserQuestion` to ask the user:
+
+> All legacy folder content has been copied to the new channel structure. Want to delete the old folders?
+>
+> - **Yes, delete them** — removes the duplicates, keeps `groups/` clean
+> - **No, keep them** — I'll show you where everything lives so you can clean up manually later
+
+**If yes:** delete the migrated legacy folders:
+
+```bash
+rm -rf groups/spec-discord groups/agentflow-discord groups/ditto-discord # etc.
+```
+
+**If no:** print a summary table of old → new paths so the user knows where to look:
+
+```
+Legacy folder                          → New location
+groups/spec-discord/                   → groups/servers/omni-aura/ditto-assistant/spec/
+groups/agentflow-discord/              → groups/servers/omni-aura/omniaura/agentflow/
+groups/ditto-discord/                  → groups/servers/omni-aura/omniaura/agent-debug/
+...
+```
+
+#### Handle orphaned folders
+
+Some old folders may have no active DB entry (no `registered_groups` row, no `channel_subscriptions`). These are stale experiments. Show the user a list and ask if they want them deleted too. Safe to delete if they're just a CLAUDE.md — worth reviewing first if they have real content.
+
+```bash
+# Find folders with no DB entry
+for f in groups/*/; do
+  name=$(basename "$f")
+  count=$(sqlite3 store/messages.db "SELECT COUNT(*) FROM registered_groups WHERE folder='$name'")
+  [ "$count" = "0" ] && echo "Orphaned: $f ($(ls $f | grep -v logs | wc -l | tr -d ' ') files)"
+done
+```
+
+### Step 6: Update subscriptions with channel/category folders
 
 ```sql
 UPDATE channel_subscriptions
@@ -136,7 +188,7 @@ SET channel_folder = 'servers/omni-aura/ditto-assistant/spec',
 WHERE channel_jid = 'dc:...' AND agent_id = 'ditto-discord';
 ```
 
-### Step 6: Set `is_primary` correctly
+### Step 7: Set `is_primary` correctly
 
 ```sql
 -- Persona agent owns all channels
@@ -145,7 +197,7 @@ UPDATE channel_subscriptions SET is_primary = 1 WHERE agent_id = 'ditto-discord'
 UPDATE channel_subscriptions SET is_primary = 0 WHERE agent_id = 'ocpeyton-discord';
 ```
 
-### Step 7: Restart and verify
+### Step 8: Restart and verify
 
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist
