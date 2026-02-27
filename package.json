@@ -34,5 +34,8 @@
     "prettier": "^3.8.1",
     "typescript": "^5.7.0",
     "vitest": "^2.1.8"
+  },
+  "overrides": {
+    "rollup": "^4.59.0"
   }
 }
