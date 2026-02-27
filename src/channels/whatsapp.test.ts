@@ -15,7 +15,9 @@ function makeMockSocket(overrides: Record<string, unknown> = {}) {
       Promise.resolve({ key: { id: `sent-${Date.now()}` } }),
     ),
     sendPresenceUpdate: mock(() => Promise.resolve()),
-    signalRepository: { lidMapping: { getPNForLID: mock(() => Promise.resolve(null)) } },
+    signalRepository: {
+      lidMapping: { getPNForLID: mock(() => Promise.resolve(null)) },
+    },
     groupFetchAllParticipating: mock(() => Promise.resolve({})),
     user: { id: '1234567890:0@s.whatsapp.net', lid: '1234:0@lid' },
     ev: { on: mock(), off: mock() },
@@ -212,9 +214,7 @@ describe('WhatsAppChannel.sendMessage', () => {
       const channel = makeChannel();
       setPrivate(channel, 'connected', true);
       const mockSock = makeMockSocket({
-        sendMessage: mock(() =>
-          Promise.resolve({ key: { id: 'msg-42' } }),
-        ),
+        sendMessage: mock(() => Promise.resolve({ key: { id: 'msg-42' } })),
       });
       setPrivate(channel, 'sock', mockSock);
 
@@ -227,9 +227,7 @@ describe('WhatsAppChannel.sendMessage', () => {
       const channel = makeChannel();
       setPrivate(channel, 'connected', true);
       const mockSock = makeMockSocket({
-        sendMessage: mock(() =>
-          Promise.resolve({ key: { id: 'msg-42' } }),
-        ),
+        sendMessage: mock(() => Promise.resolve({ key: { id: 'msg-42' } })),
       });
       setPrivate(channel, 'sock', mockSock);
 
@@ -243,9 +241,7 @@ describe('WhatsAppChannel.sendMessage', () => {
       const channel = makeChannel();
       setPrivate(channel, 'connected', true);
       const mockSock = makeMockSocket({
-        sendMessage: mock(() =>
-          Promise.resolve({ key: { id: 'msg-42' } }),
-        ),
+        sendMessage: mock(() => Promise.resolve({ key: { id: 'msg-42' } })),
       });
       setPrivate(channel, 'sock', mockSock);
 
@@ -273,9 +269,7 @@ describe('WhatsAppChannel.sendMessage', () => {
       setPrivate(channel, 'sentMessageTexts', sentTexts);
 
       const mockSock = makeMockSocket({
-        sendMessage: mock(() =>
-          Promise.resolve({ key: { id: 'new-msg' } }),
-        ),
+        sendMessage: mock(() => Promise.resolve({ key: { id: 'new-msg' } })),
       });
       setPrivate(channel, 'sock', mockSock);
 
@@ -297,7 +291,10 @@ describe('WhatsAppChannel.sendMessage', () => {
       setPrivate(channel, 'sock', mockSock);
 
       // Pre-populate message cache with a message to quote
-      const fakeMsg = { key: { id: 'orig-msg' }, message: { conversation: 'original text' } };
+      const fakeMsg = {
+        key: { id: 'orig-msg' },
+        message: { conversation: 'original text' },
+      };
       const cache = new Map();
       cache.set('orig-msg', { msg: fakeMsg, ts: Date.now() });
       setPrivate(channel, 'messageCache', cache);
