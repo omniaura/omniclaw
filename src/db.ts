@@ -4,7 +4,18 @@ import path from 'path';
 
 import { DATA_DIR, STORE_DIR } from './config.js';
 import { logger } from './logger.js';
-import { Agent, ChannelRoute, ChannelSubscription, HeartbeatConfig, NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog, registeredGroupToAgent, registeredGroupToRoute } from './types.js';
+import {
+  Agent,
+  ChannelRoute,
+  ChannelSubscription,
+  HeartbeatConfig,
+  NewMessage,
+  RegisteredGroup,
+  ScheduledTask,
+  TaskRunLog,
+  registeredGroupToAgent,
+  registeredGroupToRoute,
+} from './types.js';
 
 let db: Database;
 
@@ -86,7 +97,9 @@ const VALID_AGENT_RUNTIMES = new Set<Agent['agentRuntime']>([
   'opencode',
 ]);
 
-function normalizeAgentRuntime(value: string | null | undefined): Agent['agentRuntime'] {
+function normalizeAgentRuntime(
+  value: string | null | undefined,
+): Agent['agentRuntime'] {
   if (value && VALID_AGENT_RUNTIMES.has(value as Agent['agentRuntime'])) {
     return value as Agent['agentRuntime'];
   }
@@ -102,9 +115,18 @@ function mapRowToRegisteredGroup(
     folder: row.folder,
     trigger: row.trigger_pattern,
     added_at: row.added_at,
-    containerConfig: safeJsonParse(row.container_config, { jid: row.jid }, 'container_config'),
-    requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-    heartbeat: safeJsonParse<HeartbeatConfig>(row.heartbeat, { jid: row.jid }, 'heartbeat'),
+    containerConfig: safeJsonParse(
+      row.container_config,
+      { jid: row.jid },
+      'container_config',
+    ),
+    requiresTrigger:
+      row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    heartbeat: safeJsonParse<HeartbeatConfig>(
+      row.heartbeat,
+      { jid: row.jid },
+      'heartbeat',
+    ),
     discordBotId: row.discord_bot_id || undefined,
     discordGuildId: row.discord_guild_id || undefined,
     serverFolder: row.server_folder || undefined,
@@ -158,7 +180,9 @@ function mapRowToChannelRoute(row: ChannelRouteRow): ChannelRoute {
   };
 }
 
-function mapRowToChannelSubscription(row: ChannelSubscriptionRow): ChannelSubscription {
+function mapRowToChannelSubscription(
+  row: ChannelSubscriptionRow,
+): ChannelSubscription {
   return {
     channelJid: row.channel_jid,
     agentId: row.agent_id,
@@ -267,7 +291,12 @@ export function createSchema(database: Database): void {
   );
   addColumnIfNotExists(database, 'registered_groups', 'heartbeat', 'TEXT');
   addColumnIfNotExists(database, 'registered_groups', 'discord_bot_id', 'TEXT');
-  addColumnIfNotExists(database, 'registered_groups', 'discord_guild_id', 'TEXT');
+  addColumnIfNotExists(
+    database,
+    'registered_groups',
+    'discord_guild_id',
+    'TEXT',
+  );
   addColumnIfNotExists(database, 'registered_groups', 'server_folder', 'TEXT');
   addColumnIfNotExists(database, 'messages', 'sender_user_id', 'TEXT');
   addColumnIfNotExists(database, 'messages', 'mentions', 'TEXT');
@@ -351,7 +380,13 @@ export function createSchema(database: Database): void {
   addColumnIfNotExists(database, 'channel_routes', 'discord_bot_id', 'TEXT');
 
   // Migrate agents table for existing DBs
-  addColumnIfNotExists(database, 'agents', 'agent_runtime', 'TEXT', "'claude-agent-sdk'");
+  addColumnIfNotExists(
+    database,
+    'agents',
+    'agent_runtime',
+    'TEXT',
+    "'claude-agent-sdk'",
+  );
 
   // Auto-migrate from registered_groups → agents + channel_routes
   migrateRegisteredGroupsToAgents(database);
@@ -896,7 +931,7 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
       row.description,
       folder,
       backend,
-      'claude-agent-sdk',  // agent_runtime (default for migration)
+      'claude-agent-sdk', // agent_runtime (default for migration)
       row.container_config,
       row.heartbeat,
       isMain ? 1 : 0, // is_admin
@@ -921,7 +956,9 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
 
 function migrateRoutesToSubscriptions(database: Database): void {
   const migrated = database
-    .prepare("SELECT value FROM router_state WHERE key = 'channel_subscriptions_migrated'")
+    .prepare(
+      "SELECT value FROM router_state WHERE key = 'channel_subscriptions_migrated'",
+    )
     .get() as { value: string } | undefined;
   if (migrated?.value === '1') return;
 
@@ -1017,10 +1054,12 @@ export function getAllChannelRoutes(): Record<string, ChannelRoute> {
 
 /** Insert or replace a channel route record. */
 export function setChannelRoute(route: ChannelRoute): void {
-  db.query(`
+  db.query(
+    `
     INSERT OR REPLACE INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_bot_id, discord_guild_id, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `,
+  ).run(
     route.channelJid,
     route.agentId,
     route.trigger,
@@ -1039,23 +1078,36 @@ export function getRoutesForAgent(agentId: string): ChannelRoute[] {
   return rows.map(mapRowToChannelRoute);
 }
 
-export function getSubscriptionsForChannel(channelJid: string): ChannelSubscription[] {
+export function getSubscriptionsForChannel(
+  channelJid: string,
+): ChannelSubscription[] {
   const rows = db
-    .prepare('SELECT * FROM channel_subscriptions WHERE channel_jid = ? ORDER BY priority ASC, created_at ASC')
+    .prepare(
+      'SELECT * FROM channel_subscriptions WHERE channel_jid = ? ORDER BY priority ASC, created_at ASC',
+    )
     .all(channelJid) as ChannelSubscriptionRow[];
   return rows.map(mapRowToChannelSubscription);
 }
 
-export function getSubscriptionsForAgent(agentId: string): ChannelSubscription[] {
+export function getSubscriptionsForAgent(
+  agentId: string,
+): ChannelSubscription[] {
   const rows = db
-    .prepare('SELECT * FROM channel_subscriptions WHERE agent_id = ? ORDER BY priority ASC, created_at ASC')
+    .prepare(
+      'SELECT * FROM channel_subscriptions WHERE agent_id = ? ORDER BY priority ASC, created_at ASC',
+    )
     .all(agentId) as ChannelSubscriptionRow[];
   return rows.map(mapRowToChannelSubscription);
 }
 
-export function getAllChannelSubscriptions(): Record<string, ChannelSubscription[]> {
+export function getAllChannelSubscriptions(): Record<
+  string,
+  ChannelSubscription[]
+> {
   const rows = db
-    .prepare('SELECT * FROM channel_subscriptions ORDER BY channel_jid ASC, priority ASC, created_at ASC')
+    .prepare(
+      'SELECT * FROM channel_subscriptions ORDER BY channel_jid ASC, priority ASC, created_at ASC',
+    )
     .all() as ChannelSubscriptionRow[];
   const result: Record<string, ChannelSubscription[]> = {};
   for (const row of rows) {
@@ -1067,11 +1119,13 @@ export function getAllChannelSubscriptions(): Record<string, ChannelSubscription
 }
 
 export function setChannelSubscription(sub: ChannelSubscription): void {
-  db.query(`
+  db.query(
+    `
     INSERT OR REPLACE INTO channel_subscriptions
     (channel_jid, agent_id, trigger_pattern, requires_trigger, priority, is_primary, discord_bot_id, discord_guild_id, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `,
+  ).run(
     sub.channelJid,
     sub.agentId,
     sub.trigger,
@@ -1084,8 +1138,13 @@ export function setChannelSubscription(sub: ChannelSubscription): void {
   );
 }
 
-export function removeChannelSubscription(channelJid: string, agentId: string): void {
-  db.query('DELETE FROM channel_subscriptions WHERE channel_jid = ? AND agent_id = ?').run(channelJid, agentId);
+export function removeChannelSubscription(
+  channelJid: string,
+  agentId: string,
+): void {
+  db.query(
+    'DELETE FROM channel_subscriptions WHERE channel_jid = ? AND agent_id = ?',
+  ).run(channelJid, agentId);
 }
 
 // --- JSON migration ---

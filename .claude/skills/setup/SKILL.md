@@ -39,6 +39,14 @@ Run `./.claude/skills/setup/scripts/02-install-deps.sh` and parse the status blo
 
 Only ask the user for help if multiple retries fail with the same error.
 
+## 2b. Initialize Database Schema
+
+Run `./.claude/skills/setup/scripts/02b-init-db.sh` and parse the status block.
+
+- This step applies SQLite schema + migrations before any channel registration.
+- Expect `SUBSCRIPTIONS_TABLE=true` for current multi-agent routing support.
+- If failed, inspect `logs/setup.log`, fix the root cause, and re-run this script before continuing.
+
 ## 3. Container Runtime
 
 Use the environment check results from step 1 to decide which runtime to use:

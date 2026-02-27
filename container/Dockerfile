@@ -65,6 +65,7 @@ RUN bun install -g @anthropic-ai/claude-code
 # Install OpenCode CLI (alternative agent runtime)
 # Uses the official install script which places the binary in ~/.local/bin
 RUN curl -fsSL https://opencode.ai/install | OPENCODE_INSTALL_DIR=/usr/local/bin bash
+RUN ln -sf /root/.opencode/bin/opencode /usr/local/bin/opencode
 
 # Create app directory
 WORKDIR /app

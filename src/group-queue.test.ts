@@ -695,6 +695,57 @@ describe('GroupQueue', () => {
     });
   });
 
+  it('normalizes dispatch JID to channel JID for IPC routing', async () => {
+    const queue = new GroupQueue();
+    queue.setProcessMessagesFn(
+      mock(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        return true;
+      }),
+    );
+
+    const writes: Array<{
+      groupFolder: string;
+      text: string;
+      chatJid?: string;
+    }> = [];
+    const backend = {
+      name: 'test',
+      runAgent: async () => ({ status: 'success', result: 'ok' as const }),
+      sendMessage: (
+        groupFolder: string,
+        text: string,
+        opts?: { chatJid?: string },
+      ) => {
+        writes.push({ groupFolder, text, chatJid: opts?.chatJid });
+        return true;
+      },
+      closeStdin: () => {},
+      writeIpcData: () => {},
+      readFile: async () => null,
+      writeFile: async () => {},
+      initialize: async () => {},
+      shutdown: async () => {},
+    };
+
+    const dispatchJid = 'dc:123::agent::ocpeyton-discord';
+    queue.enqueueMessageCheck(dispatchJid);
+    queue.registerProcess(
+      dispatchJid,
+      { killed: false } as any,
+      'container-1',
+      'ocpeyton-discord',
+      backend as any,
+      'message',
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const sent = await queue.sendMessage(dispatchJid, 'hello');
+    expect(sent).toBe(true);
+    expect(writes.length).toBe(1);
+    expect(writes[0].chatJid).toBe('dc:123');
+  });
+
   // --- Task deduplication ---
 
   it('prevents double-queuing of the same task', async () => {

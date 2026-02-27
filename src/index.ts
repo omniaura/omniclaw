@@ -66,7 +66,18 @@ import {
 } from './router.js';
 import { reconcileHeartbeats, startSchedulerLoop } from './task-scheduler.js';
 import { createThreadStreamer } from './thread-streaming.js';
-import { Agent, AgentRuntime, BackendType, Channel, ChannelRoute, ChannelSubscription, NewMessage, RegisteredGroup, registeredGroupToAgent, registeredGroupToRoute } from './types.js';
+import {
+  Agent,
+  AgentRuntime,
+  BackendType,
+  Channel,
+  ChannelRoute,
+  ChannelSubscription,
+  NewMessage,
+  RegisteredGroup,
+  registeredGroupToAgent,
+  registeredGroupToRoute,
+} from './types.js';
 import { findMainGroupJid } from './group-helpers.js';
 import { logger } from './logger.js';
 import { assertPathWithin } from './path-security.js';
@@ -139,7 +150,10 @@ function makeDispatchKey(channelJid: string, agentId: string): string {
   return `${channelJid}${DISPATCH_KEY_SEP}${agentId}`;
 }
 
-function parseDispatchKey(key: string): { channelJid: string; agentId?: string } {
+function parseDispatchKey(key: string): {
+  channelJid: string;
+  agentId?: string;
+} {
   const idx = key.indexOf(DISPATCH_KEY_SEP);
   if (idx === -1) return { channelJid: key };
   return {
@@ -148,7 +162,9 @@ function parseDispatchKey(key: string): { channelJid: string; agentId?: string }
   };
 }
 
-function getSubscriptionsForChannelInMemory(channelJid: string): ChannelSubscription[] {
+function getSubscriptionsForChannelInMemory(
+  channelJid: string,
+): ChannelSubscription[] {
   return channelSubscriptions[channelJid] || [];
 }
 
@@ -174,7 +190,8 @@ function buildRegisteredGroupFromSubscription(
     discordGuildId: sub.discordGuildId || fallback?.discordGuildId,
     serverFolder: agent?.serverFolder || fallback?.serverFolder,
     backend: agent?.backend || fallback?.backend || 'apple-container',
-    agentRuntime: agent?.agentRuntime || fallback?.agentRuntime || runtimeDefault,
+    agentRuntime:
+      agent?.agentRuntime || fallback?.agentRuntime || runtimeDefault,
     description: agent?.description || fallback?.description,
   };
 }
@@ -193,15 +210,16 @@ function getDiscordBotIdForJid(jid: string): string | undefined {
   return DISCORD_DEFAULT_BOT_ID;
 }
 
-function findChannelForJid(jid: string, preferredBotId?: string): Channel | undefined {
+function findChannelForJid(
+  jid: string,
+  preferredBotId?: string,
+): Channel | undefined {
   if (!jid.startsWith('dc:')) return findChannel(channels, jid);
 
   const botId = preferredBotId || getDiscordBotIdForJid(jid);
   if (botId) {
     const preferred = channels.find(
-      (c) =>
-        c.name === 'discord' &&
-        (c as { botId?: string }).botId === botId,
+      (c) => c.name === 'discord' && (c as { botId?: string }).botId === botId,
     );
     if (preferred) return preferred;
   }
@@ -215,7 +233,8 @@ function backfillDiscordBotIds(): void {
   for (const [jid, group] of Object.entries(registeredGroups)) {
     if (!jid.startsWith('dc:')) continue;
     const routeBotId = channelRoutes[jid]?.discordBotId;
-    const resolvedBotId = group.discordBotId || routeBotId || DISCORD_DEFAULT_BOT_ID;
+    const resolvedBotId =
+      group.discordBotId || routeBotId || DISCORD_DEFAULT_BOT_ID;
 
     let updatedGroup = group;
     if (!updatedGroup.discordBotId && resolvedBotId) {
@@ -225,7 +244,9 @@ function backfillDiscordBotIds(): void {
       };
     }
     if (!updatedGroup.agentRuntime) {
-      const runtimeDefault = getDiscordRuntimeDefault(updatedGroup.discordBotId);
+      const runtimeDefault = getDiscordRuntimeDefault(
+        updatedGroup.discordBotId,
+      );
       if (runtimeDefault) {
         updatedGroup = { ...updatedGroup, agentRuntime: runtimeDefault };
       }
@@ -267,12 +288,18 @@ function refreshChannelSubscriptions(): void {
     for (const sub of subs) {
       const agent = agents[sub.agentId];
       if (!agent) continue;
-      queue.registerJidMapping(makeDispatchKey(channelJid, sub.agentId), agent.folder);
+      queue.registerJidMapping(
+        makeDispatchKey(channelJid, sub.agentId),
+        agent.folder,
+      );
     }
   }
 }
 
-function refreshRegisteredGroupsFromCanonicalState(): { synthesized: number; legacyOnly: number } {
+function refreshRegisteredGroupsFromCanonicalState(): {
+  synthesized: number;
+  legacyOnly: number;
+} {
   const legacyGroups = getAllRegisteredGroups();
   const nextGroups: Record<string, RegisteredGroup> = {};
   let synthesized = 0;
@@ -285,9 +312,7 @@ function refreshRegisteredGroupsFromCanonicalState(): { synthesized: number; leg
 
   for (const jid of allJids) {
     const subs = channelSubscriptions[jid] || [];
-    const preferredSub =
-      subs.find((s) => s.isPrimary) ||
-      subs[0];
+    const preferredSub = subs.find((s) => s.isPrimary) || subs[0];
     const route = channelRoutes[jid];
     const legacy = legacyGroups[jid];
     const agentId = preferredSub?.agentId || route?.agentId;
@@ -295,13 +320,22 @@ function refreshRegisteredGroupsFromCanonicalState(): { synthesized: number; leg
 
     if (!agent && !legacy) continue;
 
-    const discordBotId = preferredSub?.discordBotId || route?.discordBotId || legacy?.discordBotId;
+    const discordBotId =
+      preferredSub?.discordBotId || route?.discordBotId || legacy?.discordBotId;
     const runtimeDefault = getDiscordRuntimeDefault(discordBotId);
     nextGroups[jid] = {
       name: agent?.name || legacy?.name || agentId || jid,
       folder: agent?.folder || legacy?.folder || agentId || jid,
-      trigger: preferredSub?.trigger || route?.trigger || legacy?.trigger || `@${ASSISTANT_NAME}`,
-      added_at: preferredSub?.createdAt || route?.createdAt || legacy?.added_at || new Date().toISOString(),
+      trigger:
+        preferredSub?.trigger ||
+        route?.trigger ||
+        legacy?.trigger ||
+        `@${ASSISTANT_NAME}`,
+      added_at:
+        preferredSub?.createdAt ||
+        route?.createdAt ||
+        legacy?.added_at ||
+        new Date().toISOString(),
       containerConfig: agent?.containerConfig || legacy?.containerConfig,
       requiresTrigger:
         preferredSub?.requiresTrigger ??
@@ -310,10 +344,16 @@ function refreshRegisteredGroupsFromCanonicalState(): { synthesized: number; leg
         true,
       heartbeat: agent?.heartbeat || legacy?.heartbeat,
       discordBotId,
-      discordGuildId: preferredSub?.discordGuildId || route?.discordGuildId || legacy?.discordGuildId,
+      discordGuildId:
+        preferredSub?.discordGuildId ||
+        route?.discordGuildId ||
+        legacy?.discordGuildId,
       serverFolder: agent?.serverFolder || legacy?.serverFolder,
-      backend: (agent?.backend || legacy?.backend || 'apple-container') as BackendType,
-      agentRuntime: agent?.agentRuntime || legacy?.agentRuntime || runtimeDefault,
+      backend: (agent?.backend ||
+        legacy?.backend ||
+        'apple-container') as BackendType,
+      agentRuntime:
+        agent?.agentRuntime || legacy?.agentRuntime || runtimeDefault,
       description: agent?.description || legacy?.description,
       autoRespondToQuestions: legacy?.autoRespondToQuestions,
       autoRespondKeywords: legacy?.autoRespondKeywords,
@@ -349,7 +389,8 @@ function loadState(): void {
   agents = getAllAgents();
   channelRoutes = getAllChannelRoutes();
   refreshChannelSubscriptions();
-  const { synthesized, legacyOnly } = refreshRegisteredGroupsFromCanonicalState();
+  const { synthesized, legacyOnly } =
+    refreshRegisteredGroupsFromCanonicalState();
 
   // Register JID→folder mappings in the queue so multiple JIDs
   // for the same agent share one container (GroupState keyed by folder).
@@ -389,7 +430,9 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     normalizedGroup.discordBotId = DISCORD_DEFAULT_BOT_ID;
   }
   if (!normalizedGroup.agentRuntime && normalizedGroup.discordBotId) {
-    normalizedGroup.agentRuntime = getDiscordRuntimeDefault(normalizedGroup.discordBotId);
+    normalizedGroup.agentRuntime = getDiscordRuntimeDefault(
+      normalizedGroup.discordBotId,
+    );
   }
 
   registeredGroups[jid] = normalizedGroup;
@@ -626,7 +669,9 @@ export function _setRegisteredGroups(
 async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   const { channelJid: chatJid, agentId } = parseDispatchKey(dispatchJid);
   const sub = agentId
-    ? getSubscriptionsForChannelInMemory(chatJid).find((s) => s.agentId === agentId)
+    ? getSubscriptionsForChannelInMemory(chatJid).find(
+        (s) => s.agentId === agentId,
+      )
     : undefined;
   const group = sub
     ? buildRegisteredGroupFromSubscription(chatJid, sub)
@@ -636,10 +681,9 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
   const sinceTimestamp = lastAgentTimestamp[dispatchJid] || '';
-  const missedMessages = getMessagesSince(
-    chatJid,
-    sinceTimestamp,
-  ).filter((m) => m.content.trim().length > 0);
+  const missedMessages = getMessagesSince(chatJid, sinceTimestamp).filter(
+    (m) => m.content.trim().length > 0,
+  );
 
   if (missedMessages.length === 0) return true;
 
@@ -714,7 +758,10 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
           return;
         }
         channel.setTyping!(chatJid, true).catch((err) => {
-          log.debug({ err, chatJid, dispatchJid }, 'Typing indicator refresh failed (non-fatal)');
+          log.debug(
+            { err, chatJid, dispatchJid },
+            'Typing indicator refresh failed (non-fatal)',
+          );
         });
       }, TYPING_REFRESH_MS);
     } catch (err) {
@@ -823,96 +870,105 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
 
   let output: 'success' | 'error';
   try {
-    output = await runAgent(group, prompt, chatJid, dispatchJid, async (result) => {
-      // Wrap in try/catch to prevent unhandled rejections
-      // Adopted from [Upstream PR #243] - Critical stability fix
-      try {
-        if (result.intermediate && result.result) {
-          const raw =
-            typeof result.result === 'string'
-              ? result.result
-              : JSON.stringify(result.result);
-          await streamer.handleIntermediate(raw);
-          return;
-        }
+    output = await runAgent(
+      group,
+      prompt,
+      chatJid,
+      dispatchJid,
+      async (result) => {
+        // Wrap in try/catch to prevent unhandled rejections
+        // Adopted from [Upstream PR #243] - Critical stability fix
+        try {
+          if (result.intermediate && result.result) {
+            const raw =
+              typeof result.result === 'string'
+                ? result.result
+                : JSON.stringify(result.result);
+            await streamer.handleIntermediate(raw);
+            return;
+          }
 
-        // Final output — send to main channel as before
-        if (result.result) {
-          const raw =
-            typeof result.result === 'string'
-              ? result.result
-              : JSON.stringify(result.result);
-          // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-          const text = raw
-            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-            .trim();
-          log.info(`Agent output: ${raw.slice(0, 200)}`);
+          // Final output — send to main channel as before
+          if (result.result) {
+            const raw =
+              typeof result.result === 'string'
+                ? result.result
+                : JSON.stringify(result.result);
+            // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+            const text = raw
+              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+              .trim();
+            log.info(`Agent output: ${raw.slice(0, 200)}`);
 
-          // Suppress system/auth errors — log them but don't send to channels
-          // This prevents infinite loops when auth fails (error echoed back → triggers agent → fails again)
-          const isSystemError = systemErrorPatterns.some((p) => p.test(text));
-          if (isSystemError) {
-            const redactedText = redactSensitiveData(text.slice(0, 300));
-            log.error(
-              `Suppressed system error (not sent to user): ${redactedText}`,
-            );
-            hadError = true;
-            // Skip sending to channel but continue processing
-          } else if (text) {
-            // Route to the chatJid from the container output (multi-channel support).
-            // Falls back to the original launch chatJid for single-channel agents.
-            const targetJid = parseDispatchKey(result.chatJid || chatJid).channelJid;
-            const targetChannel = findChannelForJid(targetJid, group.discordBotId) || channel;
-            if (targetChannel) {
-              const formatted = formatOutbound(
-                targetChannel,
-                text,
-                getAgentName(group),
+            // Suppress system/auth errors — log them but don't send to channels
+            // This prevents infinite loops when auth fails (error echoed back → triggers agent → fails again)
+            const isSystemError = systemErrorPatterns.some((p) => p.test(text));
+            if (isSystemError) {
+              const redactedText = redactSensitiveData(text.slice(0, 300));
+              log.error(
+                `Suppressed system error (not sent to user): ${redactedText}`,
               );
-              if (formatted) {
-                // Don't use triggeringMessageId for cross-channel responses — it belongs to the original chat
-                const replyId =
-                  targetJid === chatJid ? triggeringMessageId : null;
-                await targetChannel.sendMessage(
-                  targetJid,
-                  formatted,
-                  replyId || undefined,
+              hadError = true;
+              // Skip sending to channel but continue processing
+            } else if (text) {
+              // Route to the chatJid from the container output (multi-channel support).
+              // Falls back to the original launch chatJid for single-channel agents.
+              const targetJid = parseDispatchKey(
+                result.chatJid || chatJid,
+              ).channelJid;
+              const targetChannel =
+                findChannelForJid(targetJid, group.discordBotId) || channel;
+              if (targetChannel) {
+                const formatted = formatOutbound(
+                  targetChannel,
+                  text,
+                  getAgentName(group),
                 );
-                outputSentToUser = true;
-                // Stop typing refresh — prevents the 8s interval from
-                // re-triggering typing AFTER the response is visible.
-                if (typingInterval) {
-                  clearInterval(typingInterval);
-                  typingInterval = null;
+                if (formatted) {
+                  // Don't use triggeringMessageId for cross-channel responses — it belongs to the original chat
+                  const replyId =
+                    targetJid === chatJid ? triggeringMessageId : null;
+                  await targetChannel.sendMessage(
+                    targetJid,
+                    formatted,
+                    replyId || undefined,
+                  );
+                  outputSentToUser = true;
+                  // Stop typing refresh — prevents the 8s interval from
+                  // re-triggering typing AFTER the response is visible.
+                  if (typingInterval) {
+                    clearInterval(typingInterval);
+                    typingInterval = null;
+                  }
                 }
               }
             }
+            // Only reset idle timer on actual results, not session-update markers (result: null)
+            resetIdleTimer();
           }
-          // Only reset idle timer on actual results, not session-update markers (result: null)
-          resetIdleTimer();
-        }
 
-        // [Upstream PR #354] Mark container as idle when it finishes work
-        // (status: success with null result = session-update marker = idle-waiting)
-        if (result.status === 'success') {
-          queue.notifyIdle(dispatchJid);
-          // Stop typing indicator when agent goes idle — otherwise the 8s
-          // refresh loop keeps the indicator alive until the container exits,
-          // which can be minutes later. Fixes #9.
-          if (typingInterval) {
-            clearInterval(typingInterval);
-            typingInterval = null;
+          // [Upstream PR #354] Mark container as idle when it finishes work
+          // (status: success with null result = session-update marker = idle-waiting)
+          if (result.status === 'success') {
+            queue.notifyIdle(dispatchJid);
+            // Stop typing indicator when agent goes idle — otherwise the 8s
+            // refresh loop keeps the indicator alive until the container exits,
+            // which can be minutes later. Fixes #9.
+            if (typingInterval) {
+              clearInterval(typingInterval);
+              typingInterval = null;
+            }
           }
-        }
 
-        if (result.status === 'error') {
+          if (result.status === 'error') {
+            hadError = true;
+          }
+        } catch (err) {
+          log.error({ err }, 'Error in streaming output callback');
           hadError = true;
         }
-      } catch (err) {
-        log.error({ err }, 'Error in streaming output callback');
-        hadError = true;
-      }
-    });
+      },
+    );
   } finally {
     // Stop the typing keep-alive loop — must be in finally to prevent stuck
     // typing indicators when runAgent throws or the process is interrupted.
@@ -931,7 +987,9 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
       consecutiveErrors[dispatchJid] = 0;
-      log.warn('Agent error after output was sent, skipping cursor rollback to prevent duplicates');
+      log.warn(
+        'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
+      );
       return true;
     }
 
@@ -987,7 +1045,8 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
  * Returns undefined if the agent only has one channel (no routing needed).
  */
 function buildChannelsForAgent(agentFolder: string): ChannelInfo[] | undefined {
-  const agentToChannels = buildAgentToChannelsMapFromSubscriptions(channelSubscriptions);
+  const agentToChannels =
+    buildAgentToChannelsMapFromSubscriptions(channelSubscriptions);
   const jids = agentToChannels.get(agentFolder);
   if (!jids || jids.length <= 1) return undefined;
 
@@ -1071,7 +1130,15 @@ async function runAgent(
         agentRuntime: group.agentRuntime,
         channels: agentChannels,
       },
-      (proc, containerName) => queue.registerProcess(processKeyJid, proc, containerName, group.folder, backend, 'message'),
+      (proc, containerName) =>
+        queue.registerProcess(
+          processKeyJid,
+          proc,
+          containerName,
+          group.folder,
+          backend,
+          'message',
+        ),
       wrappedOnOutput,
     );
 
@@ -1109,11 +1176,7 @@ function selectSubscriptionsForMessage(
   const directBotMentions = subs.filter((sub) => {
     const agent = agents[sub.agentId];
     const triggerHandle = sub.trigger.replace(/^@/, '');
-    const handles = [
-      agent?.name,
-      sub.discordBotId,
-      triggerHandle,
-    ]
+    const handles = [agent?.name, sub.discordBotId, triggerHandle]
       .filter((v): v is string => Boolean(v && v.trim()))
       .map((v) => v.trim().toLowerCase());
     if (handles.length === 0) return false;
@@ -1121,7 +1184,10 @@ function selectSubscriptionsForMessage(
     return groupMessages.some((m) => {
       const text = m.content.toLowerCase();
       return handles.some((handle) => {
-        const mentionPattern = new RegExp(`(^|\\s)@${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|\\s|$)`, 'i');
+        const mentionPattern = new RegExp(
+          `(^|\\s)@${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|\\s|$)`,
+          'i',
+        );
         return mentionPattern.test(text);
       });
     });
@@ -1149,7 +1215,10 @@ function selectSubscriptionsForMessage(
   }
 
   return selected
-    .sort((a, b) => (a.priority - b.priority) || a.createdAt.localeCompare(b.createdAt))
+    .sort(
+      (a, b) =>
+        a.priority - b.priority || a.createdAt.localeCompare(b.createdAt),
+    )
     .slice(0, MAX_CHANNEL_AGENT_FANOUT);
 }
 
@@ -1165,14 +1234,13 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       refreshChannelSubscriptions();
-      const jids = Array.from(new Set([
-        ...Object.keys(registeredGroups),
-        ...Object.keys(channelSubscriptions),
-      ]));
-      const { messages, newTimestamp } = getNewMessages(
-        jids,
-        lastTimestamp,
+      const jids = Array.from(
+        new Set([
+          ...Object.keys(registeredGroups),
+          ...Object.keys(channelSubscriptions),
+        ]),
       );
+      const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp);
 
       if (messages.length > 0) {
         logger.info({ count: messages.length }, 'New messages');
@@ -1193,7 +1261,10 @@ async function startMessageLoop(): Promise<void> {
         }
 
         for (const [chatJid, groupMessages] of messagesByGroup) {
-          const selectedSubs = selectSubscriptionsForMessage(chatJid, groupMessages);
+          const selectedSubs = selectSubscriptionsForMessage(
+            chatJid,
+            groupMessages,
+          );
 
           // Legacy fallback: one-to-one registered group handling
           if (selectedSubs.length === 0) {
@@ -1201,7 +1272,8 @@ async function startMessageLoop(): Promise<void> {
             if (!group) continue;
 
             const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-            const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+            const needsTrigger =
+              !isMainGroup && group.requiresTrigger !== false;
             if (needsTrigger) {
               const groupTriggerPattern = buildTriggerPattern(group.trigger);
               const hasTrigger = groupMessages.some((m) =>
@@ -1227,11 +1299,20 @@ async function startMessageLoop(): Promise<void> {
                 messagesToSend[messagesToSend.length - 1].timestamp;
               saveState();
               const typingCh = findChannelForJid(chatJid);
-              if (typingCh?.setTyping) typingCh.setTyping(chatJid, true).catch((err) =>
-                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-              );
+              if (typingCh?.setTyping)
+                typingCh
+                  .setTyping(chatJid, true)
+                  .catch((err) =>
+                    logger.warn(
+                      { chatJid, err },
+                      'Failed to set typing indicator',
+                    ),
+                  );
             } else {
-              logger.info({ chatJid, count: messagesToSend.length }, 'No active container, enqueuing for new one');
+              logger.info(
+                { chatJid, count: messagesToSend.length },
+                'No active container, enqueuing for new one',
+              );
               queue.enqueueMessageCheck(chatJid);
             }
             continue;
@@ -1243,7 +1324,8 @@ async function startMessageLoop(): Promise<void> {
               chatJid,
               lastAgentTimestamp[dispatchJid] || '',
             );
-            const messagesToSend = allPending.length > 0 ? allPending : groupMessages;
+            const messagesToSend =
+              allPending.length > 0 ? allPending : groupMessages;
             const formatted = formatMessages(messagesToSend);
 
             if (await queue.sendMessage(dispatchJid, formatted)) {
@@ -1255,9 +1337,15 @@ async function startMessageLoop(): Promise<void> {
                 messagesToSend[messagesToSend.length - 1].timestamp;
               saveState();
               const typingCh = findChannelForJid(chatJid);
-              if (typingCh?.setTyping) typingCh.setTyping(chatJid, true).catch((err) =>
-                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-              );
+              if (typingCh?.setTyping)
+                typingCh
+                  .setTyping(chatJid, true)
+                  .catch((err) =>
+                    logger.warn(
+                      { chatJid, err },
+                      'Failed to set typing indicator',
+                    ),
+                  );
             } else {
               logger.info(
                 { chatJid, agentId: sub.agentId, count: messagesToSend.length },
@@ -1315,14 +1403,18 @@ function recoverPendingMessages(): void {
  */
 function buildAgentRegistry(): void {
   // Build registry from agents (new system) with channel route info
-  const agentToChannels = buildAgentToChannelsMapFromSubscriptions(channelSubscriptions);
+  const agentToChannels =
+    buildAgentToChannelsMapFromSubscriptions(channelSubscriptions);
 
   const registry = Object.values(agents).map((agent) => {
     const jids = agentToChannels.get(agent.id) || [];
     // Get trigger from first route for backwards compat
-    const firstSub = jids.length > 0
-      ? (channelSubscriptions[jids[0]] || []).find((s) => s.agentId === agent.id)
-      : undefined;
+    const firstSub =
+      jids.length > 0
+        ? (channelSubscriptions[jids[0]] || []).find(
+            (s) => s.agentId === agent.id,
+          )
+        : undefined;
     return {
       id: agent.id,
       jid: jids[0] || agent.id, // Primary JID
@@ -1562,38 +1654,57 @@ async function main(): Promise<void> {
     }),
   );
 
-  const connectDiscord = DISCORD_BOTS.length > 0
-    ? Effect.forEach(
-        DISCORD_BOTS,
-        (bot, idx) =>
-          Effect.gen(function* () {
-            const discord = new DiscordChannel({
-              botId: bot.id,
-              token: bot.token,
-              multiBotMode: DISCORD_BOTS.length > 1,
-              onReaction: async (chatJid, messageId, emoji, userName) => {
-                if (emoji.startsWith('👍') || emoji === '❤️' || emoji === '✅') {
-                  if (handleShareRequestApproval(messageId, emoji, 'Discord')) return;
-                }
-                await handleReactionNotification(chatJid, messageId, emoji, userName, 'Discord');
-              },
-            });
-            yield* Effect.tryPromise(() => discord.connect());
-            return discord;
-          }).pipe(Effect.catchAll((err) => {
-            logger.error(
-              { err, index: idx + 1, total: DISCORD_BOTS.length, botId: bot.id },
-              'Failed to connect Discord bot token (continuing with remaining Discord bots)',
-            );
-            return Effect.succeed(null);
-          })),
-        { concurrency: 'unbounded' },
-      ).pipe(
-        Effect.map((connected) =>
-          connected.filter((ch): ch is DiscordChannel => ch !== null),
-        ),
-      )
-    : Effect.succeed([] as DiscordChannel[]);
+  const connectDiscord =
+    DISCORD_BOTS.length > 0
+      ? Effect.forEach(
+          DISCORD_BOTS,
+          (bot, idx) =>
+            Effect.gen(function* () {
+              const discord = new DiscordChannel({
+                botId: bot.id,
+                token: bot.token,
+                multiBotMode: DISCORD_BOTS.length > 1,
+                onReaction: async (chatJid, messageId, emoji, userName) => {
+                  if (
+                    emoji.startsWith('👍') ||
+                    emoji === '❤️' ||
+                    emoji === '✅'
+                  ) {
+                    if (handleShareRequestApproval(messageId, emoji, 'Discord'))
+                      return;
+                  }
+                  await handleReactionNotification(
+                    chatJid,
+                    messageId,
+                    emoji,
+                    userName,
+                    'Discord',
+                  );
+                },
+              });
+              yield* Effect.tryPromise(() => discord.connect());
+              return discord;
+            }).pipe(
+              Effect.catchAll((err) => {
+                logger.error(
+                  {
+                    err,
+                    index: idx + 1,
+                    total: DISCORD_BOTS.length,
+                    botId: bot.id,
+                  },
+                  'Failed to connect Discord bot token (continuing with remaining Discord bots)',
+                );
+                return Effect.succeed(null);
+              }),
+            ),
+          { concurrency: 'unbounded' },
+        ).pipe(
+          Effect.map((connected) =>
+            connected.filter((ch): ch is DiscordChannel => ch !== null),
+          ),
+        )
+      : Effect.succeed([] as DiscordChannel[]);
 
   const connectTelegram = TELEGRAM_BOT_TOKEN
     ? Effect.gen(function* () {
@@ -1783,7 +1894,8 @@ async function main(): Promise<void> {
     syncGroupMetadata: (force) =>
       whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    writeGroupsSnapshot: (gf, im, ag, rj) =>
+      writeGroupsSnapshot(gf, im, ag, rj),
     findChannel: (jid) => findChannelForJid(jid),
     writeTasksSnapshot: (groupFolder, isMainGroup) => {
       writeTasksSnapshot(

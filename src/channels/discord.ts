@@ -80,7 +80,11 @@ function updateUserRegistry(
     // Mirror into each group IPC dir so container-local MCP tools can read it at /workspace/ipc/user_registry.json
     for (const entry of fs.readdirSync(ipcRoot, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.name === 'errors') continue;
-      const groupRegistryPath = path.join(ipcRoot, entry.name, 'user_registry.json');
+      const groupRegistryPath = path.join(
+        ipcRoot,
+        entry.name,
+        'user_registry.json',
+      );
       const groupTempPath = `${groupRegistryPath}.tmp`;
       fs.writeFileSync(groupTempPath, payload, 'utf-8');
       fs.renameSync(groupTempPath, groupRegistryPath);
@@ -172,7 +176,11 @@ export class DiscordChannel implements Channel {
       this.client.once(Events.ClientReady, (readyClient) => {
         this.connected = true;
         logger.info(
-          { username: readyClient.user.tag, id: readyClient.user.id, botId: this.botId },
+          {
+            username: readyClient.user.tag,
+            id: readyClient.user.id,
+            botId: this.botId,
+          },
           'Discord bot connected',
         );
         logger.info({ tag: readyClient.user.tag }, 'Discord bot ready');
@@ -242,7 +250,10 @@ export class DiscordChannel implements Channel {
             });
           } catch (err) {
             // Reply targets can disappear (deleted/not visible). Fall back to plain send.
-            logger.warn({ jid, replyToMessageId, err }, 'Discord reply failed, sending without reply reference');
+            logger.warn(
+              { jid, replyToMessageId, err },
+              'Discord reply failed, sending without reply reference',
+            );
             sent = await (channel as TextChannel | DMChannel).send(chunks[i]);
           }
         } else {
@@ -250,7 +261,10 @@ export class DiscordChannel implements Channel {
         }
         lastMessageId = sent.id;
       }
-      logger.info({ jid, length: normalizedText.length }, 'Discord message sent');
+      logger.info(
+        { jid, length: normalizedText.length },
+        'Discord message sent',
+      );
       this.ownedJids.add(jid);
       return lastMessageId;
     } catch (err) {
@@ -461,9 +475,7 @@ export class DiscordChannel implements Channel {
     // Translate @bot mention into trigger format
     // FIX: Determine agent name from the channel's registered group, not global ASSISTANT_NAME
     const botId = this.client.user?.id;
-    const botMentionPattern = botId
-      ? new RegExp(`<@!?${botId}>`, 'g')
-      : null;
+    const botMentionPattern = botId ? new RegExp(`<@!?${botId}>`, 'g') : null;
     if (botMentionPattern && botMentionPattern.test(content)) {
       content = content.replace(botMentionPattern, '').trim();
       const isDM = message.channel.type === ChannelType.DM;
@@ -471,10 +483,17 @@ export class DiscordChannel implements Channel {
         ? `dc:dm:${message.author.id}`
         : `dc:${message.channelId}`;
       const subscriptions = getSubscriptionsForChannel(chatJid);
-      const matchedSub = subscriptions.find((s) => (s.discordBotId || '') === this.botId);
-      const fallbackSub = subscriptions.find((s) => s.isPrimary) || subscriptions[0];
+      const matchedSub = subscriptions.find(
+        (s) => (s.discordBotId || '') === this.botId,
+      );
+      const fallbackSub =
+        subscriptions.find((s) => s.isPrimary) || subscriptions[0];
       const group = this.resolveGroupForChannel(chatJid);
-      const trigger = matchedSub?.trigger || fallbackSub?.trigger || group?.trigger || `@${ASSISTANT_NAME}`;
+      const trigger =
+        matchedSub?.trigger ||
+        fallbackSub?.trigger ||
+        group?.trigger ||
+        `@${ASSISTANT_NAME}`;
       const triggerPattern = buildTriggerPattern(trigger);
       if (!triggerPattern.test(content)) {
         content = `${trigger} ${content}`;
@@ -526,9 +545,8 @@ export class DiscordChannel implements Channel {
 
     // Detect thread messages: route via parent channel for group lookup
     const isThread = !isDM && message.channel.isThread();
-    const threadParentId = isThread && message.channel.parent
-      ? message.channel.parent.id
-      : null;
+    const threadParentId =
+      isThread && message.channel.parent ? message.channel.parent.id : null;
     // For thread messages, route via parent channel JID so we find the registered group.
     // Responses go to the parent channel (thread-reply routing is a future enhancement).
     const chatJid = isDM
@@ -542,12 +560,16 @@ export class DiscordChannel implements Channel {
     const isReplyToBot = message.mentions.repliedUser?.id === botId;
     if (message.author.bot) {
       const subs = getSubscriptionsForChannel(chatJid);
-      const thisBotSubs = subs.filter((s) => (s.discordBotId || '') === this.botId);
+      const thisBotSubs = subs.filter(
+        (s) => (s.discordBotId || '') === this.botId,
+      );
       const group = this.resolveGroupForChannel(chatJid);
-      const triggerPatterns = thisBotSubs.length > 0
-        ? thisBotSubs.map((s) => buildTriggerPattern(s.trigger))
-        : [buildTriggerPattern(group?.trigger)];
-      const mentionsThisBot = botId != null && message.mentions.users.has(botId);
+      const triggerPatterns =
+        thisBotSubs.length > 0
+          ? thisBotSubs.map((s) => buildTriggerPattern(s.trigger))
+          : [buildTriggerPattern(group?.trigger)];
+      const mentionsThisBot =
+        botId != null && message.mentions.users.has(botId);
       const hasTriggerForThisBot = triggerPatterns.some((p) => p.test(content));
       if (!mentionsThisBot && !hasTriggerForThisBot && !isReplyToBot) return;
     }

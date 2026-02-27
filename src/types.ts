@@ -63,9 +63,9 @@ export interface RegisteredGroup {
   autoRespondKeywords?: string[]; // Keywords that trigger response without mention (e.g., ["omni", "help"])
   heartbeat?: HeartbeatConfig;
   discordBotId?: string; // Stable Discord bot identity key (e.g., "CLAUDE", "OPENCODE")
-  discordGuildId?: string;  // Discord guild/server ID (for server-level context)
-  serverFolder?: string;    // e.g., "servers/omniaura-discord" (shared across channels in same server)
-  backend?: BackendType;     // Which container backend runs this group's agent (default: apple-container)
+  discordGuildId?: string; // Discord guild/server ID (for server-level context)
+  serverFolder?: string; // e.g., "servers/omniaura-discord" (shared across channels in same server)
+  backend?: BackendType; // Which container backend runs this group's agent (default: apple-container)
   agentRuntime?: AgentRuntime; // Which agent runtime runs inside the container (default: claude-agent-sdk)
   description?: string; // What this agent does (for agent registry)
   streamIntermediates?: boolean; // Stream intermediate output (thinking, tool calls) to channel threads. Default: false
@@ -165,7 +165,7 @@ export interface Agent {
   description?: string;
   folder: string; // Workspace folder (= id for backwards compat)
   backend: BackendType;
-  agentRuntime: AgentRuntime;    // Which agent runtime runs inside the container
+  agentRuntime: AgentRuntime; // Which agent runtime runs inside the container
   containerConfig?: ContainerConfig;
   heartbeat?: HeartbeatConfig;
   isAdmin: boolean; // Local agent = true (can approve tasks, access local FS)

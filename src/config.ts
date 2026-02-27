@@ -17,7 +17,9 @@ export function parseEnvList(value: string | undefined): string[] {
     .filter((v) => v.length > 0);
 }
 
-function parseAgentRuntime(value: string | undefined): AgentRuntime | undefined {
+function parseAgentRuntime(
+  value: string | undefined,
+): AgentRuntime | undefined {
   if (!value) return undefined;
   if (value === 'claude-agent-sdk' || value === 'opencode') return value;
   return undefined;

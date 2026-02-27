@@ -52,10 +52,12 @@ function seedLegacyObservedSchema(db: Database): void {
     );
   `);
 
-  db.query(`
+  db.query(
+    `
     INSERT INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, is_local, server_folder, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `,
+  ).run(
     'main',
     'Main Agent',
     'admin',
@@ -69,10 +71,12 @@ function seedLegacyObservedSchema(db: Database): void {
     '2026-01-01T00:00:00.000Z',
   );
 
-  db.query(`
+  db.query(
+    `
     INSERT INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, is_local, server_folder, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `,
+  ).run(
     'worker',
     'Worker Agent',
     'worker',
@@ -88,14 +92,16 @@ function seedLegacyObservedSchema(db: Database): void {
 }
 
 function getAgentColumns(db: Database): string[] {
-  const columns = db.query('PRAGMA table_info(agents)').all() as Array<{ name: string }>;
+  const columns = db.query('PRAGMA table_info(agents)').all() as Array<{
+    name: string;
+  }>;
   return columns.map((c) => c.name);
 }
 
 function getTableColumns(db: Database, table: string): string[] {
-  const columns = db
-    .query(`PRAGMA table_info(${table})`)
-    .all() as Array<{ name: string }>;
+  const columns = db.query(`PRAGMA table_info(${table})`).all() as Array<{
+    name: string;
+  }>;
   return columns.map((c) => c.name);
 }
 
@@ -118,13 +124,19 @@ describe('db migrations (bun:sqlite)', () => {
     const columns = getAgentColumns(db);
     expect(columns).toContain('agent_runtime');
     expect(columns).toContain('is_local'); // legacy column remains
-    expect(getTableColumns(db, 'registered_groups')).toContain('discord_bot_id');
+    expect(getTableColumns(db, 'registered_groups')).toContain(
+      'discord_bot_id',
+    );
     expect(getTableColumns(db, 'channel_routes')).toContain('discord_bot_id');
-    expect(getTableColumns(db, 'channel_subscriptions')).toContain('channel_jid');
+    expect(getTableColumns(db, 'channel_subscriptions')).toContain(
+      'channel_jid',
+    );
     expect(getTableColumns(db, 'channel_subscriptions')).toContain('agent_id');
 
     // Verify default values applied to existing rows
-    const agents = db.query('SELECT id, agent_runtime FROM agents ORDER BY id').all() as Array<{ id: string; agent_runtime: string | null }>;
+    const agents = db
+      .query('SELECT id, agent_runtime FROM agents ORDER BY id')
+      .all() as Array<{ id: string; agent_runtime: string | null }>;
     expect(agents.length).toBe(2);
     for (const agent of agents) {
       expect(agent.agent_runtime).toBe('claude-agent-sdk');
@@ -139,18 +151,34 @@ describe('db migrations (bun:sqlite)', () => {
 
     const columns = getAgentColumns(db);
     expect(columns).toContain('agent_runtime');
-    expect(getTableColumns(db, 'registered_groups')).toContain('discord_bot_id');
+    expect(getTableColumns(db, 'registered_groups')).toContain(
+      'discord_bot_id',
+    );
     expect(getTableColumns(db, 'channel_routes')).toContain('discord_bot_id');
-    expect(getTableColumns(db, 'channel_subscriptions')).toContain('channel_jid');
+    expect(getTableColumns(db, 'channel_subscriptions')).toContain(
+      'channel_jid',
+    );
     expect(getTableColumns(db, 'channel_subscriptions')).toContain('agent_id');
 
     // Write an agent with opencode runtime
-    db.query(`
+    db.query(
+      `
       INSERT INTO agents (id, name, folder, backend, agent_runtime, is_admin, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run('test', 'Test Agent', 'test', 'apple-container', 'opencode', 0, '2026-01-01T00:00:00.000Z');
+    `,
+    ).run(
+      'test',
+      'Test Agent',
+      'test',
+      'apple-container',
+      'opencode',
+      0,
+      '2026-01-01T00:00:00.000Z',
+    );
 
-    const row = db.query('SELECT agent_runtime FROM agents WHERE id = ?').get('test') as { agent_runtime: string };
+    const row = db
+      .query('SELECT agent_runtime FROM agents WHERE id = ?')
+      .get('test') as { agent_runtime: string };
     expect(row.agent_runtime).toBe('opencode');
 
     db.close();
@@ -162,24 +190,53 @@ describe('db migrations (bun:sqlite)', () => {
 
     // Seed routes that reflect local observed state shape:
     // single-agent routes with Discord guild IDs and mixed timestamps.
-    db.query(`
+    db.query(
+      `
       INSERT INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_guild_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run('dc:940321040482074705', 'ditto-discord', '@Omni', 1, '753336633083953213', '2026-02-11T17:54:36.399Z');
-    db.query(`
+    `,
+    ).run(
+      'dc:940321040482074705',
+      'ditto-discord',
+      '@Omni',
+      1,
+      '753336633083953213',
+      '2026-02-11T17:54:36.399Z',
+    );
+    db.query(
+      `
       INSERT INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_guild_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run('dc:1475568899452964874', 'ditto-discord', '@Omni', 1, '753336633083953213', '2026-02-23 19:17:03');
-    db.query(`
+    `,
+    ).run(
+      'dc:1475568899452964874',
+      'ditto-discord',
+      '@Omni',
+      1,
+      '753336633083953213',
+      '2026-02-23 19:17:03',
+    );
+    db.query(
+      `
       INSERT INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_guild_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run('dc:1475601379400745101', 'ditto-discord', '@Omni', 1, '753336633083953213', '2026-02-23 21:15:03');
+    `,
+    ).run(
+      'dc:1475601379400745101',
+      'ditto-discord',
+      '@Omni',
+      1,
+      '753336633083953213',
+      '2026-02-23 21:15:03',
+    );
 
     // Seed matching agent id so FK exists in migrated table.
-    db.query(`
+    db.query(
+      `
       INSERT INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, is_local, server_folder, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    `,
+    ).run(
       'ditto-discord',
       'Ditto Discord',
       'discord agent',
@@ -195,11 +252,15 @@ describe('db migrations (bun:sqlite)', () => {
 
     createSchema(db);
 
-    const migratedRows = db.query(`
+    const migratedRows = db
+      .query(
+        `
       SELECT channel_jid, agent_id, trigger_pattern, requires_trigger, priority, is_primary, discord_guild_id
       FROM channel_subscriptions
       ORDER BY channel_jid
-    `).all() as Array<{
+    `,
+      )
+      .all() as Array<{
       channel_jid: string;
       agent_id: string;
       trigger_pattern: string;
@@ -219,16 +280,24 @@ describe('db migrations (bun:sqlite)', () => {
       expect(row.discord_guild_id).toBe('753336633083953213');
     }
 
-    const marker = db.query(`
+    const marker = db
+      .query(
+        `
       SELECT value FROM router_state WHERE key = 'channel_subscriptions_migrated'
-    `).get() as { value: string };
+    `,
+      )
+      .get() as { value: string };
     expect(marker.value).toBe('1');
 
     // Idempotency: running migration again should not duplicate subscription rows.
     createSchema(db);
-    const countAfterSecondRun = db.query(`
+    const countAfterSecondRun = db
+      .query(
+        `
       SELECT COUNT(*) AS cnt FROM channel_subscriptions
-    `).get() as { cnt: number };
+    `,
+      )
+      .get() as { cnt: number };
     expect(countAfterSecondRun.cnt).toBe(3);
 
     db.close();

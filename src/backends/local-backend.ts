@@ -49,6 +49,62 @@ function getHomeDir(): string {
   return home;
 }
 
+function getLatestMtimeMs(dir: string): number {
+  if (!fs.existsSync(dir)) return 0;
+  let latest = 0;
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    const stat = fs.statSync(current);
+    latest = Math.max(latest, stat.mtimeMs);
+    if (!stat.isDirectory()) continue;
+    for (const name of fs.readdirSync(current)) {
+      stack.push(path.join(current, name));
+    }
+  }
+  return latest;
+}
+
+function syncAgentRunnerSource(
+  agentRunnerSrc: string,
+  groupAgentRunnerDir: string,
+): boolean {
+  if (!fs.existsSync(agentRunnerSrc)) return false;
+
+  const noAutoSyncMarker = path.join(
+    groupAgentRunnerDir,
+    '.omniclaw-no-autosync',
+  );
+  const syncMarker = path.join(groupAgentRunnerDir, '.omniclaw-source-sync');
+  const hasGroupDir = fs.existsSync(groupAgentRunnerDir);
+
+  if (!hasGroupDir) {
+    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    fs.writeFileSync(syncMarker, `${Date.now()}\n`, 'utf-8');
+    return true;
+  }
+
+  // Allow manual per-agent runtime customization by opting out of auto-sync.
+  if (fs.existsSync(noAutoSyncMarker)) {
+    return true;
+  }
+
+  const srcLatestMtime = getLatestMtimeMs(agentRunnerSrc);
+  const lastSyncedMtime = fs.existsSync(syncMarker)
+    ? fs.statSync(syncMarker).mtimeMs
+    : 0;
+  if (srcLatestMtime <= lastSyncedMtime) {
+    return true;
+  }
+
+  fs.rmSync(groupAgentRunnerDir, { recursive: true, force: true });
+  fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  fs.writeFileSync(syncMarker, `${Date.now()}\n`, 'utf-8');
+  logger.info({ groupAgentRunnerDir }, 'Refreshed cached agent-runner source');
+  return true;
+}
+
 function buildVolumeMounts(
   group: AgentOrGroup,
   isMain: boolean,
@@ -212,12 +268,14 @@ function buildVolumeMounts(
     const allowedVars = [
       'CLAUDE_CODE_OAUTH_TOKEN',
       'ANTHROPIC_API_KEY',
-      'ANTHROPIC_BASE_URL',
       'ANTHROPIC_MODEL',
       'GITHUB_TOKEN',
       'GIT_AUTHOR_NAME',
       'GIT_AUTHOR_EMAIL',
       'CLAUDE_MODEL',
+      'OPENCODE_MODEL',
+      'OPENCODE_PROVIDER',
+      'OPENCODE_MODEL_ID',
     ];
     const filteredLines = envContent.split('\n').filter((line) => {
       const trimmed = line.trim();
@@ -252,11 +310,15 @@ function buildVolumeMounts(
     folder,
     'agent-runner-src',
   );
-  let hasGroupDir = fs.existsSync(groupAgentRunnerDir);
-  if (!hasGroupDir && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-    hasGroupDir = true;
-  }
+  assertPathWithin(
+    groupAgentRunnerDir,
+    sessionsBase,
+    'agent runner source cache',
+  );
+  const hasGroupDir = syncAgentRunnerSource(
+    agentRunnerSrc,
+    groupAgentRunnerDir,
+  );
   mounts.push({
     hostPath: hasGroupDir ? groupAgentRunnerDir : agentRunnerSrc,
     containerPath: '/app/src',
@@ -277,21 +339,10 @@ function buildVolumeMounts(
   return mounts;
 }
 
-/** @internal Exported for testing */
-export interface ContainerArgsOpts {
-  mounts: VolumeMount[];
-  containerName: string;
-  isMain: boolean;
-  networkMode?: 'full' | 'none';
-}
-
-/** @internal Exported for testing */
-export function buildContainerArgs({
-  mounts,
-  containerName,
-  isMain,
-  networkMode,
-}: ContainerArgsOpts): string[] {
+function buildContainerArgs(
+  mounts: VolumeMount[],
+  containerName: string,
+): string[] {
   const isDocker = LOCAL_RUNTIME === 'docker';
   const args: string[] = [
     'run',
@@ -306,14 +357,6 @@ export function buildContainerArgs({
   if (isDocker) {
     args.push('--pids-limit', '256');
     args.push('--security-opt', 'no-new-privileges:true');
-
-    // Network isolation: non-main containers have no network access by default.
-    // Main containers retain full network (needed for WebFetch/WebSearch).
-    // Per-group override via containerConfig.networkMode.
-    const effectiveNetwork = networkMode ?? (isMain ? 'full' : 'none');
-    if (effectiveNetwork === 'none') {
-      args.push('--network', 'none');
-    }
   }
 
   // Pass host timezone so container's local time matches the user's
@@ -368,12 +411,7 @@ export class LocalBackend implements AgentBackend {
     );
     const safeName = folder.replace(/[^a-zA-Z0-9-]/g, '-');
     const containerName = `omniclaw-${safeName}-${Date.now()}`;
-    const containerArgs = buildContainerArgs({
-      mounts,
-      containerName,
-      isMain: input.isMain,
-      networkMode: containerCfg?.networkMode,
-    });
+    const containerArgs = buildContainerArgs(mounts, containerName);
     const configTimeout = containerCfg?.timeout || CONTAINER_TIMEOUT;
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
@@ -858,20 +896,8 @@ export class LocalBackend implements AgentBackend {
           )
           .map((c) => c.configuration.id);
       }
-      // Defense-in-depth: validate container names before passing to Bun.spawn.
-      // Names are generated as `omniclaw-<safeName>-<timestamp>` with safeName already
-      // sanitized, but orphan names come from runtime output — re-validate to
-      // reject any names containing shell metacharacters. [Upstream PR #507]
-      const SAFE_CONTAINER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
-      const safeOrphans = orphans.filter((name) => {
-        if (!SAFE_CONTAINER_NAME_RE.test(name)) {
-          logger.warn({ name }, 'Skipping orphaned container with unsafe name');
-          return false;
-        }
-        return true;
-      });
       await Promise.all(
-        safeOrphans.map((name) => {
+        orphans.map((name) => {
           const proc = Bun.spawn([LOCAL_RUNTIME, 'stop', name], {
             stdout: 'ignore',
             stderr: 'ignore',
@@ -879,9 +905,9 @@ export class LocalBackend implements AgentBackend {
           return proc.exited;
         }),
       );
-      if (safeOrphans.length > 0) {
+      if (orphans.length > 0) {
         logger.info(
-          { count: safeOrphans.length, names: safeOrphans },
+          { count: orphans.length, names: orphans },
           'Stopped orphaned containers',
         );
       }

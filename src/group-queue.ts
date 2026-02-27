@@ -59,6 +59,12 @@ interface GroupState {
   activeTaskInfo: ActiveTaskInfo | null;
 }
 
+function toChannelJid(jid: string): string {
+  const marker = '::agent::';
+  const idx = jid.indexOf(marker);
+  return idx >= 0 ? jid.slice(0, idx) : jid;
+}
+
 export class GroupQueue {
   private groups = new Map<string, GroupState>();
   private activeCount = 0;
@@ -315,6 +321,7 @@ export class GroupQueue {
     const state = this.getGroup(chatJid);
     if (!state.messageActive || !state.messageGroupFolder) return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
+    const channelJid = toChannelJid(chatJid);
 
     // Use Effect-based queue if available
     if (this.effectQueue && state.messageBackend) {
@@ -325,7 +332,7 @@ export class GroupQueue {
             text,
             state.messageBackend,
             state.messageGroupFolder,
-            chatJid,
+            channelJid,
           ),
         );
         return true;
@@ -341,7 +348,7 @@ export class GroupQueue {
     // Fallback: delegate to backend directly
     if (state.messageBackend) {
       return state.messageBackend.sendMessage(state.messageGroupFolder, text, {
-        chatJid,
+        chatJid: channelJid,
       });
     }
 
@@ -359,7 +366,7 @@ export class GroupQueue {
       const tempPath = `${filepath}.tmp`;
       fs.writeFileSync(
         tempPath,
-        JSON.stringify({ type: 'message', text, chatJid }),
+        JSON.stringify({ type: 'message', text, chatJid: channelJid }),
       );
       fs.renameSync(tempPath, filepath);
       return true;

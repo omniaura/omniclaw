@@ -97,9 +97,6 @@ function loadUserRegistry(): UserRegistry {
   return {};
 }
 
-// Load registry on startup
-const userRegistry = loadUserRegistry();
-
 function writeIpcFile(dir: string, data: object): string {
   const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
 
@@ -800,6 +797,8 @@ if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
       user_name: z.string().describe('Display name of the user to mention (e.g. "OmarOmni", "PeytonOmni")'),
     },
     async (args) => {
+      // Reload on each request so long-lived containers do not use stale registry data.
+      const userRegistry = loadUserRegistry();
       // Look up user in registry (case-insensitive)
       const key = args.user_name.toLowerCase().trim();
       const user = userRegistry[key];

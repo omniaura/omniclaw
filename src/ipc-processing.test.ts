@@ -23,7 +23,12 @@ import {
   getRoutesForAgent,
 } from './db.js';
 import { processTaskIpc, IpcDeps } from './ipc.js';
-import { RegisteredGroup, Agent, ChannelRoute, ChannelSubscription } from './types.js';
+import {
+  RegisteredGroup,
+  Agent,
+  ChannelRoute,
+  ChannelSubscription,
+} from './types.js';
 
 // --- Shared test fixtures ---
 
@@ -678,7 +683,10 @@ describe('processTaskIpc: channel subscriptions', () => {
       deps,
     );
     const subs = getSubscriptionsForChannel('dc:777');
-    expect(subs.map((s) => s.agentId).sort()).toEqual(['other-group', 'third-group']);
+    expect(subs.map((s) => s.agentId).sort()).toEqual([
+      'other-group',
+      'third-group',
+    ]);
   });
 
   it('unsubscribe_channel removes targeted subscription', async () => {
@@ -920,7 +928,7 @@ describe('Agent CRUD', () => {
       backend: 'apple-container',
       agentRuntime: 'claude-agent-sdk',
       isAdmin: false,
-        createdAt: '2024-06-01T00:00:00.000Z',
+      createdAt: '2024-06-01T00:00:00.000Z',
     });
     const agent = getAgent('minimal-agent');
     expect(agent!.description).toBeUndefined();
@@ -1026,7 +1034,12 @@ describe('ChannelSubscription CRUD', () => {
 
   it('creates and retrieves subscriptions for channel', () => {
     setChannelSubscription(testSub);
-    setChannelSubscription({ ...testSub, agentId: 'agent-2', isPrimary: false, priority: 200 });
+    setChannelSubscription({
+      ...testSub,
+      agentId: 'agent-2',
+      isPrimary: false,
+      priority: 200,
+    });
     const subs = getSubscriptionsForChannel('dc:123');
     expect(subs).toHaveLength(2);
     expect(subs[0].agentId).toBe('agent-1');
@@ -1035,7 +1048,11 @@ describe('ChannelSubscription CRUD', () => {
 
   it('removes one subscription without affecting others', () => {
     setChannelSubscription(testSub);
-    setChannelSubscription({ ...testSub, agentId: 'agent-2', isPrimary: false });
+    setChannelSubscription({
+      ...testSub,
+      agentId: 'agent-2',
+      isPrimary: false,
+    });
     removeChannelSubscription('dc:123', 'agent-2');
     const subs = getSubscriptionsForChannel('dc:123');
     expect(subs).toHaveLength(1);

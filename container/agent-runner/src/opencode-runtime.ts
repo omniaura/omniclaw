@@ -11,7 +11,6 @@
 
 import fs from 'fs';
 import path from 'path';
-import type { Subprocess } from 'bun';
 
 // ---------------------------------------------------------------------------
 // Types (duplicated from host — container can't import host source)
@@ -163,85 +162,41 @@ function waitForIpcMessage(): Promise<string | null> {
 // OpenCode server management
 // ---------------------------------------------------------------------------
 
-let serverProcess: Subprocess | null = null;
+let openCodeServer: { close(): void } | null = null;
 
 /**
- * Start `opencode serve` as a background process and wait for it to be healthy.
+ * Start OpenCode server via SDK helper (spawns opencode CLI under the hood).
  */
-async function startOpenCodeServer(env: Record<string, string | undefined>): Promise<void> {
-  log(`Starting opencode serve on ${OPENCODE_HOST}:${OPENCODE_PORT}...`);
-
-  // Build env for the opencode server process — include secrets so it can auth with providers
-  const serverEnv: Record<string, string> = {};
+async function startOpenCodeServer(
+  env: Record<string, string | undefined>,
+  model?: string,
+): Promise<OpenCodeClient> {
+  // createOpencodeServer reads process.env only. Apply merged env first.
   for (const [key, value] of Object.entries(env)) {
-    if (value !== undefined) serverEnv[key] = value;
-  }
-  // Ensure opencode knows where to work
-  serverEnv.HOME = process.env.HOME || '/home/bun';
-
-  serverProcess = Bun.spawn(
-    ['opencode', 'serve', '--port', String(OPENCODE_PORT), '--hostname', OPENCODE_HOST],
-    {
-      cwd: '/workspace/group',
-      env: serverEnv,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    },
-  );
-
-  // Log stderr in background
-  const stderrStream = serverProcess.stderr;
-  const stderrReader = typeof stderrStream === 'number' ? null : stderrStream?.getReader();
-  if (stderrReader) {
-    (async () => {
-      const decoder = new TextDecoder();
-      try {
-        while (true) {
-          const { done, value } = await stderrReader.read();
-          if (done) break;
-          const text = decoder.decode(value, { stream: true });
-          for (const line of text.split('\n').filter(Boolean)) {
-            log(`[opencode-server] ${line}`);
-          }
-        }
-      } catch { /* stream closed */ }
-    })();
+    if (value !== undefined) process.env[key] = value;
   }
 
-  // Wait for the server to be healthy
-  const deadline = Date.now() + SERVER_STARTUP_TIMEOUT;
-  const baseUrl = `http://${OPENCODE_HOST}:${OPENCODE_PORT}`;
-
-  while (Date.now() < deadline) {
-    try {
-      const resp = await fetch(`${baseUrl}/global/health`);
-      if (resp.ok) {
-        log('OpenCode server is healthy');
-        return;
-      }
-    } catch {
-      // Not ready yet
-    }
-
-    // Check if process exited
-    if (serverProcess.exitCode !== null) {
-      throw new Error(`opencode serve exited with code ${serverProcess.exitCode}`);
-    }
-
-    await new Promise(r => setTimeout(r, HEALTH_POLL_MS));
-  }
-
-  // Timed out
-  serverProcess.kill();
-  throw new Error(`opencode serve did not become healthy within ${SERVER_STARTUP_TIMEOUT}ms`);
+  const { createOpencode } = await import('@opencode-ai/sdk');
+  const opencode = await createOpencode({
+    hostname: OPENCODE_HOST,
+    port: OPENCODE_PORT,
+    timeout: SERVER_STARTUP_TIMEOUT,
+    config: model ? { model } : undefined,
+  });
+  openCodeServer = opencode.server;
+  log(`OpenCode server is healthy at ${opencode.server.url}`);
+  return opencode.client as unknown as OpenCodeClient;
 }
 
 function stopOpenCodeServer(): void {
-  if (serverProcess && serverProcess.exitCode === null) {
-    log('Stopping opencode server...');
-    serverProcess.kill();
-    serverProcess = null;
+  if (!openCodeServer) return;
+  log('Stopping opencode server...');
+  try {
+    openCodeServer.close();
+  } catch {
+    // ignore cleanup errors
   }
+  openCodeServer = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,25 +209,16 @@ interface OpenCodeClient {
     get(opts: { path: { id: string } }): Promise<{ data?: { id: string } }>;
     prompt(opts: {
       path: { id: string };
-      body: { parts: Array<{ type: string; text: string }>; noReply?: boolean };
+      body: {
+        parts: Array<{ type: string; text: string }>;
+        noReply?: boolean;
+        model?: { providerID: string; modelID: string };
+      };
     }): Promise<{ data?: any }>;
     abort(opts: { path: { id: string } }): Promise<void>;
     messages(opts: { path: { id: string } }): Promise<{ data?: any }>;
+    status(): Promise<{ data?: any }>;
   };
-  global: {
-    health(): Promise<{ data?: { version: string } }>;
-  };
-  event: {
-    subscribe(): Promise<{ stream: AsyncIterable<any> }>;
-  };
-}
-
-async function createClient(): Promise<OpenCodeClient> {
-  // Lazy-import the SDK
-  const { createOpencodeClient } = await import('@opencode-ai/sdk');
-  return createOpencodeClient({
-    baseUrl: `http://${OPENCODE_HOST}:${OPENCODE_PORT}`,
-  }) as unknown as OpenCodeClient;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,9 +245,25 @@ function extractResponseText(result: any): string | null {
   // Message parts array
   if (Array.isArray(data.parts)) {
     const textParts = data.parts
-      .filter((p: any) => p.type === 'text')
+      .filter((p: any) => p?.type === 'text' || p?.type === 'reasoning')
       .map((p: any) => p.text);
     if (textParts.length > 0) return textParts.join('\n');
+  }
+
+  // SDK v1.2.x typically returns { info, parts }
+  // where info is assistant metadata and parts carries message content.
+  if (data.info && Array.isArray(data.parts)) {
+    const text = extractTextFromParts(data.parts);
+    if (text) return text;
+    const deepCandidates = collectCandidateStrings(data.parts).slice(0, 6);
+    if (deepCandidates.length > 0) return deepCandidates.join('\n');
+    const partTypes = data.parts.map((p: any) => p?.type || 'unknown').join(', ');
+    log(`OpenCode prompt returned non-text parts only: [${partTypes}]`);
+    try {
+      log(`OpenCode info snapshot: ${JSON.stringify(data.info).slice(0, 800)}`);
+    } catch {
+      // ignore snapshot stringify errors
+    }
   }
 
   // Messages array — take last assistant message
@@ -326,10 +288,42 @@ function extractResponseText(result: any): string | null {
 }
 
 function extractTextFromParts(parts: any[]): string | null {
-  const textParts = parts
-    .filter((p: any) => p?.type === 'text' && typeof p.text === 'string')
-    .map((p: any) => p.text);
-  return textParts.length > 0 ? textParts.join('\n') : null;
+  const extracted: string[] = [];
+  for (const p of parts) {
+    if ((p?.type === 'text' || p?.type === 'reasoning') && typeof p.text === 'string') {
+      extracted.push(p.text);
+      continue;
+    }
+    if (p?.type === 'tool' && typeof p.state?.output === 'string' && p.state.output.trim()) {
+      extracted.push(p.state.output);
+      continue;
+    }
+  }
+  return extracted.length > 0 ? extracted.join('\n') : null;
+}
+
+function collectCandidateStrings(value: any, out: string[] = [], depth: number = 0): string[] {
+  if (value == null || depth > 5) return out;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed) out.push(trimmed);
+    return out;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectCandidateStrings(item, out, depth + 1);
+    return out;
+  }
+  if (typeof value === 'object') {
+    const preferredKeys = ['text', 'output', 'content', 'message', 'reason'];
+    for (const key of preferredKeys) {
+      if (key in value) collectCandidateStrings((value as any)[key], out, depth + 1);
+    }
+    for (const [k, v] of Object.entries(value)) {
+      if (preferredKeys.includes(k)) continue;
+      collectCandidateStrings(v, out, depth + 1);
+    }
+  }
+  return out;
 }
 
 function extractTextFromMessage(msg: any): string | null {
@@ -343,10 +337,44 @@ function extractTextFromMessage(msg: any): string | null {
 function extractLatestAssistantFromMessages(messages: any[]): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
+    // OpenCode messages endpoint commonly returns [{ info, parts }]
+    if (msg?.info?.role === 'assistant') {
+      const text = extractTextFromParts(Array.isArray(msg.parts) ? msg.parts : []);
+      if (text) return text;
+    }
     if (msg?.role === 'assistant' || msg?.type === 'assistant') {
       const text = extractTextFromMessage(msg);
       if (text) return text;
     }
+  }
+  return null;
+}
+
+async function waitForAssistantText(
+  client: OpenCodeClient,
+  sessionId: string,
+  timeoutMs: number = 60000,
+): Promise<string | null> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const messagesResponse = await client.session.messages({
+        path: { id: sessionId },
+      });
+      const payload = messagesResponse.data;
+      const messages = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.messages)
+          ? payload.messages
+          : [];
+      const text = extractLatestAssistantFromMessages(messages);
+      if (text) return text;
+    } catch (err) {
+      log(
+        `Failed to fetch session messages during response wait: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 500));
   }
   return null;
 }
@@ -364,6 +392,7 @@ async function runOpenCodePrompt(
   sessionId: string,
   prompt: string,
   timeoutMs: number,
+  forcedModel?: { providerID: string; modelID: string },
 ): Promise<{ sessionId: string; closedDuringPrompt: boolean; promptSucceeded: boolean }> {
   let closedDuringPrompt = false;
 
@@ -391,6 +420,7 @@ async function runOpenCodePrompt(
         path: { id: sessionId },
         body: {
           parts: [{ type: 'text', text: prompt }],
+          ...(forcedModel ? { model: forcedModel } : {}),
         },
       }),
       new Promise<never>((_, reject) =>
@@ -402,20 +432,12 @@ async function runOpenCodePrompt(
 
     let responseText = extractResponseText(result);
     if (!responseText) {
-      try {
-        const messagesResponse = await client.session.messages({ path: { id: sessionId } });
-        const payload = messagesResponse.data;
-        const messages = Array.isArray(payload)
-          ? payload
-          : Array.isArray(payload?.messages)
-            ? payload.messages
-            : [];
-        responseText = extractLatestAssistantFromMessages(messages);
-      } catch (err) {
-        log(`Failed to fetch session messages for response extraction: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      responseText = await waitForAssistantText(client, sessionId);
     }
-    log(`Prompt completed, response: ${responseText ? responseText.slice(0, 200) : '(empty)'}...`);
+    if (!responseText) {
+      responseText = 'I processed your message but did not generate a text response.';
+    }
+    log(`Prompt completed, response: ${responseText.slice(0, 200)}...`);
 
     // Emit intermediate tool results if available
     // (OpenCode doesn't expose granular tool-call streaming via SDK prompt,
@@ -502,17 +524,45 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
     sdkEnv[key] = value;
   }
 
-  // Start the OpenCode server
+  const openCodeModelEnv = (sdkEnv.OPENCODE_MODEL || '').trim();
+  const openCodeProviderEnv = (sdkEnv.OPENCODE_PROVIDER || '').trim();
+  const openCodeModelIdEnv = (sdkEnv.OPENCODE_MODEL_ID || '').trim();
+  let forcedModel: { providerID: string; modelID: string } | undefined;
+  if (openCodeModelEnv.includes('/')) {
+    const [providerID, ...rest] = openCodeModelEnv.split('/');
+    const modelID = rest.join('/').trim();
+    if (providerID.trim() && modelID) {
+      forcedModel = { providerID: providerID.trim(), modelID };
+    }
+  } else if (openCodeProviderEnv && (openCodeModelIdEnv || openCodeModelEnv)) {
+    forcedModel = {
+      providerID: openCodeProviderEnv,
+      modelID: openCodeModelIdEnv || openCodeModelEnv,
+    };
+  }
+  if (forcedModel) {
+    log(`Forcing OpenCode model: ${forcedModel.providerID}/${forcedModel.modelID}`);
+  } else {
+    log('OpenCode model not forced (using provider default)');
+  }
+  const forcedModelArg = forcedModel
+    ? `${forcedModel.providerID}/${forcedModel.modelID}`
+    : undefined;
+
+  let client: OpenCodeClient;
   try {
-    await startOpenCodeServer(sdkEnv);
+    client = await startOpenCodeServer(sdkEnv, forcedModelArg);
+    await client.session.status();
+    log('Connected to OpenCode server');
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    log(`Failed to start OpenCode server: ${errorMessage}`);
+    log(`Failed to start/connect OpenCode server: ${errorMessage}`);
     writeOutput({
       status: 'error',
       result: null,
-      error: `Failed to start OpenCode server: ${errorMessage}`,
+      error: `Failed to start/connect OpenCode server: ${errorMessage}`,
     });
+    stopOpenCodeServer();
     process.exit(1);
   }
 
@@ -520,23 +570,6 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
   process.on('exit', stopOpenCodeServer);
   process.on('SIGTERM', () => { stopOpenCodeServer(); process.exit(0); });
   process.on('SIGINT', () => { stopOpenCodeServer(); process.exit(0); });
-
-  let client: OpenCodeClient;
-  try {
-    client = await createClient();
-    const health = await client.global.health();
-    log(`Connected to OpenCode server (version: ${health.data?.version || 'unknown'})`);
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    log(`Failed to connect to OpenCode server: ${errorMessage}`);
-    writeOutput({
-      status: 'error',
-      result: null,
-      error: `Failed to connect to OpenCode server: ${errorMessage}`,
-    });
-    stopOpenCodeServer();
-    process.exit(1);
-  }
 
   // Create or resume session
   let sessionId: string;
@@ -592,6 +625,7 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
           body: {
             noReply: true,
             parts: [{ type: 'text', text: systemContext }],
+            ...(forcedModel ? { model: forcedModel } : {}),
           },
         });
         log('Injected system context');
@@ -622,7 +656,7 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
     while (true) {
       log(`Sending prompt (session: ${sessionId}, ${prompt.length} chars)...`);
 
-      const result = await runOpenCodePrompt(client, sessionId, prompt, timeoutMs);
+      const result = await runOpenCodePrompt(client, sessionId, prompt, timeoutMs, forcedModel);
       sessionId = result.sessionId;
 
       if (result.closedDuringPrompt) {

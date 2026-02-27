@@ -616,16 +616,25 @@ export async function processTaskIpc(
 
     case 'subscribe_channel': {
       if (!isMain) {
-        logger.warn({ sourceGroup }, 'Unauthorized subscribe_channel attempt blocked');
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized subscribe_channel attempt blocked',
+        );
         break;
       }
       if (!data.channel_jid || !data.target_agent) {
         logger.warn({ data }, 'subscribe_channel missing required fields');
         break;
       }
-      const targetEntry = findGroupByFolder(registeredGroups, data.target_agent);
+      const targetEntry = findGroupByFolder(
+        registeredGroups,
+        data.target_agent,
+      );
       if (!targetEntry) {
-        logger.warn({ targetAgent: data.target_agent }, 'subscribe_channel target agent not found');
+        logger.warn(
+          { targetAgent: data.target_agent },
+          'subscribe_channel target agent not found',
+        );
         break;
       }
       const targetGroup = targetEntry[1];
@@ -652,7 +661,10 @@ export async function processTaskIpc(
 
     case 'unsubscribe_channel': {
       if (!isMain) {
-        logger.warn({ sourceGroup }, 'Unauthorized unsubscribe_channel attempt blocked');
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized unsubscribe_channel attempt blocked',
+        );
         break;
       }
       if (!data.channel_jid || !data.target_agent) {

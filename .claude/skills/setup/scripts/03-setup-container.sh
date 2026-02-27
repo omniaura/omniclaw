@@ -99,7 +99,7 @@ log "Building container with $RUNTIME"
 
 # Build
 BUILD_OK="false"
-if (cd "$PROJECT_ROOT/container" && $BUILD_CMD -t "$IMAGE" .) >> "$LOG_FILE" 2>&1; then
+if (cd "$PROJECT_ROOT" && $BUILD_CMD -t "$IMAGE" -f container/Dockerfile .) >> "$LOG_FILE" 2>&1; then
   BUILD_OK="true"
   log "Container build succeeded"
 else
