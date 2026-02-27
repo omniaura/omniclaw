@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   DATA_DIR,
+  DISPATCH_RUNTIME_SEP,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
   TIMEZONE,
@@ -61,8 +62,6 @@ export interface IpcDeps {
   /** Refresh the current_tasks.json snapshot so the agent sees updates immediately */
   writeTasksSnapshot?: (groupFolder: string, isMain: boolean) => void;
 }
-
-const DISPATCH_RUNTIME_SEP = '__dispatch__';
 
 function resolveOwnerGroupFolder(
   sourceGroup: string,

@@ -355,7 +355,6 @@ export function createSchema(database: Database): void {
       backend TEXT NOT NULL DEFAULT 'apple-container',
       agent_runtime TEXT DEFAULT 'claude-agent-sdk',
       container_config TEXT,
-      heartbeat TEXT,
       is_admin INTEGER NOT NULL DEFAULT 0,
       server_folder TEXT,
       created_at TEXT NOT NULL

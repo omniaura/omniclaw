@@ -147,6 +147,8 @@ export function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+export const DISPATCH_RUNTIME_SEP = '__dispatch__';
+
 export const TRIGGER_PATTERN = new RegExp(
   `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
   'i',

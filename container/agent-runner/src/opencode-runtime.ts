@@ -313,10 +313,6 @@ function extractTextFromParts(parts: any[]): string | null {
       extracted.push(p.text);
       continue;
     }
-    if (p?.type === 'tool' && typeof p.state?.output === 'string' && p.state.output.trim()) {
-      extracted.push(p.state.output);
-      continue;
-    }
   }
   return extracted.length > 0 ? extracted.join('\n') : null;
 }
@@ -597,11 +593,10 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
   // Initialize current chat JID
   setCurrentChat(containerInput.chatJid);
 
-  // Build env with secrets for the opencode server
+  // Build env for the opencode server
+  // Secrets intentionally excluded: OpenCode authenticates via auth.json,
+  // not env vars. Including them leaks API keys to bash subprocesses.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
-  for (const [key, value] of Object.entries(containerInput.secrets || {})) {
-    sdkEnv[key] = value;
-  }
 
   const openCodeModelEnv = (sdkEnv.OPENCODE_MODEL || '').trim();
   const openCodeProviderEnv = (sdkEnv.OPENCODE_PROVIDER || '').trim();

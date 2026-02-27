@@ -6,6 +6,7 @@ import {
   ASSISTANT_NAME,
   buildTriggerPattern,
   DATA_DIR,
+  DISPATCH_RUNTIME_SEP,
   DISCORD_BOTS,
   DISCORD_DEFAULT_BOT_ID,
   GROUPS_DIR,
@@ -146,7 +147,6 @@ const queue = new GroupQueue();
 
 const MAX_CHANNEL_AGENT_FANOUT = 3;
 const DISPATCH_KEY_SEP = '::agent::';
-const DISPATCH_RUNTIME_SEP = '__dispatch__';
 
 function makeDispatchKey(channelJid: string, agentId: string): string {
   return `${channelJid}${DISPATCH_KEY_SEP}${agentId}`;
@@ -210,6 +210,9 @@ function buildRegisteredGroupFromSubscription(
     channelFolder: sub.channelFolder || undefined,
     categoryFolder: sub.categoryFolder || undefined,
     agentContextFolder: agent?.agentContextFolder || undefined,
+    autoRespondToQuestions: fallback?.autoRespondToQuestions,
+    autoRespondKeywords: fallback?.autoRespondKeywords,
+    streamIntermediates: fallback?.streamIntermediates,
   };
 }
 
