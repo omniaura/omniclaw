@@ -122,7 +122,9 @@ export const SESSION_MAX_AGE = parseInt(
 export const MAX_ACTIVE_CONTAINERS = Math.max(
   1,
   parseInt(
-    process.env.MAX_ACTIVE_CONTAINERS || process.env.MAX_CONCURRENT_CONTAINERS || '8',
+    process.env.MAX_ACTIVE_CONTAINERS ||
+      process.env.MAX_CONCURRENT_CONTAINERS ||
+      '8',
     10,
   ) || 8,
 );

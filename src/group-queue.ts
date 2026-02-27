@@ -69,7 +69,7 @@ function toChannelJid(jid: string): string {
 export class GroupQueue {
   private groups = new Map<string, GroupState>();
   private activeCount = 0; // total live containers (processing + idle)
-  private idleCount = 0;  // subset of activeCount that are idle-waiting
+  private idleCount = 0; // subset of activeCount that are idle-waiting
   private idleGroups: string[] = []; // folderKeys of idle containers, oldest first
   private activeTaskCount = 0;
   private waitingMessageGroups: string[] = [];
@@ -190,7 +190,12 @@ export class GroupQueue {
     }
 
     logger.info(
-      { groupJid, folderKey, processingCount: this.activeCount - this.idleCount, activeCount: this.activeCount },
+      {
+        groupJid,
+        folderKey,
+        processingCount: this.activeCount - this.idleCount,
+        activeCount: this.activeCount,
+      },
       'Launching container for group',
     );
     this.runForGroup(groupJid, 'messages').catch((err) =>
@@ -323,7 +328,10 @@ export class GroupQueue {
 
     // Pending tasks for this group? Preempt immediately.
     if (state.pendingTasks.length > 0) {
-      logger.info({ groupJid }, 'Idle container preempted: pending tasks found');
+      logger.info(
+        { groupJid },
+        'Idle container preempted: pending tasks found',
+      );
       this._closeIdleContainer(groupJid);
       return;
     }
