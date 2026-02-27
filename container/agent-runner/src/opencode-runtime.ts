@@ -171,21 +171,9 @@ let openCodeServer: { close(): void } | null = null;
  * Start OpenCode server via SDK helper (spawns opencode CLI under the hood).
  */
 async function startOpenCodeServer(
-  env: Record<string, string | undefined>,
   model?: string,
   mcpEnv?: Record<string, string>,
 ): Promise<OpenCodeClient> {
-  // createOpencode reads process.env when spawning the server subprocess.
-  // Temporarily set secrets in process.env for the spawn, then remove them
-  // so they aren't inherited by any subsequent subprocesses (e.g., bash).
-  const injectedKeys: string[] = [];
-  for (const [key, value] of Object.entries(env)) {
-    if (value !== undefined && process.env[key] !== value) {
-      process.env[key] = value;
-      injectedKeys.push(key);
-    }
-  }
-
   const mcpServerPath = path.join(import.meta.dir, 'ipc-mcp-stdio.ts');
   const config: Record<string, unknown> = {};
   if (model) config.model = model;
@@ -202,21 +190,12 @@ async function startOpenCodeServer(
   }
 
   const { createOpencode } = await import('@opencode-ai/sdk');
-  let opencode;
-  try {
-    opencode = await createOpencode({
-      hostname: OPENCODE_HOST,
-      port: OPENCODE_PORT,
-      timeout: SERVER_STARTUP_TIMEOUT,
-      config: Object.keys(config).length > 0 ? config : undefined,
-    });
-  } finally {
-    // Remove secrets from process.env immediately after server spawn.
-    // The server subprocess already inherited them at fork time.
-    for (const key of injectedKeys) {
-      delete process.env[key];
-    }
-  }
+  const opencode = await createOpencode({
+    hostname: OPENCODE_HOST,
+    port: OPENCODE_PORT,
+    timeout: SERVER_STARTUP_TIMEOUT,
+    config: Object.keys(config).length > 0 ? config : undefined,
+  });
   openCodeServer = opencode.server;
   log(`OpenCode server is healthy at ${opencode.server.url}`);
   return opencode.client as unknown as OpenCodeClient;
@@ -640,7 +619,7 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
   } else {
     log('OpenCode model not forced (using provider default)');
   }
-  const forcedModelArg = forcedModel
+  const model = forcedModel
     ? `${forcedModel.providerID}/${forcedModel.modelID}`
     : undefined;
 
@@ -660,7 +639,7 @@ export async function runOpenCodeRuntime(containerInput: ContainerInput): Promis
 
   let client: OpenCodeClient;
   try {
-    client = await startOpenCodeServer(sdkEnv, forcedModelArg, mcpEnv);
+    client = await startOpenCodeServer(model, mcpEnv);
     await client.session.status();
     log('Connected to OpenCode server');
   } catch (err) {
