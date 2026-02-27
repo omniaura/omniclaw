@@ -904,6 +904,23 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
     .get(migrationKey) as { value: string } | undefined;
   if (migrationRow?.value === '1') return;
 
+  const agentCount = database
+    .prepare('SELECT COUNT(*) as cnt FROM agents')
+    .get() as { cnt: number };
+  const routeCount = database
+    .prepare('SELECT COUNT(*) as cnt FROM channel_routes')
+    .get() as { cnt: number };
+
+  // If both new tables already have data, treat legacy migration as complete.
+  // This prevents legacy registered_groups rows from being re-imported into
+  // already-migrated multi-channel setups.
+  if (agentCount.cnt > 0 && routeCount.cnt > 0) {
+    database
+      .prepare('INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)')
+      .run(migrationKey, '1');
+    return;
+  }
+
   // Read all registered_groups
   const rows = database
     .prepare('SELECT * FROM registered_groups')
