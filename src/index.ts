@@ -1325,7 +1325,6 @@ async function main(): Promise<void> {
   // and should NOT block message processing for IPC/scheduled messages.
   // See: https://github.com/qwibitai/nanoclaw/issues/553
   queue.setProcessMessagesFn(processGroupMessages);
-  recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
@@ -1392,6 +1391,11 @@ async function main(): Promise<void> {
         );
       }
     }
+
+    // Recover pending messages AFTER channels are connected so that
+    // findChannel() can route recovered output to the correct channel.
+    // (startMessageLoop already runs above for IPC/scheduled task responsiveness.)
+    recoverPendingMessages();
   };
 
   // Fire-and-forget: channels connect in background while message loop already runs
