@@ -482,22 +482,32 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const channel = findChannel(channels, chatJid);
 
-  // Keep the typing indicator alive for the entire agent run.
-  // Discord's typing indicator expires after ~10 seconds, so we refresh
-  // every 8 seconds until the agent finishes. Other channels (Telegram,
-  // WhatsApp) send a one-shot update and ignore subsequent calls gracefully.
+  // Keep the typing indicator alive for the agent run. Discord's indicator
+  // expires after ~10 seconds; 15s refresh is sufficient with some overlap.
+  // Cap at 20 refreshes (~5 min) to avoid excessive API calls on long tasks
+  // and reduce risk of triggering Discord's abuse detection.
+  const TYPING_REFRESH_MS = 15_000;
+  const TYPING_MAX_REFRESHES = 20;
   let typingInterval: ReturnType<typeof setInterval> | null = null;
   if (channel?.setTyping) {
     try {
       await channel.setTyping(chatJid, true);
+      let typingCount = 0;
       typingInterval = setInterval(() => {
+        typingCount++;
+        if (typingCount >= TYPING_MAX_REFRESHES) {
+          if (typingInterval) clearInterval(typingInterval);
+          typingInterval = null;
+          log.debug({ chatJid }, 'Typing indicator capped after max refreshes');
+          return;
+        }
         channel.setTyping!(chatJid, true).catch((err) => {
           log.debug(
             { err, chatJid },
             'Typing indicator refresh failed (non-fatal)',
           );
         });
-      }, 8_000);
+      }, TYPING_REFRESH_MS);
     } catch (err) {
       log.debug({ error: err }, 'Typing indicator failed to start');
     }
