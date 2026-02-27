@@ -1336,7 +1336,9 @@ async function main(): Promise<void> {
   // the message loop reads from the DB and works without them.
   const connectChannels = async () => {
     const [wa, discord, telegram] = await Effect.runPromise(
-      Effect.all([connectWhatsApp, connectDiscord, connectTelegram], { concurrency: 'unbounded' }),
+      Effect.all([connectWhatsApp, connectDiscord, connectTelegram], {
+        concurrency: 'unbounded',
+      }),
     );
 
     whatsapp = wa;
@@ -1484,7 +1486,6 @@ async function main(): Promise<void> {
       );
     },
   });
-
 }
 
 // Guard: only run when executed directly, not when imported by tests
