@@ -197,6 +197,16 @@ async function runTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
 ): Promise<void> {
+  // Re-check task status: may have been cancelled/paused while queued
+  const freshTask = getTaskById(task.id);
+  if (!freshTask || freshTask.status !== 'active') {
+    logger.info(
+      { taskId: task.id, status: freshTask?.status ?? 'deleted' },
+      'Task no longer active, skipping',
+    );
+    return;
+  }
+
   const startTime = Date.now();
   const groupDir = path.join(GROUPS_DIR, task.group_folder);
   fs.mkdirSync(groupDir, { recursive: true });
