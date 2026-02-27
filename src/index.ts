@@ -1057,13 +1057,13 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
 }
 
 /**
- * Build the channels array for multi-channel agents.
+ * Build the channels array for a multi-channel agent ID.
  * Returns undefined if the agent only has one channel (no routing needed).
  */
-function buildChannelsForAgent(agentFolder: string): ChannelInfo[] | undefined {
+function buildChannelsForAgent(agentId: string): ChannelInfo[] | undefined {
   const agentToChannels =
     buildAgentToChannelsMapFromSubscriptions(channelSubscriptions);
-  const jids = agentToChannels.get(agentFolder);
+  const jids = agentToChannels.get(agentId);
   if (!jids || jids.length <= 1) return undefined;
 
   return jids.map((jid, i) => {
@@ -1141,7 +1141,8 @@ async function runAgent(
 
   try {
     const backend = resolveBackend(group);
-    const agentChannels = buildChannelsForAgent(group.folder);
+    const agentId = (channelSubscriptions[chatJid] || [])[0]?.agentId ?? group.folder;
+    const agentChannels = buildChannelsForAgent(agentId);
     const output = await backend.runAgent(
       group,
       {

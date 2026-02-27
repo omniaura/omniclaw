@@ -200,8 +200,12 @@ function addColumnIfNotExists(
   try {
     const def = defaultValue !== undefined ? ` DEFAULT ${defaultValue}` : '';
     database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}${def}`);
-  } catch {
-    /* column already exists */
+  } catch (err) {
+    const message = (err instanceof Error ? err.message : String(err)).toLowerCase();
+    if (message.includes('duplicate column name') || message.includes('already exists')) {
+      return;
+    }
+    throw err;
   }
 }
 
@@ -894,11 +898,11 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
 // --- Agent + ChannelRoute CRUD ---
 
 function migrateRegisteredGroupsToAgents(database: Database): void {
-  // Check if migration already happened (agents table has data)
-  const agentCount = database
-    .prepare('SELECT COUNT(*) as cnt FROM agents')
-    .get() as { cnt: number };
-  if (agentCount.cnt > 0) return;
+  const migrationKey = 'registered_groups_to_agents_migrated';
+  const migrationRow = database
+    .prepare('SELECT value FROM router_state WHERE key = ?')
+    .get(migrationKey) as { value: string } | undefined;
+  if (migrationRow?.value === '1') return;
 
   // Read all registered_groups
   const rows = database
@@ -918,11 +922,27 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
     description: string | null;
   }>;
 
-  if (rows.length === 0) return;
+  if (rows.length === 0) {
+    database
+      .prepare('INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)')
+      .run(migrationKey, '1');
+    return;
+  }
+
+  const validRows = rows.filter((row) => {
+    if (/^[a-z0-9][a-z0-9_-]*$/i.test(row.folder)) {
+      return true;
+    }
+    logger.warn(
+      { jid: row.jid, folder: row.folder },
+      'Skipping legacy migration row with invalid folder name',
+    );
+    return false;
+  });
 
   // Group rows by folder to deduplicate (multiple JIDs can map to same folder)
-  const agentsByFolder = new Map<string, (typeof rows)[0]>();
-  for (const row of rows) {
+  const agentsByFolder = new Map<string, (typeof rows)[number]>();
+  for (const row of validRows) {
     if (!agentsByFolder.has(row.folder)) {
       agentsByFolder.set(row.folder, row);
     }
@@ -957,7 +977,7 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
   }
 
   // Insert all routes (including multiple JIDs per agent)
-  for (const row of rows) {
+  for (const row of validRows) {
     insertRoute.run(
       row.jid,
       row.folder, // agent_id = folder
@@ -968,6 +988,10 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
       row.added_at,
     );
   }
+
+  database
+    .prepare('INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)')
+    .run(migrationKey, '1');
 }
 
 function migrateRoutesToSubscriptions(database: Database): void {
