@@ -41,7 +41,6 @@ export interface ContainerConfig {
   networkMode?: 'full' | 'none'; // Default: 'none' for non-main, 'full' for main
 }
 
-
 export type BackendType = 'apple-container' | 'docker';
 
 /** Which agent runtime runs inside the container. */

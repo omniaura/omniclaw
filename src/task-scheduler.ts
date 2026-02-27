@@ -47,7 +47,6 @@ export interface SchedulerDependencies {
   findChannel: (jid: string) => Channel | undefined;
 }
 
-
 async function runTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
