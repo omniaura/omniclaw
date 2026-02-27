@@ -107,149 +107,6 @@ beforeEach(() => {
 });
 
 // =============================================================================
-// processTaskIpc: configure_heartbeat
-// =============================================================================
-
-describe('processTaskIpc: configure_heartbeat', () => {
-  it('main group enables heartbeat for another group', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: true,
-        interval: '3600000',
-        target_group_jid: 'other@g.us',
-      },
-      'main',
-      true,
-      deps,
-    );
-
-    expect(groups['other@g.us'].heartbeat).toBeDefined();
-    expect(groups['other@g.us'].heartbeat!.enabled).toBe(true);
-    expect(groups['other@g.us'].heartbeat!.interval).toBe('3600000');
-  });
-
-  it('main group disables heartbeat for another group', async () => {
-    // First enable it
-    groups['other@g.us'] = {
-      ...OTHER_GROUP,
-      heartbeat: {
-        enabled: true,
-        interval: '1800000',
-        scheduleType: 'interval',
-      },
-    };
-
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: false,
-        target_group_jid: 'other@g.us',
-      },
-      'main',
-      true,
-      deps,
-    );
-
-    expect(groups['other@g.us'].heartbeat).toBeUndefined();
-  });
-
-  it('non-main group can configure its own heartbeat', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: true,
-        interval: '600000',
-      },
-      'other-group',
-      false,
-      deps,
-    );
-
-    expect(groups['other@g.us'].heartbeat).toBeDefined();
-    expect(groups['other@g.us'].heartbeat!.enabled).toBe(true);
-    expect(groups['other@g.us'].heartbeat!.interval).toBe('600000');
-  });
-
-  it('non-main group cannot configure another groups heartbeat', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: true,
-        interval: '600000',
-        target_group_jid: 'third@g.us',
-      },
-      'other-group',
-      false,
-      deps,
-    );
-
-    // Third group should remain unchanged
-    expect(groups['third@g.us'].heartbeat).toBeUndefined();
-  });
-
-  it('rejects configure_heartbeat with missing enabled field', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        interval: '600000',
-      } as any,
-      'main',
-      true,
-      deps,
-    );
-
-    // No changes
-    expect(groups['main@g.us'].heartbeat).toBeUndefined();
-  });
-
-  it('defaults heartbeat scheduleType to interval when not cron', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: true,
-        interval: '900000',
-      },
-      'other-group',
-      false,
-      deps,
-    );
-
-    expect(groups['other@g.us'].heartbeat!.scheduleType).toBe('interval');
-  });
-
-  it('accepts cron heartbeat schedule type', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: true,
-        interval: '0 */6 * * *',
-        heartbeat_schedule_type: 'cron',
-      },
-      'other-group',
-      false,
-      deps,
-    );
-
-    expect(groups['other@g.us'].heartbeat!.scheduleType).toBe('cron');
-  });
-
-  it('defaults interval to 1800000 when not provided', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: true,
-      },
-      'other-group',
-      false,
-      deps,
-    );
-
-    expect(groups['other@g.us'].heartbeat!.interval).toBe('1800000');
-  });
-});
-
-// =============================================================================
 // processTaskIpc: share_request
 // =============================================================================
 
@@ -895,21 +752,6 @@ describe('Agent CRUD', () => {
     expect(agent!.name).toBe('Updated Agent');
   });
 
-  it('stores and retrieves agent with heartbeat config', () => {
-    setAgent({
-      ...testAgent,
-      heartbeat: {
-        enabled: true,
-        interval: '3600000',
-        scheduleType: 'interval',
-      },
-    });
-    const agent = getAgent('agent-1');
-    expect(agent!.heartbeat).toBeDefined();
-    expect(agent!.heartbeat!.enabled).toBe(true);
-    expect(agent!.heartbeat!.interval).toBe('3600000');
-  });
-
   it('stores and retrieves agent with containerConfig', () => {
     setAgent({
       ...testAgent,
@@ -932,7 +774,6 @@ describe('Agent CRUD', () => {
     });
     const agent = getAgent('minimal-agent');
     expect(agent!.description).toBeUndefined();
-    expect(agent!.heartbeat).toBeUndefined();
     expect(agent!.containerConfig).toBeUndefined();
     expect(agent!.serverFolder).toBeUndefined();
   });

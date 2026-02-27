@@ -34,10 +34,8 @@ import {
 } from './ipc-file-security.js';
 import { logger } from './logger.js';
 import { stripInternalTags } from './router.js';
-import { reconcileHeartbeats } from './task-scheduler.js';
 import {
   Channel,
-  HeartbeatConfig,
   IpcMessagePayload,
   IpcTaskPayload,
   RegisteredGroup,
@@ -695,65 +693,6 @@ export async function processTaskIpc(
       logger.info(
         { channelJid: data.channel_jid, agentId: data.target_agent },
         'Channel subscription removed via IPC',
-      );
-      break;
-    }
-
-    case 'configure_heartbeat': {
-      if (data.enabled === undefined) {
-        logger.warn({ data }, 'configure_heartbeat missing enabled field');
-        break;
-      }
-
-      // Resolve target group
-      const targetJid =
-        isMain && data.target_group_jid
-          ? data.target_group_jid
-          : findJidByFolder(registeredGroups, sourceGroup);
-
-      if (!targetJid) {
-        logger.warn(
-          { sourceGroup },
-          'configure_heartbeat: could not resolve target group',
-        );
-        break;
-      }
-
-      const targetGroup = registeredGroups[targetJid];
-      if (!targetGroup) {
-        logger.warn(
-          { targetJid },
-          'configure_heartbeat: target group not registered',
-        );
-        break;
-      }
-
-      // Authorization: non-main groups can only configure their own heartbeat
-      if (!isMain && targetGroup.folder !== sourceGroup) {
-        logger.warn(
-          { sourceGroup, targetFolder: targetGroup.folder },
-          'Unauthorized configure_heartbeat attempt',
-        );
-        break;
-      }
-
-      const heartbeat: HeartbeatConfig | undefined = data.enabled
-        ? {
-            enabled: true,
-            interval: data.interval || '1800000',
-            scheduleType: (data.heartbeat_schedule_type === 'cron'
-              ? 'cron'
-              : 'interval') as 'cron' | 'interval',
-          }
-        : undefined;
-
-      const updatedGroup: RegisteredGroup = { ...targetGroup, heartbeat };
-      deps.updateGroup(targetJid, updatedGroup);
-      reconcileHeartbeats(deps.registeredGroups());
-
-      logger.info(
-        { targetJid, folder: targetGroup.folder, enabled: data.enabled },
-        'Heartbeat configured via IPC',
       );
       break;
     }

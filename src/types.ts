@@ -41,11 +41,6 @@ export interface ContainerConfig {
   networkMode?: 'full' | 'none'; // Default: 'none' for non-main, 'full' for main
 }
 
-export interface HeartbeatConfig {
-  enabled: boolean;
-  interval: string; // cron expression or ms interval
-  scheduleType: 'cron' | 'interval';
-}
 
 export type BackendType = 'apple-container' | 'docker';
 
@@ -61,7 +56,6 @@ export interface RegisteredGroup {
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   autoRespondToQuestions?: boolean; // Respond to messages ending with '?' (default: false)
   autoRespondKeywords?: string[]; // Keywords that trigger response without mention (e.g., ["omni", "help"])
-  heartbeat?: HeartbeatConfig;
   discordBotId?: string; // Stable Discord bot identity key (e.g., "CLAUDE", "OPENCODE")
   discordGuildId?: string; // Discord guild/server ID (for server-level context)
   serverFolder?: string; // e.g., "servers/omniaura-discord" (shared across channels in same server)
@@ -173,7 +167,6 @@ export interface Agent {
   backend: BackendType;
   agentRuntime: AgentRuntime; // Which agent runtime runs inside the container
   containerConfig?: ContainerConfig;
-  heartbeat?: HeartbeatConfig;
   isAdmin: boolean; // Local agent = true (can approve tasks, access local FS)
   serverFolder?: string; // Shared server context (e.g., "servers/omniaura-discord")
   createdAt: string;
@@ -232,7 +225,6 @@ export function registeredGroupToAgent(
     backend: backendType,
     agentRuntime: group.agentRuntime || 'claude-agent-sdk',
     containerConfig: group.containerConfig,
-    heartbeat: group.heartbeat,
     isAdmin: isMainGroup,
     serverFolder: group.serverFolder,
     createdAt: group.added_at,
@@ -294,11 +286,6 @@ export interface IpcTaskPayload {
   containerConfig?: ContainerConfig;
   discord_bot_id?: string;
   discord_guild_id?: string;
-  // For configure_heartbeat
-  enabled?: boolean;
-  interval?: string;
-  heartbeat_schedule_type?: string;
-  target_group_jid?: string;
   // For share_request
   description?: string;
   sourceGroup?: string;

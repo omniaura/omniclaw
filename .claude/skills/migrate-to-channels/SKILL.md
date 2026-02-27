@@ -244,6 +244,22 @@ Ask each agent: "what are your debug info / loaded contexts?" — verify:
 
 ---
 
+### Step 10: Remove any legacy heartbeat config
+
+The heartbeat feature has been removed. Use scheduled tasks (`create_task`) instead — they're more flexible and don't silently re-create themselves on restart.
+
+If any agents or groups had heartbeat configured, it will be automatically NULLed out on first startup (the migration runs in `createSchema()`). But you can also clean it up manually:
+
+```sql
+UPDATE registered_groups SET heartbeat = NULL WHERE heartbeat IS NOT NULL;
+UPDATE agents SET heartbeat = NULL WHERE heartbeat IS NOT NULL;
+DELETE FROM scheduled_tasks WHERE id LIKE 'heartbeat-%';
+```
+
+Any `## Heartbeat` sections in existing `CLAUDE.md` files are now inert (the system no longer reads them). You can leave them as documentation or migrate the content to a regular scheduled task.
+
+---
+
 ## Backward Compatibility
 
 - Agents without `agent_context_folder` → no `/workspace/agent/` mount, identity via `agentName` fallback (works but name may be wrong — see gotcha #2)

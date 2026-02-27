@@ -456,7 +456,6 @@ export class DiscordChannel implements Channel {
       added_at: preferredSub.createdAt,
       containerConfig: agent.containerConfig,
       requiresTrigger: preferredSub.requiresTrigger,
-      heartbeat: agent.heartbeat,
       discordBotId: preferredSub.discordBotId,
       discordGuildId: preferredSub.discordGuildId,
       serverFolder: agent.serverFolder,

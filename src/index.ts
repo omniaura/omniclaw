@@ -65,7 +65,7 @@ import {
   formatOutbound,
   getAgentName,
 } from './router.js';
-import { reconcileHeartbeats, startSchedulerLoop } from './task-scheduler.js';
+import { startSchedulerLoop } from './task-scheduler.js';
 import { createThreadStreamer } from './thread-streaming.js';
 import {
   Agent,
@@ -200,7 +200,6 @@ function buildRegisteredGroupFromSubscription(
     added_at: sub.createdAt,
     containerConfig: agent?.containerConfig || fallback?.containerConfig,
     requiresTrigger: sub.requiresTrigger,
-    heartbeat: agent?.heartbeat || fallback?.heartbeat,
     discordBotId: resolvedBotId,
     discordGuildId: sub.discordGuildId || fallback?.discordGuildId,
     serverFolder: agent?.serverFolder || fallback?.serverFolder,
@@ -350,7 +349,6 @@ function refreshRegisteredGroupsFromCanonicalState(): {
         route?.requiresTrigger ??
         legacy?.requiresTrigger ??
         true,
-      heartbeat: agent?.heartbeat || legacy?.heartbeat,
       discordBotId,
       discordGuildId:
         preferredSub?.discordGuildId ||
@@ -1874,9 +1872,6 @@ async function main(): Promise<void> {
   connectChannels().catch((err) => {
     logger.error({ err }, 'Channel connection failed');
   });
-
-  // Reconcile heartbeat tasks with group config before starting scheduler
-  reconcileHeartbeats(registeredGroups);
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

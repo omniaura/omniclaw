@@ -8,7 +8,6 @@ import {
   Agent,
   ChannelRoute,
   ChannelSubscription,
-  HeartbeatConfig,
   NewMessage,
   RegisteredGroup,
   ScheduledTask,
@@ -28,7 +27,6 @@ interface RegisteredGroupRow {
   added_at: string;
   container_config: string | null;
   requires_trigger: number | null;
-  heartbeat: string | null;
   discord_bot_id: string | null;
   discord_guild_id: string | null;
   server_folder: string | null;
@@ -48,7 +46,6 @@ interface AgentRow {
   backend: string;
   agent_runtime: string | null;
   container_config: string | null;
-  heartbeat: string | null;
   is_admin: number;
   server_folder: string | null;
   created_at: string;
@@ -125,11 +122,6 @@ function mapRowToRegisteredGroup(
     ),
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-    heartbeat: safeJsonParse<HeartbeatConfig>(
-      row.heartbeat,
-      { jid: row.jid },
-      'heartbeat',
-    ),
     discordBotId: row.discord_bot_id || undefined,
     discordGuildId: row.discord_guild_id || undefined,
     serverFolder: row.server_folder || undefined,
@@ -158,11 +150,6 @@ function mapRowToAgent(row: AgentRow): Agent {
       row.container_config,
       { id: row.id },
       'agent container_config',
-    ),
-    heartbeat: safeJsonParse<HeartbeatConfig>(
-      row.heartbeat,
-      { id: row.id },
-      'agent heartbeat',
     ),
     isAdmin: row.is_admin === 1,
     serverFolder: row.server_folder || undefined,
@@ -337,6 +324,17 @@ export function createSchema(database: Database): void {
     'INTEGER',
     '0',
   );
+
+  // Heartbeat feature removed — clear any existing heartbeat config so it doesn't
+  // get re-created on startup (reconcileHeartbeats is also removed).
+  try {
+    database.exec(`
+      UPDATE registered_groups SET heartbeat = NULL WHERE heartbeat IS NOT NULL;
+      UPDATE agents SET heartbeat = NULL WHERE heartbeat IS NOT NULL;
+    `);
+  } catch {
+    // columns may not exist on very old DBs — harmless
+  }
 
   // --- Agent-Channel Decoupling tables ---
   database.exec(`
@@ -849,8 +847,8 @@ export function getRegisteredGroup(
 /** Insert or replace a registered group entry. */
 export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   db.query(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, heartbeat, discord_bot_id, discord_guild_id, server_folder, backend, description, auto_respond_to_questions, auto_respond_keywords, stream_intermediates)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, discord_bot_id, discord_guild_id, server_folder, backend, description, auto_respond_to_questions, auto_respond_keywords, stream_intermediates)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -859,7 +857,6 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
-    group.heartbeat ? JSON.stringify(group.heartbeat) : null,
     group.discordBotId || null,
     group.discordGuildId || null,
     group.serverFolder || null,
@@ -914,7 +911,6 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
     added_at: string;
     container_config: string | null;
     requires_trigger: number | null;
-    heartbeat: string | null;
     discord_bot_id: string | null;
     discord_guild_id: string | null;
     server_folder: string | null;
@@ -933,8 +929,8 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
   }
 
   const insertAgent = database.prepare(`
-    INSERT OR IGNORE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, heartbeat, is_admin, server_folder, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertRoute = database.prepare(`
@@ -954,7 +950,6 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
       backend,
       'claude-agent-sdk', // agent_runtime (default for migration)
       row.container_config,
-      row.heartbeat,
       isMain ? 1 : 0, // is_admin
       row.server_folder,
       row.added_at,
@@ -1034,8 +1029,8 @@ export function getAllAgents(): Record<string, Agent> {
 export function setAgent(agent: Agent): void {
   db.query(
     `
-    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, heartbeat, is_admin, server_folder, created_at, agent_context_folder)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at, agent_context_folder)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     agent.id,
@@ -1045,7 +1040,6 @@ export function setAgent(agent: Agent): void {
     agent.backend,
     normalizeAgentRuntime(agent.agentRuntime),
     agent.containerConfig ? JSON.stringify(agent.containerConfig) : null,
-    agent.heartbeat ? JSON.stringify(agent.heartbeat) : null,
     agent.isAdmin ? 1 : 0,
     agent.serverFolder || null,
     agent.createdAt,
