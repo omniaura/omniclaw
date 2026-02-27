@@ -5,7 +5,8 @@ import { Effect, Layer } from 'effect';
 import type { AgentBackend } from './backends/types.js';
 import {
   DATA_DIR,
-  MAX_CONCURRENT_CONTAINERS,
+  MAX_ACTIVE_CONTAINERS,
+  MAX_IDLE_CONTAINERS,
   MAX_TASK_CONTAINERS,
 } from './config.js';
 import { OmniClawLoggerLayer } from './effect/logger-layer.js';
@@ -67,7 +68,9 @@ function toChannelJid(jid: string): string {
 
 export class GroupQueue {
   private groups = new Map<string, GroupState>();
-  private activeCount = 0;
+  private activeCount = 0; // total live containers (processing + idle)
+  private idleCount = 0;  // subset of activeCount that are idle-waiting
+  private idleGroups: string[] = []; // folderKeys of idle containers, oldest first
   private activeTaskCount = 0;
   private waitingMessageGroups: string[] = [];
   private waitingTaskGroups: string[] = [];
@@ -161,7 +164,18 @@ export class GroupQueue {
       return;
     }
 
-    if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
+    const processingCount = this.activeCount - this.idleCount;
+    if (processingCount >= MAX_ACTIVE_CONTAINERS) {
+      // Proactively preempt the oldest idle container to free a slot sooner.
+      if (this.idleGroups.length > 0) {
+        const oldest = this.idleGroups.shift()!;
+        this.idleCount--;
+        logger.info(
+          { groupJid, folderKey, preempting: oldest },
+          'Preempting oldest idle container to free processing slot',
+        );
+        this.closeStdin(oldest, 'message');
+      }
       if (!state.pendingMessageJids.includes(groupJid)) {
         state.pendingMessageJids.push(groupJid);
       }
@@ -169,14 +183,14 @@ export class GroupQueue {
         this.waitingMessageGroups.push(groupJid);
       }
       logger.info(
-        { groupJid, folderKey, activeCount: this.activeCount },
-        'At concurrency limit, message queued',
+        { groupJid, folderKey, processingCount, activeCount: this.activeCount },
+        'At active container limit, message queued',
       );
       return;
     }
 
     logger.info(
-      { groupJid, folderKey, activeCount: this.activeCount },
+      { groupJid, folderKey, processingCount: this.activeCount - this.idleCount, activeCount: this.activeCount },
       'Launching container for group',
     );
     this.runForGroup(groupJid, 'messages').catch((err) =>
@@ -213,7 +227,7 @@ export class GroupQueue {
 
     // Check both global limit and task-specific limit
     if (
-      this.activeCount >= MAX_CONCURRENT_CONTAINERS ||
+      this.activeCount - this.idleCount >= MAX_ACTIVE_CONTAINERS ||
       this.activeTaskCount >= MAX_TASK_CONTAINERS
     ) {
       state.pendingTasks.push({ id: taskId, groupJid, fn, promptPreview });
@@ -297,14 +311,40 @@ export class GroupQueue {
    */
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
+    const folderKey = this.resolveFolder(groupJid);
     state.idleWaiting = true;
-    if (state.pendingTasks.length > 0) {
-      logger.info(
-        { groupJid },
-        'Idle container preempted: pending tasks found',
-      );
-      this.closeStdin(groupJid, 'message');
+    this.idleCount++;
+    if (!this.idleGroups.includes(folderKey)) {
+      this.idleGroups.push(folderKey);
     }
+
+    // A processing slot just freed up — let waiting messages start.
+    this.drainWaitingMessages();
+
+    // Pending tasks for this group? Preempt immediately.
+    if (state.pendingTasks.length > 0) {
+      logger.info({ groupJid }, 'Idle container preempted: pending tasks found');
+      this._closeIdleContainer(groupJid);
+      return;
+    }
+
+    // Over idle limit? Preempt the oldest idle container.
+    if (this.idleCount > MAX_IDLE_CONTAINERS) {
+      const oldest = this.idleGroups.shift()!;
+      logger.info(
+        { oldest, idleCount: this.idleCount, maxIdle: MAX_IDLE_CONTAINERS },
+        'Idle limit exceeded, preempting oldest idle container',
+      );
+      this._closeIdleContainer(oldest);
+    }
+  }
+
+  /** Close an idle container and update idle tracking. */
+  private _closeIdleContainer(groupJidOrFolder: string): void {
+    const folderKey = this.resolveFolder(groupJidOrFolder);
+    this.idleCount = Math.max(0, this.idleCount - 1);
+    this.idleGroups = this.idleGroups.filter((k) => k !== folderKey);
+    this.closeStdin(groupJidOrFolder, 'message');
   }
 
   /**
@@ -320,7 +360,13 @@ export class GroupQueue {
   async sendMessage(chatJid: string, text: string): Promise<boolean> {
     const state = this.getGroup(chatJid);
     if (!state.messageActive || !state.messageGroupFolder) return false;
-    state.idleWaiting = false; // Agent is about to receive work, no longer idle
+    if (state.idleWaiting) {
+      // Container was idle — it's now processing again
+      const folderKey = this.resolveFolder(chatJid);
+      this.idleCount = Math.max(0, this.idleCount - 1);
+      this.idleGroups = this.idleGroups.filter((k) => k !== folderKey);
+      state.idleWaiting = false;
+    }
     const channelJid = toChannelJid(chatJid);
 
     // Use Effect-based queue if available
@@ -449,6 +495,12 @@ export class GroupQueue {
       logger.error({ groupJid, err }, 'Error processing messages for group');
       this.scheduleRetry(groupJid, state);
     } finally {
+      if (state.idleWaiting) {
+        // Container exited while idle — clean up idle tracking
+        const folderKey = this.resolveFolder(groupJid);
+        this.idleCount = Math.max(0, this.idleCount - 1);
+        this.idleGroups = this.idleGroups.filter((k) => k !== folderKey);
+      }
       state.messageActive = false;
       state.idleWaiting = false;
       state.messageProcess = null;
@@ -553,7 +605,7 @@ export class GroupQueue {
     if (state.pendingTasks.length > 0) {
       // Check task concurrency limits before starting next task
       if (
-        this.activeCount < MAX_CONCURRENT_CONTAINERS &&
+        this.activeCount - this.idleCount < MAX_ACTIVE_CONTAINERS &&
         this.activeTaskCount < MAX_TASK_CONTAINERS
       ) {
         const task = state.pendingTasks.shift()!;
@@ -582,7 +634,7 @@ export class GroupQueue {
   private drainWaitingMessages(): void {
     while (
       this.waitingMessageGroups.length > 0 &&
-      this.activeCount < MAX_CONCURRENT_CONTAINERS
+      this.activeCount - this.idleCount < MAX_ACTIVE_CONTAINERS
     ) {
       const nextJid = this.waitingMessageGroups.shift()!;
       const state = this.getGroup(nextJid);
@@ -602,7 +654,7 @@ export class GroupQueue {
   private drainWaitingTasks(): void {
     while (
       this.waitingTaskGroups.length > 0 &&
-      this.activeCount < MAX_CONCURRENT_CONTAINERS &&
+      this.activeCount - this.idleCount < MAX_ACTIVE_CONTAINERS &&
       this.activeTaskCount < MAX_TASK_CONTAINERS
     ) {
       const nextJid = this.waitingTaskGroups.shift()!;

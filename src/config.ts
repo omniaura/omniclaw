@@ -118,14 +118,25 @@ export const SESSION_MAX_AGE = parseInt(
   process.env.SESSION_MAX_AGE || '14400000',
   10,
 ); // 4 hours — rotate sessions to prevent unbounded context growth
-export const MAX_CONCURRENT_CONTAINERS = Math.max(
+/** Max containers actively processing messages or tasks. */
+export const MAX_ACTIVE_CONTAINERS = Math.max(
   1,
-  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '8', 10) || 8,
+  parseInt(
+    process.env.MAX_ACTIVE_CONTAINERS || process.env.MAX_CONCURRENT_CONTAINERS || '8',
+    10,
+  ) || 8,
 );
+/** Max warm containers sitting idle, waiting for the next message. */
+export const MAX_IDLE_CONTAINERS = Math.max(
+  0,
+  parseInt(process.env.MAX_IDLE_CONTAINERS || '4', 10) || 4,
+);
+/** Backward-compat alias. */
+export const MAX_CONCURRENT_CONTAINERS = MAX_ACTIVE_CONTAINERS;
 export const MAX_TASK_CONTAINERS = Math.max(
   1,
   parseInt(
-    process.env.MAX_TASK_CONTAINERS || String(MAX_CONCURRENT_CONTAINERS - 1),
+    process.env.MAX_TASK_CONTAINERS || String(MAX_ACTIVE_CONTAINERS - 1),
     10,
   ),
 );

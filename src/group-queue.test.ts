@@ -4,7 +4,9 @@ import { mock as mockModule } from 'bun:test';
 
 mockModule.module('./config.js', () => ({
   DATA_DIR: '/tmp/omniclaw-test-data',
-  MAX_CONCURRENT_CONTAINERS: 3,
+  MAX_ACTIVE_CONTAINERS: 3,
+  MAX_IDLE_CONTAINERS: 0, // disable idle slots so tests see hard limit of 3
+  MAX_CONCURRENT_CONTAINERS: 3, // backward-compat alias
   MAX_TASK_CONTAINERS: 2,
 }));
 
