@@ -14,6 +14,7 @@ import {
   ThreadAutoArchiveDuration,
   type ThreadChannel,
 } from 'discord.js';
+import { RESTEvents } from '@discordjs/rest';
 
 import fs from 'fs';
 import path from 'path';
@@ -137,6 +138,22 @@ export class DiscordChannel implements Channel {
 
       this.client.on(Events.Error, (err) => {
         logger.error({ err }, 'Discord client error');
+      });
+
+      // Log when discord.js REST layer hits a Discord 429 rate limit.
+      // The REST client retries automatically, but this gives us visibility
+      // into whether our send pacing (300ms chunk delay, thread caps) is sufficient.
+      this.client.rest.on(RESTEvents.RateLimited, (info) => {
+        logger.warn(
+          {
+            route: info.route,
+            method: info.method,
+            retryAfterMs: info.retryAfter,
+            limit: info.limit,
+            global: info.global,
+          },
+          'Discord rate limited — REST client will auto-retry',
+        );
       });
 
       this.client.login(this.opts.token).catch(reject);
