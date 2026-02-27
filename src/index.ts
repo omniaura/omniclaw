@@ -132,6 +132,7 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let agents: Record<string, Agent> = {};
 let channelRoutes: Record<string, ChannelRoute> = {};
 let channelSubscriptions: Record<string, ChannelSubscription[]> = {};
+let channelSubscriptionsDirty = true;
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
@@ -145,7 +146,10 @@ let whatsapp: WhatsAppChannel | null = null;
 let channels: Channel[] = [];
 const queue = new GroupQueue();
 
-const MAX_CHANNEL_AGENT_FANOUT = 3;
+const MAX_CHANNEL_AGENT_FANOUT = parseInt(
+  process.env.MAX_CHANNEL_AGENT_FANOUT || '3',
+  10,
+);
 const DISPATCH_KEY_SEP = '::agent::';
 
 function makeDispatchKey(channelJid: string, agentId: string): string {
@@ -174,7 +178,15 @@ function getRuntimeGroupFolder(
     .update(processKeyJid)
     .digest('hex')
     .slice(0, 16);
-  return `${baseFolder}${DISPATCH_RUNTIME_SEP}${digest}`;
+  const runtimeFolder = `${baseFolder}${DISPATCH_RUNTIME_SEP}${digest}`;
+  // Guard against path traversal from user-controlled baseFolder
+  const ipcBase = path.join(DATA_DIR, 'ipc');
+  assertPathWithin(
+    path.join(ipcBase, runtimeFolder),
+    ipcBase,
+    'runtime group folder',
+  );
+  return runtimeFolder;
 }
 
 function getSubscriptionsForChannelInMemory(
@@ -303,7 +315,15 @@ function backfillDiscordBotIds(): void {
 }
 
 function refreshChannelSubscriptions(): void {
+  if (!channelSubscriptionsDirty) return;
   channelSubscriptions = getAllChannelSubscriptions();
+  channelSubscriptionsDirty = false;
+}
+
+/** Mark channel subscriptions as stale so the next loop tick re-reads from DB. */
+function invalidateChannelSubscriptions(): void {
+  channelSubscriptionsDirty = true;
+  mentionPatternCache.clear();
 }
 
 function refreshRegisteredGroupsFromCanonicalState(): {
@@ -1208,6 +1228,28 @@ async function runAgent(
   }
 }
 
+/** Pre-compiled mention patterns per agent, invalidated when subscriptions change. */
+const mentionPatternCache = new Map<string, RegExp[]>();
+
+function getMentionPatterns(sub: ChannelSubscription): RegExp[] {
+  const cached = mentionPatternCache.get(sub.agentId);
+  if (cached) return cached;
+  const agent = agents[sub.agentId];
+  const triggerHandle = sub.trigger.replace(/^@/, '');
+  const handles = [agent?.name, sub.discordBotId, triggerHandle]
+    .filter((v): v is string => Boolean(v && v.trim()))
+    .map((v) => v.trim().toLowerCase());
+  const patterns = handles.map(
+    (handle) =>
+      new RegExp(
+        `(^|\\s)@${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|\\s|$)`,
+        'i',
+      ),
+  );
+  mentionPatternCache.set(sub.agentId, patterns);
+  return patterns;
+}
+
 function selectSubscriptionsForMessage(
   chatJid: string,
   groupMessages: NewMessage[],
@@ -1219,22 +1261,12 @@ function selectSubscriptionsForMessage(
   // no GuildMembers privileged intent needed. Safe because it only reads already-stored text.
   const hasAllAgents = groupMessages.some((m) => /@allagents/i.test(m.content));
   const directBotMentions = subs.filter((sub) => {
-    const agent = agents[sub.agentId];
-    const triggerHandle = sub.trigger.replace(/^@/, '');
-    const handles = [agent?.name, sub.discordBotId, triggerHandle]
-      .filter((v): v is string => Boolean(v && v.trim()))
-      .map((v) => v.trim().toLowerCase());
-    if (handles.length === 0) return false;
+    const patterns = getMentionPatterns(sub);
+    if (patterns.length === 0) return false;
 
     return groupMessages.some((m) => {
       const text = m.content.toLowerCase();
-      return handles.some((handle) => {
-        const mentionPattern = new RegExp(
-          `(^|\\s)@${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|\\s|$)`,
-          'i',
-        );
-        return mentionPattern.test(text);
-      });
+      return patterns.some((p) => p.test(text));
     });
   });
   const explicitMatches = subs.filter((sub) => {
@@ -1338,8 +1370,8 @@ async function startMessageLoop(): Promise<void> {
               chatJid,
               lastAgentTimestamp[chatJid] || '',
             );
-            const messagesToSend =
-              allPending.length > 0 ? allPending : groupMessages;
+            if (allPending.length === 0) continue;
+            const messagesToSend = allPending;
             const formatted = formatMessages(messagesToSend);
 
             if (await queue.sendMessage(chatJid, formatted)) {
@@ -1530,8 +1562,10 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
     if (folder) folders.add(folder);
   }
 
+  const ipcBase = path.join(DATA_DIR, 'ipc');
   for (const folder of folders) {
-    const groupIpcDir = path.join(DATA_DIR, 'ipc', folder);
+    const groupIpcDir = path.join(ipcBase, folder);
+    assertPathWithin(groupIpcDir, ipcBase, 'agent registry target');
     fs.mkdirSync(groupIpcDir, { recursive: true });
     fs.writeFileSync(
       path.join(groupIpcDir, 'agent_registry.json'),
@@ -1991,6 +2025,7 @@ async function main(): Promise<void> {
         mapTasksForSnapshot(getAllTasks()),
       );
     },
+    onSubscriptionChanged: invalidateChannelSubscriptions,
   });
 }
 

@@ -347,11 +347,25 @@ export class GroupQueue {
     }
   }
 
-  /** Close an idle container and update idle tracking. */
-  private _closeIdleContainer(groupJidOrFolder: string): void {
+  /**
+   * Atomically clear the idle-waiting state for a group.
+   * No-op if the group is not currently idle.
+   * All idle-count bookkeeping goes through this single method to prevent
+   * drift from multiple callers decrementing independently.
+   */
+  private _clearIdleState(groupJidOrFolder: string): boolean {
     const folderKey = this.resolveFolder(groupJidOrFolder);
+    const state = this.groups.get(folderKey);
+    if (!state?.idleWaiting) return false;
+    state.idleWaiting = false;
     this.idleCount = Math.max(0, this.idleCount - 1);
     this.idleGroups = this.idleGroups.filter((k) => k !== folderKey);
+    return true;
+  }
+
+  /** Close an idle container and update idle tracking. */
+  private _closeIdleContainer(groupJidOrFolder: string): void {
+    this._clearIdleState(groupJidOrFolder);
     this.closeStdin(groupJidOrFolder, 'message');
   }
 
@@ -368,13 +382,8 @@ export class GroupQueue {
   async sendMessage(chatJid: string, text: string): Promise<boolean> {
     const state = this.getGroup(chatJid);
     if (!state.messageActive || !state.messageGroupFolder) return false;
-    if (state.idleWaiting) {
-      // Container was idle — it's now processing again
-      const folderKey = this.resolveFolder(chatJid);
-      this.idleCount = Math.max(0, this.idleCount - 1);
-      this.idleGroups = this.idleGroups.filter((k) => k !== folderKey);
-      state.idleWaiting = false;
-    }
+    // Container was idle — mark it active again (single-method bookkeeping)
+    this._clearIdleState(chatJid);
     const channelJid = toChannelJid(chatJid);
 
     // Use Effect-based queue if available
@@ -503,14 +512,9 @@ export class GroupQueue {
       logger.error({ groupJid, err }, 'Error processing messages for group');
       this.scheduleRetry(groupJid, state);
     } finally {
-      if (state.idleWaiting) {
-        // Container exited while idle — clean up idle tracking
-        const folderKey = this.resolveFolder(groupJid);
-        this.idleCount = Math.max(0, this.idleCount - 1);
-        this.idleGroups = this.idleGroups.filter((k) => k !== folderKey);
-      }
+      // Clean up idle tracking if container exited while idle
+      this._clearIdleState(groupJid);
       state.messageActive = false;
-      state.idleWaiting = false;
       state.messageProcess = null;
       state.messageContainerName = null;
       state.messageGroupFolder = null;

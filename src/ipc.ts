@@ -61,7 +61,20 @@ export interface IpcDeps {
   findChannel?: (jid: string) => Channel | undefined;
   /** Refresh the current_tasks.json snapshot so the agent sees updates immediately */
   writeTasksSnapshot?: (groupFolder: string, isMain: boolean) => void;
+  /** Called when channel subscriptions are mutated via IPC */
+  onSubscriptionChanged?: () => void;
 }
+
+/**
+ * Resolve a runtime group folder back to its canonical owner folder.
+ *
+ * Runtime folders have the format `{owner}{DISPATCH_RUNTIME_SEP}{16-char hex digest}`.
+ * We validate both parts: the owner must be a known folder AND the suffix must
+ * be exactly the 16-char hex digest format produced by getRuntimeGroupFolder().
+ * This prevents a rogue folder like `main__rt__abc` from resolving to `main`
+ * and gaining main-group privileges.
+ */
+const RUNTIME_DIGEST_RE = /^[0-9a-f]{16}$/;
 
 function resolveOwnerGroupFolder(
   sourceGroup: string,
@@ -74,7 +87,12 @@ function resolveOwnerGroupFolder(
   const idx = sourceGroup.indexOf(DISPATCH_RUNTIME_SEP);
   if (idx === -1) return sourceGroup;
   const owner = sourceGroup.slice(0, idx);
-  return knownFolders.has(owner) ? owner : sourceGroup;
+  const digest = sourceGroup.slice(idx + DISPATCH_RUNTIME_SEP.length);
+  // Validate: owner must be known AND suffix must be a valid runtime digest
+  if (knownFolders.has(owner) && RUNTIME_DIGEST_RE.test(digest)) {
+    return owner;
+  }
+  return sourceGroup;
 }
 
 // --- Pending share request tracking ---
@@ -673,6 +691,7 @@ export async function processTaskIpc(
         { channelJid: data.channel_jid, agentId: targetGroup.folder },
         'Channel subscription upserted via IPC',
       );
+      deps.onSubscriptionChanged?.();
       break;
     }
 
@@ -693,6 +712,7 @@ export async function processTaskIpc(
         { channelJid: data.channel_jid, agentId: data.target_agent },
         'Channel subscription removed via IPC',
       );
+      deps.onSubscriptionChanged?.();
       break;
     }
 

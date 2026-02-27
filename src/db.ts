@@ -360,6 +360,8 @@ export function createSchema(database: Database): void {
       created_at TEXT NOT NULL
     );
 
+    -- TODO: Deprecated — channel_subscriptions is now the canonical source of truth.
+    -- Kept for backwards compat with rollback scenarios. Remove in a future cycle.
     CREATE TABLE IF NOT EXISTS channel_routes (
       channel_jid TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL REFERENCES agents(id),
