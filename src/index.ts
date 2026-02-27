@@ -1587,8 +1587,22 @@ async function handleReactionNotification(
   emoji: string,
   userName: string,
   channelName: string,
+  discordBotId?: string,
 ): Promise<void> {
-  const group = registeredGroups[chatJid];
+  // For multi-agent Discord channels, route to the subscription whose bot
+  // received the reaction rather than blindly using the primary registered group.
+  // Without this, a reaction on OCPeyton's message routes to Ditto (the primary).
+  let dispatchJid = chatJid;
+  let group = registeredGroups[chatJid];
+  const subs = getSubscriptionsForChannelInMemory(chatJid);
+  if (discordBotId && subs.length > 0) {
+    const matchingSub = subs.find((s) => s.discordBotId === discordBotId);
+    if (matchingSub) {
+      dispatchJid = makeDispatchKey(chatJid, matchingSub.agentId);
+      group =
+        buildRegisteredGroupFromSubscription(chatJid, matchingSub) ?? group;
+    }
+  }
   if (!group) return;
 
   logger.info(
@@ -1609,12 +1623,12 @@ async function handleReactionNotification(
   };
 
   const piped = await queue.sendMessage(
-    chatJid,
+    dispatchJid,
     formatMessages([reactionMessage]),
   );
   if (!piped) {
     storeMessage(reactionMessage);
-    queue.enqueueMessageCheck(chatJid);
+    queue.enqueueMessageCheck(dispatchJid);
   }
 }
 
@@ -1739,6 +1753,7 @@ async function main(): Promise<void> {
                     emoji,
                     userName,
                     'Discord',
+                    bot.id,
                   );
                 },
               });
