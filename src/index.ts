@@ -1141,7 +1141,8 @@ async function runAgent(
 
   try {
     const backend = resolveBackend(group);
-    const agentId = (channelSubscriptions[chatJid] || [])[0]?.agentId ?? group.folder;
+    const agentId =
+      (channelSubscriptions[chatJid] || [])[0]?.agentId ?? group.folder;
     const agentChannels = buildChannelsForAgent(agentId);
     const output = await backend.runAgent(
       group,

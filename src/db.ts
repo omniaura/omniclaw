@@ -201,8 +201,13 @@ function addColumnIfNotExists(
     const def = defaultValue !== undefined ? ` DEFAULT ${defaultValue}` : '';
     database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}${def}`);
   } catch (err) {
-    const message = (err instanceof Error ? err.message : String(err)).toLowerCase();
-    if (message.includes('duplicate column name') || message.includes('already exists')) {
+    const message = (
+      err instanceof Error ? err.message : String(err)
+    ).toLowerCase();
+    if (
+      message.includes('duplicate column name') ||
+      message.includes('already exists')
+    ) {
       return;
     }
     throw err;
