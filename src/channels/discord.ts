@@ -158,6 +158,8 @@ export class DiscordChannel implements Channel {
       const chunks = splitMessage(text, 2000);
       let lastMessageId: string | undefined;
       for (let i = 0; i < chunks.length; i++) {
+        // Delay between chunks to avoid Discord 429 rate limits (#130)
+        if (i > 0) await delay(300);
         const opts =
           i === 0 && replyToMessageId
             ? {
@@ -260,8 +262,10 @@ export class DiscordChannel implements Channel {
   async sendToThread(thread: ThreadChannel, text: string): Promise<void> {
     try {
       const chunks = splitMessage(text, 2000);
-      for (const chunk of chunks) {
-        await thread.send(chunk);
+      for (let i = 0; i < chunks.length; i++) {
+        // Delay between chunks to avoid Discord 429 rate limits (#130)
+        if (i > 0) await delay(300);
+        await thread.send(chunks[i]);
       }
     } catch (err) {
       logger.warn(
@@ -718,6 +722,11 @@ export class DiscordChannel implements Channel {
       // Non-critical — ignore cleanup errors
     }
   }
+}
+
+/** Promisified setTimeout for rate-limit delays between chunk sends */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** Convert a dc: JID to a Discord channel ID (guild channels only) */
