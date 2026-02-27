@@ -1264,6 +1264,13 @@ function selectSubscriptionsForMessage(
     }
   }
 
+  if (selected.length === 0) {
+    logger.debug(
+      { chatJid, subsCount: subs.length },
+      'No agents selected after trigger filter — all candidates require explicit trigger',
+    );
+  }
+
   return selected
     .sort(
       (a, b) =>

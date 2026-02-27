@@ -1,34 +1,288 @@
-import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import fs from 'fs';
 import path from 'path';
 
-/**
- * Tests for the OpenCode runtime adapter.
- *
- * Since the runtime depends on an OpenCode server, these tests focus on:
- * - Runtime dispatch from the main index (opencode branch)
- * - Pure helper functions (IPC, response extraction)
- * - Integration flow mocking
- */
+import {
+  extractResponseText,
+  extractTextFromParts,
+  collectCandidateStrings,
+  extractTextFromMessage,
+  extractLatestAssistantFromMessages,
+} from '../opencode-runtime.js';
 
-describe('OpenCode runtime dispatch', () => {
-  it('dispatches to opencode runtime when agentRuntime is "opencode"', async () => {
-    // Verify the import path resolves (module exists)
-    const mod = await import('../opencode-runtime.js');
-    expect(typeof mod.runOpenCodeRuntime).toBe('function');
+// ---------------------------------------------------------------------------
+// extractTextFromParts
+// ---------------------------------------------------------------------------
+
+describe('extractTextFromParts', () => {
+  it('extracts text parts', () => {
+    const parts = [
+      { type: 'text', text: 'Hello' },
+      { type: 'text', text: 'World' },
+    ];
+    expect(extractTextFromParts(parts)).toBe('Hello\nWorld');
+  });
+
+  it('extracts reasoning parts', () => {
+    const parts = [
+      { type: 'reasoning', text: 'Let me think...' },
+      { type: 'text', text: 'The answer is 42.' },
+    ];
+    expect(extractTextFromParts(parts)).toBe('Let me think...\nThe answer is 42.');
+  });
+
+  it('ignores tool parts (no tool output in user-facing response)', () => {
+    const parts = [
+      { type: 'text', text: 'Here is the result:' },
+      { type: 'tool', state: { output: 'ls -la\ntotal 42' } },
+    ];
+    expect(extractTextFromParts(parts)).toBe('Here is the result:');
+  });
+
+  it('returns null for empty parts', () => {
+    expect(extractTextFromParts([])).toBeNull();
+  });
+
+  it('returns null when all parts are tools', () => {
+    const parts = [
+      { type: 'tool', state: { output: 'some output' } },
+    ];
+    expect(extractTextFromParts(parts)).toBeNull();
+  });
+
+  it('skips parts with non-string text', () => {
+    const parts = [
+      { type: 'text', text: 123 },
+      { type: 'text', text: 'valid' },
+    ];
+    expect(extractTextFromParts(parts)).toBe('valid');
+  });
+
+  it('handles null/undefined elements gracefully', () => {
+    const parts = [null, undefined, { type: 'text', text: 'ok' }];
+    expect(extractTextFromParts(parts as any)).toBe('ok');
   });
 });
 
-describe('OpenCode response extraction', () => {
-  // Test the extractResponseText logic by importing the module
-  // The function isn't exported, but we can test the patterns it handles
-  // by verifying the expected shapes work
+// ---------------------------------------------------------------------------
+// collectCandidateStrings
+// ---------------------------------------------------------------------------
 
-  it('handles null/undefined results', () => {
-    // Just verify the module loads cleanly
-    expect(true).toBe(true);
+describe('collectCandidateStrings', () => {
+  it('collects top-level string', () => {
+    expect(collectCandidateStrings('hello')).toEqual(['hello']);
+  });
+
+  it('collects strings from arrays', () => {
+    expect(collectCandidateStrings(['a', 'b'])).toEqual(['a', 'b']);
+  });
+
+  it('prefers known keys in objects', () => {
+    const obj = { text: 'preferred', other: 'also here' };
+    const result = collectCandidateStrings(obj);
+    expect(result[0]).toBe('preferred');
+    expect(result).toContain('also here');
+  });
+
+  it('returns empty for null/undefined', () => {
+    expect(collectCandidateStrings(null)).toEqual([]);
+    expect(collectCandidateStrings(undefined)).toEqual([]);
+  });
+
+  it('respects max depth', () => {
+    // Build a deeply nested structure
+    let obj: any = { text: 'deep' };
+    for (let i = 0; i < 10; i++) obj = { nested: obj };
+    // Should stop at depth 5, so the deep text won't be found
+    const result = collectCandidateStrings(obj);
+    expect(result).not.toContain('deep');
+  });
+
+  it('skips empty/whitespace strings', () => {
+    expect(collectCandidateStrings(['', '  ', 'valid'])).toEqual(['valid']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// extractTextFromMessage
+// ---------------------------------------------------------------------------
+
+describe('extractTextFromMessage', () => {
+  it('returns null for null input', () => {
+    expect(extractTextFromMessage(null)).toBeNull();
+  });
+
+  it('extracts string content directly', () => {
+    expect(extractTextFromMessage({ content: 'hello' })).toBe('hello');
+  });
+
+  it('extracts from array content (parts format)', () => {
+    const msg = {
+      content: [
+        { type: 'text', text: 'first' },
+        { type: 'text', text: 'second' },
+      ],
+    };
+    expect(extractTextFromMessage(msg)).toBe('first\nsecond');
+  });
+
+  it('extracts from parts array (OpenCode format)', () => {
+    const msg = {
+      parts: [
+        { type: 'text', text: 'from parts' },
+      ],
+    };
+    expect(extractTextFromMessage(msg)).toBe('from parts');
+  });
+
+  it('returns null for message with no recognizable content', () => {
+    expect(extractTextFromMessage({ foo: 'bar' })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractLatestAssistantFromMessages
+// ---------------------------------------------------------------------------
+
+describe('extractLatestAssistantFromMessages', () => {
+  it('returns the last assistant message', () => {
+    const messages = [
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'first response' },
+      { role: 'user', content: 'thanks' },
+      { role: 'assistant', content: 'second response' },
+    ];
+    expect(extractLatestAssistantFromMessages(messages)).toBe('second response');
+  });
+
+  it('returns null for empty messages', () => {
+    expect(extractLatestAssistantFromMessages([])).toBeNull();
+  });
+
+  it('returns null when no assistant messages', () => {
+    const messages = [
+      { role: 'user', content: 'hello' },
+    ];
+    expect(extractLatestAssistantFromMessages(messages)).toBeNull();
+  });
+
+  it('handles OpenCode info/parts format', () => {
+    const messages = [
+      {
+        info: { role: 'assistant' },
+        parts: [{ type: 'text', text: 'opencode response' }],
+      },
+    ];
+    expect(extractLatestAssistantFromMessages(messages)).toBe('opencode response');
+  });
+
+  it('handles type: assistant format', () => {
+    const messages = [
+      { type: 'assistant', content: 'typed response' },
+    ];
+    expect(extractLatestAssistantFromMessages(messages)).toBe('typed response');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractResponseText
+// ---------------------------------------------------------------------------
+
+describe('extractResponseText', () => {
+  it('returns null for null result', () => {
+    expect(extractResponseText(null)).toBeNull();
+  });
+
+  it('returns null for result without data', () => {
+    expect(extractResponseText({})).toBeNull();
+    expect(extractResponseText({ data: null })).toBeNull();
+  });
+
+  it('extracts from data.text', () => {
+    expect(extractResponseText({ data: { text: 'hello' } })).toBe('hello');
+  });
+
+  it('extracts from data.content', () => {
+    expect(extractResponseText({ data: { content: 'hello' } })).toBe('hello');
+  });
+
+  it('extracts structured output', () => {
+    const result = {
+      data: {
+        info: { structured_output: { key: 'value' } },
+      },
+    };
+    expect(extractResponseText(result)).toBe('{"key":"value"}');
+  });
+
+  it('extracts from parts array', () => {
+    const result = {
+      data: {
+        parts: [
+          { type: 'text', text: 'part1' },
+          { type: 'text', text: 'part2' },
+        ],
+      },
+    };
+    expect(extractResponseText(result)).toBe('part1\npart2');
+  });
+
+  it('extracts from messages array (last assistant)', () => {
+    const result = {
+      data: {
+        messages: [
+          { role: 'user', content: 'question' },
+          { role: 'assistant', content: 'answer' },
+        ],
+      },
+    };
+    expect(extractResponseText(result)).toBe('answer');
+  });
+
+  it('extracts from messages with array content', () => {
+    const result = {
+      data: {
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: 'structured answer' },
+            ],
+          },
+        ],
+      },
+    };
+    expect(extractResponseText(result)).toBe('structured answer');
+  });
+
+  it('extracts from info + parts (SDK v1.2.x format)', () => {
+    const result = {
+      data: {
+        info: { role: 'assistant' },
+        parts: [
+          { type: 'text', text: 'sdk response' },
+        ],
+      },
+    };
+    expect(extractResponseText(result)).toBe('sdk response');
+  });
+
+  it('falls back to deep candidate collection for non-text parts', () => {
+    const result = {
+      data: {
+        info: { role: 'assistant' },
+        parts: [
+          { type: 'custom', content: 'deep text' },
+        ],
+      },
+    };
+    expect(extractResponseText(result)).toBe('deep text');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IPC protocol (filesystem-based)
+// ---------------------------------------------------------------------------
 
 describe('OpenCode runtime IPC protocol', () => {
   const TEST_IPC_DIR = '/tmp/test-opencode-ipc';
@@ -51,10 +305,7 @@ describe('OpenCode runtime IPC protocol', () => {
     const msgPath = path.join(TEST_IPC_DIR, '001.json');
     fs.writeFileSync(msgPath, JSON.stringify({ type: 'message', text: 'hello' }));
 
-    // Verify file exists
     expect(fs.existsSync(msgPath)).toBe(true);
-
-    // Read and parse like the runtime does
     const data = JSON.parse(fs.readFileSync(msgPath, 'utf-8'));
     expect(data.type).toBe('message');
     expect(data.text).toBe('hello');
@@ -64,8 +315,6 @@ describe('OpenCode runtime IPC protocol', () => {
     const closePath = path.join(TEST_IPC_DIR, '_close');
     fs.writeFileSync(closePath, '');
     expect(fs.existsSync(closePath)).toBe(true);
-
-    // Clean up like the runtime does
     fs.unlinkSync(closePath);
     expect(fs.existsSync(closePath)).toBe(false);
   });
@@ -92,7 +341,6 @@ describe('OpenCode runtime IPC protocol', () => {
       .sort();
 
     expect(files).toEqual(['001.json', '002.json', '003.json']);
-
     const messages = files.map(f => {
       const data = JSON.parse(fs.readFileSync(path.join(TEST_IPC_DIR, f), 'utf-8'));
       return data.text;
@@ -101,12 +349,15 @@ describe('OpenCode runtime IPC protocol', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Output protocol
+// ---------------------------------------------------------------------------
+
 describe('OpenCode output protocol', () => {
   const OUTPUT_START_MARKER = '---OMNICLAW_OUTPUT_START---';
   const OUTPUT_END_MARKER = '---OMNICLAW_OUTPUT_END---';
 
   it('uses the same markers as Claude SDK runtime', () => {
-    // Verify the markers match what the host expects
     expect(OUTPUT_START_MARKER).toBe('---OMNICLAW_OUTPUT_START---');
     expect(OUTPUT_END_MARKER).toBe('---OMNICLAW_OUTPUT_END---');
   });
@@ -120,7 +371,6 @@ describe('OpenCode output protocol', () => {
 
     const json = JSON.stringify(output);
     const parsed = JSON.parse(json);
-
     expect(parsed.status).toBe('success');
     expect(parsed.result).toBe('Hello from OpenCode');
     expect(parsed.newSessionId).toBe('test-session-123');
@@ -152,6 +402,10 @@ describe('OpenCode output protocol', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// AgentRuntime type
+// ---------------------------------------------------------------------------
+
 describe('AgentRuntime type', () => {
   it('accepts opencode as a valid runtime', () => {
     type AgentRuntime = 'claude-agent-sdk' | 'opencode';
@@ -163,5 +417,16 @@ describe('AgentRuntime type', () => {
     type AgentRuntime = 'claude-agent-sdk' | 'opencode';
     const runtime: AgentRuntime = 'claude-agent-sdk';
     expect(runtime).toBe('claude-agent-sdk');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Module export
+// ---------------------------------------------------------------------------
+
+describe('OpenCode runtime module', () => {
+  it('exports runOpenCodeRuntime', async () => {
+    const mod = await import('../opencode-runtime.js');
+    expect(typeof mod.runOpenCodeRuntime).toBe('function');
   });
 });

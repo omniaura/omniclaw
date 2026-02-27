@@ -263,7 +263,8 @@ interface OpenCodeClient {
  * Extract text from an OpenCode SDK prompt result.
  * The response shape can vary — try common patterns.
  */
-function extractResponseText(result: any): string | null {
+/** @internal exported for testing */
+export function extractResponseText(result: any): string | null {
   if (!result?.data) return null;
   const data = result.data;
 
@@ -321,7 +322,8 @@ function extractResponseText(result: any): string | null {
   return null;
 }
 
-function extractTextFromParts(parts: any[]): string | null {
+/** @internal exported for testing */
+export function extractTextFromParts(parts: any[]): string | null {
   const extracted: string[] = [];
   for (const p of parts) {
     if ((p?.type === 'text' || p?.type === 'reasoning') && typeof p.text === 'string') {
@@ -333,7 +335,8 @@ function extractTextFromParts(parts: any[]): string | null {
   return extracted.length > 0 ? extracted.join('\n') : null;
 }
 
-function collectCandidateStrings(value: any, out: string[] = [], depth: number = 0): string[] {
+/** @internal exported for testing */
+export function collectCandidateStrings(value: any, out: string[] = [], depth: number = 0): string[] {
   if (value == null || depth > 5) return out;
   if (typeof value === 'string') {
     const trimmed = value.trim();
@@ -357,7 +360,8 @@ function collectCandidateStrings(value: any, out: string[] = [], depth: number =
   return out;
 }
 
-function extractTextFromMessage(msg: any): string | null {
+/** @internal exported for testing */
+export function extractTextFromMessage(msg: any): string | null {
   if (!msg) return null;
   if (typeof msg.content === 'string') return msg.content;
   if (Array.isArray(msg.content)) return extractTextFromParts(msg.content);
@@ -365,7 +369,8 @@ function extractTextFromMessage(msg: any): string | null {
   return null;
 }
 
-function extractLatestAssistantFromMessages(messages: any[]): string | null {
+/** @internal exported for testing */
+export function extractLatestAssistantFromMessages(messages: any[]): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     // OpenCode messages endpoint commonly returns [{ info, parts }]

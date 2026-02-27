@@ -919,6 +919,10 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
     .prepare('SELECT COUNT(*) as cnt FROM channel_routes')
     .get() as { cnt: number };
   if (agentCount.cnt > 0 && routeCount.cnt > 0) {
+    logger.info(
+      { agentCount: agentCount.cnt, routeCount: routeCount.cnt },
+      'Agents and routes already exist — marking migration as complete',
+    );
     database
       .prepare('INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)')
       .run(migrationKey, '1');
