@@ -207,12 +207,12 @@ function buildRegisteredGroupFromSubscription(
     agentRuntime:
       agent?.agentRuntime || fallback?.agentRuntime || runtimeDefault,
     description: agent?.description || fallback?.description,
-    channelFolder: sub.channelFolder || undefined,
-    categoryFolder: sub.categoryFolder || undefined,
-    agentContextFolder: agent?.agentContextFolder || undefined,
     autoRespondToQuestions: fallback?.autoRespondToQuestions,
     autoRespondKeywords: fallback?.autoRespondKeywords,
     streamIntermediates: fallback?.streamIntermediates,
+    channelFolder: sub.channelFolder || undefined,
+    categoryFolder: sub.categoryFolder || undefined,
+    agentContextFolder: agent?.agentContextFolder || undefined,
   };
 }
 
@@ -1144,8 +1144,12 @@ async function runAgent(
 
   try {
     const backend = resolveBackend(group);
-    const agentId =
-      (channelSubscriptions[chatJid] || [])[0]?.agentId ?? group.folder;
+    const subAgentId = (channelSubscriptions[chatJid] || [])[0]?.agentId;
+    // Prefer the canonical agent ID from subscriptions. Fall back to looking up
+    // the agent by folder, so this stays correct even if agent.id diverges from folder.
+    const agentId = subAgentId
+      ?? Object.values(agents).find((a) => a.folder === group.folder)?.id
+      ?? group.folder;
     const agentChannels = buildChannelsForAgent(agentId);
     const output = await backend.runAgent(
       group,
@@ -1210,6 +1214,8 @@ function selectSubscriptionsForMessage(
   const subs = getSubscriptionsForChannelInMemory(chatJid);
   if (subs.length === 0) return [];
 
+  // @allagents fan-out: regex check on stored message content — no Discord API call,
+  // no GuildMembers privileged intent needed. Safe because it only reads already-stored text.
   const hasAllAgents = groupMessages.some((m) => /@allagents/i.test(m.content));
   const directBotMentions = subs.filter((sub) => {
     const agent = agents[sub.agentId];
@@ -1250,6 +1256,12 @@ function selectSubscriptionsForMessage(
       const isMain = agent?.isAdmin === true;
       return isMain || s.requiresTrigger === false;
     });
+    if (selected.length === 0) {
+      logger.debug(
+        { chatJid, subCount: subs.length },
+        'All primary agents require trigger — no agents selected for untriggered message',
+      );
+    }
   }
 
   return selected

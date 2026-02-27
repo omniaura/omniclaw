@@ -273,12 +273,9 @@ function buildVolumeMounts(
   // to the same SQLite file and DB corruption.
   const hostOpenCodeDir = path.join(homeDir, '.local', 'share', 'opencode');
   if (fs.existsSync(hostOpenCodeDir)) {
-    const containerOcDir = path.join(
-      DATA_DIR,
-      'opencode-data',
-      runtimeFolderName,
-    );
-    assertPathWithin(containerOcDir, DATA_DIR, 'opencode data dir');
+    const openCodeDataBase = path.join(DATA_DIR, 'opencode-data');
+    const containerOcDir = path.join(openCodeDataBase, runtimeFolderName);
+    assertPathWithin(containerOcDir, openCodeDataBase, 'opencode-data directory');
     fs.mkdirSync(containerOcDir, { recursive: true });
     for (const authFile of ['auth.json', 'mcp-auth.json']) {
       const src = path.join(hostOpenCodeDir, authFile);

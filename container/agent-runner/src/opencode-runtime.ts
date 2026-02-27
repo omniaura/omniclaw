@@ -175,9 +175,15 @@ async function startOpenCodeServer(
   model?: string,
   mcpEnv?: Record<string, string>,
 ): Promise<OpenCodeClient> {
-  // createOpencodeServer reads process.env only. Apply merged env first.
+  // createOpencode reads process.env when spawning the server subprocess.
+  // Temporarily set secrets in process.env for the spawn, then remove them
+  // so they aren't inherited by any subsequent subprocesses (e.g., bash).
+  const injectedKeys: string[] = [];
   for (const [key, value] of Object.entries(env)) {
-    if (value !== undefined) process.env[key] = value;
+    if (value !== undefined && process.env[key] !== value) {
+      process.env[key] = value;
+      injectedKeys.push(key);
+    }
   }
 
   const mcpServerPath = path.join(import.meta.dir, 'ipc-mcp-stdio.ts');
@@ -196,12 +202,21 @@ async function startOpenCodeServer(
   }
 
   const { createOpencode } = await import('@opencode-ai/sdk');
-  const opencode = await createOpencode({
-    hostname: OPENCODE_HOST,
-    port: OPENCODE_PORT,
-    timeout: SERVER_STARTUP_TIMEOUT,
-    config: Object.keys(config).length > 0 ? config : undefined,
-  });
+  let opencode;
+  try {
+    opencode = await createOpencode({
+      hostname: OPENCODE_HOST,
+      port: OPENCODE_PORT,
+      timeout: SERVER_STARTUP_TIMEOUT,
+      config: Object.keys(config).length > 0 ? config : undefined,
+    });
+  } finally {
+    // Remove secrets from process.env immediately after server spawn.
+    // The server subprocess already inherited them at fork time.
+    for (const key of injectedKeys) {
+      delete process.env[key];
+    }
+  }
   openCodeServer = opencode.server;
   log(`OpenCode server is healthy at ${opencode.server.url}`);
   return opencode.client as unknown as OpenCodeClient;
@@ -311,8 +326,9 @@ function extractTextFromParts(parts: any[]): string | null {
   for (const p of parts) {
     if ((p?.type === 'text' || p?.type === 'reasoning') && typeof p.text === 'string') {
       extracted.push(p.text);
-      continue;
     }
+    // Tool outputs (bash stdout, file contents, etc.) are intentionally excluded
+    // from the user-facing response — only text/reasoning parts are surfaced.
   }
   return extracted.length > 0 ? extracted.join('\n') : null;
 }

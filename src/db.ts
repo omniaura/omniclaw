@@ -902,22 +902,22 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
 // --- Agent + ChannelRoute CRUD ---
 
 function migrateRegisteredGroupsToAgents(database: Database): void {
+  // Idempotency: check the dedicated flag (same pattern as migrateRoutesToSubscriptions).
   const migrationKey = 'registered_groups_to_agents_migrated';
   const migrationRow = database
     .prepare('SELECT value FROM router_state WHERE key = ?')
     .get(migrationKey) as { value: string } | undefined;
   if (migrationRow?.value === '1') return;
 
+  // If both new tables already have data but the flag was never set (pre-flag DB),
+  // mark migration complete. This prevents re-importing legacy registered_groups
+  // rows into an already-migrated multi-channel setup.
   const agentCount = database
     .prepare('SELECT COUNT(*) as cnt FROM agents')
     .get() as { cnt: number };
   const routeCount = database
     .prepare('SELECT COUNT(*) as cnt FROM channel_routes')
     .get() as { cnt: number };
-
-  // If both new tables already have data, treat legacy migration as complete.
-  // This prevents legacy registered_groups rows from being re-imported into
-  // already-migrated multi-channel setups.
   if (agentCount.cnt > 0 && routeCount.cnt > 0) {
     database
       .prepare('INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)')

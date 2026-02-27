@@ -78,6 +78,9 @@ export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 export const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
 export const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN || '';
 export const POLL_INTERVAL = 2000;
+
+/** Separator used in runtime group folders to isolate multi-agent dispatch state. */
+export const DISPATCH_RUNTIME_SEP = '__dispatch__';
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
@@ -146,8 +149,6 @@ export const MAX_TASK_CONTAINERS = Math.max(
 export function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
-
-export const DISPATCH_RUNTIME_SEP = '__dispatch__';
 
 export const TRIGGER_PATTERN = new RegExp(
   `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
