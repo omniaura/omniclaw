@@ -991,8 +991,23 @@ export class LocalBackend implements AgentBackend {
           )
           .map((c) => c.configuration.id);
       }
+      // Validate container names before passing to Bun.spawn.
+      // Names come from runtime output — reject any that don't match the
+      // expected omniclaw-<safeName>-<hex/timestamp> format to prevent
+      // CLI flag injection (e.g. a name like "--all").
+      const SAFE_CONTAINER_NAME = /^omniclaw-[a-zA-Z0-9_-]+-[a-f0-9-]+$/;
+      const safeOrphans = orphans.filter((name) => {
+        if (!SAFE_CONTAINER_NAME.test(name)) {
+          logger.warn(
+            { name },
+            'Skipping orphan with unexpected container name',
+          );
+          return false;
+        }
+        return true;
+      });
       await Promise.all(
-        orphans.map((name) => {
+        safeOrphans.map((name) => {
           const proc = Bun.spawn([LOCAL_RUNTIME, 'stop', name], {
             stdout: 'ignore',
             stderr: 'ignore',
@@ -1000,9 +1015,9 @@ export class LocalBackend implements AgentBackend {
           return proc.exited;
         }),
       );
-      if (orphans.length > 0) {
+      if (safeOrphans.length > 0) {
         logger.info(
-          { count: orphans.length, names: orphans },
+          { count: safeOrphans.length, names: safeOrphans },
           'Stopped orphaned containers',
         );
       }

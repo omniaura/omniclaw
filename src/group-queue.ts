@@ -168,13 +168,12 @@ export class GroupQueue {
     if (processingCount >= MAX_ACTIVE_CONTAINERS) {
       // Proactively preempt the oldest idle container to free a slot sooner.
       if (this.idleGroups.length > 0) {
-        const oldest = this.idleGroups.shift()!;
-        this.idleCount--;
+        const oldest = this.idleGroups[0];
         logger.info(
           { groupJid, folderKey, preempting: oldest },
           'Preempting oldest idle container to free processing slot',
         );
-        this.closeStdin(oldest, 'message');
+        this._closeIdleContainer(oldest);
       }
       if (!state.pendingMessageJids.includes(groupJid)) {
         state.pendingMessageJids.push(groupJid);
