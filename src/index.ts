@@ -1164,11 +1164,12 @@ async function runAgent(
 
   try {
     const backend = resolveBackend(group);
-    const subAgentId = (channelSubscriptions[chatJid] || [])[0]?.agentId;
-    // Prefer the canonical agent ID from subscriptions. Fall back to looking up
-    // the agent by folder, so this stays correct even if agent.id diverges from folder.
+    // Use the dispatch key's agent ID (from processKeyJid) so that in multi-agent
+    // channels each agent gets its own channel map, not the first subscription's.
+    const { agentId: dispatchAgentId } = parseDispatchKey(processKeyJid);
     const agentId =
-      subAgentId ??
+      dispatchAgentId ??
+      (channelSubscriptions[chatJid] || [])[0]?.agentId ??
       Object.values(agents).find((a) => a.folder === group.folder)?.id ??
       group.folder;
     const agentChannels = buildChannelsForAgent(agentId);

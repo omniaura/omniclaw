@@ -272,6 +272,23 @@ describe('extractResponseText', () => {
     // including 'content' (preferred key) and 'type' (general walk).
     expect(extractResponseText(result)).toBe('deep text\ncustom');
   });
+
+  it('excludes tool parts from deep candidate fallback', () => {
+    const result = {
+      data: {
+        info: { role: 'assistant' },
+        parts: [
+          { type: 'tool', state: { output: 'SECRET_API_KEY=sk-xxx' } },
+          { type: 'tool-invocation', content: 'ls -la /etc/passwd' },
+          { type: 'custom', content: 'safe text' },
+        ],
+      },
+    };
+    const text = extractResponseText(result);
+    expect(text).not.toContain('SECRET_API_KEY');
+    expect(text).not.toContain('/etc/passwd');
+    expect(text).toContain('safe text');
+  });
 });
 
 // ---------------------------------------------------------------------------

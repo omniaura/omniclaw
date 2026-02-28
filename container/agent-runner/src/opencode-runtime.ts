@@ -286,7 +286,12 @@ export function extractResponseText(result: any): string | null {
   if (data.info && Array.isArray(data.parts)) {
     const text = extractTextFromParts(data.parts);
     if (text) return text;
-    const deepCandidates = collectCandidateStrings(data.parts).slice(0, 6);
+    // Filter out tool parts before deep traversal to avoid surfacing
+    // sensitive tool output (command results, file contents) in user-facing text.
+    const nonToolParts = data.parts.filter(
+      (p: any) => p?.type !== 'tool' && p?.type !== 'tool-invocation',
+    );
+    const deepCandidates = collectCandidateStrings(nonToolParts).slice(0, 6);
     if (deepCandidates.length > 0) return deepCandidates.join('\n');
     const partTypes = data.parts
       .map((p: any) => p?.type || 'unknown')
