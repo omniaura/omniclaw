@@ -191,6 +191,23 @@ async function startOpenCodeServer(
 ): Promise<OpenCodeClient> {
   const mcpServerPath = path.join(import.meta.dir, 'ipc-mcp-stdio.ts');
   const config: Record<string, unknown> = {};
+  // Allow all tool operations without prompting (equivalent to Claude Code's
+  // --dangerously-skip-permissions). Without this the opencode server can
+  // stall waiting for interactive approval that never comes in a headless
+  // container environment.
+  //
+  // external_directory grants access to paths outside the project root
+  // (/workspace/group). The agent needs IPC, context layers, temp files,
+  // and the MCP server source — all of which live outside the cwd.
+  config.permission = {
+    '*': 'allow',
+    external_directory: {
+      '/workspace/**': 'allow',
+      '/tmp/**': 'allow',
+      '/app/**': 'allow',
+      '/home/bun/**': 'allow',
+    },
+  };
   if (model) config.model = model;
   if (mcpEnv) {
     config.mcp = {
