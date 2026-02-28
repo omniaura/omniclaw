@@ -133,6 +133,8 @@ let agents: Record<string, Agent> = {};
 let channelRoutes: Record<string, ChannelRoute> = {};
 let channelSubscriptions: Record<string, ChannelSubscription[]> = {};
 let channelSubscriptionsDirty = true;
+/** Runtime folders currently in use by the orchestrator (for IPC auth). */
+const activeRuntimeFolders = new Set<string>();
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
@@ -1110,6 +1112,7 @@ async function runAgent(
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
   const runtimeGroupFolder = getRuntimeGroupFolder(group.folder, processKeyJid);
+  activeRuntimeFolders.add(runtimeGroupFolder);
 
   // Expire stale sessions before each run to prevent unbounded context growth
   const expired = expireStaleSessions(SESSION_MAX_AGE);
@@ -1226,6 +1229,8 @@ async function runAgent(
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
+  } finally {
+    activeRuntimeFolders.delete(runtimeGroupFolder);
   }
 }
 
@@ -2029,6 +2034,7 @@ async function main(): Promise<void> {
       );
     },
     onSubscriptionChanged: invalidateChannelSubscriptions,
+    activeRuntimeFolders: () => activeRuntimeFolders,
   });
 }
 

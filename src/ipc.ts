@@ -63,6 +63,8 @@ export interface IpcDeps {
   writeTasksSnapshot?: (groupFolder: string, isMain: boolean) => void;
   /** Called when channel subscriptions are mutated via IPC */
   onSubscriptionChanged?: () => void;
+  /** Runtime folders currently launched by the orchestrator (for auth). */
+  activeRuntimeFolders?: () => ReadonlySet<string>;
 }
 
 /**
@@ -71,28 +73,38 @@ export interface IpcDeps {
  * Runtime folders have the format `{owner}{DISPATCH_RUNTIME_SEP}{16-char hex digest}`.
  * We validate both parts: the owner must be a known folder AND the suffix must
  * be exactly the 16-char hex digest format produced by getRuntimeGroupFolder().
- * This prevents a rogue folder like `main__rt__abc` from resolving to `main`
- * and gaining main-group privileges.
+ *
+ * When an activeRuntimeFolders allowlist is provided (from the orchestrator),
+ * runtime folders are checked against it — only folders actually launched by the
+ * orchestrator are accepted. This prevents forged directories from gaining
+ * elevated privileges.
+ *
+ * Returns null if the folder is unrecognized (not a known folder, not an active
+ * runtime folder, and doesn't match the expected format).
  */
 const RUNTIME_DIGEST_RE = /^[0-9a-f]{16}$/;
 
 function resolveOwnerGroupFolder(
   sourceGroup: string,
   registeredGroups: Record<string, RegisteredGroup>,
-): string {
+  activeRuntimeFolders?: ReadonlySet<string>,
+): string | null {
   const knownFolders = new Set(
     Object.values(registeredGroups).map((g) => g.folder),
   );
   if (knownFolders.has(sourceGroup)) return sourceGroup;
   const idx = sourceGroup.indexOf(DISPATCH_RUNTIME_SEP);
-  if (idx === -1) return sourceGroup;
+  if (idx === -1) return null; // Unknown folder, not a runtime folder
   const owner = sourceGroup.slice(0, idx);
   const digest = sourceGroup.slice(idx + DISPATCH_RUNTIME_SEP.length);
-  // Validate: owner must be known AND suffix must be a valid runtime digest
-  if (knownFolders.has(owner) && RUNTIME_DIGEST_RE.test(digest)) {
-    return owner;
+  if (!knownFolders.has(owner) || !RUNTIME_DIGEST_RE.test(digest)) {
+    return null; // Owner unknown or digest malformed
   }
-  return sourceGroup;
+  // If allowlist available, verify this runtime folder was actually launched
+  if (activeRuntimeFolders && !activeRuntimeFolders.has(sourceGroup)) {
+    return null;
+  }
+  return owner;
 }
 
 // --- Pending share request tracking ---
@@ -336,8 +348,18 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
     const registeredGroups = deps.registeredGroups();
 
+    const runtimeFolders = deps.activeRuntimeFolders?.();
     for (const sourceGroup of groupFolders) {
-      const ownerGroup = resolveOwnerGroupFolder(sourceGroup, registeredGroups);
+      const ownerGroup = resolveOwnerGroupFolder(
+        sourceGroup,
+        registeredGroups,
+        runtimeFolders,
+      );
+      if (ownerGroup === null) {
+        // Unknown sender — not a registered group or active runtime folder.
+        // Skip to avoid processing IPC from rogue directories.
+        continue;
+      }
       const isMain = ownerGroup === MAIN_GROUP_FOLDER;
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
