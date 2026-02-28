@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   DATA_DIR,
+  DISPATCH_RUNTIME_SEP,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
   TIMEZONE,
@@ -12,6 +13,9 @@ import { AvailableGroup } from './ipc-snapshots.js';
 import {
   createTask,
   deleteTask,
+  getSubscriptionsForChannel,
+  removeChannelSubscription,
+  setChannelSubscription,
   getTaskById,
   setRegisteredGroup,
   updateTask,
@@ -31,10 +35,8 @@ import {
 } from './ipc-file-security.js';
 import { logger } from './logger.js';
 import { stripInternalTags } from './router.js';
-import { reconcileHeartbeats } from './task-scheduler.js';
 import {
   Channel,
-  HeartbeatConfig,
   IpcMessagePayload,
   IpcTaskPayload,
   RegisteredGroup,
@@ -42,8 +44,9 @@ import {
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<string | void>;
-  /** Store a message in a group's DB and enqueue it for agent processing */
-  notifyGroup: (jid: string, text: string) => void;
+  /** Store a message in a group's DB and enqueue it for agent processing.
+   * Pass sourceFolder to tag the message so the source agent doesn't echo it. */
+  notifyGroup: (jid: string, text: string, sourceFolder?: string) => void;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   updateGroup: (jid: string, group: RegisteredGroup) => void;
@@ -58,6 +61,54 @@ export interface IpcDeps {
   findChannel?: (jid: string) => Channel | undefined;
   /** Refresh the current_tasks.json snapshot so the agent sees updates immediately */
   writeTasksSnapshot?: (groupFolder: string, isMain: boolean) => void;
+  /** Called when channel subscriptions are mutated via IPC */
+  onSubscriptionChanged?: () => void;
+  /** Runtime folders currently launched by the orchestrator (for auth). */
+  activeRuntimeFolders?: () => ReadonlySet<string>;
+  /** All known agent folders (including secondary agents not in registeredGroups). */
+  agentFolders?: () => ReadonlySet<string>;
+}
+
+/**
+ * Resolve a runtime group folder back to its canonical owner folder.
+ *
+ * Runtime folders have the format `{owner}{DISPATCH_RUNTIME_SEP}{16-char hex digest}`.
+ * We validate both parts: the owner must be a known folder AND the suffix must
+ * be exactly the 16-char hex digest format produced by getRuntimeGroupFolder().
+ *
+ * When an activeRuntimeFolders allowlist is provided (from the orchestrator),
+ * runtime folders are checked against it — only folders actually launched by the
+ * orchestrator are accepted. This prevents forged directories from gaining
+ * elevated privileges.
+ *
+ * Returns null if the folder is unrecognized (not a known folder, not an active
+ * runtime folder, and doesn't match the expected format).
+ */
+const RUNTIME_DIGEST_RE = /^[0-9a-f]{16}$/;
+
+function resolveOwnerGroupFolder(
+  sourceGroup: string,
+  registeredGroups: Record<string, RegisteredGroup>,
+  activeRuntimeFolders?: ReadonlySet<string>,
+  agentFolders?: ReadonlySet<string>,
+): string | null {
+  const knownFolders = new Set([
+    ...Object.values(registeredGroups).map((g) => g.folder),
+    ...(agentFolders ?? []),
+  ]);
+  if (knownFolders.has(sourceGroup)) return sourceGroup;
+  const idx = sourceGroup.indexOf(DISPATCH_RUNTIME_SEP);
+  if (idx === -1) return null; // Unknown folder, not a runtime folder
+  const owner = sourceGroup.slice(0, idx);
+  const digest = sourceGroup.slice(idx + DISPATCH_RUNTIME_SEP.length);
+  if (!knownFolders.has(owner) || !RUNTIME_DIGEST_RE.test(digest)) {
+    return null; // Owner unknown or digest malformed
+  }
+  // If allowlist available, verify this runtime folder was actually launched
+  if (activeRuntimeFolders && !activeRuntimeFolders.has(sourceGroup)) {
+    return null;
+  }
+  return owner;
 }
 
 // --- Pending share request tracking ---
@@ -253,9 +304,11 @@ export async function processMessageIpc(
     const isRegisteredTarget = !!targetGroup;
     if (isMain || isSelf || isRegisteredTarget) {
       await deps.sendMessage(msgChatJid, msgText);
-      // Cross-group message: also wake up the target agent
+      // Cross-group message: also wake up the target agent.
+      // Pass sourceGroup so the notify message is tagged — the source
+      // agent won't see its own IPC message echoed back at it.
       if (targetGroup && targetGroup.folder !== sourceGroup) {
-        deps.notifyGroup(msgChatJid, msgText);
+        deps.notifyGroup(msgChatJid, msgText, sourceGroup);
       }
       logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
       return { action: 'handled' };
@@ -299,8 +352,38 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
     const registeredGroups = deps.registeredGroups();
 
+    const runtimeFolders = deps.activeRuntimeFolders?.();
+    const agentFolders = deps.agentFolders?.();
     for (const sourceGroup of groupFolders) {
-      const isMain = sourceGroup === MAIN_GROUP_FOLDER;
+      const ownerGroup = resolveOwnerGroupFolder(
+        sourceGroup,
+        registeredGroups,
+        runtimeFolders,
+        agentFolders,
+      );
+      if (ownerGroup === null) {
+        // Unknown sender — not a registered group or active runtime folder.
+        // Log and quarantine to prevent unbounded disk growth from rogue dirs.
+        const rogueDir = path.join(ipcBaseDir, sourceGroup);
+        logger.warn(
+          { sourceGroup },
+          'Skipping IPC from unrecognized source folder — quarantining',
+        );
+        try {
+          const errDir = path.join(ipcBaseDir, 'errors');
+          fs.mkdirSync(errDir, { recursive: true });
+          fs.renameSync(rogueDir, path.join(errDir, sourceGroup));
+        } catch {
+          // If rename fails (e.g. cross-device), just delete
+          try {
+            fs.rmSync(rogueDir, { recursive: true, force: true });
+          } catch {
+            /* ignore */
+          }
+        }
+        continue;
+      }
+      const isMain = ownerGroup === MAIN_GROUP_FOLDER;
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
 
@@ -328,7 +411,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const data = result.data as IpcMessagePayload;
               await processMessageIpc(
                 data,
-                sourceGroup,
+                ownerGroup,
                 isMain,
                 ipcBaseDir,
                 registeredGroups,
@@ -374,7 +457,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = taskResult.data as IpcTaskPayload;
               // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data, sourceGroup, isMain, deps);
+              await processTaskIpc(data, ownerGroup, isMain, deps);
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
@@ -583,8 +666,10 @@ export async function processTaskIpc(
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
           backend: data.backend,
+          agentRuntime: data.agent_runtime,
           description: data.group_description,
           requiresTrigger: data.requiresTrigger,
+          discordBotId: data.discord_bot_id,
         };
 
         // If a Discord guild ID is provided, validate it and compute serverFolder
@@ -609,62 +694,70 @@ export async function processTaskIpc(
       }
       break;
 
-    case 'configure_heartbeat': {
-      if (data.enabled === undefined) {
-        logger.warn({ data }, 'configure_heartbeat missing enabled field');
-        break;
-      }
-
-      // Resolve target group
-      const targetJid =
-        isMain && data.target_group_jid
-          ? data.target_group_jid
-          : findJidByFolder(registeredGroups, sourceGroup);
-
-      if (!targetJid) {
+    case 'subscribe_channel': {
+      if (!isMain) {
         logger.warn(
           { sourceGroup },
-          'configure_heartbeat: could not resolve target group',
+          'Unauthorized subscribe_channel attempt blocked',
         );
         break;
       }
-
-      const targetGroup = registeredGroups[targetJid];
-      if (!targetGroup) {
-        logger.warn(
-          { targetJid },
-          'configure_heartbeat: target group not registered',
-        );
+      if (!data.channel_jid || !data.target_agent) {
+        logger.warn({ data }, 'subscribe_channel missing required fields');
         break;
       }
-
-      // Authorization: non-main groups can only configure their own heartbeat
-      if (!isMain && targetGroup.folder !== sourceGroup) {
-        logger.warn(
-          { sourceGroup, targetFolder: targetGroup.folder },
-          'Unauthorized configure_heartbeat attempt',
-        );
-        break;
-      }
-
-      const heartbeat: HeartbeatConfig | undefined = data.enabled
-        ? {
-            enabled: true,
-            interval: data.interval || '1800000',
-            scheduleType: (data.heartbeat_schedule_type === 'cron'
-              ? 'cron'
-              : 'interval') as 'cron' | 'interval',
-          }
-        : undefined;
-
-      const updatedGroup: RegisteredGroup = { ...targetGroup, heartbeat };
-      deps.updateGroup(targetJid, updatedGroup);
-      reconcileHeartbeats(deps.registeredGroups());
-
-      logger.info(
-        { targetJid, folder: targetGroup.folder, enabled: data.enabled },
-        'Heartbeat configured via IPC',
+      const targetEntry = findGroupByFolder(
+        registeredGroups,
+        data.target_agent,
       );
+      if (!targetEntry) {
+        logger.warn(
+          { targetAgent: data.target_agent },
+          'subscribe_channel target agent not found',
+        );
+        break;
+      }
+      const targetGroup = targetEntry[1];
+      const subs = getSubscriptionsForChannel(data.channel_jid);
+      const existing = subs.find((s) => s.agentId === targetGroup.folder);
+      const now = new Date().toISOString();
+      setChannelSubscription({
+        channelJid: data.channel_jid,
+        agentId: targetGroup.folder,
+        trigger: data.trigger || targetGroup.trigger || `@${targetGroup.name}`,
+        requiresTrigger: data.requiresTrigger !== false,
+        priority: 100,
+        isPrimary: existing?.isPrimary ?? false,
+        discordBotId: data.discord_bot_id || targetGroup.discordBotId,
+        discordGuildId: data.discord_guild_id || targetGroup.discordGuildId,
+        createdAt: existing?.createdAt || now,
+      });
+      logger.info(
+        { channelJid: data.channel_jid, agentId: targetGroup.folder },
+        'Channel subscription upserted via IPC',
+      );
+      deps.onSubscriptionChanged?.();
+      break;
+    }
+
+    case 'unsubscribe_channel': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized unsubscribe_channel attempt blocked',
+        );
+        break;
+      }
+      if (!data.channel_jid || !data.target_agent) {
+        logger.warn({ data }, 'unsubscribe_channel missing required fields');
+        break;
+      }
+      removeChannelSubscription(data.channel_jid, data.target_agent);
+      logger.info(
+        { channelJid: data.channel_jid, agentId: data.target_agent },
+        'Channel subscription removed via IPC',
+      );
+      deps.onSubscriptionChanged?.();
       break;
     }
 

@@ -15,12 +15,20 @@ import {
   getAgent,
   getAllAgents,
   setChannelRoute,
+  setChannelSubscription,
+  getSubscriptionsForChannel,
+  removeChannelSubscription,
   getChannelRoute,
   getAllChannelRoutes,
   getRoutesForAgent,
 } from './db.js';
 import { processTaskIpc, IpcDeps } from './ipc.js';
-import { RegisteredGroup, Agent, ChannelRoute } from './types.js';
+import {
+  RegisteredGroup,
+  Agent,
+  ChannelRoute,
+  ChannelSubscription,
+} from './types.js';
 
 // --- Shared test fixtures ---
 
@@ -96,149 +104,6 @@ beforeEach(() => {
       taskSnapshots.push({ groupFolder, isMain });
     },
   };
-});
-
-// =============================================================================
-// processTaskIpc: configure_heartbeat
-// =============================================================================
-
-describe('processTaskIpc: configure_heartbeat', () => {
-  it('main group enables heartbeat for another group', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: true,
-        interval: '3600000',
-        target_group_jid: 'other@g.us',
-      },
-      'main',
-      true,
-      deps,
-    );
-
-    expect(groups['other@g.us'].heartbeat).toBeDefined();
-    expect(groups['other@g.us'].heartbeat!.enabled).toBe(true);
-    expect(groups['other@g.us'].heartbeat!.interval).toBe('3600000');
-  });
-
-  it('main group disables heartbeat for another group', async () => {
-    // First enable it
-    groups['other@g.us'] = {
-      ...OTHER_GROUP,
-      heartbeat: {
-        enabled: true,
-        interval: '1800000',
-        scheduleType: 'interval',
-      },
-    };
-
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: false,
-        target_group_jid: 'other@g.us',
-      },
-      'main',
-      true,
-      deps,
-    );
-
-    expect(groups['other@g.us'].heartbeat).toBeUndefined();
-  });
-
-  it('non-main group can configure its own heartbeat', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: true,
-        interval: '600000',
-      },
-      'other-group',
-      false,
-      deps,
-    );
-
-    expect(groups['other@g.us'].heartbeat).toBeDefined();
-    expect(groups['other@g.us'].heartbeat!.enabled).toBe(true);
-    expect(groups['other@g.us'].heartbeat!.interval).toBe('600000');
-  });
-
-  it('non-main group cannot configure another groups heartbeat', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: true,
-        interval: '600000',
-        target_group_jid: 'third@g.us',
-      },
-      'other-group',
-      false,
-      deps,
-    );
-
-    // Third group should remain unchanged
-    expect(groups['third@g.us'].heartbeat).toBeUndefined();
-  });
-
-  it('rejects configure_heartbeat with missing enabled field', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        interval: '600000',
-      } as any,
-      'main',
-      true,
-      deps,
-    );
-
-    // No changes
-    expect(groups['main@g.us'].heartbeat).toBeUndefined();
-  });
-
-  it('defaults heartbeat scheduleType to interval when not cron', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: true,
-        interval: '900000',
-      },
-      'other-group',
-      false,
-      deps,
-    );
-
-    expect(groups['other@g.us'].heartbeat!.scheduleType).toBe('interval');
-  });
-
-  it('accepts cron heartbeat schedule type', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: true,
-        interval: '0 */6 * * *',
-        heartbeat_schedule_type: 'cron',
-      },
-      'other-group',
-      false,
-      deps,
-    );
-
-    expect(groups['other@g.us'].heartbeat!.scheduleType).toBe('cron');
-  });
-
-  it('defaults interval to 1800000 when not provided', async () => {
-    await processTaskIpc(
-      {
-        type: 'configure_heartbeat',
-        enabled: true,
-      },
-      'other-group',
-      false,
-      deps,
-    );
-
-    expect(groups['other@g.us'].heartbeat!.interval).toBe('1800000');
-  });
 });
 
 // =============================================================================
@@ -598,6 +463,42 @@ describe('processTaskIpc: register_group with discord', () => {
     expect(groups['new@g.us'].backend).toBe('docker');
   });
 
+  it('sets discordBotId when discord_bot_id provided', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'dc:channel999',
+        name: 'Discord OpenCode',
+        folder: 'dc-opencode',
+        trigger: '@Bot',
+        discord_bot_id: 'OPENCODE',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    expect(groups['dc:channel999'].discordBotId).toBe('OPENCODE');
+  });
+
+  it('sets agentRuntime when agent_runtime provided', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'dc:channel555',
+        name: 'Discord Runtime',
+        folder: 'dc-runtime',
+        trigger: '@Bot',
+        agent_runtime: 'opencode',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    expect(groups['dc:channel555'].agentRuntime).toBe('opencode');
+  });
+
   it('sets description when provided', async () => {
     await processTaskIpc(
       {
@@ -614,6 +515,69 @@ describe('processTaskIpc: register_group with discord', () => {
     );
 
     expect(groups['new@g.us'].description).toBe('A group for testing');
+  });
+});
+
+describe('processTaskIpc: channel subscriptions', () => {
+  it('subscribe_channel adds a second agent to same channel', async () => {
+    setChannelSubscription({
+      channelJid: 'dc:777',
+      agentId: 'other-group',
+      trigger: '@Other',
+      requiresTrigger: true,
+      priority: 100,
+      isPrimary: true,
+      createdAt: '2024-01-01T00:00:00.000Z',
+    });
+    await processTaskIpc(
+      {
+        type: 'subscribe_channel',
+        channel_jid: 'dc:777',
+        target_agent: 'third-group',
+      },
+      'main',
+      true,
+      deps,
+    );
+    const subs = getSubscriptionsForChannel('dc:777');
+    expect(subs.map((s) => s.agentId).sort()).toEqual([
+      'other-group',
+      'third-group',
+    ]);
+  });
+
+  it('unsubscribe_channel removes targeted subscription', async () => {
+    setChannelSubscription({
+      channelJid: 'dc:888',
+      agentId: 'other-group',
+      trigger: '@Other',
+      requiresTrigger: true,
+      priority: 100,
+      isPrimary: true,
+      createdAt: '2024-01-01T00:00:00.000Z',
+    });
+    setChannelSubscription({
+      channelJid: 'dc:888',
+      agentId: 'third-group',
+      trigger: '@Third',
+      requiresTrigger: true,
+      priority: 100,
+      isPrimary: false,
+      createdAt: '2024-01-01T00:00:00.000Z',
+    });
+    await processTaskIpc(
+      {
+        type: 'unsubscribe_channel',
+        channel_jid: 'dc:888',
+        target_agent: 'third-group',
+      },
+      'main',
+      true,
+      deps,
+    );
+    const subs = getSubscriptionsForChannel('dc:888');
+    expect(subs).toHaveLength(1);
+    expect(subs[0].agentId).toBe('other-group');
   });
 });
 
@@ -747,8 +711,8 @@ describe('Agent CRUD', () => {
     description: 'A test agent',
     folder: 'test-folder',
     backend: 'apple-container',
+    agentRuntime: 'claude-agent-sdk',
     isAdmin: false,
-    isLocal: true,
     createdAt: '2024-01-01T00:00:00.000Z',
   };
 
@@ -761,7 +725,6 @@ describe('Agent CRUD', () => {
     expect(agent!.folder).toBe('test-folder');
     expect(agent!.backend).toBe('apple-container');
     expect(agent!.isAdmin).toBe(false);
-    expect(agent!.isLocal).toBe(true);
   });
 
   it('returns undefined for nonexistent agent', () => {
@@ -789,21 +752,6 @@ describe('Agent CRUD', () => {
     expect(agent!.name).toBe('Updated Agent');
   });
 
-  it('stores and retrieves agent with heartbeat config', () => {
-    setAgent({
-      ...testAgent,
-      heartbeat: {
-        enabled: true,
-        interval: '3600000',
-        scheduleType: 'interval',
-      },
-    });
-    const agent = getAgent('agent-1');
-    expect(agent!.heartbeat).toBeDefined();
-    expect(agent!.heartbeat!.enabled).toBe(true);
-    expect(agent!.heartbeat!.interval).toBe('3600000');
-  });
-
   it('stores and retrieves agent with containerConfig', () => {
     setAgent({
       ...testAgent,
@@ -820,13 +768,12 @@ describe('Agent CRUD', () => {
       name: 'Minimal',
       folder: 'minimal-folder',
       backend: 'apple-container',
+      agentRuntime: 'claude-agent-sdk',
       isAdmin: false,
-      isLocal: true,
       createdAt: '2024-06-01T00:00:00.000Z',
     });
     const agent = getAgent('minimal-agent');
     expect(agent!.description).toBeUndefined();
-    expect(agent!.heartbeat).toBeUndefined();
     expect(agent!.containerConfig).toBeUndefined();
     expect(agent!.serverFolder).toBeUndefined();
   });
@@ -902,10 +849,55 @@ describe('ChannelRoute CRUD', () => {
     expect(route!.discordGuildId).toBe('guild-123');
   });
 
+  it('stores and retrieves route with discordBotId', () => {
+    setChannelRoute({ ...testRoute, discordBotId: 'OPENCODE' });
+    const route = getChannelRoute('channel@g.us');
+    expect(route!.discordBotId).toBe('OPENCODE');
+  });
+
   it('handles route without discordGuildId', () => {
     setChannelRoute(testRoute);
     const route = getChannelRoute('channel@g.us');
     expect(route!.discordGuildId).toBeUndefined();
+  });
+});
+
+describe('ChannelSubscription CRUD', () => {
+  const testSub: ChannelSubscription = {
+    channelJid: 'dc:123',
+    agentId: 'agent-1',
+    trigger: '@Bot',
+    requiresTrigger: true,
+    priority: 100,
+    isPrimary: true,
+    createdAt: '2024-01-01T00:00:00.000Z',
+  };
+
+  it('creates and retrieves subscriptions for channel', () => {
+    setChannelSubscription(testSub);
+    setChannelSubscription({
+      ...testSub,
+      agentId: 'agent-2',
+      isPrimary: false,
+      priority: 200,
+    });
+    const subs = getSubscriptionsForChannel('dc:123');
+    expect(subs).toHaveLength(2);
+    expect(subs[0].agentId).toBe('agent-1');
+    expect(subs[1].agentId).toBe('agent-2');
+  });
+
+  it('removes one subscription without affecting others', () => {
+    setChannelSubscription(testSub);
+    setChannelSubscription({
+      ...testSub,
+      agentId: 'agent-2',
+      isPrimary: false,
+    });
+    removeChannelSubscription('dc:123', 'agent-2');
+    const subs = getSubscriptionsForChannel('dc:123');
+    expect(subs).toHaveLength(1);
+    expect(subs[0].agentId).toBe('agent-1');
   });
 });
 

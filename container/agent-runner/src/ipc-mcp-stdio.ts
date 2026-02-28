@@ -97,9 +97,6 @@ function loadUserRegistry(): UserRegistry {
   return {};
 }
 
-// Load registry on startup
-const userRegistry = loadUserRegistry();
-
 function writeIpcFile(dir: string, data: object): string {
   const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
 
@@ -158,7 +155,11 @@ const channelListDesc = isMultiChannel
 
 server.tool(
   'send_message',
-  `Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group. You can also send to other agents by specifying target_jid (check agent_registry.json for available agents and their JIDs).${channelListDesc}`,
+  `Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. To message another agent, use the "sendTo" field from /workspace/ipc/agent_registry.json — it tells you exactly what target_jid to use and whether to prefix the message with their trigger word. Never use an agent's id or folder name as target_jid.
+
+IMPORTANT: Your final text response is ALSO sent to the user automatically. If send_message already contains your complete response, stay silent afterwards — wrap any remaining acknowledgment (e.g. "Done!", "Sent!") in <internal> tags so it isn't delivered as a duplicate message.
+
+Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.${channelListDesc}`,
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
@@ -187,7 +188,7 @@ server.tool(
 
     const channelName = channelByJid.get(targetJid)?.name;
     const targetDesc = channelName || (targetJid !== getCurrentChatJid() ? targetJid : '');
-    return { content: [{ type: 'text' as const, text: `Message sent${targetDesc ? ` to ${targetDesc}` : ''}.` }] };
+    return { content: [{ type: 'text' as const, text: `Message sent${targetDesc ? ` to ${targetDesc}` : ''}. If this was your final response, stay silent — wrap any remaining text in <internal> tags to avoid a duplicate.` }] };
   },
 );
 
@@ -384,66 +385,6 @@ server.tool(
     writeIpcFile(TASKS_DIR, data);
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.${ownerWarning}` }] };
-  },
-);
-
-server.tool(
-  'configure_heartbeat',
-  `Enable or disable the heartbeat for a group. The heartbeat is a recurring background task that runs on a schedule.
-
-What the heartbeat does is controlled by the ## Heartbeat section in CLAUDE.md — edit that to customize behavior. The heartbeat also reads ## Goals from CLAUDE.md, so maintain your goals there.
-
-After enabling, edit your CLAUDE.md to add/update the ## Heartbeat and ## Goals sections to control what the heartbeat does.`,
-  {
-    enabled: z.boolean().describe('Whether to enable or disable the heartbeat'),
-    interval: z.string().default('1800000').describe('Schedule: milliseconds for interval type, or cron expression for cron type (default: "1800000" = 30 min)'),
-    schedule_type: z.enum(['cron', 'interval']).default('interval').describe('Type of schedule (default: "interval")'),
-    target_group_jid: z.string().optional().describe('(Main group only) JID of the group to configure. Defaults to current group.'),
-  },
-  async (args) => {
-    // Non-main groups can only configure themselves
-    const targetJid = isMain && args.target_group_jid ? args.target_group_jid : getCurrentChatJid();
-
-    if (args.enabled && args.schedule_type === 'cron') {
-      try {
-        CronExpressionParser.parse(args.interval);
-      } catch {
-        return {
-          content: [{ type: 'text' as const, text: `Invalid cron expression: "${args.interval}". Use format like "0 */30 * * *" (every 30 min) or "0 9 * * *" (daily 9am).` }],
-          isError: true,
-        };
-      }
-    } else if (args.enabled && args.schedule_type === 'interval') {
-      const ms = parseInt(args.interval, 10);
-      if (isNaN(ms) || ms <= 0) {
-        return {
-          content: [{ type: 'text' as const, text: `Invalid interval: "${args.interval}". Must be positive milliseconds (e.g., "1800000" for 30 min).` }],
-          isError: true,
-        };
-      }
-    }
-
-    const data = {
-      type: 'configure_heartbeat',
-      enabled: args.enabled,
-      interval: args.interval,
-      heartbeat_schedule_type: args.schedule_type,
-      target_group_jid: targetJid,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    if (args.enabled) {
-      return {
-        content: [{ type: 'text' as const, text: `Heartbeat enabled (${args.schedule_type}: ${args.interval}). Edit ## Heartbeat and ## Goals in your CLAUDE.md to customize what the heartbeat does.` }],
-      };
-    } else {
-      return {
-        content: [{ type: 'text' as const, text: 'Heartbeat disabled. The recurring heartbeat task has been removed.' }],
-      };
-    }
   },
 );
 
@@ -800,6 +741,8 @@ if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
       user_name: z.string().describe('Display name of the user to mention (e.g. "OmarOmni", "PeytonOmni")'),
     },
     async (args) => {
+      // Reload on each request so long-lived containers do not use stale registry data.
+      const userRegistry = loadUserRegistry();
       // Look up user in registry (case-insensitive)
       const key = args.user_name.toLowerCase().trim();
       const user = userRegistry[key];

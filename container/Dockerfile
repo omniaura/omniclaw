@@ -1,5 +1,5 @@
 # OmniClaw Agent Container
-# Runs Claude Agent SDK in isolated Linux VM
+# Runs agent runtimes (Claude Agent SDK or OpenCode) in isolated Linux VM
 
 FROM oven/bun:slim
 
@@ -58,9 +58,15 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 ARG GRAPHITE_VERSION=1.7.16
 RUN npm install -g @withgraphite/graphite-cli@${GRAPHITE_VERSION}
 
-# Install claude-code globally
+# Install claude-code globally (default agent runtime)
 # Note: agent-browser is available as an on-demand skill (installed on first use)
 RUN bun install -g @anthropic-ai/claude-code
+
+# Install OpenCode CLI (alternative agent runtime)
+# Pin version to prevent supply-chain attacks via unsigned curl|bash.
+ARG OPENCODE_VERSION=1.2.15
+RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} OPENCODE_INSTALL_DIR=/usr/local/bin bash
+RUN ln -sf /root/.opencode/bin/opencode /usr/local/bin/opencode
 
 # Create app directory
 WORKDIR /app

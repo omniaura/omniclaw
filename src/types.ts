@@ -41,13 +41,10 @@ export interface ContainerConfig {
   networkMode?: 'full' | 'none'; // Default: 'none' for non-main, 'full' for main
 }
 
-export interface HeartbeatConfig {
-  enabled: boolean;
-  interval: string; // cron expression or ms interval
-  scheduleType: 'cron' | 'interval';
-}
-
 export type BackendType = 'apple-container' | 'docker';
+
+/** Which agent runtime runs inside the container. */
+export type AgentRuntime = 'claude-agent-sdk' | 'opencode';
 
 export interface RegisteredGroup {
   name: string;
@@ -58,12 +55,19 @@ export interface RegisteredGroup {
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   autoRespondToQuestions?: boolean; // Respond to messages ending with '?' (default: false)
   autoRespondKeywords?: string[]; // Keywords that trigger response without mention (e.g., ["omni", "help"])
-  heartbeat?: HeartbeatConfig;
+  discordBotId?: string; // Stable Discord bot identity key (e.g., "CLAUDE", "OPENCODE")
   discordGuildId?: string; // Discord guild/server ID (for server-level context)
   serverFolder?: string; // e.g., "servers/omniaura-discord" (shared across channels in same server)
-  backend?: BackendType; // Which backend runs this group's agent (default: apple-container)
+  backend?: BackendType; // Which container backend runs this group's agent (default: apple-container)
+  agentRuntime?: AgentRuntime; // Which agent runtime runs inside the container (default: claude-agent-sdk)
   description?: string; // What this agent does (for agent registry)
   streamIntermediates?: boolean; // Stream intermediate output (thinking, tool calls) to channel threads. Default: false
+  /** Channel workspace folder. Mounted at /workspace/group/. Falls back to agent folder if unset. */
+  channelFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant/spec'
+  /** Category team workspace. Mounted read-write at /workspace/category/. */
+  categoryFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant'
+  /** Agent identity folder. Mounted read-write at /workspace/agent/. */
+  agentContextFolder?: string; // e.g., 'agents/peytonomi'
 }
 
 export interface NewMessage {
@@ -160,12 +164,13 @@ export interface Agent {
   description?: string;
   folder: string; // Workspace folder (= id for backwards compat)
   backend: BackendType;
+  agentRuntime: AgentRuntime; // Which agent runtime runs inside the container
   containerConfig?: ContainerConfig;
-  heartbeat?: HeartbeatConfig;
   isAdmin: boolean; // Local agent = true (can approve tasks, access local FS)
-  isLocal: boolean; // Runs on local machine (Apple Container)
   serverFolder?: string; // Shared server context (e.g., "servers/omniaura-discord")
   createdAt: string;
+  /** Agent identity + global notes folder, mounted read-write at /workspace/agent/. */
+  agentContextFolder?: string; // e.g., 'agents/peytonomi'
 }
 
 /**
@@ -177,8 +182,29 @@ export interface ChannelRoute {
   agentId: string; // FK to Agent.id
   trigger: string;
   requiresTrigger: boolean;
+  discordBotId?: string;
   discordGuildId?: string;
   createdAt: string;
+}
+
+/**
+ * Multi-agent channel subscription.
+ * Multiple agents can subscribe to the same channel.
+ */
+export interface ChannelSubscription {
+  channelJid: string;
+  agentId: string;
+  trigger: string;
+  requiresTrigger: boolean;
+  priority: number;
+  isPrimary: boolean;
+  discordBotId?: string;
+  discordGuildId?: string;
+  createdAt: string;
+  /** Channel workspace folder. Overrides agent folder as /workspace/group/ mount when set. */
+  channelFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant/spec'
+  /** Category team workspace folder, mounted at /workspace/category/. */
+  categoryFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant'
 }
 
 /**
@@ -196,10 +222,9 @@ export function registeredGroupToAgent(
     description: group.description,
     folder: group.folder,
     backend: backendType,
+    agentRuntime: group.agentRuntime || 'claude-agent-sdk',
     containerConfig: group.containerConfig,
-    heartbeat: group.heartbeat,
     isAdmin: isMainGroup,
-    isLocal: backendType === 'apple-container' || backendType === 'docker',
     serverFolder: group.serverFolder,
     createdAt: group.added_at,
   };
@@ -217,6 +242,7 @@ export function registeredGroupToRoute(
     agentId: group.folder,
     trigger: group.trigger,
     requiresTrigger: group.requiresTrigger !== false,
+    discordBotId: group.discordBotId,
     discordGuildId: group.discordGuildId,
     createdAt: group.added_at,
   };
@@ -249,6 +275,7 @@ export interface IpcTaskPayload {
   groupFolder?: string;
   chatJid?: string;
   targetJid?: string;
+  channel_jid?: string;
   // For register_group
   jid?: string;
   name?: string;
@@ -256,12 +283,8 @@ export interface IpcTaskPayload {
   trigger?: string;
   requiresTrigger?: boolean;
   containerConfig?: ContainerConfig;
+  discord_bot_id?: string;
   discord_guild_id?: string;
-  // For configure_heartbeat
-  enabled?: boolean;
-  interval?: string;
-  heartbeat_schedule_type?: string;
-  target_group_jid?: string;
   // For share_request
   description?: string;
   sourceGroup?: string;
@@ -273,6 +296,7 @@ export interface IpcTaskPayload {
   request_files?: string[];
   // For register_group: backend config
   backend?: BackendType;
+  agent_runtime?: AgentRuntime;
   group_description?: string;
   // For delegate_task
   callbackAgentId?: string;

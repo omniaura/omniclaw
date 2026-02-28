@@ -29,7 +29,6 @@ describe('types.ts conversion functions', () => {
       expect(agent.folder).toBe('test-group');
       expect(agent.backend).toBe('apple-container');
       expect(agent.isAdmin).toBe(false);
-      expect(agent.isLocal).toBe(true);
       expect(agent.createdAt).toBe('2025-01-01T00:00:00.000Z');
     });
 
@@ -55,13 +54,18 @@ describe('types.ts conversion functions', () => {
       const group = makeGroup({ backend: 'docker' });
       const agent = registeredGroupToAgent('jid@g.us', group);
       expect(agent.backend).toBe('docker');
-      expect(agent.isLocal).toBe(true);
     });
 
-    it('marks docker as local', () => {
-      const group = makeGroup({ backend: 'docker' });
+    it('defaults agentRuntime to claude-agent-sdk', () => {
+      const group = makeGroup();
       const agent = registeredGroupToAgent('jid@g.us', group);
-      expect(agent.isLocal).toBe(true);
+      expect(agent.agentRuntime).toBe('claude-agent-sdk');
+    });
+
+    it('preserves opencode agentRuntime', () => {
+      const group = makeGroup({ agentRuntime: 'opencode' });
+      const agent = registeredGroupToAgent('jid@g.us', group);
+      expect(agent.agentRuntime).toBe('opencode');
     });
 
     it('preserves containerConfig', () => {
@@ -69,17 +73,6 @@ describe('types.ts conversion functions', () => {
       const group = makeGroup({ containerConfig: config });
       const agent = registeredGroupToAgent('jid@g.us', group);
       expect(agent.containerConfig).toEqual(config);
-    });
-
-    it('preserves heartbeat config', () => {
-      const heartbeat = {
-        enabled: true,
-        interval: '*/5 * * * *',
-        scheduleType: 'cron' as const,
-      };
-      const group = makeGroup({ heartbeat });
-      const agent = registeredGroupToAgent('jid@g.us', group);
-      expect(agent.heartbeat).toEqual(heartbeat);
     });
 
     it('preserves serverFolder', () => {
@@ -129,6 +122,12 @@ describe('types.ts conversion functions', () => {
       const group = makeGroup({ discordGuildId: 'guild-123' });
       const route = registeredGroupToRoute('dc:456', group);
       expect(route.discordGuildId).toBe('guild-123');
+    });
+
+    it('preserves discordBotId', () => {
+      const group = makeGroup({ discordBotId: 'OPENCODE' });
+      const route = registeredGroupToRoute('dc:456', group);
+      expect(route.discordBotId).toBe('OPENCODE');
     });
 
     it('handles WhatsApp JIDs', () => {

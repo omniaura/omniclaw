@@ -9,6 +9,8 @@ Run setup scripts automatically. Only pause when user action is required (WhatsA
 
 **Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. scanning a QR code, pasting a secret token). If a dependency is missing, install it. If a service won't start, diagnose and repair. Ask the user for permission when needed, then do the work.
 
+> **Upgrading an existing multi-agent Discord/Slack setup?** Run `/migrate-to-channels` to restructure workspaces into the new agent/server/category/channel context architecture.
+
 **UX Note:** Use `AskUserQuestion` for all user-facing questions.
 
 ## 1. Check Environment
@@ -38,6 +40,13 @@ Run `./.claude/skills/setup/scripts/02-install-deps.sh` and parse the status blo
 3. If specific package fails to build (native modules like better-sqlite3): install build tools (`xcode-select --install` on macOS, `build-essential` on Linux), then retry
 
 Only ask the user for help if multiple retries fail with the same error.
+
+## 2b. Initialize Database Schema
+
+The database schema and migrations now run automatically on service startup via `initDatabase()`. No separate script is needed — just ensure `bun run build` succeeds and the service can start.
+
+- Schema + migrations apply automatically on first startup.
+- If startup fails with DB errors, inspect `logs/omniclaw.error.log` for the root cause.
 
 ## 3. Container Runtime
 
@@ -258,6 +267,20 @@ Ask the user:
 
 If they paste the token, use the Write tool or a text editor to append `DISCORD_BOT_TOKEN=<token>` to `.env`. Do **not** echo the token via shell command, as it would leak into shell history.
 
+For multi-bot support (recommended), collect:
+- A bot ID (uppercase letters/numbers/underscores), e.g. `CLAUDE` or `OPENCODE`
+- Optional runtime default for that bot ID: `claude-agent-sdk` or `opencode`
+- Whether this bot should be the default for unassigned Discord channels
+
+Then update `.env`:
+- Ensure `DISCORD_BOT_IDS` includes the bot ID (comma-separated list)
+- Set `DISCORD_BOT_<BOT_ID>_TOKEN=<token>`
+- Optionally set `DISCORD_BOT_<BOT_ID>_RUNTIME=<runtime>`
+- Optionally set `DISCORD_BOT_DEFAULT=<BOT_ID>` for default Discord routing
+
+Backwards compatibility rule:
+- Never remove or overwrite an existing `DISCORD_BOT_TOKEN` unless user explicitly asks.
+
 #### Register Discord Channel
 
 The Discord channel JID format is `dc:<channel_id>`. Ask the user for the Discord channel ID:
@@ -277,6 +300,18 @@ Create the group folder:
 mkdir -p groups/<FOLDER_NAME>/logs
 ```
 
+Preferred registration path (keeps agents/channel_routes in sync):
+```bash
+./.claude/skills/setup/scripts/06-register-channel.sh \
+  --jid "dc:<CHANNEL_ID>" \
+  --name "<AGENT_NAME>" \
+  --trigger "@<TRIGGER>" \
+  --folder "<FOLDER_NAME>" \
+  --discord-bot-id "<BOT_ID>" \
+  --agent-runtime "<claude-agent-sdk|opencode>" \
+  --assistant-name "<AssistantName>"
+```
+
 Restart the service to connect to Discord:
 ```bash
 launchctl kickstart -k gui/$(id -u)/com.omniclaw
@@ -286,6 +321,120 @@ Verify the agent is working by checking logs after sending a message in the Disc
 ```bash
 tail -f logs/omniclaw.log
 ```
+
+## Upgrading OmniClaw
+
+When the user says they're upgrading, just updated their OmniClaw, pulled the latest code, or something seems broken after a git pull, follow this path.
+
+### What auto-update handles automatically
+
+The `container/auto-update.sh` script (run by scheduled tasks or manually) does all of this without user intervention:
+
+1. `git pull --ff-only origin main` — pulls latest code
+2. `bun run build` — rebuilds host TypeScript
+3. `bash container/build.sh` — rebuilds the container image
+4. Waits for agents to be idle, then restarts the service
+
+If any step fails (build errors, network issues), it exits before restarting — the running service and old container image stay up safely.
+
+**DB migrations run automatically on service start.** New columns/tables are additive with safe defaults, so existing setups are never broken by a migration.
+
+### When to use this upgrade path
+
+Use this section when the user:
+- Pulled latest code and something broke
+- Just had auto-update run and wants to verify everything is healthy
+- Wants to manually upgrade and is unsure what to do
+
+### Upgrade checklist
+
+**Step 1 — Check if the container is up to date**
+
+```bash
+container run -i --rm --entrypoint wc omniclaw-agent:latest -l /app/src/index.ts
+```
+
+If this errors or shows a stale line count, the container image is stale. Rebuild it:
+
+```bash
+container builder stop && container builder rm && container builder start
+./container/build.sh
+```
+
+> The `container builder stop/rm/start` cache bust is required when COPY steps serve stale files. `--no-cache` alone doesn't fix this with Apple Container's buildkit.
+
+**Step 2 — Verify the DB schema is current**
+
+The DB schema and migrations run automatically on service startup via `initDatabase()`. To verify manually, just restart the service — it applies additive-only changes (new tables/columns) on boot, never drops data.
+
+**Step 3 — Restart the service**
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.omniclaw
+```
+
+**Step 4 — Verify**
+
+Run `./.claude/skills/setup/scripts/09-verify.sh` and confirm all checks pass.
+
+### After upgrading: new capabilities (opt-in)
+
+The following features are available after upgrading but require explicit configuration — **existing agents are completely unaffected by default**.
+
+#### OpenCode runtime (alternative to Claude Agent SDK)
+
+To run a specific agent on OpenCode instead of Claude Agent SDK:
+
+```bash
+./.claude/skills/setup/scripts/06-register-channel.sh \
+  --jid "dc:<CHANNEL_ID>" \
+  --name "<AGENT_NAME>" \
+  --trigger "@<TRIGGER>" \
+  --folder "<FOLDER_NAME>" \
+  --discord-bot-id "<BOT_ID>" \
+  --agent-runtime opencode
+```
+
+Or update an existing agent in the DB directly:
+
+```bash
+sqlite3 store/messages.db "UPDATE registered_groups SET container_config = json_set(COALESCE(container_config,'{}'), '$.agentRuntime', 'opencode') WHERE folder = '<FOLDER_NAME>'"
+```
+
+OpenCode needs its own API key/credentials. Add to `.env`:
+```
+OPENCODE_MODEL=anthropic/claude-sonnet-4-5   # or openai/gpt-4o, etc.
+```
+
+#### Multiple Discord bots
+
+To configure a second Discord bot with its own token and runtime:
+
+Add to `.env`:
+```
+DISCORD_BOT_IDS=CLAUDE,OPENCODE
+DISCORD_BOT_CLAUDE_TOKEN=<existing token>
+DISCORD_BOT_OPENCODE_TOKEN=<new token>
+DISCORD_BOT_OPENCODE_RUNTIME=opencode
+DISCORD_BOT_DEFAULT=CLAUDE
+```
+
+Then re-register channels that should use the new bot with `--discord-bot-id OPENCODE`.
+
+### Rollback
+
+If something goes wrong after upgrading:
+
+```bash
+# Roll back to previous commit
+git log --oneline -5   # find the previous commit hash
+git reset --hard <HASH>
+bun run build
+./container/build.sh
+launchctl kickstart -k gui/$(id -u)/com.omniclaw
+```
+
+The DB schema changes are additive — rolling back the code is safe even if the migration has already run. The extra columns/tables are harmless on older code.
 
 ## Reboot Agents
 

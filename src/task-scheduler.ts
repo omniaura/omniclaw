@@ -47,152 +47,6 @@ export interface SchedulerDependencies {
   findChannel: (jid: string) => Channel | undefined;
 }
 
-const HEARTBEAT_SENTINEL = '[HEARTBEAT]';
-
-/**
- * Extract the ## Heartbeat section from a CLAUDE.md file.
- * Returns content between `## Heartbeat` and the next `##` heading (or EOF).
- */
-function extractHeartbeatSection(content: string): string | null {
-  const match = content.match(/^## Heartbeat\n([\s\S]*?)(?=\n## |\n$|$)/m);
-  return match ? match[1].trim() : null;
-}
-
-/**
- * Build the heartbeat prompt for a group by reading ## Heartbeat from CLAUDE.md.
- * Falls back: group CLAUDE.md → global CLAUDE.md → sensible default.
- */
-export function buildHeartbeatPrompt(groupFolder: string): string {
-  const groupClaudeMd = path.join(GROUPS_DIR, groupFolder, 'CLAUDE.md');
-  const globalClaudeMd = path.join(GROUPS_DIR, 'global', 'CLAUDE.md');
-
-  // Try group-specific CLAUDE.md first
-  try {
-    const content = fs.readFileSync(groupClaudeMd, 'utf-8');
-    const section = extractHeartbeatSection(content);
-    if (section) return section;
-  } catch {
-    // File doesn't exist, fall through
-  }
-
-  // Fall back to global CLAUDE.md
-  try {
-    const content = fs.readFileSync(globalClaudeMd, 'utf-8');
-    const section = extractHeartbeatSection(content);
-    if (section) return section;
-  } catch {
-    // File doesn't exist, fall through
-  }
-
-  // Sensible default
-  return 'Review your ## Goals section for current priorities. Pick the highest-priority actionable item and work on it. Only message the group if there is meaningful progress to report.';
-}
-
-/**
- * Reconcile heartbeat tasks with group config.
- * Creates/removes heartbeat scheduled tasks to match each group's heartbeat config.
- */
-export function reconcileHeartbeats(
-  registeredGroups: Record<string, RegisteredGroup>,
-): void {
-  const existingTasks = getAllTasks();
-  const heartbeatTasks = new Map(
-    existingTasks
-      .filter((t) => t.id.startsWith('heartbeat-'))
-      .map((t) => [t.id, t]),
-  );
-
-  for (const [jid, group] of Object.entries(registeredGroups)) {
-    const taskId = `heartbeat-${group.folder}`;
-    const existing = heartbeatTasks.get(taskId);
-
-    if (group.heartbeat?.enabled) {
-      if (!existing) {
-        // Create heartbeat task
-        const nextRun = calculateNextRun(
-          group.heartbeat.scheduleType,
-          group.heartbeat.interval,
-        );
-        if (!nextRun) {
-          logger.warn(
-            { groupFolder: group.folder, interval: group.heartbeat.interval },
-            'Invalid heartbeat schedule',
-          );
-          continue;
-        }
-
-        createTask({
-          id: taskId,
-          group_folder: group.folder,
-          chat_jid: jid,
-          prompt: HEARTBEAT_SENTINEL,
-          schedule_type: group.heartbeat.scheduleType,
-          schedule_value: group.heartbeat.interval,
-          context_mode: 'group',
-          next_run: nextRun,
-          status: 'active',
-          created_at: new Date().toISOString(),
-        });
-        logger.info(
-          { taskId, groupFolder: group.folder },
-          'Heartbeat task created',
-        );
-      } else {
-        // Update schedule if it changed
-        if (
-          existing.schedule_value !== group.heartbeat.interval ||
-          existing.schedule_type !== group.heartbeat.scheduleType
-        ) {
-          // Delete and recreate with new schedule
-          deleteTask(taskId);
-          const nextRun = calculateNextRun(
-            group.heartbeat.scheduleType,
-            group.heartbeat.interval,
-          );
-          if (!nextRun) {
-            logger.warn(
-              { groupFolder: group.folder },
-              'Invalid heartbeat schedule on update',
-            );
-            continue;
-          }
-          createTask({
-            id: taskId,
-            group_folder: group.folder,
-            chat_jid: jid,
-            prompt: HEARTBEAT_SENTINEL,
-            schedule_type: group.heartbeat.scheduleType,
-            schedule_value: group.heartbeat.interval,
-            context_mode: 'group',
-            next_run: nextRun,
-            status: 'active',
-            created_at: new Date().toISOString(),
-          });
-          logger.info(
-            { taskId, groupFolder: group.folder },
-            'Heartbeat task updated',
-          );
-        }
-      }
-      heartbeatTasks.delete(taskId);
-    } else if (existing) {
-      // Heartbeat disabled or removed — delete the task
-      deleteTask(taskId);
-      logger.info(
-        { taskId, groupFolder: group.folder },
-        'Heartbeat task removed',
-      );
-      heartbeatTasks.delete(taskId);
-    }
-  }
-
-  // Clean up orphaned heartbeat tasks (groups that were removed)
-  for (const [taskId] of heartbeatTasks) {
-    deleteTask(taskId);
-    logger.info({ taskId }, 'Orphaned heartbeat task removed');
-  }
-}
-
 async function runTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
@@ -236,10 +90,7 @@ async function runTask(
     return;
   }
 
-  // For heartbeat tasks, replace sentinel with real prompt from CLAUDE.md
-  const prompt = task.id.startsWith('heartbeat-')
-    ? buildHeartbeatPrompt(task.group_folder)
-    : task.prompt;
+  const prompt = task.prompt;
 
   // Update tasks snapshot for container to read (filtered by group)
   const isMain = task.group_folder === MAIN_GROUP_FOLDER;
@@ -285,12 +136,10 @@ async function runTask(
     }, TASK_CLOSE_DELAY_MS);
   };
 
-  // Set up thread streaming for non-heartbeat tasks
-  const isHeartbeat = task.id.startsWith('heartbeat-');
   const channel = deps.findChannel(task.chat_jid);
   let parentMessageId: string | null = null;
 
-  if (!isHeartbeat && group.streamIntermediates && channel?.createThread) {
+  if (group.streamIntermediates && channel?.createThread) {
     const preview = prompt.slice(0, 80).replace(/\n/g, ' ');
     try {
       const msgId = await deps.sendMessage(
@@ -303,12 +152,12 @@ async function runTask(
     }
   }
 
-  const threadLabel = isHeartbeat ? 'heartbeat' : prompt.slice(0, 50);
+  const threadLabel = prompt.slice(0, 50);
   const streamer = createThreadStreamer(
     {
       channel,
       chatJid: task.chat_jid,
-      streamIntermediates: !isHeartbeat && !!group.streamIntermediates,
+      streamIntermediates: !!group.streamIntermediates,
       groupName: group.name,
       groupFolder: task.group_folder,
       label: threadLabel,
@@ -331,6 +180,7 @@ async function runTask(
         isScheduledTask: true,
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
+        agentRuntime: group.agentRuntime,
       },
       (proc, containerName) =>
         deps.onProcess(
@@ -443,9 +293,7 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
               );
         advanceTaskNextRun(currentTask.id, nextRun);
 
-        const promptPreview = currentTask.id.startsWith('heartbeat-')
-          ? 'Heartbeat'
-          : currentTask.prompt.slice(0, 100);
+        const promptPreview = currentTask.prompt.slice(0, 100);
         deps.queue.enqueueTask(
           currentTask.chat_jid,
           currentTask.id,

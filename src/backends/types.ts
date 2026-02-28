@@ -5,12 +5,13 @@
 
 import {
   Agent,
+  type AgentRuntime,
   type BackendType,
   ContainerProcess,
   RegisteredGroup,
 } from '../types.js';
 
-export type { BackendType };
+export type { AgentRuntime, BackendType };
 
 /**
  * Unified group-or-agent type for backwards compatibility.
@@ -51,6 +52,12 @@ export function getBackendType(entity: AgentOrGroup): BackendType {
   return (entity as RegisteredGroup).backend || 'apple-container';
 }
 
+/** Get agent runtime from either type. */
+export function getAgentRuntime(entity: AgentOrGroup): AgentRuntime {
+  if (isAgent(entity)) return entity.agentRuntime;
+  return (entity as RegisteredGroup).agentRuntime || 'claude-agent-sdk';
+}
+
 export interface ChannelInfo {
   id: string;
   jid: string;
@@ -62,13 +69,29 @@ export interface ContainerInput {
   sessionId?: string;
   resumeAt?: string;
   groupFolder: string;
+  /** Host-side runtime key for IPC/session isolation (defaults to groupFolder). */
+  runtimeFolder?: string;
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
   discordGuildId?: string;
   serverFolder?: string;
+  /** Which agent runtime to use inside the container. Default: claude-agent-sdk */
+  agentRuntime?: AgentRuntime;
   /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
   channels?: ChannelInfo[];
+  /** Agent's display name (e.g. "OCPeyton"). Injected into system prompt for self-awareness. */
+  agentName?: string;
+  /** Agent's Discord bot ID. Injected into system prompt so agent knows its own bot identity. */
+  discordBotId?: string;
+  /** Agent's trigger word/phrase (e.g. "@OCPeyton"). */
+  agentTrigger?: string;
+  /** Agent's identity + global notes folder, mounted read-write at /workspace/agent/ */
+  agentContextFolder?: string; // e.g., 'agents/peytonomi'
+  /** Channel workspace folder. If set, overrides groupFolder as /workspace/group/ mount. */
+  channelFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant/spec'
+  /** Category team workspace, mounted read-write at /workspace/category/ (shared across channels in same category) */
+  categoryFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant'
 }
 
 export interface ContainerOutput {

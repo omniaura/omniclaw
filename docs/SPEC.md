@@ -235,12 +235,30 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 
 | Variable | Required For | Purpose |
 |----------|-------------|---------|
-| `DISCORD_BOT_TOKEN` | Discord | Bot token |
+| `DISCORD_BOT_TOKEN` | Discord | Single bot token (backward compatible) |
+| `DISCORD_BOT_IDS` | Discord | Ordered bot IDs for prefixed multi-bot config (e.g. `CLAUDE,OPENCODE`) |
+| `DISCORD_BOT_<ID>_TOKEN` | Discord | Token for a specific Discord bot ID |
+| `DISCORD_BOT_<ID>_RUNTIME` | Discord | Default runtime for that bot ID (`claude-agent-sdk` or `opencode`) |
+| `DISCORD_BOT_DEFAULT` | Discord | Default bot ID for unassigned Discord channels |
 | `TELEGRAM_BOT_TOKEN` | Telegram | Bot token |
 | `TELEGRAM_ONLY` | Telegram | Run Telegram-only mode (no WhatsApp) |
 | `TELEGRAM_BOT_POOL` | Telegram | Comma-separated tokens for multi-bot |
 | `SLACK_BOT_TOKEN` | Slack | Bot token (xoxb-...) |
 | `SLACK_APP_TOKEN` | Slack | App-level token for Socket Mode (xapp-...) |
+
+Discord multi-bot examples:
+
+```bash
+# Single token (existing behavior)
+DISCORD_BOT_TOKEN=discord_token_a
+
+# Prefix mode (recommended for identity mapping)
+DISCORD_BOT_IDS=CLAUDE,OPENCODE
+DISCORD_BOT_CLAUDE_TOKEN=discord_token_a
+DISCORD_BOT_OPENCODE_TOKEN=discord_token_b
+DISCORD_BOT_OPENCODE_RUNTIME=opencode
+DISCORD_BOT_DEFAULT=CLAUDE
+```
 
 ### Backend Credentials
 

@@ -27,7 +27,8 @@ import {
   TRIGGER_PATTERN,
 } from '../config.js';
 import {
-  getAllRegisteredGroups,
+  getAllAgents,
+  getSubscriptionsForChannel,
   storeChatMetadata,
   storeMessage,
 } from '../db.js';
@@ -45,7 +46,8 @@ function updateUserRegistry(
   mentions: Array<{ id: string; name: string; platform: 'discord' }>,
 ): void {
   if (mentions.length === 0) return;
-  const registryPath = path.join(DATA_DIR, 'ipc', 'user_registry.json');
+  const ipcRoot = path.join(DATA_DIR, 'ipc');
+  const registryPath = path.join(ipcRoot, 'user_registry.json');
   try {
     // Read existing registry or start fresh
     let registry: Record<
@@ -67,11 +69,26 @@ function updateUserRegistry(
       registry[key] = { id, name, platform, lastSeen: now };
     }
 
-    // Atomic write: temp file then rename
+    const payload = JSON.stringify(registry, null, 2);
+
+    // Atomic write: temp file then rename (global copy)
     fs.mkdirSync(path.dirname(registryPath), { recursive: true });
     const tempPath = `${registryPath}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify(registry, null, 2), 'utf-8');
+    fs.writeFileSync(tempPath, payload, 'utf-8');
     fs.renameSync(tempPath, registryPath);
+
+    // Mirror into each group IPC dir so container-local MCP tools can read it at /workspace/ipc/user_registry.json
+    for (const entry of fs.readdirSync(ipcRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === 'errors') continue;
+      const groupRegistryPath = path.join(
+        ipcRoot,
+        entry.name,
+        'user_registry.json',
+      );
+      const groupTempPath = `${groupRegistryPath}.tmp`;
+      fs.writeFileSync(groupTempPath, payload, 'utf-8');
+      fs.renameSync(groupTempPath, groupRegistryPath);
+    }
   } catch (err) {
     logger.warn(
       { err },
@@ -80,8 +97,47 @@ function updateUserRegistry(
   }
 }
 
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeDiscordMentions(text: string): string {
+  const registryPath = path.join(DATA_DIR, 'ipc', 'user_registry.json');
+  if (!fs.existsSync(registryPath) || !text.includes('@')) return text;
+
+  let registry: Record<
+    string,
+    { id: string; name: string; platform: string; lastSeen: string }
+  > = {};
+  try {
+    registry = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+  } catch {
+    return text;
+  }
+
+  let normalized = text;
+  const candidates = Object.values(registry)
+    .filter((u) => u.platform === 'discord' && u.name?.trim() && u.id?.trim())
+    .sort((a, b) => b.name.length - a.name.length);
+
+  for (const user of candidates) {
+    const name = user.name.trim();
+    const mention = `<@${user.id}>`;
+    // Replace plain @DisplayName tokens while leaving existing <@...> syntax untouched.
+    const pattern = new RegExp(
+      `(^|\\s)@${escapeRegex(name)}(?=$|\\s|[.,!?;:])`,
+      'gi',
+    );
+    normalized = normalized.replace(pattern, `$1${mention}`);
+  }
+
+  return normalized;
+}
+
 export interface DiscordChannelOpts {
+  botId: string;
   token: string;
+  multiBotMode?: boolean;
   onReaction?: (
     chatJid: string,
     messageId: string,
@@ -93,13 +149,16 @@ export interface DiscordChannelOpts {
 export class DiscordChannel implements Channel {
   name = 'discord';
   prefixAssistantName = false;
+  readonly botId: string;
 
   private client: Client;
   private connected = false;
   private opts: DiscordChannelOpts;
+  private ownedJids = new Set<string>();
 
   constructor(opts: DiscordChannelOpts) {
     this.opts = opts;
+    this.botId = opts.botId;
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -117,7 +176,11 @@ export class DiscordChannel implements Channel {
       this.client.once(Events.ClientReady, (readyClient) => {
         this.connected = true;
         logger.info(
-          { username: readyClient.user.tag, id: readyClient.user.id },
+          {
+            username: readyClient.user.tag,
+            id: readyClient.user.id,
+            botId: this.botId,
+          },
           'Discord bot connected',
         );
         logger.info({ tag: readyClient.user.tag }, 'Discord bot ready');
@@ -172,22 +235,37 @@ export class DiscordChannel implements Channel {
     }
 
     try {
-      const chunks = splitMessage(text, 2000);
+      const normalizedText = normalizeDiscordMentions(text);
+      const chunks = splitMessage(normalizedText, 2000);
       let lastMessageId: string | undefined;
       for (let i = 0; i < chunks.length; i++) {
         // Delay between chunks to avoid Discord 429 rate limits (#130)
         if (i > 0) await delay(300);
-        const opts =
-          i === 0 && replyToMessageId
-            ? {
-                content: chunks[i],
-                reply: { messageReference: replyToMessageId },
-              }
-            : chunks[i];
-        const sent = await (channel as TextChannel | DMChannel).send(opts);
+        let sent;
+        if (i === 0 && replyToMessageId) {
+          try {
+            sent = await (channel as TextChannel | DMChannel).send({
+              content: chunks[i],
+              reply: { messageReference: replyToMessageId },
+            });
+          } catch (err) {
+            // Reply targets can disappear (deleted/not visible). Fall back to plain send.
+            logger.warn(
+              { jid, replyToMessageId, err },
+              'Discord reply failed, sending without reply reference',
+            );
+            sent = await (channel as TextChannel | DMChannel).send(chunks[i]);
+          }
+        } else {
+          sent = await (channel as TextChannel | DMChannel).send(chunks[i]);
+        }
         lastMessageId = sent.id;
       }
-      logger.info({ jid, length: text.length }, 'Discord message sent');
+      logger.info(
+        { jid, length: normalizedText.length },
+        'Discord message sent',
+      );
+      this.ownedJids.add(jid);
       return lastMessageId;
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Discord message');
@@ -199,7 +277,10 @@ export class DiscordChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    return jid.startsWith('dc:');
+    if (!jid.startsWith('dc:')) return false;
+    // Backward-compatible single-bot behavior: one Discord client owns all dc: JIDs.
+    if (!this.opts.multiBotMode) return true;
+    return this.ownedJids.has(jid);
   }
 
   async disconnect(): Promise<void> {
@@ -358,6 +439,32 @@ export class DiscordChannel implements Channel {
     return false;
   }
 
+  private resolveGroupForChannel(chatJid: string): RegisteredGroup | undefined {
+    const subs = getSubscriptionsForChannel(chatJid);
+    const preferredSub =
+      subs.find((s) => (s.discordBotId || '') === this.botId) ||
+      subs.find((s) => s.isPrimary) ||
+      subs[0];
+    if (!preferredSub) return undefined;
+
+    const agent = getAllAgents()[preferredSub.agentId];
+    if (!agent) return undefined;
+    return {
+      name: agent.name,
+      folder: agent.folder,
+      trigger: preferredSub.trigger,
+      added_at: preferredSub.createdAt,
+      containerConfig: agent.containerConfig,
+      requiresTrigger: preferredSub.requiresTrigger,
+      discordBotId: preferredSub.discordBotId,
+      discordGuildId: preferredSub.discordGuildId,
+      serverFolder: agent.serverFolder,
+      backend: agent.backend,
+      agentRuntime: agent.agentRuntime,
+      description: agent.description,
+    };
+  }
+
   private async handleMessage(message: Message): Promise<void> {
     // Ignore own messages
     if (message.author.id === this.client.user?.id) return;
@@ -367,18 +474,28 @@ export class DiscordChannel implements Channel {
     // Translate @bot mention into trigger format
     // FIX: Determine agent name from the channel's registered group, not global ASSISTANT_NAME
     const botId = this.client.user?.id;
-    if (botId && content.includes(`<@${botId}>`)) {
-      content = content.replace(new RegExp(`<@${botId}>`, 'g'), '').trim();
-      if (!TRIGGER_PATTERN.test(content)) {
-        // Get agent name from the group's trigger (e.g., "@OmarOmni" → "OmarOmni")
-        const isDM = message.channel.type === ChannelType.DM;
-        const chatJid = isDM
-          ? `dc:dm:${message.author.id}`
-          : `dc:${message.channelId}`;
-        const registeredGroups = getAllRegisteredGroups();
-        const group = registeredGroups[chatJid];
-        const agentName = group?.trigger?.replace(/^@/, '') || ASSISTANT_NAME;
-        content = `@${agentName} ${content}`;
+    const botMentionPattern = botId ? new RegExp(`<@!?${botId}>`, 'g') : null;
+    if (botMentionPattern && botMentionPattern.test(content)) {
+      content = content.replace(botMentionPattern, '').trim();
+      const isDM = message.channel.type === ChannelType.DM;
+      const chatJid = isDM
+        ? `dc:dm:${message.author.id}`
+        : `dc:${message.channelId}`;
+      const subscriptions = getSubscriptionsForChannel(chatJid);
+      const matchedSub = subscriptions.find(
+        (s) => (s.discordBotId || '') === this.botId,
+      );
+      const fallbackSub =
+        subscriptions.find((s) => s.isPrimary) || subscriptions[0];
+      const group = this.resolveGroupForChannel(chatJid);
+      const trigger =
+        matchedSub?.trigger ||
+        fallbackSub?.trigger ||
+        group?.trigger ||
+        `@${ASSISTANT_NAME}`;
+      const triggerPattern = buildTriggerPattern(trigger);
+      if (!triggerPattern.test(content)) {
+        content = `${trigger} ${content}`;
       }
     }
 
@@ -429,25 +546,35 @@ export class DiscordChannel implements Channel {
     const isThread = !isDM && message.channel.isThread();
     const threadParentId =
       isThread && message.channel.parent ? message.channel.parent.id : null;
+    // For thread messages, route via parent channel JID so we find the registered group.
+    // Responses go to the parent channel (thread-reply routing is a future enhancement).
+    const chatJid = isDM
+      ? `dc:dm:${message.author.id}`
+      : isThread && threadParentId
+        ? `dc:${threadParentId}`
+        : `dc:${message.channelId}`;
 
     // Allow bot messages through only if they contain our trigger (agent-to-agent comms).
-    // This prevents infinite loops — bots must explicitly @mention us.
-    // Use per-channel trigger so agent-to-agent comms work across multi-agent servers.
-    // For threads, resolve the parent channel's group for the trigger pattern.
-    {
-      const _chatJid = isDM
-        ? `dc:dm:${message.author.id}`
-        : isThread && threadParentId
-          ? `dc:${threadParentId}`
-          : `dc:${message.channelId}`;
-      const _group = getAllRegisteredGroups()[_chatJid];
-      const _triggerPattern = buildTriggerPattern(_group?.trigger);
-      if (message.author.bot && !_triggerPattern.test(content)) return;
+    // This prevents loops while allowing explicit agent-to-agent handoffs.
+    const isReplyToBot = message.mentions.repliedUser?.id === botId;
+    if (message.author.bot) {
+      const subs = getSubscriptionsForChannel(chatJid);
+      const thisBotSubs = subs.filter(
+        (s) => (s.discordBotId || '') === this.botId,
+      );
+      const group = this.resolveGroupForChannel(chatJid);
+      const triggerPatterns =
+        thisBotSubs.length > 0
+          ? thisBotSubs.map((s) => buildTriggerPattern(s.trigger))
+          : [buildTriggerPattern(group?.trigger)];
+      const mentionsThisBot =
+        botId != null && message.mentions.users.has(botId);
+      const hasTriggerForThisBot = triggerPatterns.some((p) => p.test(content));
+      if (!mentionsThisBot && !hasTriggerForThisBot && !isReplyToBot) return;
     }
 
     // In guild channels, only process messages that mention THIS bot OR reply to the bot.
     // Prevents responding when another agent (e.g. @PeytonOmni) is mentioned instead.
-    const isReplyToBot = message.mentions.repliedUser?.id === botId;
     // Only block if message mentions other users but NOT this bot.
     // Messages with NO mentions pass through to auto-respond check below.
     // Guard botId != null so TypeScript is satisfied (Map.has requires a string).
@@ -486,14 +613,6 @@ export class DiscordChannel implements Channel {
       }
     }
 
-    // For thread messages, route via parent channel JID so we find the registered group.
-    // Responses go to the parent channel (thread-reply routing is a future enhancement).
-    const chatJid = isDM
-      ? `dc:dm:${message.author.id}`
-      : isThread && threadParentId
-        ? `dc:${threadParentId}`
-        : `dc:${message.channelId}`;
-
     const timestamp = message.createdAt.toISOString();
     const senderName =
       message.member?.displayName ||
@@ -520,9 +639,7 @@ export class DiscordChannel implements Channel {
       message.guildId || undefined,
     );
 
-    // Check if this chat is registered
-    const registeredGroups = getAllRegisteredGroups();
-    const group = registeredGroups[chatJid];
+    const group = this.resolveGroupForChannel(chatJid);
 
     if (!group) {
       logger.debug(
@@ -618,6 +735,7 @@ export class DiscordChannel implements Channel {
 
     if (!content) return;
 
+    const effectiveTrigger = group?.trigger || `@${ASSISTANT_NAME}`;
     // Smart auto-respond: check if we should respond without explicit mention
     const hasTrigger = TRIGGER_PATTERN.test(content);
     if (!hasTrigger && !isDM) {
@@ -627,7 +745,7 @@ export class DiscordChannel implements Channel {
           { chatJid, sender: senderName },
           'Reply to bot — treating as triggered',
         );
-        content = `@${ASSISTANT_NAME} ${content}`;
+        content = `${effectiveTrigger} ${content}`;
       } else if (isThread && message.channel.ownerId === botId) {
         // Auto-trigger in threads created by this bot — no @mention needed.
         // Use per-group trigger name for consistency with multi-agent setups.
@@ -659,12 +777,15 @@ export class DiscordChannel implements Channel {
           'Auto-responding based on group config',
         );
         // Prepend trigger so message gets processed
-        content = `@${ASSISTANT_NAME} ${content}`;
+        content = `${effectiveTrigger} ${content}`;
       }
     }
 
     // Clean up media files older than 24 hours
     this.cleanupOldMedia(group.folder);
+
+    // Mark this JID as owned by this bot only after we accept/process the message.
+    this.ownedJids.add(chatJid);
 
     // Store message — startMessageLoop() will pick it up
     storeMessage({
@@ -716,6 +837,7 @@ export class DiscordChannel implements Channel {
     const chatJid = isDM
       ? `dc:dm:${user.id}`
       : `dc:${reaction.message.channelId}`;
+    this.ownedJids.add(chatJid);
     const emoji = reaction.emoji.name || '';
 
     const userName = user.displayName || user.username || 'Someone';

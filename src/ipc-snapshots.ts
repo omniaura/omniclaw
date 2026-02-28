@@ -44,15 +44,17 @@ export function writeTasksSnapshot(
     status: string;
     next_run: string | null;
   }>,
+  visibleGroupFolder?: string,
 ): void {
   const ipcBase = path.join(DATA_DIR, 'ipc');
   const groupIpcDir = path.join(ipcBase, groupFolder);
   assertPathWithin(groupIpcDir, ipcBase, 'writeTasksSnapshot');
   fs.mkdirSync(groupIpcDir, { recursive: true });
+  const taskOwnerFolder = visibleGroupFolder || groupFolder;
 
   const filteredTasks = isMain
     ? tasks
-    : tasks.filter((t) => t.groupFolder === groupFolder);
+    : tasks.filter((t) => t.groupFolder === taskOwnerFolder);
 
   const tasksFile = path.join(groupIpcDir, 'current_tasks.json');
   fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));

@@ -1,13 +1,86 @@
 import os from 'os';
 import path from 'path';
 
+export type AgentRuntime = 'claude-agent-sdk' | 'opencode';
+
+export interface DiscordBotConfig {
+  id: string;
+  token: string;
+  runtime?: AgentRuntime;
+}
+
+export function parseEnvList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(/[\n,]/)
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+}
+
+function parseAgentRuntime(
+  value: string | undefined,
+): AgentRuntime | undefined {
+  if (!value) return undefined;
+  if (value === 'claude-agent-sdk' || value === 'opencode') return value;
+  return undefined;
+}
+
+function sanitizeBotId(raw: string): string {
+  return raw
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+export function buildDiscordBotConfigFromEnv(env: NodeJS.ProcessEnv): {
+  bots: DiscordBotConfig[];
+  defaultBotId?: string;
+} {
+  const ids = parseEnvList(env.DISCORD_BOT_IDS)
+    .map(sanitizeBotId)
+    .filter((id) => id.length > 0);
+
+  if (ids.length > 0) {
+    const bots: DiscordBotConfig[] = [];
+    for (const id of ids) {
+      const token = env[`DISCORD_BOT_${id}_TOKEN`]?.trim();
+      if (!token) continue;
+      const runtime = parseAgentRuntime(env[`DISCORD_BOT_${id}_RUNTIME`]);
+      bots.push({ id, token, runtime });
+    }
+    if (bots.length === 0) return { bots: [] };
+    const preferredDefault = sanitizeBotId(env.DISCORD_BOT_DEFAULT || '');
+    const defaultBotId = bots.some((b) => b.id === preferredDefault)
+      ? preferredDefault
+      : bots[0].id;
+    return { bots, defaultBotId };
+  }
+
+  const token = (env.DISCORD_BOT_TOKEN || '').trim();
+  const bots = token
+    ? [{ id: 'PRIMARY', token, runtime: undefined as AgentRuntime | undefined }]
+    : [];
+  return {
+    bots,
+    defaultBotId: bots[0]?.id,
+  };
+}
+
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Omni';
-export const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || '';
+const discordEnv = buildDiscordBotConfigFromEnv(process.env);
+export const DISCORD_BOTS = discordEnv.bots;
+export const DISCORD_DEFAULT_BOT_ID = discordEnv.defaultBotId;
+export const DISCORD_BOT_IDS = DISCORD_BOTS.map((b) => b.id);
+export const DISCORD_BOT_TOKEN = DISCORD_BOTS[0]?.token || '';
 export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 // Slack: bot token (xoxb-...) + app-level token for Socket Mode (xapp-...)
 export const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
 export const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN || '';
 export const POLL_INTERVAL = 2000;
+
+/** Separator used in runtime group folders to isolate multi-agent dispatch state. */
+export const DISPATCH_RUNTIME_SEP = '__dispatch__';
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
@@ -48,14 +121,27 @@ export const SESSION_MAX_AGE = parseInt(
   process.env.SESSION_MAX_AGE || '14400000',
   10,
 ); // 4 hours — rotate sessions to prevent unbounded context growth
-export const MAX_CONCURRENT_CONTAINERS = Math.max(
+/** Max containers actively processing messages or tasks. */
+export const MAX_ACTIVE_CONTAINERS = Math.max(
   1,
-  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '8', 10) || 8,
+  parseInt(
+    process.env.MAX_ACTIVE_CONTAINERS ||
+      process.env.MAX_CONCURRENT_CONTAINERS ||
+      '8',
+    10,
+  ) || 8,
 );
+/** Max warm containers sitting idle, waiting for the next message. */
+export const MAX_IDLE_CONTAINERS = Math.max(
+  0,
+  parseInt(process.env.MAX_IDLE_CONTAINERS || '4', 10) || 4,
+);
+/** Backward-compat alias. */
+export const MAX_CONCURRENT_CONTAINERS = MAX_ACTIVE_CONTAINERS;
 export const MAX_TASK_CONTAINERS = Math.max(
   1,
   parseInt(
-    process.env.MAX_TASK_CONTAINERS || String(MAX_CONCURRENT_CONTAINERS - 1),
+    process.env.MAX_TASK_CONTAINERS || String(MAX_ACTIVE_CONTAINERS - 1),
     10,
   ),
 );

@@ -5,6 +5,7 @@
  */
 
 import { $ } from 'bun';
+import { createHash } from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -49,16 +50,94 @@ function getHomeDir(): string {
   return home;
 }
 
+function getLatestMtimeMs(dir: string): number {
+  if (!fs.existsSync(dir)) return 0;
+  let latest = 0;
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    const stat = fs.statSync(current);
+    latest = Math.max(latest, stat.mtimeMs);
+    if (!stat.isDirectory()) continue;
+    for (const name of fs.readdirSync(current)) {
+      stack.push(path.join(current, name));
+    }
+  }
+  return latest;
+}
+
+function syncAgentRunnerSource(
+  agentRunnerSrc: string,
+  groupAgentRunnerDir: string,
+): boolean {
+  if (!fs.existsSync(agentRunnerSrc)) return false;
+
+  const noAutoSyncMarker = path.join(
+    groupAgentRunnerDir,
+    '.omniclaw-no-autosync',
+  );
+  const syncMarker = path.join(groupAgentRunnerDir, '.omniclaw-source-sync');
+  const hasGroupDir = fs.existsSync(groupAgentRunnerDir);
+
+  if (!hasGroupDir) {
+    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    fs.writeFileSync(syncMarker, `${Date.now()}\n`, 'utf-8');
+    return true;
+  }
+
+  // Allow manual per-agent runtime customization by opting out of auto-sync.
+  if (fs.existsSync(noAutoSyncMarker)) {
+    return true;
+  }
+
+  const srcLatestMtime = getLatestMtimeMs(agentRunnerSrc);
+  const lastSyncedMtime = fs.existsSync(syncMarker)
+    ? fs.statSync(syncMarker).mtimeMs
+    : 0;
+  if (srcLatestMtime <= lastSyncedMtime) {
+    return true;
+  }
+
+  // Atomic replace: copy to temp dir then rename to avoid races when
+  // two containers for the same group start simultaneously.
+  const tmpDir = `${groupAgentRunnerDir}.tmp-${process.pid}`;
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.cpSync(agentRunnerSrc, tmpDir, { recursive: true });
+    fs.rmSync(groupAgentRunnerDir, { recursive: true, force: true });
+    fs.renameSync(tmpDir, groupAgentRunnerDir);
+  } catch (err) {
+    // Clean up temp dir on failure
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
+  fs.writeFileSync(syncMarker, `${Date.now()}\n`, 'utf-8');
+  logger.info({ groupAgentRunnerDir }, 'Refreshed cached agent-runner source');
+  return true;
+}
+
 function buildVolumeMounts(
   group: AgentOrGroup,
   isMain: boolean,
   isScheduledTask: boolean = false,
+  runtimeFolder?: string,
+  contextFolders?: {
+    channelFolder?: string;
+    categoryFolder?: string;
+    agentContextFolder?: string;
+  },
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const homeDir = getHomeDir();
   const projectRoot = process.cwd();
 
   const folder = getFolder(group);
+  const runtimeFolderName = runtimeFolder || folder;
   const srvFolder = getServerFolder(group);
 
   if (isMain) {
@@ -98,9 +177,11 @@ function buildVolumeMounts(
       readonly: false,
     });
   } else {
-    // Other groups only get their own folder
-    const groupPath = path.join(GROUPS_DIR, folder);
+    // Channel workspace: use channelFolder if set, otherwise fall back to groupFolder
+    const workspaceFolder = contextFolders?.channelFolder || folder;
+    const groupPath = path.join(GROUPS_DIR, workspaceFolder);
     assertPathWithin(groupPath, GROUPS_DIR, 'group folder');
+    fs.mkdirSync(groupPath, { recursive: true });
 
     mounts.push({
       hostPath: groupPath,
@@ -114,6 +195,30 @@ function buildVolumeMounts(
         hostPath: globalDir,
         containerPath: '/workspace/global',
         readonly: true,
+      });
+    }
+
+    // Agent identity + global notes (read-write: agent can evolve its own identity)
+    if (contextFolders?.agentContextFolder) {
+      const agentDir = path.join(GROUPS_DIR, contextFolders.agentContextFolder);
+      assertPathWithin(agentDir, GROUPS_DIR, 'agent context folder');
+      fs.mkdirSync(agentDir, { recursive: true });
+      mounts.push({
+        hostPath: agentDir,
+        containerPath: '/workspace/agent',
+        readonly: false,
+      });
+    }
+
+    // Category team workspace (read-write: agents share knowledge across channels)
+    if (contextFolders?.categoryFolder) {
+      const categoryDir = path.join(GROUPS_DIR, contextFolders.categoryFolder);
+      assertPathWithin(categoryDir, GROUPS_DIR, 'category folder');
+      fs.mkdirSync(categoryDir, { recursive: true });
+      mounts.push({
+        hostPath: categoryDir,
+        containerPath: '/workspace/category',
+        readonly: false,
       });
     }
 
@@ -133,7 +238,11 @@ function buildVolumeMounts(
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const sessionsBase = path.join(DATA_DIR, 'sessions');
-  const groupSessionsDir = path.join(sessionsBase, folder, '.claude');
+  const groupSessionsDir = path.join(
+    sessionsBase,
+    runtimeFolderName,
+    '.claude',
+  );
   assertPathWithin(groupSessionsDir, sessionsBase, 'sessions directory');
 
   fs.mkdirSync(groupSessionsDir, { recursive: true });
@@ -172,10 +281,38 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Optional shared OpenCode auth from the host.
+  // We copy only auth.json / mcp-auth.json into a per-group isolated dir so
+  // the container inherits credentials without sharing the host opencode.db.
+  // Mounting the whole host dir with readonly:false caused concurrent writes
+  // to the same SQLite file and DB corruption.
+  const hostOpenCodeDir = path.join(homeDir, '.local', 'share', 'opencode');
+  if (fs.existsSync(hostOpenCodeDir)) {
+    const openCodeDataBase = path.join(DATA_DIR, 'opencode-data');
+    const containerOcDir = path.join(openCodeDataBase, runtimeFolderName);
+    assertPathWithin(
+      containerOcDir,
+      openCodeDataBase,
+      'opencode-data directory',
+    );
+    fs.mkdirSync(containerOcDir, { recursive: true });
+    for (const authFile of ['auth.json', 'mcp-auth.json']) {
+      const src = path.join(hostOpenCodeDir, authFile);
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, path.join(containerOcDir, authFile));
+      }
+    }
+    mounts.push({
+      hostPath: containerOcDir,
+      containerPath: '/home/bun/.local/share/opencode',
+      readonly: true,
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const ipcBase = path.join(DATA_DIR, 'ipc');
-  const groupIpcDir = path.join(ipcBase, folder);
+  const groupIpcDir = path.join(ipcBase, runtimeFolderName);
   assertPathWithin(groupIpcDir, ipcBase, 'IPC directory');
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
@@ -206,6 +343,9 @@ function buildVolumeMounts(
       'GIT_AUTHOR_NAME',
       'GIT_AUTHOR_EMAIL',
       'CLAUDE_MODEL',
+      'OPENCODE_MODEL',
+      'OPENCODE_PROVIDER',
+      'OPENCODE_MODEL_ID',
     ];
     const filteredLines = envContent.split('\n').filter((line) => {
       const trimmed = line.trim();
@@ -237,14 +377,18 @@ function buildVolumeMounts(
   const groupAgentRunnerDir = path.join(
     DATA_DIR,
     'sessions',
-    folder,
+    runtimeFolderName,
     'agent-runner-src',
   );
-  let hasGroupDir = fs.existsSync(groupAgentRunnerDir);
-  if (!hasGroupDir && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-    hasGroupDir = true;
-  }
+  assertPathWithin(
+    groupAgentRunnerDir,
+    sessionsBase,
+    'agent runner source cache',
+  );
+  const hasGroupDir = syncAgentRunnerSource(
+    agentRunnerSrc,
+    groupAgentRunnerDir,
+  );
   mounts.push({
     hostPath: hasGroupDir ? groupAgentRunnerDir : agentRunnerSrc,
     containerPath: '/app/src',
@@ -265,8 +409,19 @@ function buildVolumeMounts(
   return mounts;
 }
 
-/** @internal Exported for testing */
-export interface ContainerArgsOpts {
+function makeContainerName(baseFolder: string, runtimeFolder: string): string {
+  const baseSafe = baseFolder.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 24);
+  if (runtimeFolder === baseFolder) {
+    return `omniclaw-${baseSafe}-${Date.now()}`;
+  }
+  const digest = createHash('sha1')
+    .update(runtimeFolder)
+    .digest('hex')
+    .slice(0, 8);
+  return `omniclaw-${baseSafe}-d${digest}-${Date.now()}`;
+}
+
+interface ContainerArgsOpts {
   mounts: VolumeMount[];
   containerName: string;
   isMain: boolean;
@@ -343,6 +498,7 @@ export class LocalBackend implements AgentBackend {
   ): Promise<ContainerOutput> {
     const startTime = Date.now();
     const folder = getFolder(group);
+    const runtimeFolder = input.runtimeFolder || folder;
     const groupName = getName(group);
     const containerCfg = getContainerConfig(group);
 
@@ -353,9 +509,14 @@ export class LocalBackend implements AgentBackend {
       group,
       input.isMain,
       input.isScheduledTask,
+      runtimeFolder,
+      {
+        channelFolder: input.channelFolder,
+        categoryFolder: input.categoryFolder,
+        agentContextFolder: input.agentContextFolder,
+      },
     );
-    const safeName = folder.replace(/[^a-zA-Z0-9-]/g, '-');
-    const containerName = `omniclaw-${safeName}-${Date.now()}`;
+    const containerName = makeContainerName(folder, runtimeFolder);
     const containerArgs = buildContainerArgs({
       mounts,
       containerName,
@@ -665,8 +826,9 @@ export class LocalBackend implements AgentBackend {
   }
 
   closeStdin(groupFolder: string, inputSubdir: string = 'input'): void {
-    const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, inputSubdir);
-    assertPathWithin(inputDir, path.join(DATA_DIR, 'ipc'), 'closeStdin');
+    const ipcBase = path.join(DATA_DIR, 'ipc');
+    const inputDir = path.join(ipcBase, groupFolder, inputSubdir);
+    assertPathWithin(inputDir, ipcBase, 'closeStdin');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
       fs.writeFileSync(path.join(inputDir, '_close'), '');
@@ -676,12 +838,13 @@ export class LocalBackend implements AgentBackend {
   }
 
   writeIpcData(groupFolder: string, filename: string, data: string): void {
-    const groupIpcDir = path.join(DATA_DIR, 'ipc', groupFolder);
-    assertPathWithin(groupIpcDir, path.join(DATA_DIR, 'ipc'), 'writeIpcData');
-    const targetFile = path.join(groupIpcDir, filename);
-    assertPathWithin(targetFile, groupIpcDir, 'writeIpcData filename');
+    const ipcBase = path.join(DATA_DIR, 'ipc');
+    const groupIpcDir = path.join(ipcBase, groupFolder);
+    assertPathWithin(groupIpcDir, ipcBase, 'writeIpcData');
+    const filePath = path.join(groupIpcDir, filename);
+    assertPathWithin(filePath, groupIpcDir, 'writeIpcData filename');
     fs.mkdirSync(groupIpcDir, { recursive: true });
-    fs.writeFileSync(targetFile, data);
+    fs.writeFileSync(filePath, data);
   }
 
   async readFile(
@@ -844,14 +1007,17 @@ export class LocalBackend implements AgentBackend {
           )
           .map((c) => c.configuration.id);
       }
-      // Defense-in-depth: validate container names before passing to Bun.spawn.
-      // Names are generated as `omniclaw-<safeName>-<timestamp>` with safeName already
-      // sanitized, but orphan names come from runtime output — re-validate to
-      // reject any names containing shell metacharacters. [Upstream PR #507]
-      const SAFE_CONTAINER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+      // Validate container names before passing to Bun.spawn.
+      // Names come from runtime output — reject any that don't match the
+      // expected omniclaw-<safeName>-<hex/timestamp> format to prevent
+      // CLI flag injection (e.g. a name like "--all").
+      const SAFE_CONTAINER_NAME = /^omniclaw-[a-zA-Z0-9_-]+-[a-f0-9-]+$/;
       const safeOrphans = orphans.filter((name) => {
-        if (!SAFE_CONTAINER_NAME_RE.test(name)) {
-          logger.warn({ name }, 'Skipping orphaned container with unsafe name');
+        if (!SAFE_CONTAINER_NAME.test(name)) {
+          logger.warn(
+            { name },
+            'Skipping orphan with unexpected container name',
+          );
           return false;
         }
         return true;

@@ -26,10 +26,13 @@ interface ChannelInfo {
   name: string;
 }
 
+type AgentRuntime = 'claude-agent-sdk' | 'opencode';
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
   resumeAt?: string;
+  agentName?: string;
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
@@ -37,8 +40,16 @@ interface ContainerInput {
   discordGuildId?: string;
   serverFolder?: string;
   secrets?: Record<string, string>;
+  /** Which agent runtime to use. Default: claude-agent-sdk */
+  agentRuntime?: AgentRuntime;
   /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
   channels?: ChannelInfo[];
+  /** Agent's display name (e.g. "OCPeyton"). Injected into system prompt for self-awareness. */
+  agentName?: string;
+  /** Agent's Discord bot ID. Injected into system prompt so agent knows its own bot identity. */
+  discordBotId?: string;
+  /** Agent's trigger word/phrase (e.g. "@OCPeyton"). */
+  agentTrigger?: string;
 }
 
 interface ContainerOutput {
@@ -252,7 +263,7 @@ function getSessionSummary(sessionId: string, transcriptPath: string): string | 
 /**
  * Archive the full transcript to conversations/ before compaction.
  */
-function createPreCompactHook(): HookCallback {
+function createPreCompactHook(assistantName: string): HookCallback {
   return async (input, _toolUseId, _context) => {
     const preCompact = input as PreCompactHookInput;
     const transcriptPath = preCompact.transcript_path;
@@ -282,7 +293,7 @@ function createPreCompactHook(): HookCallback {
       const filename = `${date}-${name}.md`;
       const filePath = path.join(conversationsDir, filename);
 
-      const markdown = formatTranscriptMarkdown(messages, summary);
+      const markdown = formatTranscriptMarkdown(messages, summary, assistantName);
       fs.writeFileSync(filePath, markdown);
 
       log(`Archived conversation to ${filePath}`);
@@ -505,7 +516,11 @@ function parseTranscript(content: string): ParsedMessage[] {
   return messages;
 }
 
-function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null): string {
+function formatTranscriptMarkdown(
+  messages: ParsedMessage[],
+  title?: string | null,
+  assistantName: string = 'Assistant',
+): string {
   const now = new Date();
   const formatDateTime = (d: Date) => d.toLocaleString('en-US', {
     month: 'short',
@@ -524,7 +539,7 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
   lines.push('');
 
   for (const msg of messages) {
-    const sender = msg.role === 'user' ? 'User' : 'Andy';
+    const sender = msg.role === 'user' ? 'User' : assistantName;
     const content = msg.content.length > 2000
       ? msg.content.slice(0, 2000) + '...'
       : msg.content;
@@ -711,9 +726,28 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
-  // Discover additional directories mounted at /workspace/extra/*
-  // These are passed to the SDK so their CLAUDE.md files are loaded automatically
+  // Append agent identity as a fallback for agents without /workspace/agent/CLAUDE.md
+  // When the agent has an identity file, the SDK auto-loads it via additionalDirectories
+  if (containerInput.agentName && !fs.existsSync('/workspace/agent/CLAUDE.md')) {
+    const identityParts = [`You are **${containerInput.agentName}**.`];
+    if (containerInput.agentTrigger) {
+      identityParts.push(`Your trigger is \`${containerInput.agentTrigger}\`.`);
+    }
+    if (containerInput.discordBotId) {
+      identityParts.push(`Your Discord Bot ID is \`${containerInput.discordBotId}\`.`);
+    }
+    const identityBlock = `\n\n## Your Identity\n${identityParts.join(' ')}`;
+    globalClaudeMd = globalClaudeMd ? globalClaudeMd + identityBlock : identityBlock.trim();
+  }
+
+  // Discover additional directories for CLAUDE.md auto-loading:
+  // 1. Context layers: /workspace/agent, /workspace/server, /workspace/category
+  // 2. Extra mounts: /workspace/extra/*
   const extraDirs: string[] = [];
+  const contextDirs = ['/workspace/agent', '/workspace/server', '/workspace/category'];
+  for (const dir of contextDirs) {
+    if (fs.existsSync(dir)) extraDirs.push(dir);
+  }
   const extraBase = '/workspace/extra';
   if (fs.existsSync(extraBase)) {
     for (const entry of fs.readdirSync(extraBase)) {
@@ -734,7 +768,7 @@ async function runQuery(
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
-      resumeSessionAt: resumeAt,
+      resumeSessionAt: sessionId ? resumeAt : undefined,
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
@@ -765,11 +799,14 @@ async function runQuery(
             ...(containerInput.discordGuildId ? { OMNICLAW_DISCORD_GUILD_ID: containerInput.discordGuildId } : {}),
             ...(containerInput.serverFolder ? { OMNICLAW_SERVER_FOLDER: containerInput.serverFolder } : {}),
             ...(containerInput.channels ? { OMNICLAW_CHANNELS: JSON.stringify(containerInput.channels) } : {}),
+            ...(containerInput.agentName ? { OMNICLAW_AGENT_NAME: containerInput.agentName } : {}),
+            ...(containerInput.discordBotId ? { OMNICLAW_AGENT_BOT_ID: containerInput.discordBotId } : {}),
+            ...(containerInput.agentTrigger ? { OMNICLAW_AGENT_TRIGGER: containerInput.agentTrigger } : {}),
           },
         },
       },
       hooks: {
-        PreCompact: [{ hooks: [createPreCompactHook()] }],
+        PreCompact: [{ hooks: [createPreCompactHook(containerInput.agentName || 'Assistant')] }],
         PreToolUse: [
           { matcher: 'Bash', hooks: [createSanitizeBashHook()] },
           { matcher: 'Read', hooks: [createSanitizeReadHook(), createFileSizeHook()] },
@@ -951,12 +988,28 @@ async function main(): Promise<void> {
     containerInput = JSON.parse(stdinData);
     // Delete the temp file the entrypoint wrote — it contains secrets
     try { fs.unlinkSync('/tmp/input.json'); } catch { /* may not exist */ }
-    log(`Received input for group: ${containerInput.groupFolder}`);
+    log(`Received input for group: ${containerInput.groupFolder} (runtime: ${containerInput.agentRuntime || 'claude-agent-sdk'})`);
   } catch (err) {
     writeOutput({
       status: 'error',
       result: null,
       error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
+    });
+    process.exit(1);
+  }
+
+  // Runtime dispatch: select which agent runtime to use
+  const runtime = containerInput.agentRuntime || 'claude-agent-sdk';
+  if (runtime === 'opencode') {
+    const { runOpenCodeRuntime } = await import('./opencode-runtime.js');
+    await runOpenCodeRuntime(containerInput);
+    return;
+  }
+  if (runtime !== 'claude-agent-sdk') {
+    writeOutput({
+      status: 'error',
+      result: null,
+      error: `Agent runtime '${runtime}' is not yet implemented. Supported: 'claude-agent-sdk', 'opencode'.`,
     });
     process.exit(1);
   }
