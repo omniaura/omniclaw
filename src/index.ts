@@ -2035,6 +2035,7 @@ async function main(): Promise<void> {
     },
     onSubscriptionChanged: invalidateChannelSubscriptions,
     activeRuntimeFolders: () => activeRuntimeFolders,
+    agentFolders: () => new Set(Object.values(agents).map((a) => a.folder)),
   });
 }
 

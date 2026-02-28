@@ -65,6 +65,8 @@ export interface IpcDeps {
   onSubscriptionChanged?: () => void;
   /** Runtime folders currently launched by the orchestrator (for auth). */
   activeRuntimeFolders?: () => ReadonlySet<string>;
+  /** All known agent folders (including secondary agents not in registeredGroups). */
+  agentFolders?: () => ReadonlySet<string>;
 }
 
 /**
@@ -88,10 +90,12 @@ function resolveOwnerGroupFolder(
   sourceGroup: string,
   registeredGroups: Record<string, RegisteredGroup>,
   activeRuntimeFolders?: ReadonlySet<string>,
+  agentFolders?: ReadonlySet<string>,
 ): string | null {
-  const knownFolders = new Set(
-    Object.values(registeredGroups).map((g) => g.folder),
-  );
+  const knownFolders = new Set([
+    ...Object.values(registeredGroups).map((g) => g.folder),
+    ...(agentFolders ?? []),
+  ]);
   if (knownFolders.has(sourceGroup)) return sourceGroup;
   const idx = sourceGroup.indexOf(DISPATCH_RUNTIME_SEP);
   if (idx === -1) return null; // Unknown folder, not a runtime folder
@@ -349,11 +353,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
     const registeredGroups = deps.registeredGroups();
 
     const runtimeFolders = deps.activeRuntimeFolders?.();
+    const agentFolders = deps.agentFolders?.();
     for (const sourceGroup of groupFolders) {
       const ownerGroup = resolveOwnerGroupFolder(
         sourceGroup,
         registeredGroups,
         runtimeFolders,
+        agentFolders,
       );
       if (ownerGroup === null) {
         // Unknown sender — not a registered group or active runtime folder.
