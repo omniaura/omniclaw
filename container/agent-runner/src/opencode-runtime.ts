@@ -653,10 +653,24 @@ export async function runOpenCodeRuntime(
   // Initialize current chat JID
   setCurrentChat(containerInput.chatJid);
 
-  // Build env for the opencode server
-  // Secrets intentionally excluded: OpenCode authenticates via auth.json,
-  // not env vars. Including them leaks API keys to bash subprocesses.
-  const sdkEnv: Record<string, string | undefined> = { ...process.env };
+  // Build env for the opencode server — strip secrets that OpenCode doesn't
+  // need. OpenCode authenticates via auth.json, not env vars. Including
+  // secrets leaks API keys to bash subprocesses the agent spawns.
+  const SECRET_PREFIXES = [
+    'ANTHROPIC_',
+    'CLAUDE_CODE_',
+    'DISCORD_BOT_',
+    'TELEGRAM_',
+    'SLACK_',
+    'WHATSAPP_',
+    'GITHUB_TOKEN',
+  ];
+  const sdkEnv: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (!SECRET_PREFIXES.some((p) => k.startsWith(p))) {
+      sdkEnv[k] = v;
+    }
+  }
 
   const openCodeModelEnv = (sdkEnv.OPENCODE_MODEL || '').trim();
   const openCodeProviderEnv = (sdkEnv.OPENCODE_PROVIDER || '').trim();

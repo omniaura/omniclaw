@@ -63,8 +63,9 @@ RUN npm install -g @withgraphite/graphite-cli@${GRAPHITE_VERSION}
 RUN bun install -g @anthropic-ai/claude-code
 
 # Install OpenCode CLI (alternative agent runtime)
-# Uses the official install script which places the binary in ~/.local/bin
-RUN curl -fsSL https://opencode.ai/install | OPENCODE_INSTALL_DIR=/usr/local/bin bash
+# Pin version to prevent supply-chain attacks via unsigned curl|bash.
+ARG OPENCODE_VERSION=1.2.15
+RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} OPENCODE_INSTALL_DIR=/usr/local/bin bash
 RUN ln -sf /root/.opencode/bin/opencode /usr/local/bin/opencode
 
 # Create app directory

@@ -99,8 +99,23 @@ function syncAgentRunnerSource(
     return true;
   }
 
-  fs.rmSync(groupAgentRunnerDir, { recursive: true, force: true });
-  fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  // Atomic replace: copy to temp dir then rename to avoid races when
+  // two containers for the same group start simultaneously.
+  const tmpDir = `${groupAgentRunnerDir}.tmp-${process.pid}`;
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.cpSync(agentRunnerSrc, tmpDir, { recursive: true });
+    fs.rmSync(groupAgentRunnerDir, { recursive: true, force: true });
+    fs.renameSync(tmpDir, groupAgentRunnerDir);
+  } catch (err) {
+    // Clean up temp dir on failure
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
   fs.writeFileSync(syncMarker, `${Date.now()}\n`, 'utf-8');
   logger.info({ groupAgentRunnerDir }, 'Refreshed cached agent-runner source');
   return true;
@@ -290,7 +305,7 @@ function buildVolumeMounts(
     mounts.push({
       hostPath: containerOcDir,
       containerPath: '/home/bun/.local/share/opencode',
-      readonly: false,
+      readonly: true,
     });
   }
 

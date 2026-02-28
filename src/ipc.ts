@@ -357,7 +357,24 @@ export function startIpcWatcher(deps: IpcDeps): void {
       );
       if (ownerGroup === null) {
         // Unknown sender — not a registered group or active runtime folder.
-        // Skip to avoid processing IPC from rogue directories.
+        // Log and quarantine to prevent unbounded disk growth from rogue dirs.
+        const rogueDir = path.join(ipcBaseDir, sourceGroup);
+        logger.warn(
+          { sourceGroup },
+          'Skipping IPC from unrecognized source folder — quarantining',
+        );
+        try {
+          const errDir = path.join(ipcBaseDir, 'errors');
+          fs.mkdirSync(errDir, { recursive: true });
+          fs.renameSync(rogueDir, path.join(errDir, sourceGroup));
+        } catch {
+          // If rename fails (e.g. cross-device), just delete
+          try {
+            fs.rmSync(rogueDir, { recursive: true, force: true });
+          } catch {
+            /* ignore */
+          }
+        }
         continue;
       }
       const isMain = ownerGroup === MAIN_GROUP_FOLDER;
