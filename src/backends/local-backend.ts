@@ -337,6 +337,7 @@ function buildVolumeMounts(
     const allowedVars = [
       'CLAUDE_CODE_OAUTH_TOKEN',
       'ANTHROPIC_API_KEY',
+      'ANTHROPIC_BASE_URL',
       'ANTHROPIC_MODEL',
       'GITHUB_TOKEN',
       'GIT_AUTHOR_NAME',
