@@ -191,6 +191,11 @@ async function startOpenCodeServer(
 ): Promise<OpenCodeClient> {
   const mcpServerPath = path.join(import.meta.dir, 'ipc-mcp-stdio.ts');
   const config: Record<string, unknown> = {};
+  // Allow all tool operations without prompting (equivalent to Claude Code's
+  // --dangerously-skip-permissions). Without this the opencode server can
+  // stall waiting for interactive approval that never comes in a headless
+  // container environment.
+  config.permission = 'allow';
   if (model) config.model = model;
   if (mcpEnv) {
     config.mcp = {
