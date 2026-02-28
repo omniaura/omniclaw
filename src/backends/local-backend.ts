@@ -305,7 +305,7 @@ function buildVolumeMounts(
     mounts.push({
       hostPath: containerOcDir,
       containerPath: '/home/bun/.local/share/opencode',
-      readonly: true,
+      readonly: false,
     });
   }
 
