@@ -150,7 +150,35 @@ After all content is verified in the new locations, use `AskUserQuestion` to ask
 > - **Yes, delete them** — removes the duplicates, keeps `groups/` clean
 > - **No, keep them** — I'll show you where everything lives so you can clean up manually later
 
-**If yes:** delete the migrated legacy folders:
+**If yes:** first check whether any containers are actively running — deleting a folder while a container has it virtiofs-mounted can break the mount mid-run (the host rename makes the path disappear inside the container).
+
+```bash
+# Check for running omniclaw containers
+container list 2>/dev/null | grep omniclaw || echo "No containers running"
+```
+
+If containers are running, use `AskUserQuestion` to ask:
+
+> Some agent containers are currently running. Deleting their workspace folders now could break an in-progress response. What would you like to do?
+>
+> - **Wait and check again** — I'll re-check in a moment
+> - **Stop the service now** — safest option, agents will pick up again on next restart
+
+**If wait:** re-run the container list check and loop until clear, then delete without stopping the service:
+
+```bash
+rm -rf groups/spec-discord groups/agentflow-discord groups/ditto-discord # etc.
+```
+
+**If stop the service:** unload, delete, reload:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist
+rm -rf groups/spec-discord groups/agentflow-discord groups/ditto-discord # etc.
+launchctl load ~/Library/LaunchAgents/com.omniclaw.plist
+```
+
+**If no containers running:** delete directly:
 
 ```bash
 rm -rf groups/spec-discord groups/agentflow-discord groups/ditto-discord # etc.
