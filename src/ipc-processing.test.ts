@@ -605,7 +605,7 @@ describe('processTaskIpc: task snapshot refresh', () => {
     expect(taskSnapshots[0].isMain).toBe(true);
   });
 
-  it('refreshes task snapshot after pause_task', async () => {
+  it('refreshes task snapshot after edit_task', async () => {
     createTask({
       id: 'task-snap',
       group_folder: 'main',
@@ -620,7 +620,7 @@ describe('processTaskIpc: task snapshot refresh', () => {
     });
 
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-snap' },
+      { type: 'edit_task', taskId: 'task-snap', status: 'paused' },
       'main',
       true,
       deps,

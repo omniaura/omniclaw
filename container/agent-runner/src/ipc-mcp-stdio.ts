@@ -114,7 +114,7 @@ function writeIpcFile(dir: string, data: object): string {
  *  caller lacks permission, or an ownerWarning string (may be empty) if allowed. */
 function checkTaskOwnership(
   taskId: string,
-  action: 'pause' | 'resume' | 'cancel',
+  action: 'update' | 'cancel',
 ): { allowed: true; ownerWarning: string } | { allowed: false; response: { content: [{ type: 'text'; text: string }]; isError: true } } {
   const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
   try {
@@ -211,7 +211,7 @@ MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It ca
 \u2022 Only send a message when there's something to report (e.g., "notify me if...")
 \u2022 Never send a message (background maintenance tasks)
 
-IMPORTANT: When MODIFYING an existing task, you MUST cancel the old task first using cancel_task, then create the new one. Otherwise you'll end up with duplicate tasks. Always call list_tasks first to find the old task ID, then cancel_task, then schedule_task.
+IMPORTANT: When MODIFYING an existing task, use update_task — it edits the task in place while preserving its ID and run history. Only use cancel_task to destructively delete a task the user no longer wants. Unlike pausing, the task cannot be restored on deletion.
 
 SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 \u2022 cron: Standard cron expression (e.g., "*/5 * * * *" for every 5 minutes, "0 9 * * *" for daily at 9am LOCAL time)
@@ -320,40 +320,84 @@ server.tool(
 );
 
 server.tool(
-  'pause_task',
-  'Pause a scheduled task. It will not run until resumed. Non-main agents can only pause their own tasks.',
-  { task_id: z.string().describe('The task ID to pause') },
-  async (args) => {
-    const ownerCheck = checkTaskOwnership(args.task_id, 'pause');
-    if (!ownerCheck.allowed) return ownerCheck.response;
-    const { ownerWarning } = ownerCheck;
+  'update_task',
+  `Update an existing scheduled task. Change its prompt, schedule, and/or status (active/paused). The task keeps the same ID and run history.
 
-    const data = {
-      type: 'pause_task',
-      taskId: args.task_id,
-      groupFolder,
-      isMain,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.${ownerWarning}` }] };
+Examples:
+- update_task({ task_id: "...", prompt: "new instructions" })
+- update_task({ task_id: "...", schedule_type: "cron", schedule_value: "0 9 * * *" })
+- update_task({ task_id: "...", status: "paused" })
+- update_task({ task_id: "...", status: "active" })`,
+  {
+    task_id: z.string().describe('ID of the task to update'),
+    prompt: z.string().optional().describe('New instructions for the task'),
+    schedule_type: z.enum(['cron', 'interval', 'once']).optional(),
+    schedule_value: z.string().optional().describe('New cron expression, interval ms, or ISO timestamp'),
+    status: z.enum(['active', 'paused']).optional().describe('Pause or resume the task'),
+    context_mode: z.enum(['group', 'isolated']).optional().describe('group=runs with chat history and memory, isolated=fresh session'),
   },
-);
-
-server.tool(
-  'resume_task',
-  'Resume a paused task. Non-main agents can only resume their own tasks.',
-  { task_id: z.string().describe('The task ID to resume') },
   async (args) => {
-    const ownerCheck = checkTaskOwnership(args.task_id, 'resume');
+    if (!args.prompt && !args.schedule_type && !args.schedule_value && !args.status && !args.context_mode) {
+      return {
+        content: [{ type: 'text' as const, text: 'At least one of prompt, schedule_type, schedule_value, or status must be provided.' }],
+        isError: true,
+      };
+    }
+
+    // Require schedule_value when schedule_type changes to avoid type/format mismatch
+    if (args.schedule_type && !args.schedule_value) {
+      return {
+        content: [{ type: 'text' as const, text: `When changing schedule_type to "${args.schedule_type}", you must also provide schedule_value so the format matches.` }],
+        isError: true,
+      };
+    }
+
+    // Validate schedule fields if provided
+    if (args.schedule_type === 'cron' && args.schedule_value) {
+      try {
+        CronExpressionParser.parse(args.schedule_value);
+      } catch {
+        return {
+          content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).` }],
+          isError: true,
+        };
+      }
+    } else if (args.schedule_type === 'interval' && args.schedule_value) {
+      const ms = parseInt(args.schedule_value, 10);
+      if (isNaN(ms) || ms <= 0) {
+        return {
+          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}". Must be positive milliseconds (e.g., "300000" for 5 min).` }],
+          isError: true,
+        };
+      }
+    } else if (args.schedule_type === 'once' && args.schedule_value) {
+      if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
+        return {
+          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
+          isError: true,
+        };
+      }
+      const date = new Date(args.schedule_value);
+      if (isNaN(date.getTime())) {
+        return {
+          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".` }],
+          isError: true,
+        };
+      }
+    }
+
+    const ownerCheck = checkTaskOwnership(args.task_id, 'update');
     if (!ownerCheck.allowed) return ownerCheck.response;
     const { ownerWarning } = ownerCheck;
 
     const data = {
-      type: 'resume_task',
+      type: 'edit_task',
       taskId: args.task_id,
+      prompt: args.prompt,
+      schedule_type: args.schedule_type,
+      schedule_value: args.schedule_value,
+      status: args.status,
+      context_mode: args.context_mode,
       groupFolder,
       isMain,
       timestamp: new Date().toISOString(),
@@ -361,7 +405,12 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.${ownerWarning}` }] };
+    const changed: string[] = [];
+    if (args.prompt) changed.push('prompt');
+    if (args.schedule_type || args.schedule_value) changed.push('schedule');
+    if (args.status) changed.push(`status → ${args.status}`);
+    if (args.context_mode) changed.push(`context_mode → ${args.context_mode}`);
+    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} update requested (changed: ${changed.join(', ')}).${ownerWarning}` }] };
   },
 );
 

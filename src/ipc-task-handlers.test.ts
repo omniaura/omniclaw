@@ -689,12 +689,12 @@ function createTestTask(id: string, folder: string) {
   });
 }
 
-describe('processTaskIpc: pause_task', () => {
+describe('processTaskIpc: edit_task (pause/resume)', () => {
   it('main group can pause any task', async () => {
     createTestTask('task-pause-1', 'other-group');
 
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-pause-1' },
+      { type: 'edit_task', taskId: 'task-pause-1', status: 'paused' },
       'main',
       true,
       deps,
@@ -708,7 +708,7 @@ describe('processTaskIpc: pause_task', () => {
     createTestTask('task-pause-own', 'other-group');
 
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-pause-own' },
+      { type: 'edit_task', taskId: 'task-pause-own', status: 'paused' },
       'other-group',
       false,
       deps,
@@ -722,7 +722,7 @@ describe('processTaskIpc: pause_task', () => {
     createTestTask('task-pause-other', 'third-group');
 
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-pause-other' },
+      { type: 'edit_task', taskId: 'task-pause-other', status: 'paused' },
       'other-group',
       false,
       deps,
@@ -733,7 +733,7 @@ describe('processTaskIpc: pause_task', () => {
   });
 
   it('handles missing taskId gracefully', async () => {
-    await processTaskIpc({ type: 'pause_task' } as any, 'main', true, deps);
+    await processTaskIpc({ type: 'edit_task' } as any, 'main', true, deps);
 
     // Should not throw
     expect(taskSnapshots).toHaveLength(0);
@@ -741,7 +741,7 @@ describe('processTaskIpc: pause_task', () => {
 
   it('handles non-existent task gracefully', async () => {
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'nonexistent-task' },
+      { type: 'edit_task', taskId: 'nonexistent-task', status: 'paused' },
       'main',
       true,
       deps,
@@ -755,7 +755,7 @@ describe('processTaskIpc: pause_task', () => {
     createTestTask('task-pause-snap', 'main');
 
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-pause-snap' },
+      { type: 'edit_task', taskId: 'task-pause-snap', status: 'paused' },
       'main',
       true,
       deps,
@@ -763,23 +763,19 @@ describe('processTaskIpc: pause_task', () => {
 
     expect(taskSnapshots.length).toBeGreaterThanOrEqual(1);
   });
-});
 
-describe('processTaskIpc: resume_task', () => {
   it('main group can resume any paused task', async () => {
     createTestTask('task-resume-1', 'other-group');
-    // First pause it
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-resume-1' },
+      { type: 'edit_task', taskId: 'task-resume-1', status: 'paused' },
       'main',
       true,
       deps,
     );
     expect(getTaskById('task-resume-1')!.status).toBe('paused');
 
-    // Then resume it
     await processTaskIpc(
-      { type: 'resume_task', taskId: 'task-resume-1' },
+      { type: 'edit_task', taskId: 'task-resume-1', status: 'active' },
       'main',
       true,
       deps,
@@ -791,14 +787,14 @@ describe('processTaskIpc: resume_task', () => {
   it('group can resume its own task', async () => {
     createTestTask('task-resume-own', 'other-group');
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-resume-own' },
+      { type: 'edit_task', taskId: 'task-resume-own', status: 'paused' },
       'other-group',
       false,
       deps,
     );
 
     await processTaskIpc(
-      { type: 'resume_task', taskId: 'task-resume-own' },
+      { type: 'edit_task', taskId: 'task-resume-own', status: 'active' },
       'other-group',
       false,
       deps,
@@ -810,7 +806,7 @@ describe('processTaskIpc: resume_task', () => {
   it('non-main group cannot resume another groups task', async () => {
     createTestTask('task-resume-other', 'third-group');
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-resume-other' },
+      { type: 'edit_task', taskId: 'task-resume-other', status: 'paused' },
       'main',
       true,
       deps,
@@ -818,25 +814,24 @@ describe('processTaskIpc: resume_task', () => {
     expect(getTaskById('task-resume-other')!.status).toBe('paused');
 
     await processTaskIpc(
-      { type: 'resume_task', taskId: 'task-resume-other' },
+      { type: 'edit_task', taskId: 'task-resume-other', status: 'active' },
       'other-group',
       false,
       deps,
     );
 
-    // Should remain paused — unauthorized
     expect(getTaskById('task-resume-other')!.status).toBe('paused');
   });
 
-  it('handles missing taskId gracefully', async () => {
-    await processTaskIpc({ type: 'resume_task' } as any, 'main', true, deps);
+  it('handles missing taskId on resume gracefully', async () => {
+    await processTaskIpc({ type: 'edit_task' } as any, 'main', true, deps);
 
     expect(taskSnapshots).toHaveLength(0);
   });
 
-  it('handles non-existent task gracefully', async () => {
+  it('handles non-existent task on resume gracefully', async () => {
     await processTaskIpc(
-      { type: 'resume_task', taskId: 'ghost-task' },
+      { type: 'edit_task', taskId: 'ghost-task', status: 'active' },
       'main',
       true,
       deps,
