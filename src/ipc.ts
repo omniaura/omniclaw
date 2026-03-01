@@ -76,20 +76,15 @@ export interface IpcDeps {
  * We validate both parts: the owner must be a known folder AND the suffix must
  * be exactly the 16-char hex digest format produced by getRuntimeGroupFolder().
  *
- * When an activeRuntimeFolders allowlist is provided (from the orchestrator),
- * runtime folders are checked against it — only folders actually launched by the
- * orchestrator are accepted. This prevents forged directories from gaining
- * elevated privileges.
- *
- * Returns null if the folder is unrecognized (not a known folder, not an active
- * runtime folder, and doesn't match the expected format).
+ * Returns null if the folder is unrecognized (unknown owner or malformed digest).
+ * Liveness checking (whether the container is still running) is handled by the
+ * caller — this function only validates structural ownership.
  */
 const RUNTIME_DIGEST_RE = /^[0-9a-f]{16}$/;
 
 function resolveOwnerGroupFolder(
   sourceGroup: string,
   registeredGroups: Record<string, RegisteredGroup>,
-  activeRuntimeFolders?: ReadonlySet<string>,
   agentFolders?: ReadonlySet<string>,
 ): string | null {
   const knownFolders = new Set([
@@ -103,10 +98,6 @@ function resolveOwnerGroupFolder(
   const digest = sourceGroup.slice(idx + DISPATCH_RUNTIME_SEP.length);
   if (!knownFolders.has(owner) || !RUNTIME_DIGEST_RE.test(digest)) {
     return null; // Owner unknown or digest malformed
-  }
-  // If allowlist available, verify this runtime folder was actually launched
-  if (activeRuntimeFolders && !activeRuntimeFolders.has(sourceGroup)) {
-    return null;
   }
   return owner;
 }
@@ -358,11 +349,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
       const ownerGroup = resolveOwnerGroupFolder(
         sourceGroup,
         registeredGroups,
-        runtimeFolders,
         agentFolders,
       );
       if (ownerGroup === null) {
-        // Unknown sender — not a registered group or active runtime folder.
+        // Unknown sender — not a registered group or runtime folder.
         // Log and quarantine to prevent unbounded disk growth from rogue dirs.
         const rogueDir = path.join(ipcBaseDir, sourceGroup);
         logger.warn(
@@ -383,6 +373,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
         }
         continue;
       }
+      // Detect stale dispatch folders: container has finished (removed from
+      // activeRuntimeFolders) but the IPC directory was not yet cleaned up.
+      // Process any remaining files first, then delete the directory.
+      const isStaleDispatch =
+        sourceGroup.includes(DISPATCH_RUNTIME_SEP) &&
+        runtimeFolders !== undefined &&
+        !runtimeFolders.has(sourceGroup);
       const isMain = ownerGroup === MAIN_GROUP_FOLDER;
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
@@ -470,6 +467,19 @@ export function startIpcWatcher(deps: IpcDeps): void {
         }
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+      }
+
+      // Clean up stale dispatch IPC folder after processing any remaining files.
+      // This avoids a race where the container exits, activeRuntimeFolders is
+      // updated, and the watcher finds the orphaned directory on the next poll.
+      if (isStaleDispatch) {
+        const staleDir = path.join(ipcBaseDir, sourceGroup);
+        try {
+          fs.rmSync(staleDir, { recursive: true, force: true });
+          logger.debug({ sourceGroup }, 'Cleaned up stale dispatch IPC folder');
+        } catch {
+          /* ignore — will retry next poll */
+        }
       }
     }
 
