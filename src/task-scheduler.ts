@@ -54,8 +54,12 @@ export interface SchedulerDependencies {
     groupFolder: string,
     lane: 'task',
   ) => void;
-  sendMessage: (jid: string, text: string) => Promise<string | void>;
-  findChannel: (jid: string) => Channel | undefined;
+  sendMessage: (
+    jid: string,
+    text: string,
+    discordBotId?: string,
+  ) => Promise<string | void>;
+  findChannel: (jid: string, discordBotId?: string) => Channel | undefined;
 }
 
 async function runTask(
@@ -144,7 +148,7 @@ async function runTask(
     }, TASK_CLOSE_DELAY_MS);
   };
 
-  const channel = deps.findChannel(task.chat_jid);
+  const channel = deps.findChannel(task.chat_jid, group.discordBotId);
   let parentMessageId: string | null = null;
 
   if (group.streamIntermediates && channel?.createThread) {
@@ -153,6 +157,7 @@ async function runTask(
       const msgId = await deps.sendMessage(
         task.chat_jid,
         `Running scheduled task: ${preview}...`,
+        group.discordBotId,
       );
       parentMessageId = msgId ? String(msgId) : null;
     } catch {
@@ -216,7 +221,11 @@ async function runTask(
 
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          await deps.sendMessage(
+            task.chat_jid,
+            streamedOutput.result,
+            group.discordBotId,
+          );
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
