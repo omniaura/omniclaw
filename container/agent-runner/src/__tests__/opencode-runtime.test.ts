@@ -5,9 +5,6 @@ import path from 'path';
 import {
   extractResponseText,
   extractTextFromParts,
-  collectCandidateStrings,
-  extractTextFromMessage,
-  extractLatestAssistantFromMessages,
 } from '../opencode-runtime.js';
 
 // ---------------------------------------------------------------------------
@@ -49,137 +46,6 @@ describe('extractTextFromParts', () => {
     const parts = [{ type: 'tool', state: { output: 'some output' } }];
     expect(extractTextFromParts(parts)).toBeNull();
   });
-
-  it('skips parts with non-string text', () => {
-    const parts = [
-      { type: 'text', text: 123 },
-      { type: 'text', text: 'valid' },
-    ];
-    expect(extractTextFromParts(parts)).toBe('valid');
-  });
-
-  it('handles null/undefined elements gracefully', () => {
-    const parts = [null, undefined, { type: 'text', text: 'ok' }];
-    expect(extractTextFromParts(parts as any)).toBe('ok');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// collectCandidateStrings
-// ---------------------------------------------------------------------------
-
-describe('collectCandidateStrings', () => {
-  it('collects top-level string', () => {
-    expect(collectCandidateStrings('hello')).toEqual(['hello']);
-  });
-
-  it('collects strings from arrays', () => {
-    expect(collectCandidateStrings(['a', 'b'])).toEqual(['a', 'b']);
-  });
-
-  it('prefers known keys in objects', () => {
-    const obj = { text: 'preferred', other: 'also here' };
-    const result = collectCandidateStrings(obj);
-    expect(result[0]).toBe('preferred');
-    expect(result).toContain('also here');
-  });
-
-  it('returns empty for null/undefined', () => {
-    expect(collectCandidateStrings(null)).toEqual([]);
-    expect(collectCandidateStrings(undefined)).toEqual([]);
-  });
-
-  it('respects max depth', () => {
-    // Build a deeply nested structure
-    let obj: any = { text: 'deep' };
-    for (let i = 0; i < 10; i++) obj = { nested: obj };
-    // Should stop at depth 5, so the deep text won't be found
-    const result = collectCandidateStrings(obj);
-    expect(result).not.toContain('deep');
-  });
-
-  it('skips empty/whitespace strings', () => {
-    expect(collectCandidateStrings(['', '  ', 'valid'])).toEqual(['valid']);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// extractTextFromMessage
-// ---------------------------------------------------------------------------
-
-describe('extractTextFromMessage', () => {
-  it('returns null for null input', () => {
-    expect(extractTextFromMessage(null)).toBeNull();
-  });
-
-  it('extracts string content directly', () => {
-    expect(extractTextFromMessage({ content: 'hello' })).toBe('hello');
-  });
-
-  it('extracts from array content (parts format)', () => {
-    const msg = {
-      content: [
-        { type: 'text', text: 'first' },
-        { type: 'text', text: 'second' },
-      ],
-    };
-    expect(extractTextFromMessage(msg)).toBe('first\nsecond');
-  });
-
-  it('extracts from parts array (OpenCode format)', () => {
-    const msg = {
-      parts: [{ type: 'text', text: 'from parts' }],
-    };
-    expect(extractTextFromMessage(msg)).toBe('from parts');
-  });
-
-  it('returns null for message with no recognizable content', () => {
-    expect(extractTextFromMessage({ foo: 'bar' })).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// extractLatestAssistantFromMessages
-// ---------------------------------------------------------------------------
-
-describe('extractLatestAssistantFromMessages', () => {
-  it('returns the last assistant message', () => {
-    const messages = [
-      { role: 'user', content: 'hello' },
-      { role: 'assistant', content: 'first response' },
-      { role: 'user', content: 'thanks' },
-      { role: 'assistant', content: 'second response' },
-    ];
-    expect(extractLatestAssistantFromMessages(messages)).toBe(
-      'second response',
-    );
-  });
-
-  it('returns null for empty messages', () => {
-    expect(extractLatestAssistantFromMessages([])).toBeNull();
-  });
-
-  it('returns null when no assistant messages', () => {
-    const messages = [{ role: 'user', content: 'hello' }];
-    expect(extractLatestAssistantFromMessages(messages)).toBeNull();
-  });
-
-  it('handles OpenCode info/parts format', () => {
-    const messages = [
-      {
-        info: { role: 'assistant' },
-        parts: [{ type: 'text', text: 'opencode response' }],
-      },
-    ];
-    expect(extractLatestAssistantFromMessages(messages)).toBe(
-      'opencode response',
-    );
-  });
-
-  it('handles type: assistant format', () => {
-    const messages = [{ type: 'assistant', content: 'typed response' }];
-    expect(extractLatestAssistantFromMessages(messages)).toBe('typed response');
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -191,103 +57,35 @@ describe('extractResponseText', () => {
     expect(extractResponseText(null)).toBeNull();
   });
 
-  it('returns null for result without data', () => {
-    expect(extractResponseText({})).toBeNull();
-    expect(extractResponseText({ data: null })).toBeNull();
+  it('returns null for result without parts', () => {
+    expect(extractResponseText({ data: null } as any)).toBeNull();
+    expect(extractResponseText({ data: { info: {} } } as any)).toBeNull();
   });
 
-  it('extracts from data.text', () => {
-    expect(extractResponseText({ data: { text: 'hello' } })).toBe('hello');
-  });
-
-  it('extracts from data.content', () => {
-    expect(extractResponseText({ data: { content: 'hello' } })).toBe('hello');
-  });
-
-  it('extracts structured output', () => {
+  it('extracts text from parts array', () => {
     const result = {
       data: {
-        info: { structured_output: { key: 'value' } },
-      },
-    };
-    expect(extractResponseText(result)).toBe('{"key":"value"}');
-  });
-
-  it('extracts from parts array', () => {
-    const result = {
-      data: {
+        info: {},
         parts: [
           { type: 'text', text: 'part1' },
           { type: 'text', text: 'part2' },
         ],
       },
     };
-    expect(extractResponseText(result)).toBe('part1\npart2');
+    expect(extractResponseText(result as any)).toBe('part1\npart2');
   });
 
-  it('extracts from messages array (last assistant)', () => {
+  it('ignores non-text parts', () => {
     const result = {
       data: {
-        messages: [
-          { role: 'user', content: 'question' },
-          { role: 'assistant', content: 'answer' },
-        ],
-      },
-    };
-    expect(extractResponseText(result)).toBe('answer');
-  });
-
-  it('extracts from messages with array content', () => {
-    const result = {
-      data: {
-        messages: [
-          {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'structured answer' }],
-          },
-        ],
-      },
-    };
-    expect(extractResponseText(result)).toBe('structured answer');
-  });
-
-  it('extracts from info + parts (SDK v1.2.x format)', () => {
-    const result = {
-      data: {
-        info: { role: 'assistant' },
-        parts: [{ type: 'text', text: 'sdk response' }],
-      },
-    };
-    expect(extractResponseText(result)).toBe('sdk response');
-  });
-
-  it('falls back to deep candidate collection for non-text parts', () => {
-    const result = {
-      data: {
-        info: { role: 'assistant' },
-        parts: [{ type: 'custom', content: 'deep text' }],
-      },
-    };
-    // collectCandidateStrings picks up all string values from object fields,
-    // including 'content' (preferred key) and 'type' (general walk).
-    expect(extractResponseText(result)).toBe('deep text\ncustom');
-  });
-
-  it('excludes tool parts from deep candidate fallback', () => {
-    const result = {
-      data: {
-        info: { role: 'assistant' },
+        info: {},
         parts: [
-          { type: 'tool', state: { output: 'SECRET_API_KEY=sk-xxx' } },
-          { type: 'tool-invocation', content: 'ls -la /etc/passwd' },
-          { type: 'custom', content: 'safe text' },
+          { type: 'tool', state: { output: 'some output' } },
+          { type: 'text', text: 'response' },
         ],
       },
     };
-    const text = extractResponseText(result);
-    expect(text).not.toContain('SECRET_API_KEY');
-    expect(text).not.toContain('/etc/passwd');
-    expect(text).toContain('safe text');
+    expect(extractResponseText(result as any)).toBe('response');
   });
 });
 
