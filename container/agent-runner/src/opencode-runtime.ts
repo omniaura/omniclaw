@@ -9,48 +9,17 @@
  * natively, so we don't need to configure tools ourselves.
  */
 
+import {
+  createOpencode,
+  OpencodeClient,
+  type Part,
+  type ReasoningPart,
+  type SessionMessagesResponse,
+  type TextPart,
+} from '@opencode-ai/sdk';
 import fs from 'fs';
 import path from 'path';
-
-// ---------------------------------------------------------------------------
-// Types (duplicated from host — container can't import host source)
-// ---------------------------------------------------------------------------
-
-interface ChannelInfo {
-  id: string;
-  jid: string;
-  name: string;
-}
-
-type AgentRuntime = 'claude-agent-sdk' | 'opencode';
-
-interface ContainerInput {
-  prompt: string;
-  sessionId?: string;
-  resumeAt?: string;
-  groupFolder: string;
-  chatJid: string;
-  isMain: boolean;
-  isScheduledTask?: boolean;
-  discordGuildId?: string;
-  serverFolder?: string;
-  secrets?: Record<string, string>;
-  agentRuntime?: AgentRuntime;
-  channels?: ChannelInfo[];
-  agentName?: string;
-  discordBotId?: string;
-  agentTrigger?: string;
-}
-
-interface ContainerOutput {
-  status: 'success' | 'error';
-  result: string | null;
-  newSessionId?: string;
-  resumeAt?: string;
-  error?: string;
-  intermediate?: boolean;
-  chatJid?: string;
-}
+import type { ContainerInput, ContainerOutput } from '@omniclaw/protocol';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -180,7 +149,9 @@ function waitForIpcMessage(): Promise<string | null> {
 // OpenCode server management
 // ---------------------------------------------------------------------------
 
-let openCodeServer: { close(): void } | null = null;
+let openCodeServer:
+  | Awaited<ReturnType<typeof createOpencode>>['server']
+  | null = null;
 
 /**
  * Start OpenCode server via SDK helper (spawns opencode CLI under the hood).
@@ -188,7 +159,7 @@ let openCodeServer: { close(): void } | null = null;
 async function startOpenCodeServer(
   model?: string,
   mcpEnv?: Record<string, string>,
-): Promise<OpenCodeClient> {
+) {
   const mcpServerPath = path.join(import.meta.dir, 'ipc-mcp-stdio.ts');
   const config: Record<string, unknown> = {};
   // Allow all tool operations without prompting (equivalent to Claude Code's
@@ -221,7 +192,6 @@ async function startOpenCodeServer(
     };
   }
 
-  const { createOpencode } = await import('@opencode-ai/sdk');
   const opencode = await createOpencode({
     hostname: OPENCODE_HOST,
     port: OPENCODE_PORT,
@@ -230,7 +200,7 @@ async function startOpenCodeServer(
   });
   openCodeServer = opencode.server;
   log(`OpenCode server is healthy at ${opencode.server.url}`);
-  return opencode.client as unknown as OpenCodeClient;
+  return opencode.client;
 }
 
 function stopOpenCodeServer(): void {
@@ -245,181 +215,53 @@ function stopOpenCodeServer(): void {
 }
 
 // ---------------------------------------------------------------------------
-// OpenCode SDK client
-// ---------------------------------------------------------------------------
-
-interface OpenCodeClient {
-  session: {
-    create(opts: {
-      body: Record<string, unknown>;
-    }): Promise<{ data?: { id: string } }>;
-    get(opts: { path: { id: string } }): Promise<{ data?: { id: string } }>;
-    prompt(opts: {
-      path: { id: string };
-      body: {
-        parts: Array<{ type: string; text: string }>;
-        noReply?: boolean;
-        model?: { providerID: string; modelID: string };
-      };
-    }): Promise<{ data?: any }>;
-    abort(opts: { path: { id: string } }): Promise<void>;
-    messages(opts: { path: { id: string } }): Promise<{ data?: any }>;
-    status(): Promise<{ data?: any }>;
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Response extraction
 // ---------------------------------------------------------------------------
 
-/**
- * Extract text from an OpenCode SDK prompt result.
- * The response shape can vary — try common patterns.
- */
+type OpenCodePromptResult = Awaited<
+  ReturnType<OpencodeClient['session']['prompt']>
+>;
+
 /** @internal exported for testing */
-export function extractResponseText(result: any): string | null {
-  if (!result?.data) return null;
-  const data = result.data;
-
-  // Direct text field
-  if (typeof data.text === 'string') return data.text;
-  if (typeof data.content === 'string') return data.content;
-
-  // Structured output
-  if (data.info?.structured_output) {
-    return JSON.stringify(data.info.structured_output);
-  }
-
-  // Message parts array
-  if (Array.isArray(data.parts)) {
-    const textParts = data.parts
-      .filter((p: any) => p?.type === 'text' || p?.type === 'reasoning')
-      .map((p: any) => p.text);
-    if (textParts.length > 0) return textParts.join('\n');
-  }
-
-  // SDK v1.2.x typically returns { info, parts }
-  // where info is assistant metadata and parts carries message content.
-  if (data.info && Array.isArray(data.parts)) {
-    const text = extractTextFromParts(data.parts);
-    if (text) return text;
-    // Filter out tool parts before deep traversal to avoid surfacing
-    // sensitive tool output (command results, file contents) in user-facing text.
-    const nonToolParts = data.parts.filter(
-      (p: any) => p?.type !== 'tool' && p?.type !== 'tool-invocation',
-    );
-    const deepCandidates = collectCandidateStrings(nonToolParts).slice(0, 6);
-    if (deepCandidates.length > 0) return deepCandidates.join('\n');
-    const partTypes = data.parts
-      .map((p: any) => p?.type || 'unknown')
-      .join(', ');
-    log(`OpenCode prompt returned non-text parts only: [${partTypes}]`);
-    try {
-      log(`OpenCode info snapshot: ${JSON.stringify(data.info).slice(0, 800)}`);
-    } catch {
-      // ignore snapshot stringify errors
-    }
-  }
-
-  // Messages array — take last assistant message
-  if (Array.isArray(data.messages)) {
-    for (let i = data.messages.length - 1; i >= 0; i--) {
-      const msg = data.messages[i];
-      if (msg?.role === 'assistant' && msg.content) {
-        if (typeof msg.content === 'string') return msg.content;
-        if (Array.isArray(msg.content)) {
-          const text = msg.content
-            .filter((c: any) => c.type === 'text')
-            .map((c: any) => c.text)
-            .join('\n');
-          if (text) return text;
-        }
-      }
-    }
-  }
-
-  log(`Unknown OpenCode result shape, keys: ${Object.keys(data).join(', ')}`);
-  return null;
+export function extractTextFromParts(parts: Array<Part>): string | null {
+  const texts = parts
+    .filter((p): p is TextPart | ReasoningPart =>
+      p.type === 'text' || p.type === 'reasoning',
+    )
+    .map((p) => p.text);
+  return texts.length > 0 ? texts.join('\n') : null;
 }
 
 /** @internal exported for testing */
-export function extractTextFromParts(parts: any[]): string | null {
-  const extracted: string[] = [];
-  for (const p of parts) {
-    if (
-      (p?.type === 'text' || p?.type === 'reasoning') &&
-      typeof p.text === 'string'
-    ) {
-      extracted.push(p.text);
-    }
-    // Tool outputs (bash stdout, file contents, etc.) are intentionally excluded
-    // from the user-facing response — only text/reasoning parts are surfaced.
-  }
-  return extracted.length > 0 ? extracted.join('\n') : null;
+export function extractResponseText(
+  result: OpenCodePromptResult | null,
+): string | null {
+  const parts = result?.data?.parts;
+  if (!parts) return null;
+  return extractTextFromParts(parts);
 }
 
-/** @internal exported for testing */
-export function collectCandidateStrings(
-  value: any,
-  out: string[] = [],
-  depth: number = 0,
-): string[] {
-  if (value == null || depth > 5) return out;
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (trimmed) out.push(trimmed);
-    return out;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) collectCandidateStrings(item, out, depth + 1);
-    return out;
-  }
-  if (typeof value === 'object') {
-    const preferredKeys = ['text', 'output', 'content', 'message', 'reason'];
-    for (const key of preferredKeys) {
-      if (key in value)
-        collectCandidateStrings((value as any)[key], out, depth + 1);
-    }
-    for (const [k, v] of Object.entries(value)) {
-      if (preferredKeys.includes(k)) continue;
-      collectCandidateStrings(v, out, depth + 1);
-    }
-  }
-  return out;
-}
-
-/** @internal exported for testing */
-export function extractTextFromMessage(msg: any): string | null {
-  if (!msg) return null;
-  if (typeof msg.content === 'string') return msg.content;
-  if (Array.isArray(msg.content)) return extractTextFromParts(msg.content);
-  if (Array.isArray(msg.parts)) return extractTextFromParts(msg.parts);
-  return null;
-}
-
-/** @internal exported for testing */
-export function extractLatestAssistantFromMessages(
-  messages: any[],
+function extractLatestAssistantFromSessionMessages(
+  messages: SessionMessagesResponse,
 ): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    // OpenCode messages endpoint commonly returns [{ info, parts }]
-    if (msg?.info?.role === 'assistant') {
-      const text = extractTextFromParts(
-        Array.isArray(msg.parts) ? msg.parts : [],
-      );
-      if (text) return text;
-    }
-    if (msg?.role === 'assistant' || msg?.type === 'assistant') {
-      const text = extractTextFromMessage(msg);
-      if (text) return text;
-    }
+    if (msg.info.role !== 'assistant') continue;
+    const text = extractTextFromParts(msg.parts);
+    if (text) return text;
   }
   return null;
 }
 
+function getMessagesFromPayload(
+  payload: SessionMessagesResponse | undefined,
+): SessionMessagesResponse {
+  if (Array.isArray(payload)) return payload;
+  return [];
+}
+
 async function waitForAssistantText(
-  client: OpenCodeClient,
+  client: OpencodeClient,
   sessionId: string,
   timeoutMs: number = 60000,
 ): Promise<string | null> {
@@ -429,13 +271,8 @@ async function waitForAssistantText(
       const messagesResponse = await client.session.messages({
         path: { id: sessionId },
       });
-      const payload = messagesResponse.data;
-      const messages = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.messages)
-          ? payload.messages
-          : [];
-      const text = extractLatestAssistantFromMessages(messages);
+      const messages = getMessagesFromPayload(messagesResponse.data);
+      const text = extractLatestAssistantFromSessionMessages(messages);
       if (text) return text;
     } catch (err) {
       log(
@@ -456,7 +293,7 @@ async function waitForAssistantText(
  * Returns the session ID and whether _close was detected during the prompt.
  */
 async function runOpenCodePrompt(
-  client: OpenCodeClient,
+  client: OpencodeClient,
   sessionId: string,
   prompt: string,
   timeoutMs: number,
@@ -493,27 +330,20 @@ async function runOpenCodePrompt(
     if (!ipcPolling) return;
     try {
       const resp = await client.session.messages({ path: { id: sessionId } });
-      const payload = resp.data;
-      const messages: any[] = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.messages)
-          ? payload.messages
-          : [];
+      const messages = getMessagesFromPayload(resp.data);
       for (const msg of messages) {
         if (msg?.info?.role !== 'assistant') continue;
-        const parts: any[] = Array.isArray(msg.parts) ? msg.parts : [];
+        const parts = msg.parts;
         parts.forEach((p, i) => {
-          if (p?.type !== 'tool') return;
-          const id = `${msg?.info?.id ?? 'msg'}:${i}`;
+          if (p.type !== 'tool') return;
+          const id = `${msg.info.id}:${i}`;
           if (loggedToolIds.has(id)) return;
-          const toolName: string = p.tool ?? p.name ?? p.toolName ?? 'tool';
-          const stateInput = p.state?.input;
+          const toolName = p.tool || 'tool';
+          const stateInput = p.state.input;
           const input =
             stateInput != null ? JSON.stringify(stateInput).slice(0, 120) : '';
           const output =
-            typeof p.state?.output === 'string'
-              ? p.state.output.slice(0, 200)
-              : '';
+            p.state.status === 'completed' ? p.state.output.slice(0, 200) : '';
           if (output) {
             log(`[tool] ${toolName}(${input}) → ${output}`);
             loggedToolIds.add(id);
@@ -566,12 +396,18 @@ async function runOpenCodePrompt(
     // (OpenCode doesn't expose granular tool-call streaming via SDK prompt,
     //  so we just emit the final result)
 
-    const output: ContainerOutput = {
-      status: 'success',
-      result: responseText,
-      newSessionId: sessionId,
-    };
-    if (currentChatJid) output.chatJid = currentChatJid;
+    const output: ContainerOutput = currentChatJid
+      ? {
+          status: 'success',
+          result: responseText,
+          newSessionId: sessionId,
+          chatJid: currentChatJid,
+        }
+      : {
+          status: 'success',
+          result: responseText,
+          newSessionId: sessionId,
+        };
     writeOutput(output);
 
     return { sessionId, closedDuringPrompt, promptSucceeded: true };
@@ -736,7 +572,7 @@ export async function runOpenCodeRuntime(
   if (containerInput.agentTrigger)
     mcpEnv.OMNICLAW_AGENT_TRIGGER = containerInput.agentTrigger;
 
-  let client: OpenCodeClient;
+  let client: OpencodeClient;
   try {
     client = await startOpenCodeServer(model, mcpEnv);
     await client.session.status();

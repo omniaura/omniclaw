@@ -10,6 +10,19 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
+// Types duplicated from @omniclaw/protocol — kept inline to avoid file: dep issues in Docker
+interface ChannelInfo {
+  id: string;
+  jid: string;
+  name: string;
+}
+
+function decodeChannelInfoArrayOrNull(
+  value: unknown,
+): ReadonlyArray<ChannelInfo> | null {
+  if (!Array.isArray(value)) return null;
+  return value as ChannelInfo[];
+}
 
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -24,13 +37,16 @@ const discordGuildId = process.env.OMNICLAW_DISCORD_GUILD_ID || undefined;
 const serverFolder = process.env.OMNICLAW_SERVER_FOLDER || undefined;
 
 // Multi-channel support: parse OMNICLAW_CHANNELS if set
-// Intentionally duplicated from src/backends/types.ts — this stdio MCP server runs in
-// an isolated container environment and cannot import from the host's source tree at runtime.
-interface ChannelInfo { id: string; jid: string; name: string; }
 const channelsEnv = process.env.OMNICLAW_CHANNELS;
-const channels: ChannelInfo[] = channelsEnv ? (() => {
-  try { return JSON.parse(channelsEnv); } catch { return []; }
-})() : [];
+const channels: ReadonlyArray<ChannelInfo> = channelsEnv
+  ? (() => {
+      try {
+        return decodeChannelInfoArrayOrNull(JSON.parse(channelsEnv)) || [];
+      } catch {
+        return [];
+      }
+    })()
+  : [];
 const isMultiChannel = channels.length > 1;
 
 // Build lookup maps for channel resolution
@@ -67,7 +83,9 @@ function getCurrentChatJid(): string {
     try {
       const current = fs.readFileSync('/tmp/current_chat_jid', 'utf-8').trim();
       if (current) return current;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   return initialChatJid;
 }
@@ -115,7 +133,12 @@ function writeIpcFile(dir: string, data: object): string {
 function checkTaskOwnership(
   taskId: string,
   action: 'pause' | 'resume' | 'cancel',
-): { allowed: true; ownerWarning: string } | { allowed: false; response: { content: [{ type: 'text'; text: string }]; isError: true } } {
+):
+  | { allowed: true; ownerWarning: string }
+  | {
+      allowed: false;
+      response: { content: [{ type: 'text'; text: string }]; isError: true };
+    } {
   const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
   try {
     if (fs.existsSync(tasksFile)) {
@@ -129,17 +152,27 @@ function checkTaskOwnership(
               return {
                 allowed: false,
                 response: {
-                  content: [{ type: 'text' as const, text: `Cannot ${action} task ${taskId}: it belongs to "${taskOwner}", not "${groupFolder}". Only the owning group or the main agent can ${action} a task.` }],
+                  content: [
+                    {
+                      type: 'text' as const,
+                      text: `Cannot ${action} task ${taskId}: it belongs to "${taskOwner}", not "${groupFolder}". Only the owning group or the main agent can ${action} a task.`,
+                    },
+                  ],
                   isError: true,
                 },
               };
             }
-            return { allowed: true, ownerWarning: ` WARNING: This task belongs to "${taskOwner}", not "${groupFolder}".` };
+            return {
+              allowed: true,
+              ownerWarning: ` WARNING: This task belongs to "${taskOwner}", not "${groupFolder}".`,
+            };
           }
         }
       }
     }
-  } catch { /* proceed — server will do final auth check */ }
+  } catch {
+    /* proceed — server will do final auth check */
+  }
   return { allowed: true, ownerWarning: '' };
 }
 
@@ -150,7 +183,7 @@ const server = new McpServer({
 
 // Build send_message description with channel info for multi-channel agents
 const channelListDesc = isMultiChannel
-  ? `\n\nThis agent has multiple channels:\n${channels.map(ch => `  • "${ch.name}" (ID: ${ch.id}, JID: ${ch.jid})`).join('\n')}\nYou can use channel name, ID, or full JID as target_jid. Default: the most recently active chat.`
+  ? `\n\nThis agent has multiple channels:\n${channels.map((ch) => `  • "${ch.name}" (ID: ${ch.id}, JID: ${ch.jid})`).join('\n')}\nYou can use channel name, ID, or full JID as target_jid. Default: the most recently active chat.`
   : '';
 
 server.tool(
@@ -162,12 +195,20 @@ IMPORTANT: Your final text response is ALSO sent to the user automatically. If s
 Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.${channelListDesc}`,
   {
     text: z.string().describe('The message text to send'),
-    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
-    target_jid: z.string().optional().describe(
-      isMultiChannel
-        ? 'Target channel or agent. Accepts channel name, channel ID, or full JID. Defaults to the most recently active chat.'
-        : 'Send to a different group/agent by JID. Check /workspace/ipc/agent_registry.json for available targets. Defaults to current group.',
-    ),
+    sender: z
+      .string()
+      .optional()
+      .describe(
+        'Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.',
+      ),
+    target_jid: z
+      .string()
+      .optional()
+      .describe(
+        isMultiChannel
+          ? 'Target channel or agent. Accepts channel name, channel ID, or full JID. Defaults to the most recently active chat.'
+          : 'Send to a different group/agent by JID. Check /workspace/ipc/agent_registry.json for available targets. Defaults to current group.',
+      ),
   },
   async (args) => {
     const rawTarget = args.target_jid;
@@ -187,8 +228,16 @@ Note: when running as a scheduled task, your final output is NOT sent to the use
     writeIpcFile(MESSAGES_DIR, data);
 
     const channelName = channelByJid.get(targetJid)?.name;
-    const targetDesc = channelName || (targetJid !== getCurrentChatJid() ? targetJid : '');
-    return { content: [{ type: 'text' as const, text: `Message sent${targetDesc ? ` to ${targetDesc}` : ''}. If this was your final response, stay silent — wrap any remaining text in <internal> tags to avoid a duplicate.` }] };
+    const targetDesc =
+      channelName || (targetJid !== getCurrentChatJid() ? targetJid : '');
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Message sent${targetDesc ? ` to ${targetDesc}` : ''}. If this was your final response, stay silent — wrap any remaining text in <internal> tags to avoid a duplicate.`,
+        },
+      ],
+    };
   },
 );
 
@@ -218,11 +267,33 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 \u2022 interval: Milliseconds between runs (e.g., "300000" for 5 minutes, "3600000" for 1 hour)
 \u2022 once: Local time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00"). Do NOT use UTC/Z suffix.`,
   {
-    prompt: z.string().describe('What the agent should do when the task runs. For isolated mode, include all necessary context here.'),
-    schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time'),
-    schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
-    context_mode: z.enum(['group', 'isolated']).default('group').describe('group=runs with chat history and memory, isolated=fresh session (include context in prompt)'),
-    target_group_jid: z.string().optional().describe('(Main group only) JID of the group to schedule the task for. Defaults to the current group.'),
+    prompt: z
+      .string()
+      .describe(
+        'What the agent should do when the task runs. For isolated mode, include all necessary context here.',
+      ),
+    schedule_type: z
+      .enum(['cron', 'interval', 'once'])
+      .describe(
+        'cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time',
+      ),
+    schedule_value: z
+      .string()
+      .describe(
+        'cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)',
+      ),
+    context_mode: z
+      .enum(['group', 'isolated'])
+      .default('group')
+      .describe(
+        'group=runs with chat history and memory, isolated=fresh session (include context in prompt)',
+      ),
+    target_group_jid: z
+      .string()
+      .optional()
+      .describe(
+        '(Main group only) JID of the group to schedule the task for. Defaults to the current group.',
+      ),
   },
   async (args) => {
     // Validate schedule_value before writing IPC
@@ -231,7 +302,12 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
         CronExpressionParser.parse(args.schedule_value);
       } catch {
         return {
-          content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).`,
+            },
+          ],
           isError: true,
         };
       }
@@ -239,28 +315,49 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       const ms = parseInt(args.schedule_value, 10);
       if (isNaN(ms) || ms <= 0) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}". Must be positive milliseconds (e.g., "300000" for 5 min).` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid interval: "${args.schedule_value}". Must be positive milliseconds (e.g., "300000" for 5 min).`,
+            },
+          ],
           isError: true,
         };
       }
     } else if (args.schedule_type === 'once') {
-      if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
+      if (
+        /[Zz]$/.test(args.schedule_value) ||
+        /[+-]\d{2}:\d{2}$/.test(args.schedule_value)
+      ) {
         return {
-          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".`,
+            },
+          ],
           isError: true,
         };
       }
       const date = new Date(args.schedule_value);
       if (isNaN(date.getTime())) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".`,
+            },
+          ],
           isError: true,
         };
       }
     }
 
     // Non-main groups can only schedule for themselves
-    const targetJid = isMain && args.target_group_jid ? args.target_group_jid : getCurrentChatJid();
+    const targetJid =
+      isMain && args.target_group_jid
+        ? args.target_group_jid
+        : getCurrentChatJid();
 
     const data = {
       type: 'schedule_task',
@@ -276,44 +373,79 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     const filename = writeIpcFile(TASKS_DIR, data);
 
     return {
-      content: [{ type: 'text' as const, text: `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}` }],
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}`,
+        },
+      ],
     };
   },
 );
 
 server.tool(
   'list_tasks',
-  "List scheduled tasks for the current context. Shows task ownership so you can identify which group/agent each task belongs to.",
+  'List scheduled tasks for the current context. Shows task ownership so you can identify which group/agent each task belongs to.',
   {},
   async () => {
     const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
 
     try {
       if (!fs.existsSync(tasksFile)) {
-        return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }] };
+        return {
+          content: [
+            { type: 'text' as const, text: 'No scheduled tasks found.' },
+          ],
+        };
       }
 
       const tasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
 
       if (tasks.length === 0) {
-        return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }] };
+        return {
+          content: [
+            { type: 'text' as const, text: 'No scheduled tasks found.' },
+          ],
+        };
       }
 
       const formatted = tasks
         .map(
-          (t: { id: string; groupFolder?: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) => {
+          (t: {
+            id: string;
+            groupFolder?: string;
+            prompt: string;
+            schedule_type: string;
+            schedule_value: string;
+            status: string;
+            next_run: string;
+          }) => {
             const owner = t.groupFolder ?? 'unknown';
-            const ownerLabel = owner === groupFolder ? `${owner} (yours)` : owner;
-            const promptPreview = t.prompt.length > 50 ? `${t.prompt.slice(0, 50)}...` : t.prompt;
+            const ownerLabel =
+              owner === groupFolder ? `${owner} (yours)` : owner;
+            const promptPreview =
+              t.prompt.length > 50 ? `${t.prompt.slice(0, 50)}...` : t.prompt;
             return `- [${t.id}] (owner: ${ownerLabel}) ${promptPreview} (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`;
           },
         )
         .join('\n');
 
-      return { content: [{ type: 'text' as const, text: `Scheduled tasks (current group: ${groupFolder}):\n${formatted}` }] };
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Scheduled tasks (current group: ${groupFolder}):\n${formatted}`,
+          },
+        ],
+      };
     } catch (err) {
       return {
-        content: [{ type: 'text' as const, text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
       };
     }
   },
@@ -338,7 +470,14 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.${ownerWarning}` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${args.task_id} pause requested.${ownerWarning}`,
+        },
+      ],
+    };
   },
 );
 
@@ -361,7 +500,14 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.${ownerWarning}` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${args.task_id} resume requested.${ownerWarning}`,
+        },
+      ],
+    };
   },
 );
 
@@ -384,7 +530,14 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.${ownerWarning}` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${args.task_id} cancellation requested.${ownerWarning}`,
+        },
+      ],
+    };
   },
 );
 
@@ -396,21 +549,49 @@ Use available_groups.json to find the JID for a group. The folder name should be
 
 Backend options: "apple-container" (local VM, default), "docker" (Docker container).`,
   {
-    jid: z.string().describe('The group JID (e.g., "120363336345536173@g.us" for WhatsApp, "dc:123456" for Discord)'),
+    jid: z
+      .string()
+      .describe(
+        'The group JID (e.g., "120363336345536173@g.us" for WhatsApp, "dc:123456" for Discord)',
+      ),
     name: z.string().describe('Display name for the group'),
-    folder: z.string()
-      .regex(/^[a-z0-9][a-z0-9_-]*$/, 'Folder must be lowercase alphanumeric with hyphens/underscores')
+    folder: z
+      .string()
+      .regex(
+        /^[a-z0-9][a-z0-9_-]*$/,
+        'Folder must be lowercase alphanumeric with hyphens/underscores',
+      )
       .max(64, 'Folder name must be 64 characters or fewer')
-      .describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
+      .describe(
+        'Folder name for group files (lowercase, hyphens, e.g., "family-chat")',
+      ),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
-    discord_guild_id: z.string().optional().describe('Discord guild/server ID — enables server-level shared context across channels'),
-    backend: z.enum(['apple-container', 'docker']).optional().describe('Backend to run this agent on (default: apple-container)'),
-    description: z.string().optional().describe('What this agent does (shown in agent registry, helps other agents route requests)'),
+    discord_guild_id: z
+      .string()
+      .optional()
+      .describe(
+        'Discord guild/server ID — enables server-level shared context across channels',
+      ),
+    backend: z
+      .enum(['apple-container', 'docker'])
+      .optional()
+      .describe('Backend to run this agent on (default: apple-container)'),
+    description: z
+      .string()
+      .optional()
+      .describe(
+        'What this agent does (shown in agent registry, helps other agents route requests)',
+      ),
   },
   async (args) => {
     if (!isMain) {
       return {
-        content: [{ type: 'text' as const, text: 'Only the main group can register new groups.' }],
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Only the main group can register new groups.',
+          },
+        ],
         isError: true,
       };
     }
@@ -431,7 +612,12 @@ Backend options: "apple-container" (local VM, default), "docker" (Docker contain
 
     const backendInfo = args.backend ? ` (backend: ${args.backend})` : '';
     return {
-      content: [{ type: 'text' as const, text: `Group "${args.name}" registered${backendInfo}. It will start receiving messages immediately.` }],
+      content: [
+        {
+          type: 'text' as const,
+          text: `Group "${args.name}" registered${backendInfo}. It will start receiving messages immediately.`,
+        },
+      ],
     };
   },
 );
@@ -445,12 +631,33 @@ You can also share files to another agent or request files from them.
 
 The request is sent to the target agent (or admin if no target specified) who can then share the relevant context.`,
   {
-    description: z.string().describe('What context or information you need and why'),
-    target_agent: z.string().optional().describe('Agent ID to request from (e.g., "main", "ditto-discord"). Check agent_registry.json for available agents.'),
-    scope: z.enum(['channel', 'server', 'auto']).default('auto')
-      .describe('Where the shared context should go: channel (just this channel), server (all channels in this Discord server), or auto (let admin decide)'),
-    files: z.array(z.string()).optional().describe('Paths to SHARE (send TO target agent). Relative to /workspace/group/.'),
-    request_files: z.array(z.string()).optional().describe('Paths to REQUEST (ask target agent to send back). Relative to their /workspace/group/.'),
+    description: z
+      .string()
+      .describe('What context or information you need and why'),
+    target_agent: z
+      .string()
+      .optional()
+      .describe(
+        'Agent ID to request from (e.g., "main", "ditto-discord"). Check agent_registry.json for available agents.',
+      ),
+    scope: z
+      .enum(['channel', 'server', 'auto'])
+      .default('auto')
+      .describe(
+        'Where the shared context should go: channel (just this channel), server (all channels in this Discord server), or auto (let admin decide)',
+      ),
+    files: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Paths to SHARE (send TO target agent). Relative to /workspace/group/.',
+      ),
+    request_files: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Paths to REQUEST (ask target agent to send back). Relative to their /workspace/group/.',
+      ),
   },
   async (args) => {
     writeIpcFile(TASKS_DIR, {
@@ -467,11 +674,24 @@ The request is sent to the target agent (or admin if no target specified) who ca
       timestamp: new Date().toISOString(),
     });
 
-    const targetInfo = args.target_agent ? ` to agent "${args.target_agent}"` : ' to admin';
-    const filesInfo = args.files?.length ? ` Sharing ${args.files.length} file(s).` : '';
-    const requestInfo = args.request_files?.length ? ` Requesting ${args.request_files.length} file(s).` : '';
+    const targetInfo = args.target_agent
+      ? ` to agent "${args.target_agent}"`
+      : ' to admin';
+    const filesInfo = args.files?.length
+      ? ` Sharing ${args.files.length} file(s).`
+      : '';
+    const requestInfo = args.request_files?.length
+      ? ` Requesting ${args.request_files.length} file(s).`
+      : '';
 
-    return { content: [{ type: 'text' as const, text: `Context request sent${targetInfo}.${filesInfo}${requestInfo} They'll review it and share relevant information if approved.` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Context request sent${targetInfo}.${filesInfo}${requestInfo} They'll review it and share relevant information if approved.`,
+        },
+      ],
+    };
   },
 );
 
@@ -486,9 +706,19 @@ Use this when you need:
 The task will be sent to the admin for approval. Once approved, the local agent will execute it
 and notify you when results are available via context storage.`,
   {
-    description: z.string().describe('What needs to be done on the local machine'),
-    callback_agent_id: z.string().optional().describe('Agent ID to notify when done (defaults to current agent)'),
-    files: z.array(z.string()).optional().describe('Paths to include with the request (relative to /workspace/group/)'),
+    description: z
+      .string()
+      .describe('What needs to be done on the local machine'),
+    callback_agent_id: z
+      .string()
+      .optional()
+      .describe('Agent ID to notify when done (defaults to current agent)'),
+    files: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Paths to include with the request (relative to /workspace/group/)',
+      ),
   },
   async (args) => {
     writeIpcFile(TASKS_DIR, {
@@ -502,7 +732,12 @@ and notify you when results are available via context storage.`,
     });
 
     return {
-      content: [{ type: 'text' as const, text: `Task delegated to local agent for approval: "${args.description.slice(0, 100)}..."` }],
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task delegated to local agent for approval: "${args.description.slice(0, 100)}..."`,
+        },
+      ],
     };
   },
 );
@@ -517,10 +752,22 @@ server.tool(
 Use this when you need project status, repo information, or any context that hasn't been shared with you yet.
 The request goes to the admin for approval, then the local agent writes the context to your shared storage.`,
   {
-    description: z.string().describe('What context or information you need and why'),
-    requested_topics: z.array(
-      z.string().regex(TOPIC_NAME_REGEX, 'Topic must be a simple name (no path separators)')
-    ).optional().describe('Specific topic names to request (e.g., ["api-refactor", "project-overview"])'),
+    description: z
+      .string()
+      .describe('What context or information you need and why'),
+    requested_topics: z
+      .array(
+        z
+          .string()
+          .regex(
+            TOPIC_NAME_REGEX,
+            'Topic must be a simple name (no path separators)',
+          ),
+      )
+      .optional()
+      .describe(
+        'Specific topic names to request (e.g., ["api-refactor", "project-overview"])',
+      ),
   },
   async (args) => {
     writeIpcFile(TASKS_DIR, {
@@ -533,7 +780,12 @@ The request goes to the admin for approval, then the local agent writes the cont
     });
 
     return {
-      content: [{ type: 'text' as const, text: `Context requested from admin: "${args.description.slice(0, 100)}..."` }],
+      content: [
+        {
+          type: 'text' as const,
+          text: `Context requested from admin: "${args.description.slice(0, 100)}..."`,
+        },
+      ],
     };
   },
 );
@@ -543,31 +795,55 @@ server.tool(
   `Read shared context that has been written to your context storage.
 Context is stored as markdown files by topic name. Use list_context_topics first to see what's available.`,
   {
-    topic: z.string()
-      .regex(TOPIC_NAME_REGEX, 'Topic must be a simple name (no path separators)')
-      .describe('The topic name to read (e.g., "project-overview", "api-refactor")'),
+    topic: z
+      .string()
+      .regex(
+        TOPIC_NAME_REGEX,
+        'Topic must be a simple name (no path separators)',
+      )
+      .describe(
+        'The topic name to read (e.g., "project-overview", "api-refactor")',
+      ),
   },
   async (args) => {
     const contextDir = path.resolve('/workspace/group/context');
     const contextPath = path.resolve(contextDir, `${args.topic}.md`);
     // Belt-and-suspenders: verify resolved path stays within context directory
     if (!contextPath.startsWith(`${contextDir}${path.sep}`)) {
-      return { content: [{ type: 'text' as const, text: 'Error: invalid topic name' }] };
+      return {
+        content: [{ type: 'text' as const, text: 'Error: invalid topic name' }],
+      };
     }
     try {
       if (!fs.existsSync(contextPath)) {
-        return { content: [{ type: 'text' as const, text: `No context found for topic "${args.topic}".` }] };
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `No context found for topic "${args.topic}".`,
+            },
+          ],
+        };
       }
       // Reject symlinks — prevents escape via symlink planted in context dir
       const stat = fs.lstatSync(contextPath);
       if (stat.isSymbolicLink()) {
-        return { content: [{ type: 'text' as const, text: 'Error: invalid topic name' }] };
+        return {
+          content: [
+            { type: 'text' as const, text: 'Error: invalid topic name' },
+          ],
+        };
       }
       const content = fs.readFileSync(contextPath, 'utf-8');
       return { content: [{ type: 'text' as const, text: content }] };
     } catch (err) {
       return {
-        content: [{ type: 'text' as const, text: `Error reading context: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error reading context: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
         isError: true,
       };
     }
@@ -582,23 +858,48 @@ server.tool(
     const contextDir = path.resolve('/workspace/group/context');
     try {
       if (!fs.existsSync(contextDir)) {
-        return { content: [{ type: 'text' as const, text: 'No context directory found. No context has been shared yet.' }] };
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'No context directory found. No context has been shared yet.',
+            },
+          ],
+        };
       }
       // Only list regular .md files (skip symlinks)
       const files = fs.readdirSync(contextDir).filter((f) => {
         if (!f.endsWith('.md')) return false;
         try {
           return fs.lstatSync(path.join(contextDir, f)).isFile();
-        } catch { return false; }
+        } catch {
+          return false;
+        }
       });
       if (files.length === 0) {
-        return { content: [{ type: 'text' as const, text: 'No context topics found.' }] };
+        return {
+          content: [
+            { type: 'text' as const, text: 'No context topics found.' },
+          ],
+        };
       }
       const topics = files.map((f) => f.replace(/\.md$/, ''));
-      return { content: [{ type: 'text' as const, text: `Available context topics:\n${topics.map((t) => `- ${t}`).join('\n')}` }] };
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Available context topics:\n${topics.map((t) => `- ${t}`).join('\n')}`,
+          },
+        ],
+      };
     } catch (err) {
       return {
-        content: [{ type: 'text' as const, text: `Error listing context: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error listing context: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
         isError: true,
       };
     }
@@ -612,9 +913,13 @@ server.tool(
 Returns information about each agent including their ID, name, description, backend type, and JID (for messaging).
 This is useful when you need to send messages to specific agents or request context from them.`,
   {
-    filter_backend: z.enum(['apple-container', 'docker']).optional()
+    filter_backend: z
+      .enum(['apple-container', 'docker'])
+      .optional()
       .describe('Optional: filter agents by backend type'),
-    include_self: z.boolean().default(true)
+    include_self: z
+      .boolean()
+      .default(true)
       .describe('Include the current agent in results (default: true)'),
   },
   async (args) => {
@@ -623,10 +928,12 @@ This is useful when you need to send messages to specific agents or request cont
     try {
       if (!fs.existsSync(registryPath)) {
         return {
-          content: [{
-            type: 'text' as const,
-            text: 'Agent registry not found. No agents registered yet.'
-          }]
+          content: [
+            {
+              type: 'text' as const,
+              text: 'Agent registry not found. No agents registered yet.',
+            },
+          ],
         };
       }
 
@@ -634,10 +941,12 @@ This is useful when you need to send messages to specific agents or request cont
 
       if (!Array.isArray(registry) || registry.length === 0) {
         return {
-          content: [{
-            type: 'text' as const,
-            text: 'No agents found in registry.'
-          }]
+          content: [
+            {
+              type: 'text' as const,
+              text: 'No agents found in registry.',
+            },
+          ],
         };
       }
 
@@ -654,10 +963,12 @@ This is useful when you need to send messages to specific agents or request cont
 
       if (agents.length === 0) {
         return {
-          content: [{
-            type: 'text' as const,
-            text: 'No agents match your filter criteria.'
-          }]
+          content: [
+            {
+              type: 'text' as const,
+              text: 'No agents match your filter criteria.',
+            },
+          ],
         };
       }
 
@@ -673,7 +984,9 @@ This is useful when you need to send messages to specific agents or request cont
         lines.push(`  • ID: \`${agent.id}\``);
         lines.push(`  • JID: \`${agent.jid}\``);
         if (agent.jids && agent.jids.length > 1) {
-          lines.push(`  • All JIDs: ${agent.jids.map((j: string) => `\`${j}\``).join(', ')}`);
+          lines.push(
+            `  • All JIDs: ${agent.jids.map((j: string) => `\`${j}\``).join(', ')}`,
+          );
         }
         lines.push(`  • Backend: ${agent.backend}`);
         lines.push(`  • Trigger: ${agent.trigger}`);
@@ -689,17 +1002,21 @@ This is useful when you need to send messages to specific agents or request cont
       const text = `${summary}\n\n${lines.join('\n')}`;
 
       return {
-        content: [{
-          type: 'text' as const,
-          text
-        }]
+        content: [
+          {
+            type: 'text' as const,
+            text,
+          },
+        ],
       };
     } catch (err) {
       return {
-        content: [{
-          type: 'text' as const,
-          text: `Error reading agent registry: ${err instanceof Error ? err.message : String(err)}`
-        }],
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error reading agent registry: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
         isError: true,
       };
     }
@@ -717,8 +1034,15 @@ if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
     reactionDesc,
     {
       message_id: z.string().describe('The message ID to react to'),
-      emoji: z.string().describe('Emoji to react with (e.g. "\ud83d\udc4d", "\u2764\ufe0f", "\ud83c\udf89", "\u2705")'),
-      remove: z.boolean().optional().describe('Set to true to remove the reaction instead of adding it'),
+      emoji: z
+        .string()
+        .describe(
+          'Emoji to react with (e.g. "\ud83d\udc4d", "\u2764\ufe0f", "\ud83c\udf89", "\u2705")',
+        ),
+      remove: z
+        .boolean()
+        .optional()
+        .describe('Set to true to remove the reaction instead of adding it'),
     },
     async (args) => {
       writeIpcFile(MESSAGES_DIR, {
@@ -730,42 +1054,58 @@ if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
         groupFolder,
         timestamp: new Date().toISOString(),
       });
-      return { content: [{ type: 'text' as const, text: args.remove ? 'Reaction removed.' : 'Reaction added.' }] };
-    },
-  );
-
-  if (!isTelegram) server.tool(
-    'format_mention',
-    'Format a user mention for Discord using their display name. Returns the proper <@USER_ID> format for Discord mentions.',
-    {
-      user_name: z.string().describe('Display name of the user to mention (e.g. "OmarOmni", "PeytonOmni")'),
-    },
-    async (args) => {
-      // Reload on each request so long-lived containers do not use stale registry data.
-      const userRegistry = loadUserRegistry();
-      // Look up user in registry (case-insensitive)
-      const key = args.user_name.toLowerCase().trim();
-      const user = userRegistry[key];
-
-      if (user && user.platform === 'discord') {
-        // Return properly formatted Discord mention
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `<@${user.id}>`
-          }]
-        };
-      }
-
-      // User not found - return plain @mention as fallback
       return {
-        content: [{
-          type: 'text' as const,
-          text: `@${args.user_name}`
-        }]
+        content: [
+          {
+            type: 'text' as const,
+            text: args.remove ? 'Reaction removed.' : 'Reaction added.',
+          },
+        ],
       };
     },
   );
+
+  if (!isTelegram)
+    server.tool(
+      'format_mention',
+      'Format a user mention for Discord using their display name. Returns the proper <@USER_ID> format for Discord mentions.',
+      {
+        user_name: z
+          .string()
+          .describe(
+            'Display name of the user to mention (e.g. "OmarOmni", "PeytonOmni")',
+          ),
+      },
+      async (args) => {
+        // Reload on each request so long-lived containers do not use stale registry data.
+        const userRegistry = loadUserRegistry();
+        // Look up user in registry (case-insensitive)
+        const key = args.user_name.toLowerCase().trim();
+        const user = userRegistry[key];
+
+        if (user && user.platform === 'discord') {
+          // Return properly formatted Discord mention
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `<@${user.id}>`,
+              },
+            ],
+          };
+        }
+
+        // User not found - return plain @mention as fallback
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `@${args.user_name}`,
+            },
+          ],
+        };
+      },
+    );
 }
 
 // Start the stdio transport

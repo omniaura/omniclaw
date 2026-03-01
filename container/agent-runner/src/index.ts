@@ -16,40 +16,41 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import {
+  query,
+  HookCallback,
+  PreCompactHookInput,
+  PreToolUseHookInput,
+} from '@anthropic-ai/claude-agent-sdk';
+// Types duplicated from @omniclaw/protocol — kept inline to avoid file: dep issues in Docker
+type AgentRuntime = 'claude-agent-sdk' | 'opencode';
 
-// Intentionally duplicated from src/backends/types.ts — this container process runs in
-// an isolated environment and cannot import from the host's source tree at runtime.
 interface ChannelInfo {
   id: string;
   jid: string;
   name: string;
 }
 
-type AgentRuntime = 'claude-agent-sdk' | 'opencode';
-
 interface ContainerInput {
   prompt: string;
-  sessionId?: string;
-  resumeAt?: string;
-  agentName?: string;
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
+  sessionId?: string;
+  resumeAt?: string;
+  runtimeFolder?: string;
   isScheduledTask?: boolean;
   discordGuildId?: string;
   serverFolder?: string;
   secrets?: Record<string, string>;
-  /** Which agent runtime to use. Default: claude-agent-sdk */
   agentRuntime?: AgentRuntime;
-  /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
   channels?: ChannelInfo[];
-  /** Agent's display name (e.g. "OCPeyton"). Injected into system prompt for self-awareness. */
   agentName?: string;
-  /** Agent's Discord bot ID. Injected into system prompt so agent knows its own bot identity. */
   discordBotId?: string;
-  /** Agent's trigger word/phrase (e.g. "@OCPeyton"). */
   agentTrigger?: string;
+  agentContextFolder?: string;
+  channelFolder?: string;
+  categoryFolder?: string;
 }
 
 interface ContainerOutput {
@@ -60,6 +61,17 @@ interface ContainerOutput {
   error?: string;
   intermediate?: boolean;
   chatJid?: string;
+}
+
+function decodeContainerInputSync(value: unknown): ContainerInput {
+  return value as ContainerInput;
+}
+
+function decodeChannelInfoArrayOrNull(
+  value: unknown,
+): ReadonlyArray<ChannelInfo> | null {
+  if (!Array.isArray(value)) return null;
+  return value as ChannelInfo[];
 }
 
 interface SessionEntry {
@@ -75,7 +87,10 @@ interface SessionsIndex {
 
 type ContentBlock =
   | { type: 'text'; text: string }
-  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+  | {
+      type: 'image';
+      source: { type: 'base64'; media_type: string; data: string };
+    };
 
 interface SDKUserMessage {
   type: 'user';
@@ -128,7 +143,9 @@ class MessageStream {
         yield this.queue.shift()!;
       }
       if (this.done) return;
-      await new Promise<void>(r => { this.waiting = r; });
+      await new Promise<void>((r) => {
+        this.waiting = r;
+      });
       this.waiting = null;
     }
   }
@@ -138,7 +155,9 @@ async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
     process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => { data += chunk; });
+    process.stdin.on('data', (chunk) => {
+      data += chunk;
+    });
     process.stdin.on('end', () => resolve(data));
     process.stdin.on('error', reject);
   });
@@ -149,7 +168,9 @@ const OUTPUT_END_MARKER = '---OMNICLAW_OUTPUT_END---';
 
 function writeOutput(output: ContainerOutput): void {
   // Inject current chatJid so the host can route responses to the correct channel
-  const enriched = currentChatJidValue ? { ...output, chatJid: currentChatJidValue } : output;
+  const enriched = currentChatJidValue
+    ? { ...output, chatJid: currentChatJidValue }
+    : output;
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(enriched));
   console.log(OUTPUT_END_MARKER);
@@ -215,14 +236,20 @@ export function buildContent(text: string): string | ContentBlock[] {
         const mediaType = EXT_TO_MEDIA_TYPE[ext] || 'image/png';
         blocks.push({
           type: 'image',
-          source: { type: 'base64', media_type: mediaType, data: data.toString('base64') },
+          source: {
+            type: 'base64',
+            media_type: mediaType,
+            data: data.toString('base64'),
+          },
         });
       } else {
         log(`Image file not found: ${filePath}`);
         blocks.push({ type: 'text', text: '[Image unavailable]' });
       }
     } catch (err) {
-      log(`Failed to read image ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+      log(
+        `Failed to read image ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
       blocks.push({ type: 'text', text: '[Image unavailable]' });
     }
 
@@ -238,7 +265,10 @@ export function buildContent(text: string): string | ContentBlock[] {
   return blocks.length > 0 ? blocks : text;
 }
 
-function getSessionSummary(sessionId: string, transcriptPath: string): string | null {
+function getSessionSummary(
+  sessionId: string,
+  transcriptPath: string,
+): string | null {
   const projectDir = path.dirname(transcriptPath);
   const indexPath = path.join(projectDir, 'sessions-index.json');
 
@@ -248,13 +278,17 @@ function getSessionSummary(sessionId: string, transcriptPath: string): string | 
   }
 
   try {
-    const index: SessionsIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-    const entry = index.entries.find(e => e.sessionId === sessionId);
+    const index: SessionsIndex = JSON.parse(
+      fs.readFileSync(indexPath, 'utf-8'),
+    );
+    const entry = index.entries.find((e) => e.sessionId === sessionId);
     if (entry?.summary) {
       return entry.summary;
     }
   } catch (err) {
-    log(`Failed to read sessions index: ${err instanceof Error ? err.message : String(err)}`);
+    log(
+      `Failed to read sessions index: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
   return null;
@@ -293,12 +327,18 @@ function createPreCompactHook(assistantName: string): HookCallback {
       const filename = `${date}-${name}.md`;
       const filePath = path.join(conversationsDir, filename);
 
-      const markdown = formatTranscriptMarkdown(messages, summary, assistantName);
+      const markdown = formatTranscriptMarkdown(
+        messages,
+        summary,
+        assistantName,
+      );
       fs.writeFileSync(filePath, markdown);
 
       log(`Archived conversation to ${filePath}`);
     } catch (err) {
-      log(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
+      log(
+        `Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     return {};
@@ -308,7 +348,11 @@ function createPreCompactHook(assistantName: string): HookCallback {
 // Secrets to strip from Bash tool subprocess environments.
 // These are needed by claude-code for API auth but should never
 // be visible to commands Kit runs.
-const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_OAUTH_TOKEN'];
+const SECRET_ENV_VARS = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_BASE_URL',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+];
 
 /**
  * createSanitizeBashHook
@@ -334,27 +378,27 @@ export function createSanitizeBashHook(): HookCallback {
     if (/\/proc\/[^ \t\n]*\/environ/.test(command)) {
       throw new Error(
         'Access to /proc/*/environ is not allowed for security reasons. ' +
-        'This file contains process environment variables which may include sensitive credentials. ' +
-        'See: https://github.com/omniaura/omniclaw/issues/79'
+          'This file contains process environment variables which may include sensitive credentials. ' +
+          'See: https://github.com/omniaura/omniclaw/issues/79',
       );
     }
 
     // Block other sensitive paths
     const blockedPaths = [
-      /\/tmp\/input\.json/,              // Stdin buffer
-      /\/workspace\/env-dir(?:\/|$)/,   // Mounted env directory (with or without trailing slash)
-      /\/workspace\/project\/\.env(?:\s|$|[;|&><)\n]|\$\()/,  // Project root .env (masked by /dev/null mount, defense-in-depth)
-      /\/proc\/.*\/mountinfo/,       // Mount enumeration
-      /\/proc\/.*\/mounts/,          // Mount list
-      /\/etc\/mtab/,                 // Mount table
-      /\/etc\/fstab/,                // Filesystem table
+      /\/tmp\/input\.json/, // Stdin buffer
+      /\/workspace\/env-dir(?:\/|$)/, // Mounted env directory (with or without trailing slash)
+      /\/workspace\/project\/\.env(?:\s|$|[;|&><)\n]|\$\()/, // Project root .env (masked by /dev/null mount, defense-in-depth)
+      /\/proc\/.*\/mountinfo/, // Mount enumeration
+      /\/proc\/.*\/mounts/, // Mount list
+      /\/etc\/mtab/, // Mount table
+      /\/etc\/fstab/, // Filesystem table
     ];
 
     for (const pattern of blockedPaths) {
       if (pattern.test(command)) {
         throw new Error(
           'This command attempts to access a restricted file that could expose credentials. ' +
-          'See: https://github.com/omniaura/omniclaw/issues/79'
+            'See: https://github.com/omniaura/omniclaw/issues/79',
         );
       }
     }
@@ -390,7 +434,10 @@ const DEFAULT_READ_LIMIT_LINES = 500;
 export function createFileSizeHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
     const preInput = input as PreToolUseHookInput;
-    const { file_path, limit } = preInput.tool_input as { file_path?: string; limit?: number };
+    const { file_path, limit } = preInput.tool_input as {
+      file_path?: string;
+      limit?: number;
+    };
     if (!file_path) return {};
     // Respect an explicit limit the agent already set
     if (limit != null) return {};
@@ -403,7 +450,9 @@ export function createFileSizeHook(): HookCallback {
     }
 
     if (size > MAX_READ_BYTES) {
-      log(`Large file: ${file_path} (${Math.round(size / 1024)}KB), injecting limit=${DEFAULT_READ_LIMIT_LINES}`);
+      log(
+        `Large file: ${file_path} (${Math.round(size / 1024)}KB), injecting limit=${DEFAULT_READ_LIMIT_LINES}`,
+      );
       return {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
@@ -449,21 +498,21 @@ export function createSanitizeReadHook(): HookCallback {
     // Block reads of sensitive files
     const blockedPatterns = [
       /^\/proc\/(?:\d+|self)(?:\/[^/]+)*\/environ$/, // Process/task environ (any depth: /proc/<pid>/task/<tid>/environ)
-      /^\/tmp\/input\.json$/,         // Stdin buffer
-      /^\/workspace\/env-dir\//,      // Mounted env directory
+      /^\/tmp\/input\.json$/, // Stdin buffer
+      /^\/workspace\/env-dir\//, // Mounted env directory
       /^\/workspace\/project\/\.env$/, // Project root .env (masked by /dev/null mount, defense-in-depth)
-      /^\/proc\/(\d+|self)\/mountinfo$/,  // Mount enumeration for any PID (Issue #79)
-      /^\/proc\/(\d+|self)\/mounts$/,    // Mount list for any PID
-      /^\/etc\/mtab$/,                // Mount table
-      /^\/etc\/fstab$/,               // Filesystem table
+      /^\/proc\/(\d+|self)\/mountinfo$/, // Mount enumeration for any PID (Issue #79)
+      /^\/proc\/(\d+|self)\/mounts$/, // Mount list for any PID
+      /^\/etc\/mtab$/, // Mount table
+      /^\/etc\/fstab$/, // Filesystem table
     ];
 
     for (const pattern of blockedPatterns) {
       if (pattern.test(normalized)) {
         throw new Error(
           `Reading ${filePath} is not allowed for security reasons. ` +
-          `This path could expose sensitive credentials. ` +
-          `See: https://github.com/omniaura/omniclaw/issues/79`
+            `This path could expose sensitive credentials. ` +
+            `See: https://github.com/omniaura/omniclaw/issues/79`,
         );
       }
     }
@@ -498,9 +547,12 @@ function parseTranscript(content: string): ParsedMessage[] {
     try {
       const entry = JSON.parse(line);
       if (entry.type === 'user' && entry.message?.content) {
-        const text = typeof entry.message.content === 'string'
-          ? entry.message.content
-          : entry.message.content.map((c: { text?: string }) => c.text || '').join('');
+        const text =
+          typeof entry.message.content === 'string'
+            ? entry.message.content
+            : entry.message.content
+                .map((c: { text?: string }) => c.text || '')
+                .join('');
         if (text) messages.push({ role: 'user', content: text });
       } else if (entry.type === 'assistant' && entry.message?.content) {
         const textParts = entry.message.content
@@ -509,8 +561,7 @@ function parseTranscript(content: string): ParsedMessage[] {
         const text = textParts.join('');
         if (text) messages.push({ role: 'assistant', content: text });
       }
-    } catch {
-    }
+    } catch {}
   }
 
   return messages;
@@ -522,13 +573,14 @@ function formatTranscriptMarkdown(
   assistantName: string = 'Assistant',
 ): string {
   const now = new Date();
-  const formatDateTime = (d: Date) => d.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true
-  });
+  const formatDateTime = (d: Date) =>
+    d.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
 
   const lines: string[] = [];
   lines.push(`# ${title || 'Conversation'}`);
@@ -540,9 +592,10 @@ function formatTranscriptMarkdown(
 
   for (const msg of messages) {
     const sender = msg.role === 'user' ? 'User' : assistantName;
-    const content = msg.content.length > 2000
-      ? msg.content.slice(0, 2000) + '...'
-      : msg.content;
+    const content =
+      msg.content.length > 2000
+        ? msg.content.slice(0, 2000) + '...'
+        : msg.content;
     lines.push(`**${sender}**: ${content}`);
     lines.push('');
   }
@@ -555,7 +608,11 @@ function formatTranscriptMarkdown(
  */
 function shouldClose(): boolean {
   if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
-    try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+    } catch {
+      /* ignore */
+    }
     return true;
   }
   return false;
@@ -573,7 +630,11 @@ let currentChatJidValue = '';
 
 function setCurrentChat(chatJid: string): void {
   currentChatJidValue = chatJid;
-  try { fs.writeFileSync(CURRENT_CHAT_FILE, chatJid); } catch { /* ignore */ }
+  try {
+    fs.writeFileSync(CURRENT_CHAT_FILE, chatJid);
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -583,8 +644,9 @@ function setCurrentChat(chatJid: string): void {
 function drainIpcInput(): IpcMessage[] {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-    const files = fs.readdirSync(IPC_INPUT_DIR)
-      .filter(f => f.endsWith('.json'))
+    const files = fs
+      .readdirSync(IPC_INPUT_DIR)
+      .filter((f) => f.endsWith('.json'))
       .sort();
 
     const messages: IpcMessage[] = [];
@@ -601,8 +663,14 @@ function drainIpcInput(): IpcMessage[] {
           }
         }
       } catch (err) {
-        log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
-        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+        log(
+          `Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        try {
+          fs.unlinkSync(filePath);
+        } catch {
+          /* ignore */
+        }
       }
     }
     return messages;
@@ -620,12 +688,18 @@ function getChannelNameLookup(): Map<string, string> {
   const channelsEnv = process.env.OMNICLAW_CHANNELS;
   if (channelsEnv) {
     try {
-      const channels: ChannelInfo[] = JSON.parse(channelsEnv);
+      const parsedChannels = decodeChannelInfoArrayOrNull(
+        JSON.parse(channelsEnv),
+      );
+      if (!parsedChannels) return lookup;
+      const channels: ReadonlyArray<ChannelInfo> = parsedChannels;
       for (const ch of channels) {
         lookup.set(ch.jid, ch.name);
       }
     } catch (err) {
-      console.error(`[omniclaw] Failed to parse OMNICLAW_CHANNELS: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(
+        `[omniclaw] Failed to parse OMNICLAW_CHANNELS: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
   return lookup;
@@ -640,16 +714,18 @@ const isMultiChannel = channelNames.size > 1;
  */
 function formatIpcMessages(messages: IpcMessage[]): string {
   if (!isMultiChannel) {
-    return messages.map(m => m.text).join('\n');
+    return messages.map((m) => m.text).join('\n');
   }
 
-  return messages.map(m => {
-    if (m.chatJid) {
-      const channelName = channelNames.get(m.chatJid) || m.chatJid;
-      return `[From: ${channelName}]\n${m.text}`;
-    }
-    return m.text;
-  }).join('\n');
+  return messages
+    .map((m) => {
+      if (m.chatJid) {
+        const channelName = channelNames.get(m.chatJid) || m.chatJid;
+        return `[From: ${channelName}]\n${m.text}`;
+      }
+      return m.text;
+    })
+    .join('\n');
 }
 
 /**
@@ -687,7 +763,12 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; sessionStale?: boolean }> {
+): Promise<{
+  newSessionId?: string;
+  lastAssistantUuid?: string;
+  closedDuringQuery: boolean;
+  sessionStale?: boolean;
+}> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -728,23 +809,34 @@ async function runQuery(
 
   // Append agent identity as a fallback for agents without /workspace/agent/CLAUDE.md
   // When the agent has an identity file, the SDK auto-loads it via additionalDirectories
-  if (containerInput.agentName && !fs.existsSync('/workspace/agent/CLAUDE.md')) {
+  if (
+    containerInput.agentName &&
+    !fs.existsSync('/workspace/agent/CLAUDE.md')
+  ) {
     const identityParts = [`You are **${containerInput.agentName}**.`];
     if (containerInput.agentTrigger) {
       identityParts.push(`Your trigger is \`${containerInput.agentTrigger}\`.`);
     }
     if (containerInput.discordBotId) {
-      identityParts.push(`Your Discord Bot ID is \`${containerInput.discordBotId}\`.`);
+      identityParts.push(
+        `Your Discord Bot ID is \`${containerInput.discordBotId}\`.`,
+      );
     }
     const identityBlock = `\n\n## Your Identity\n${identityParts.join(' ')}`;
-    globalClaudeMd = globalClaudeMd ? globalClaudeMd + identityBlock : identityBlock.trim();
+    globalClaudeMd = globalClaudeMd
+      ? globalClaudeMd + identityBlock
+      : identityBlock.trim();
   }
 
   // Discover additional directories for CLAUDE.md auto-loading:
   // 1. Context layers: /workspace/agent, /workspace/server, /workspace/category
   // 2. Extra mounts: /workspace/extra/*
   const extraDirs: string[] = [];
-  const contextDirs = ['/workspace/agent', '/workspace/server', '/workspace/category'];
+  const contextDirs = [
+    '/workspace/agent',
+    '/workspace/server',
+    '/workspace/category',
+  ];
   for (const dir of contextDirs) {
     if (fs.existsSync(dir)) extraDirs.push(dir);
   }
@@ -770,19 +862,38 @@ async function runQuery(
       resume: sessionId,
       resumeSessionAt: sessionId ? resumeAt : undefined,
       systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+        ? {
+            type: 'preset' as const,
+            preset: 'claude_code' as const,
+            append: globalClaudeMd,
+          }
         : undefined,
       allowedTools: [
         'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
+        'Read',
+        'Write',
+        'Edit',
+        'Glob',
+        'Grep',
+        'WebSearch',
+        'WebFetch',
+        'Task',
+        'TaskOutput',
+        'TaskStop',
+        'TeamCreate',
+        'TeamDelete',
+        'SendMessage',
+        'TodoWrite',
+        'ToolSearch',
+        'Skill',
         'NotebookEdit',
-        'EnterPlanMode', 'ExitPlanMode',
-        'TaskCreate', 'TaskGet', 'TaskUpdate', 'TaskList',
-        'mcp__omniclaw__*'
+        'EnterPlanMode',
+        'ExitPlanMode',
+        'TaskCreate',
+        'TaskGet',
+        'TaskUpdate',
+        'TaskList',
+        'mcp__omniclaw__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -796,51 +907,90 @@ async function runQuery(
             OMNICLAW_CHAT_JID: containerInput.chatJid,
             OMNICLAW_GROUP_FOLDER: containerInput.groupFolder,
             OMNICLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-            ...(containerInput.discordGuildId ? { OMNICLAW_DISCORD_GUILD_ID: containerInput.discordGuildId } : {}),
-            ...(containerInput.serverFolder ? { OMNICLAW_SERVER_FOLDER: containerInput.serverFolder } : {}),
-            ...(containerInput.channels ? { OMNICLAW_CHANNELS: JSON.stringify(containerInput.channels) } : {}),
-            ...(containerInput.agentName ? { OMNICLAW_AGENT_NAME: containerInput.agentName } : {}),
-            ...(containerInput.discordBotId ? { OMNICLAW_AGENT_BOT_ID: containerInput.discordBotId } : {}),
-            ...(containerInput.agentTrigger ? { OMNICLAW_AGENT_TRIGGER: containerInput.agentTrigger } : {}),
+            ...(containerInput.discordGuildId
+              ? { OMNICLAW_DISCORD_GUILD_ID: containerInput.discordGuildId }
+              : {}),
+            ...(containerInput.serverFolder
+              ? { OMNICLAW_SERVER_FOLDER: containerInput.serverFolder }
+              : {}),
+            ...(containerInput.channels
+              ? { OMNICLAW_CHANNELS: JSON.stringify(containerInput.channels) }
+              : {}),
+            ...(containerInput.agentName
+              ? { OMNICLAW_AGENT_NAME: containerInput.agentName }
+              : {}),
+            ...(containerInput.discordBotId
+              ? { OMNICLAW_AGENT_BOT_ID: containerInput.discordBotId }
+              : {}),
+            ...(containerInput.agentTrigger
+              ? { OMNICLAW_AGENT_TRIGGER: containerInput.agentTrigger }
+              : {}),
           },
         },
       },
       hooks: {
-        PreCompact: [{ hooks: [createPreCompactHook(containerInput.agentName || 'Assistant')] }],
+        PreCompact: [
+          {
+            hooks: [
+              createPreCompactHook(containerInput.agentName || 'Assistant'),
+            ],
+          },
+        ],
         PreToolUse: [
           { matcher: 'Bash', hooks: [createSanitizeBashHook()] },
-          { matcher: 'Read', hooks: [createSanitizeReadHook(), createFileSizeHook()] },
+          {
+            matcher: 'Read',
+            hooks: [createSanitizeReadHook(), createFileSizeHook()],
+          },
         ],
       },
-    }
+    },
   })) {
     messageCount++;
-    const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
+    const msgType =
+      message.type === 'system'
+        ? `system/${(message as { subtype?: string }).subtype}`
+        : message.type;
     // Log tool calls from assistant messages for observability
     if (message.type === 'assistant' && 'message' in message) {
       const content = (message as any).message?.content;
       if (Array.isArray(content)) {
         const tools = content.filter((c: any) => c.type === 'tool_use');
         const texts = content.filter((c: any) => c.type === 'text');
-        const thinkingBlocks = content.filter((c: any) => c.type === 'thinking');
+        const thinkingBlocks = content.filter(
+          (c: any) => c.type === 'thinking',
+        );
         if (tools.length > 0) {
           for (const tool of tools) {
             const input = tool.input || {};
-            const summary = tool.name === 'Bash' ? (input.command || '').slice(0, 120)
-              : tool.name === 'Read' ? input.file_path
-              : tool.name === 'Write' ? input.file_path
-              : tool.name === 'Edit' ? input.file_path
-              : tool.name === 'Grep' ? `${input.pattern} ${input.path || ''}`
-              : tool.name === 'Glob' ? input.pattern
-              : tool.name === 'Task' ? input.description
-              : tool.name === 'WebFetch' ? input.url
-              : tool.name === 'WebSearch' ? input.query
-              : JSON.stringify(input).slice(0, 80);
+            const summary =
+              tool.name === 'Bash'
+                ? (input.command || '').slice(0, 120)
+                : tool.name === 'Read'
+                  ? input.file_path
+                  : tool.name === 'Write'
+                    ? input.file_path
+                    : tool.name === 'Edit'
+                      ? input.file_path
+                      : tool.name === 'Grep'
+                        ? `${input.pattern} ${input.path || ''}`
+                        : tool.name === 'Glob'
+                          ? input.pattern
+                          : tool.name === 'Task'
+                            ? input.description
+                            : tool.name === 'WebFetch'
+                              ? input.url
+                              : tool.name === 'WebSearch'
+                                ? input.query
+                                : JSON.stringify(input).slice(0, 80);
             log(`[msg #${messageCount}] tool=${tool.name} ${summary}`);
           }
         }
         if (texts.length > 0) {
-          const textPreview = texts.map((t: any) => t.text).join('').slice(0, 120);
+          const textPreview = texts
+            .map((t: any) => t.text)
+            .join('')
+            .slice(0, 120);
           if (textPreview.trim()) {
             log(`[msg #${messageCount}] text="${textPreview}"`);
           }
@@ -850,9 +1000,10 @@ async function runQuery(
         const parts: string[] = [];
         for (const block of thinkingBlocks) {
           if (block.thinking) {
-            const truncated = block.thinking.length > 1500
-              ? block.thinking.slice(0, 1500) + '...'
-              : block.thinking;
+            const truncated =
+              block.thinking.length > 1500
+                ? block.thinking.slice(0, 1500) + '...'
+                : block.thinking;
             parts.push(`> *thinking*: ${truncated}`);
           }
         }
@@ -863,20 +1014,35 @@ async function runQuery(
         }
         for (const tool of tools) {
           const input = tool.input || {};
-          const summary = tool.name === 'Bash' ? `\`${(input.command || '').slice(0, 120)}\``
-            : tool.name === 'Read' ? input.file_path
-            : tool.name === 'Write' ? input.file_path
-            : tool.name === 'Edit' ? input.file_path
-            : tool.name === 'Grep' ? `\`${input.pattern} ${input.path || ''}\``
-            : tool.name === 'Glob' ? `\`${input.pattern}\``
-            : tool.name === 'Task' ? input.description
-            : tool.name === 'WebFetch' ? input.url
-            : tool.name === 'WebSearch' ? input.query
-            : JSON.stringify(input).slice(0, 80);
+          const summary =
+            tool.name === 'Bash'
+              ? `\`${(input.command || '').slice(0, 120)}\``
+              : tool.name === 'Read'
+                ? input.file_path
+                : tool.name === 'Write'
+                  ? input.file_path
+                  : tool.name === 'Edit'
+                    ? input.file_path
+                    : tool.name === 'Grep'
+                      ? `\`${input.pattern} ${input.path || ''}\``
+                      : tool.name === 'Glob'
+                        ? `\`${input.pattern}\``
+                        : tool.name === 'Task'
+                          ? input.description
+                          : tool.name === 'WebFetch'
+                            ? input.url
+                            : tool.name === 'WebSearch'
+                              ? input.query
+                              : JSON.stringify(input).slice(0, 80);
           parts.push(`> **${tool.name}**: ${summary}`);
         }
         if (parts.length > 0) {
-          writeOutput({ status: 'success', result: parts.join('\n'), newSessionId, intermediate: true });
+          writeOutput({
+            status: 'success',
+            result: parts.join('\n'),
+            newSessionId,
+            intermediate: true,
+          });
         }
       }
     } else if (message.type === 'user' && 'message' in message) {
@@ -884,17 +1050,21 @@ async function runQuery(
       // Emit intermediate output for tool results
       const userContent = (message as any).message?.content;
       if (Array.isArray(userContent)) {
-        const toolResults = userContent.filter((c: any) => c.type === 'tool_result');
+        const toolResults = userContent.filter(
+          (c: any) => c.type === 'tool_result',
+        );
         for (const result of toolResults) {
-          const resultText = typeof result.content === 'string'
-            ? result.content
-            : Array.isArray(result.content)
-              ? result.content.map((c: any) => c.text || '').join('')
-              : '';
+          const resultText =
+            typeof result.content === 'string'
+              ? result.content
+              : Array.isArray(result.content)
+                ? result.content.map((c: any) => c.text || '').join('')
+                : '';
           if (resultText.trim()) {
-            const truncated = resultText.length > 500
-              ? resultText.slice(0, 500) + '...'
-              : resultText;
+            const truncated =
+              resultText.length > 500
+                ? resultText.slice(0, 500) + '...'
+                : resultText;
             writeOutput({
               status: 'success',
               result: '```\n' + truncated + '\n```',
@@ -912,7 +1082,8 @@ async function runQuery(
       lastAssistantUuid = (message as { uuid: string }).uuid;
       // Track the last assistant text so we can use it as fallback when the
       // result event has no text (e.g. agent wrote text then did a final tool call)
-      const content = (message as { message?: { content?: unknown } }).message?.content;
+      const content = (message as { message?: { content?: unknown } }).message
+        ?.content;
       if (Array.isArray(content)) {
         const textBlocks = content
           .filter((b: { type: string }) => b.type === 'text')
@@ -938,30 +1109,49 @@ async function runQuery(
       !newSessionId &&
       sessionId
     ) {
-      log(`Session ${sessionId} appears stale (error_during_execution before init), will retry as fresh session`);
+      log(
+        `Session ${sessionId} appears stale (error_during_execution before init), will retry as fresh session`,
+      );
       ipcPolling = false;
       stream.end();
-      return { newSessionId: undefined, lastAssistantUuid: undefined, closedDuringQuery, sessionStale: true };
+      return {
+        newSessionId: undefined,
+        lastAssistantUuid: undefined,
+        closedDuringQuery,
+        sessionStale: true,
+      };
     }
 
-    if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
-      const tn = message as { task_id: string; status: string; summary: string };
-      log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
+    if (
+      message.type === 'system' &&
+      (message as { subtype?: string }).subtype === 'task_notification'
+    ) {
+      const tn = message as {
+        task_id: string;
+        status: string;
+        summary: string;
+      };
+      log(
+        `Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`,
+      );
     }
 
     if (message.type === 'result') {
       resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
+      const textResult =
+        'result' in message ? (message as { result?: string }).result : null;
       // When the agent writes text then does a final tool call (e.g. closing the
       // browser), the result event has no text. Fall back to the last assistant
       // text so the user still gets the response.
       const effectiveResult = textResult || lastAssistantText || null;
       const rm = message as any;
-      log(`Result #${resultCount}: subtype=${message.subtype} turns=${rm.num_turns || '?'} duration=${rm.duration_ms || '?'}ms cost=$${rm.total_cost_usd?.toFixed(4) || '?'}${effectiveResult ? ` text=${effectiveResult.slice(0, 200)}` : ''}`);
+      log(
+        `Result #${resultCount}: subtype=${message.subtype} turns=${rm.num_turns || '?'} duration=${rm.duration_ms || '?'}ms cost=$${rm.total_cost_usd?.toFixed(4) || '?'}${effectiveResult ? ` text=${effectiveResult.slice(0, 200)}` : ''}`,
+      );
       writeOutput({
         status: 'success',
         result: effectiveResult,
-        newSessionId
+        newSessionId,
       });
       lastAssistantText = undefined;
 
@@ -976,7 +1166,9 @@ async function runQuery(
   }
 
   ipcPolling = false;
-  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
+  log(
+    `Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`,
+  );
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 
@@ -985,15 +1177,21 @@ async function main(): Promise<void> {
 
   try {
     const stdinData = await readStdin();
-    containerInput = JSON.parse(stdinData);
+    containerInput = decodeContainerInputSync(JSON.parse(stdinData));
     // Delete the temp file the entrypoint wrote — it contains secrets
-    try { fs.unlinkSync('/tmp/input.json'); } catch { /* may not exist */ }
-    log(`Received input for group: ${containerInput.groupFolder} (runtime: ${containerInput.agentRuntime || 'claude-agent-sdk'})`);
+    try {
+      fs.unlinkSync('/tmp/input.json');
+    } catch {
+      /* may not exist */
+    }
+    log(
+      `Received input for group: ${containerInput.groupFolder} (runtime: ${containerInput.agentRuntime || 'claude-agent-sdk'})`,
+    );
   } catch (err) {
     writeOutput({
       status: 'error',
       result: null,
-      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
+      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`,
     });
     process.exit(1);
   }
@@ -1026,7 +1224,7 @@ async function main(): Promise<void> {
   // Secrets never touch process.env itself, so Bash subprocesses can't see them.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
-    sdkEnv[key] = value;
+    if (typeof value === 'string') sdkEnv[key] = value;
   }
 
   log(`Model: ${sdkEnv.CLAUDE_MODEL || '(default)'}`);
@@ -1037,11 +1235,17 @@ async function main(): Promise<void> {
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
   // Clean up stale _close sentinel from previous container runs
-  try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+  try {
+    fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+  } catch {
+    /* ignore */
+  }
 
   // Check for auto-update notification
   let updateNotification = '';
-  const updateInfoPath = process.env.UPDATE_INFO_PATH || '/workspace/data/.omniclaw-update-info.json';
+  const updateInfoPath =
+    process.env.UPDATE_INFO_PATH ||
+    '/workspace/data/.omniclaw-update-info.json';
   const productName = process.env.PRODUCT_NAME || 'OmniClaw';
   try {
     if (fs.existsSync(updateInfoPath)) {
@@ -1051,10 +1255,14 @@ async function main(): Promise<void> {
 
         // Build commit log
         const commits = (updateInfo.commitLog || [])
-          .map((c: { short: string; subject: string }) => `- ${c.short}: ${c.subject}`)
+          .map(
+            (c: { short: string; subject: string }) =>
+              `- ${c.short}: ${c.subject}`,
+          )
           .join('\n');
 
-        updateNotification = `
+        updateNotification =
+          `
 🔄 ${productName} Auto-Update Complete
 
 You've been updated to commit ${updateInfo.newCommit.substring(0, 8)} (from ${updateInfo.oldCommit.substring(0, 8)}).
@@ -1073,12 +1281,16 @@ Please review these changes to understand your new capabilities and fixes.
           fs.unlinkSync(updateInfoPath);
           log('Consumed update notification file');
         } catch (err) {
-          log(`Failed to delete update info file: ${err instanceof Error ? err.message : String(err)}`);
+          log(
+            `Failed to delete update info file: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
     }
   } catch (err) {
-    log(`Failed to read update info: ${err instanceof Error ? err.message : String(err)}`);
+    log(
+      `Failed to read update info: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
   // Initialize current chat JID from container input
@@ -1106,16 +1318,32 @@ Please review these changes to understand your new capabilities and fixes.
   let resumeAt: string | undefined = containerInput.resumeAt;
   try {
     while (true) {
-      log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
+      log(
+        `Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`,
+      );
 
-      let effectiveResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      let effectiveResult = await runQuery(
+        prompt,
+        sessionId,
+        mcpServerPath,
+        containerInput,
+        sdkEnv,
+        resumeAt,
+      );
 
       // Handle stale session: discard session state and retry as fresh [Upstream PR #503]
       if (effectiveResult.sessionStale) {
         log('Retrying query as fresh session (stale session discarded)');
         sessionId = undefined;
         resumeAt = undefined;
-        effectiveResult = await runQuery(prompt, undefined, mcpServerPath, containerInput, sdkEnv, undefined);
+        effectiveResult = await runQuery(
+          prompt,
+          undefined,
+          mcpServerPath,
+          containerInput,
+          sdkEnv,
+          undefined,
+        );
       }
 
       if (effectiveResult.newSessionId) {
@@ -1134,7 +1362,12 @@ Please review these changes to understand your new capabilities and fixes.
       }
 
       // Emit session update so host can track it (include resumeAt so host persists it)
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId, resumeAt });
+      writeOutput({
+        status: 'success',
+        result: null,
+        newSessionId: sessionId,
+        resumeAt,
+      });
 
       log('Query ended, waiting for next IPC message...');
 
@@ -1156,7 +1389,7 @@ Please review these changes to understand your new capabilities and fixes.
       result: null,
       newSessionId: sessionId,
       resumeAt,
-      error: errorMessage
+      error: errorMessage,
     });
     process.exit(1);
   }

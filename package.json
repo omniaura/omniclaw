@@ -16,6 +16,7 @@
     "test:watch": "bun test --watch"
   },
   "dependencies": {
+    "@omniclaw/protocol": "file:packages/protocol",
     "@effect/schema": "^0.75.5",
     "@slack/bolt": "^4.2.1",
     "@slack/web-api": "^7.14.1",

@@ -1,7 +1,8 @@
 import os from 'os';
 import path from 'path';
+import { isAgentRuntime, type AgentRuntime } from '@omniclaw/protocol';
 
-export type AgentRuntime = 'claude-agent-sdk' | 'opencode';
+export type { AgentRuntime };
 
 export interface DiscordBotConfig {
   id: string;
@@ -20,9 +21,7 @@ export function parseEnvList(value: string | undefined): string[] {
 function parseAgentRuntime(
   value: string | undefined,
 ): AgentRuntime | undefined {
-  if (!value) return undefined;
-  if (value === 'claude-agent-sdk' || value === 'opencode') return value;
-  return undefined;
+  return value && isAgentRuntime(value) ? value : undefined;
 }
 
 function sanitizeBotId(raw: string): string {

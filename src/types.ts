@@ -1,3 +1,7 @@
+import type { AgentRuntime } from '@omniclaw/protocol';
+
+export type { AgentRuntime };
+
 export interface AdditionalMount {
   hostPath: string; // Absolute path on host (supports ~ for home)
   containerPath?: string; // Optional — defaults to basename of hostPath. Mounted at /workspace/extra/{value}
@@ -42,9 +46,6 @@ export interface ContainerConfig {
 }
 
 export type BackendType = 'apple-container' | 'docker';
-
-/** Which agent runtime runs inside the container. */
-export type AgentRuntime = 'claude-agent-sdk' | 'opencode';
 
 export interface RegisteredGroup {
   name: string;
