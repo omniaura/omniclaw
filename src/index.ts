@@ -1085,6 +1085,28 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
  * Build the channels array for a multi-channel agent ID.
  * Returns undefined if the agent only has one channel (no routing needed).
  */
+/**
+ * Resolve the RegisteredGroup for a scheduled task.
+ * Prefers the channel subscription for (chatJid, agentFolder) so that
+ * channelFolder/categoryFolder/agentContextFolder reflect the target channel's
+ * 4-layer hierarchy rather than the agent's own primary channel.
+ */
+function getGroupForTask(
+  chatJid: string,
+  agentFolder: string,
+): RegisteredGroup | undefined {
+  const subs = channelSubscriptions[chatJid] || [];
+  const matchingSub = subs.find((s) => {
+    const agent = agents[s.agentId];
+    return s.agentId === agentFolder || agent?.folder === agentFolder;
+  });
+  if (matchingSub) {
+    return buildRegisteredGroupFromSubscription(chatJid, matchingSub);
+  }
+  // Fallback: direct lookup for agents without channel subscriptions
+  return Object.values(registeredGroups).find((g) => g.folder === agentFolder);
+}
+
 function buildChannelsForAgent(agentId: string): ChannelInfo[] | undefined {
   const agentToChannels =
     buildAgentToChannelsMapFromSubscriptions(channelSubscriptions);
@@ -1952,6 +1974,7 @@ async function main(): Promise<void> {
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
+    getGroupForTask,
     getSessions: () => sessions,
     getResumePositions: () => resumePositions,
     queue,
