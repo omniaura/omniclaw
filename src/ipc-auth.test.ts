@@ -148,9 +148,9 @@ describe('schedule_task authorization', () => {
   });
 });
 
-// --- pause_task authorization ---
+// --- edit_task: pause/resume authorization ---
 
-describe('pause_task authorization', () => {
+describe('edit_task pause authorization', () => {
   beforeEach(() => {
     createTask({
       id: 'task-main',
@@ -180,7 +180,7 @@ describe('pause_task authorization', () => {
 
   it('main group can pause any task', async () => {
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-other' },
+      { type: 'edit_task', taskId: 'task-other', status: 'paused' },
       'main',
       true,
       deps,
@@ -190,7 +190,7 @@ describe('pause_task authorization', () => {
 
   it('non-main group can pause its own task', async () => {
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-other' },
+      { type: 'edit_task', taskId: 'task-other', status: 'paused' },
       'other-group',
       false,
       deps,
@@ -200,7 +200,7 @@ describe('pause_task authorization', () => {
 
   it('non-main group cannot pause another groups task', async () => {
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-main' },
+      { type: 'edit_task', taskId: 'task-main', status: 'paused' },
       'other-group',
       false,
       deps,
@@ -209,9 +209,7 @@ describe('pause_task authorization', () => {
   });
 });
 
-// --- resume_task authorization ---
-
-describe('resume_task authorization', () => {
+describe('edit_task resume authorization', () => {
   beforeEach(() => {
     createTask({
       id: 'task-paused',
@@ -229,7 +227,7 @@ describe('resume_task authorization', () => {
 
   it('main group can resume any task', async () => {
     await processTaskIpc(
-      { type: 'resume_task', taskId: 'task-paused' },
+      { type: 'edit_task', taskId: 'task-paused', status: 'active' },
       'main',
       true,
       deps,
@@ -239,7 +237,7 @@ describe('resume_task authorization', () => {
 
   it('non-main group can resume its own task', async () => {
     await processTaskIpc(
-      { type: 'resume_task', taskId: 'task-paused' },
+      { type: 'edit_task', taskId: 'task-paused', status: 'active' },
       'other-group',
       false,
       deps,
@@ -249,7 +247,7 @@ describe('resume_task authorization', () => {
 
   it('non-main group cannot resume another groups task', async () => {
     await processTaskIpc(
-      { type: 'resume_task', taskId: 'task-paused' },
+      { type: 'edit_task', taskId: 'task-paused', status: 'active' },
       'third-group',
       false,
       deps,

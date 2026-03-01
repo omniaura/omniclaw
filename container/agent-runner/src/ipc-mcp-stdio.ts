@@ -344,6 +344,14 @@ Examples:
       };
     }
 
+    // Require schedule_value when schedule_type changes to avoid type/format mismatch
+    if (args.schedule_type && !args.schedule_value) {
+      return {
+        content: [{ type: 'text' as const, text: `When changing schedule_type to "${args.schedule_type}", you must also provide schedule_value so the format matches.` }],
+        isError: true,
+      };
+    }
+
     // Validate schedule fields if provided
     if (args.schedule_type === 'cron' && args.schedule_value) {
       try {

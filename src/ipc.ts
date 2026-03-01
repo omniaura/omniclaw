@@ -640,18 +640,20 @@ export async function processTaskIpc(
       if (data.context_mode)
         updates.context_mode = data.context_mode as 'group' | 'isolated';
 
-      // Recalculate next_run if schedule changed and task is/will be active
       const effectiveStatus = updates.status ?? task.status;
-      if (
-        (updates.schedule_type || updates.schedule_value) &&
-        effectiveStatus === 'active'
-      ) {
+      const scheduleChanged = !!(updates.schedule_type || updates.schedule_value);
+      const beingResumed = updates.status === 'active' && task.status !== 'active';
+
+      if (effectiveStatus === 'active' && (scheduleChanged || beingResumed)) {
         const newType = (updates.schedule_type ?? task.schedule_type) as
           | 'cron'
           | 'interval'
           | 'once';
         const newValue = updates.schedule_value ?? task.schedule_value;
-        if (newType !== 'once') {
+        // Always recalculate when schedule explicitly changed (including 'once').
+        // On resume without a schedule change, only recalculate cron/interval so
+        // the task fires at the next appropriate time rather than a stale next_run.
+        if (scheduleChanged || newType !== 'once') {
           const nextRun = calculateNextRun(newType, newValue);
           if (nextRun !== null) updates.next_run = nextRun;
         }
