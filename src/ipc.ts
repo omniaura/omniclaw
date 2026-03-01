@@ -500,12 +500,18 @@ export async function processTaskIpc(
     isMainGroup: boolean,
   ) => {
     if (!taskId) {
-      logger.warn({ sourceGroup: srcGroup }, 'Task cancel attempt with missing taskId');
+      logger.warn(
+        { sourceGroup: srcGroup },
+        'Task cancel attempt with missing taskId',
+      );
       return;
     }
     const task = getTaskById(taskId);
     if (!task) {
-      logger.warn({ taskId, sourceGroup: srcGroup }, 'Task cancel attempt but task not found');
+      logger.warn(
+        { taskId, sourceGroup: srcGroup },
+        'Task cancel attempt but task not found',
+      );
       return;
     }
     if (isMainGroup || task.group_folder === srcGroup) {
@@ -513,7 +519,10 @@ export async function processTaskIpc(
       logger.info({ taskId, sourceGroup: srcGroup }, 'Task cancelled via IPC');
       refreshTasksSnapshot();
     } else {
-      logger.warn({ taskId, sourceGroup: srcGroup }, 'Unauthorized task cancel attempt');
+      logger.warn(
+        { taskId, sourceGroup: srcGroup },
+        'Unauthorized task cancel attempt',
+      );
     }
   };
 
@@ -595,25 +604,52 @@ export async function processTaskIpc(
       }
       const task = getTaskById(data.taskId);
       if (!task) {
-        logger.warn({ taskId: data.taskId, sourceGroup }, 'edit_task attempt but task not found');
+        logger.warn(
+          { taskId: data.taskId, sourceGroup },
+          'edit_task attempt but task not found',
+        );
         break;
       }
       if (!isMain && task.group_folder !== sourceGroup) {
-        logger.warn({ taskId: data.taskId, sourceGroup }, 'Unauthorized edit_task attempt');
+        logger.warn(
+          { taskId: data.taskId, sourceGroup },
+          'Unauthorized edit_task attempt',
+        );
         break;
       }
 
-      const updates: Partial<Pick<typeof task, 'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status' | 'context_mode'>> = {};
-      if (data.prompt)        updates.prompt = data.prompt;
-      if (data.schedule_type) updates.schedule_type = data.schedule_type as 'cron' | 'interval' | 'once';
+      const updates: Partial<
+        Pick<
+          typeof task,
+          | 'prompt'
+          | 'schedule_type'
+          | 'schedule_value'
+          | 'next_run'
+          | 'status'
+          | 'context_mode'
+        >
+      > = {};
+      if (data.prompt) updates.prompt = data.prompt;
+      if (data.schedule_type)
+        updates.schedule_type = data.schedule_type as
+          | 'cron'
+          | 'interval'
+          | 'once';
       if (data.schedule_value) updates.schedule_value = data.schedule_value;
-      if (data.status)        updates.status = data.status as 'active' | 'paused';
-      if (data.context_mode)  updates.context_mode = data.context_mode as 'group' | 'isolated';
+      if (data.status) updates.status = data.status as 'active' | 'paused';
+      if (data.context_mode)
+        updates.context_mode = data.context_mode as 'group' | 'isolated';
 
       // Recalculate next_run if schedule changed and task is/will be active
       const effectiveStatus = updates.status ?? task.status;
-      if ((updates.schedule_type || updates.schedule_value) && effectiveStatus === 'active') {
-        const newType = (updates.schedule_type ?? task.schedule_type) as 'cron' | 'interval' | 'once';
+      if (
+        (updates.schedule_type || updates.schedule_value) &&
+        effectiveStatus === 'active'
+      ) {
+        const newType = (updates.schedule_type ?? task.schedule_type) as
+          | 'cron'
+          | 'interval'
+          | 'once';
         const newValue = updates.schedule_value ?? task.schedule_value;
         if (newType !== 'once') {
           const nextRun = calculateNextRun(newType, newValue);
@@ -622,7 +658,10 @@ export async function processTaskIpc(
       }
 
       updateTask(data.taskId, updates);
-      logger.info({ taskId: data.taskId, sourceGroup, updates: Object.keys(updates) }, 'Task edited via IPC');
+      logger.info(
+        { taskId: data.taskId, sourceGroup, updates: Object.keys(updates) },
+        'Task edited via IPC',
+      );
       refreshTasksSnapshot();
       break;
     }
