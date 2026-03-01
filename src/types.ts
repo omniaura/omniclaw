@@ -302,4 +302,6 @@ export interface IpcTaskPayload {
   callbackAgentId?: string;
   // For context_request
   requestedTopics?: string[];
+  // For edit_task
+  status?: string;
 }

@@ -493,55 +493,27 @@ export async function processTaskIpc(
     deps.writeTasksSnapshot?.(sourceGroup, isMain);
   };
 
-  /** Shared handler for pause/resume/cancel — identical auth + dispatch pattern */
-  const TASK_ACTION_LABELS: Record<string, string> = {
-    pause_task: 'paused',
-    resume_task: 'resumed',
-    cancel_task: 'cancelled',
-  };
-  const TASK_ACTION_VERBS: Record<string, string> = {
-    pause_task: 'pause',
-    resume_task: 'resume',
-    cancel_task: 'cancel',
-  };
-  const handleTaskLifecycle = (
-    action: string,
+  /** Shared handler for cancel — auth + dispatch pattern */
+  const handleTaskCancel = (
     taskId: string | undefined,
     srcGroup: string,
     isMainGroup: boolean,
   ) => {
-    const verb = TASK_ACTION_VERBS[action] ?? action;
     if (!taskId) {
-      logger.warn(
-        { action, sourceGroup: srcGroup },
-        `Task ${verb} attempt with missing taskId`,
-      );
+      logger.warn({ sourceGroup: srcGroup }, 'Task cancel attempt with missing taskId');
       return;
     }
     const task = getTaskById(taskId);
-    const label = TASK_ACTION_LABELS[action] ?? action;
     if (!task) {
-      logger.warn(
-        { taskId, sourceGroup: srcGroup },
-        `Task ${verb} attempt but task not found`,
-      );
+      logger.warn({ taskId, sourceGroup: srcGroup }, 'Task cancel attempt but task not found');
       return;
     }
     if (isMainGroup || task.group_folder === srcGroup) {
-      if (action === 'cancel_task') {
-        deleteTask(taskId);
-      } else {
-        updateTask(taskId, {
-          status: action === 'pause_task' ? 'paused' : 'active',
-        });
-      }
-      logger.info({ taskId, sourceGroup: srcGroup }, `Task ${label} via IPC`);
+      deleteTask(taskId);
+      logger.info({ taskId, sourceGroup: srcGroup }, 'Task cancelled via IPC');
       refreshTasksSnapshot();
     } else {
-      logger.warn(
-        { taskId, sourceGroup: srcGroup },
-        `Unauthorized task ${verb} attempt`,
-      );
+      logger.warn({ taskId, sourceGroup: srcGroup }, 'Unauthorized task cancel attempt');
     }
   };
 
@@ -612,11 +584,47 @@ export async function processTaskIpc(
       }
       break;
 
-    case 'pause_task':
-    case 'resume_task':
     case 'cancel_task':
-      handleTaskLifecycle(data.type, data.taskId, sourceGroup, isMain);
+      handleTaskCancel(data.taskId, sourceGroup, isMain);
       break;
+
+    case 'edit_task': {
+      if (!data.taskId) {
+        logger.warn({ sourceGroup }, 'edit_task attempt with missing taskId');
+        break;
+      }
+      const task = getTaskById(data.taskId);
+      if (!task) {
+        logger.warn({ taskId: data.taskId, sourceGroup }, 'edit_task attempt but task not found');
+        break;
+      }
+      if (!isMain && task.group_folder !== sourceGroup) {
+        logger.warn({ taskId: data.taskId, sourceGroup }, 'Unauthorized edit_task attempt');
+        break;
+      }
+
+      const updates: Partial<Pick<typeof task, 'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'>> = {};
+      if (data.prompt)         updates.prompt = data.prompt;
+      if (data.schedule_type)  updates.schedule_type = data.schedule_type as 'cron' | 'interval' | 'once';
+      if (data.schedule_value) updates.schedule_value = data.schedule_value;
+      if (data.status)         updates.status = data.status as 'active' | 'paused';
+
+      // Recalculate next_run if schedule changed and task is/will be active
+      const effectiveStatus = updates.status ?? task.status;
+      if ((updates.schedule_type || updates.schedule_value) && effectiveStatus === 'active') {
+        const newType = (updates.schedule_type ?? task.schedule_type) as 'cron' | 'interval' | 'once';
+        const newValue = updates.schedule_value ?? task.schedule_value;
+        if (newType !== 'once') {
+          const nextRun = calculateNextRun(newType, newValue);
+          if (nextRun !== null) updates.next_run = nextRun;
+        }
+      }
+
+      updateTask(data.taskId, updates);
+      logger.info({ taskId: data.taskId, sourceGroup, updates: Object.keys(updates) }, 'Task edited via IPC');
+      refreshTasksSnapshot();
+      break;
+    }
 
     case 'refresh_groups':
       // Only main group can request a refresh
