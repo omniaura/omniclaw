@@ -641,8 +641,11 @@ export async function processTaskIpc(
         updates.context_mode = data.context_mode as 'group' | 'isolated';
 
       const effectiveStatus = updates.status ?? task.status;
-      const scheduleChanged = !!(updates.schedule_type || updates.schedule_value);
-      const beingResumed = updates.status === 'active' && task.status !== 'active';
+      const scheduleChanged = !!(
+        updates.schedule_type || updates.schedule_value
+      );
+      const beingResumed =
+        updates.status === 'active' && task.status !== 'active';
 
       if (effectiveStatus === 'active' && (scheduleChanged || beingResumed)) {
         const newType = (updates.schedule_type ?? task.schedule_type) as
