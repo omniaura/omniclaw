@@ -211,7 +211,7 @@ MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It ca
 \u2022 Only send a message when there's something to report (e.g., "notify me if...")
 \u2022 Never send a message (background maintenance tasks)
 
-IMPORTANT: When MODIFYING an existing task, use update_task — it edits the task in place while preserving its ID and run history. Only use cancel_task + schedule_task if you need to change the task's context_mode, which update_task cannot change.
+IMPORTANT: When MODIFYING an existing task, use update_task — it edits the task in place while preserving its ID and run history. Only use cancel_task + schedule_task if you need to start completely fresh.
 
 SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 \u2022 cron: Standard cron expression (e.g., "*/5 * * * *" for every 5 minutes, "0 9 * * *" for daily at 9am LOCAL time)
@@ -334,9 +334,10 @@ Examples:
     schedule_type: z.enum(['cron', 'interval', 'once']).optional(),
     schedule_value: z.string().optional().describe('New cron expression, interval ms, or ISO timestamp'),
     status: z.enum(['active', 'paused']).optional().describe('Pause or resume the task'),
+    context_mode: z.enum(['group', 'isolated']).optional().describe('group=runs with chat history and memory, isolated=fresh session'),
   },
   async (args) => {
-    if (!args.prompt && !args.schedule_type && !args.schedule_value && !args.status) {
+    if (!args.prompt && !args.schedule_type && !args.schedule_value && !args.status && !args.context_mode) {
       return {
         content: [{ type: 'text' as const, text: 'At least one of prompt, schedule_type, schedule_value, or status must be provided.' }],
         isError: true,
@@ -388,6 +389,7 @@ Examples:
       schedule_type: args.schedule_type,
       schedule_value: args.schedule_value,
       status: args.status,
+      context_mode: args.context_mode,
       groupFolder,
       isMain,
       timestamp: new Date().toISOString(),
@@ -399,6 +401,7 @@ Examples:
     if (args.prompt) changed.push('prompt');
     if (args.schedule_type || args.schedule_value) changed.push('schedule');
     if (args.status) changed.push(`status → ${args.status}`);
+    if (args.context_mode) changed.push(`context_mode → ${args.context_mode}`);
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} update requested (changed: ${changed.join(', ')}).${ownerWarning}` }] };
   },
 );

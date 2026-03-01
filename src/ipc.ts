@@ -603,11 +603,12 @@ export async function processTaskIpc(
         break;
       }
 
-      const updates: Partial<Pick<typeof task, 'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'>> = {};
-      if (data.prompt)         updates.prompt = data.prompt;
-      if (data.schedule_type)  updates.schedule_type = data.schedule_type as 'cron' | 'interval' | 'once';
+      const updates: Partial<Pick<typeof task, 'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status' | 'context_mode'>> = {};
+      if (data.prompt)        updates.prompt = data.prompt;
+      if (data.schedule_type) updates.schedule_type = data.schedule_type as 'cron' | 'interval' | 'once';
       if (data.schedule_value) updates.schedule_value = data.schedule_value;
-      if (data.status)         updates.status = data.status as 'active' | 'paused';
+      if (data.status)        updates.status = data.status as 'active' | 'paused';
+      if (data.context_mode)  updates.context_mode = data.context_mode as 'group' | 'isolated';
 
       // Recalculate next_run if schedule changed and task is/will be active
       const effectiveStatus = updates.status ?? task.status;
