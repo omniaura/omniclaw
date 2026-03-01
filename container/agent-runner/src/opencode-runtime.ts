@@ -14,6 +14,7 @@ import {
   OpencodeClient,
   type Part,
   type ReasoningPart,
+  type SessionMessagesResponse,
   type TextPart,
 } from '@opencode-ai/sdk';
 import fs from 'fs';
@@ -47,6 +48,9 @@ interface ContainerInput {
   agentName?: string;
   discordBotId?: string;
   agentTrigger?: string;
+  agentContextFolder?: string;
+  channelFolder?: string;
+  categoryFolder?: string;
 }
 
 interface ContainerOutput {
@@ -260,17 +264,6 @@ type OpenCodePromptResult = Awaited<
   ReturnType<OpencodeClient['session']['prompt']>
 >;
 
-type SessionMessagesData = Awaited<
-  ReturnType<OpencodeClient['session']['messages']>
->['data'];
-
-type SessionMessage =
-  SessionMessagesData extends ReadonlyArray<infer T> ? T : never;
-
-/**
- * Extract text from an OpenCode SDK prompt result.
- * The response shape can vary — try common patterns.
- */
 /** @internal exported for testing */
 export function extractTextFromParts(parts: Array<Part>): string | null {
   const texts = parts
@@ -292,11 +285,11 @@ export function extractResponseText(
 }
 
 function extractLatestAssistantFromSessionMessages(
-  messages: Array<SessionMessage>,
+  messages: SessionMessagesResponse,
 ): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (msg.info.role !== 'assistant') continue;
+    if (msg?.info?.role !== 'assistant') continue;
     const text = extractTextFromParts(msg.parts);
     if (text) return text;
   }
@@ -304,8 +297,8 @@ function extractLatestAssistantFromSessionMessages(
 }
 
 function getMessagesFromPayload(
-  payload: SessionMessagesData,
-): Array<SessionMessage> {
+  payload: SessionMessagesResponse | undefined,
+): SessionMessagesResponse {
   if (Array.isArray(payload)) return payload;
   return [];
 }
@@ -382,7 +375,7 @@ async function runOpenCodePrompt(
       const resp = await client.session.messages({ path: { id: sessionId } });
       const messages = getMessagesFromPayload(resp.data);
       for (const msg of messages) {
-        if (msg.info.role !== 'assistant') continue;
+        if (msg?.info?.role !== 'assistant') continue;
         const parts = msg.parts;
         parts.forEach((p, i) => {
           if (p.type !== 'tool') return;

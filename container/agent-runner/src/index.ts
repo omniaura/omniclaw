@@ -32,7 +32,6 @@ interface ContainerInput {
   prompt: string;
   sessionId?: string;
   resumeAt?: string;
-  agentName?: string;
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
@@ -50,6 +49,9 @@ interface ContainerInput {
   discordBotId?: string;
   /** Agent's trigger word/phrase (e.g. "@OCPeyton"). */
   agentTrigger?: string;
+  agentContextFolder?: string;
+  channelFolder?: string;
+  categoryFolder?: string;
 }
 
 interface ContainerOutput {
