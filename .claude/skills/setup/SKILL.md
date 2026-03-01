@@ -421,6 +421,17 @@ DISCORD_BOT_DEFAULT=CLAUDE
 
 Then re-register channels that should use the new bot with `--discord-bot-id OPENCODE`.
 
+**Critical — internal bot key vs Discord snowflake ID:**
+
+`DISCORD_BOT_IDS` uses **human-readable keys you define** (e.g., `PRIMARY`, `OCPEYTON`, `CLAUDE`). These are completely different from the numeric Discord bot IDs you see in the Developer Portal (e.g., `1476396931709276191`).
+
+| Identifier | Where it lives | Example | Used for |
+|---|---|---|---|
+| **Internal bot key** | `DISCORD_BOT_IDS` in `.env` | `PRIMARY`, `OCPEYTON` | OmniClaw routing |
+| **Discord snowflake ID** | Discord Developer Portal → App → General | `1476396931709276191` | Discord's own API |
+
+The value stored in `channel_subscriptions.discord_bot_id` in SQLite **must** be the internal bot key, never the numeric snowflake ID. If you ever manually edit that column, use the key from `DISCORD_BOT_IDS`, not the ID from Discord's portal.
+
 ### Rollback
 
 If something goes wrong after upgrading:

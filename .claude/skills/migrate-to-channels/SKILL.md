@@ -58,9 +58,29 @@ UPDATE agents SET agent_context_folder = 'agents/peytonomi'
 WHERE id IN ('ditto-discord', 'landing-astro-discord');
 ```
 
-### 3. The identity fallback injects the bot key, not the numeric Discord ID
+### 3. Internal bot key vs Discord snowflake ID — never confuse them
 
-When `agent_context_folder` is NULL, the injected identity block contains the bot key string (e.g., `OCPEYTON`, `PRIMARY`) not the numeric Discord bot ID. This causes the agent to report conflicting identity info. The fix is always to set `agent_context_folder`.
+OmniClaw uses **two completely different identifiers** for Discord bots:
+
+| Identifier | Where it lives | Example | Used for |
+|---|---|---|---|
+| **Internal bot key** | `DISCORD_BOT_IDS` in `.env` | `PRIMARY`, `OCPEYTON` | OmniClaw routing |
+| **Discord snowflake ID** | Discord Developer Portal → App → General | `1476396931709276191` | Discord's own API |
+
+The `channel_subscriptions.discord_bot_id` column stores the **internal bot key** — the human-readable alias you defined in `DISCORD_BOT_IDS`. It must never contain a numeric Discord snowflake ID. If you accidentally write a numeric ID there, OmniClaw's routing will silently fall back to `DISCORD_DEFAULT_BOT_ID` for every message and scheduled task.
+
+To verify:
+```bash
+# These should match keys in DISCORD_BOT_IDS, not numeric IDs
+sqlite3 store/messages.db "SELECT DISTINCT discord_bot_id FROM channel_subscriptions WHERE discord_bot_id IS NOT NULL"
+```
+
+If you see numeric IDs, fix them:
+```bash
+sqlite3 store/messages.db "UPDATE channel_subscriptions SET discord_bot_id = 'OCPEYTON' WHERE discord_bot_id = '1476396931709276191'"
+```
+
+**Separate issue:** When `agent_context_folder` is NULL, the injected identity block contains the bot key string (e.g., `OCPEYTON`, `PRIMARY`) not the persona name. This causes the agent to report conflicting identity info. The fix is always to set `agent_context_folder`.
 
 ### 4. `is_primary` controls more than routing — it controls channel name resolution
 
