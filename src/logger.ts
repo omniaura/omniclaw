@@ -42,8 +42,6 @@ export interface Logger {
 // TTY pretty-print colors
 // ---------------------------------------------------------------------------
 
-const isTTY = process.stderr.isTTY;
-
 const RST = '\x1b[0m';
 const DIM = '\x1b[2m';
 const BOLD = '\x1b[1m';
@@ -226,7 +224,7 @@ function createLogger(
       ...merged,
     };
 
-    if (isTTY) {
+    if (process.stderr.isTTY) {
       writePretty(level, record);
     } else {
       writeJSON(record);
