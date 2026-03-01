@@ -211,7 +211,7 @@ MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It ca
 \u2022 Only send a message when there's something to report (e.g., "notify me if...")
 \u2022 Never send a message (background maintenance tasks)
 
-IMPORTANT: When MODIFYING an existing task, use update_task — it edits the task in place while preserving its ID and run history. Only use cancel_task + schedule_task if you need to start completely fresh.
+IMPORTANT: When MODIFYING an existing task, use update_task — it edits the task in place while preserving its ID and run history. Only use cancel_task to destructively delete a task the user no longer wants. Unlike pausing, the task cannot be restored on deletion.
 
 SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 \u2022 cron: Standard cron expression (e.g., "*/5 * * * *" for every 5 minutes, "0 9 * * *" for daily at 9am LOCAL time)
