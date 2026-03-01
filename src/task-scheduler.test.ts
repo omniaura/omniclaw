@@ -615,7 +615,7 @@ describe('scheduler task lifecycle (deterministic simulation)', () => {
     // Due initially
     expect(getDueTasks()).toHaveLength(1);
 
-    // Pause it (simulating IPC pause_task)
+    // Pause it (simulating IPC edit_task with status: paused)
     const { updateTask } = require('./db.js');
     updateTask('sim-pausable', { status: 'paused' });
 
