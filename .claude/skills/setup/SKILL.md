@@ -491,7 +491,7 @@ Use the **AskUserQuestion** tool to show the user the status of each agent and a
 
 > **Agent Status:**
 > - **main** — last active 2 min ago
-> - **ditto-discord** — last active 3 hours ago
+> - **clayton-discord** — last active 3 hours ago
 > - **bot-commands** — no recent activity
 >
 > Which agents do you want to reboot?

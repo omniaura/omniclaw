@@ -495,7 +495,7 @@ You can also share files to another agent or request files from them.
 The request is sent to the target agent (or admin if no target specified) who can then share the relevant context.`,
   {
     description: z.string().describe('What context or information you need and why'),
-    target_agent: z.string().optional().describe('Agent ID to request from (e.g., "main", "ditto-discord"). Check agent_registry.json for available agents.'),
+    target_agent: z.string().optional().describe('Agent ID to request from (e.g., "main", "clayton-discord"). Check agent_registry.json for available agents.'),
     scope: z.enum(['channel', 'server', 'auto']).default('auto')
       .describe('Where the shared context should go: channel (just this channel), server (all channels in this Discord server), or auto (let admin decide)'),
     files: z.array(z.string()).optional().describe('Paths to SHARE (send TO target agent). Relative to /workspace/group/.'),

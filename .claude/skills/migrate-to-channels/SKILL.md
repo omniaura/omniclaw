@@ -37,9 +37,9 @@ In older OmniClaw setups, each channel got its own agent entry (e.g., `landing-a
 
 ```sql
 -- Example: landing-astro-discord was just another PeytonOmni channel
--- Move its subs to ditto-discord (if not already there)
+-- Move its subs to clayton-discord (if not already there)
 INSERT OR IGNORE INTO channel_subscriptions (channel_jid, agent_id, trigger_pattern, requires_trigger, priority, is_primary, discord_bot_id, discord_guild_id, created_at)
-SELECT channel_jid, 'ditto-discord', trigger_pattern, requires_trigger, priority, is_primary, discord_bot_id, discord_guild_id, created_at
+SELECT channel_jid, 'clayton-discord', trigger_pattern, requires_trigger, priority, is_primary, discord_bot_id, discord_guild_id, created_at
 FROM channel_subscriptions WHERE agent_id = 'landing-astro-discord';
 
 DELETE FROM channel_subscriptions WHERE agent_id = 'landing-astro-discord';
@@ -55,7 +55,7 @@ Set this immediately after adding the agent identity file:
 
 ```sql
 UPDATE agents SET agent_context_folder = 'agents/peytonomi'
-WHERE id IN ('ditto-discord', 'landing-astro-discord');
+WHERE id IN ('clayton-discord', 'landing-astro-discord');
 ```
 
 ### 3. Internal bot key vs Discord snowflake ID — never confuse them
@@ -89,14 +89,14 @@ sqlite3 store/messages.db "UPDATE channel_subscriptions SET discord_bot_id = 'OC
 - Which agent's name is used as the display name when building channel lists
 - Which subscriptions fire as a fallback when no trigger is explicitly matched
 
-In a multi-agent channel (e.g., PeytonOmni + OCPeyton both in `#spec`), set `is_primary = 1` **only on the human-persona agent** (e.g., `ditto-discord`). The tool agent (`ocpeyton-discord`) should have `is_primary = 0` so it only responds to explicit `@OCPeyton` mentions and never fires via fallback.
+In a multi-agent channel (e.g., PeytonOmni + OCPeyton both in `#spec`), set `is_primary = 1` **only on the human-persona agent** (e.g., `clayton-discord`). The tool agent (`ocpeyton-discord`) should have `is_primary = 0` so it only responds to explicit `@OCPeyton` mentions and never fires via fallback.
 
 If `is_primary` is wrong, you'll see another agent's name appear as a channel name in the multi-channel list (e.g., "OCPeyton" showing up as a channel name in PeytonOmni's channel list).
 
 ```sql
 -- Set primary correctly for each channel
 UPDATE channel_subscriptions SET is_primary = 1
-WHERE agent_id = 'ditto-discord';  -- persona agent owns the channel
+WHERE agent_id = 'clayton-discord';  -- persona agent owns the channel
 
 UPDATE channel_subscriptions SET is_primary = 0
 WHERE agent_id = 'ocpeyton-discord';  -- tool agent never owns
@@ -187,21 +187,21 @@ If containers are running, use `AskUserQuestion` to ask:
 **If wait:** re-run the container list check and loop until clear, then delete without stopping the service:
 
 ```bash
-rm -rf groups/spec-discord groups/agentflow-discord groups/ditto-discord # etc.
+rm -rf groups/spec-discord groups/agentflow-discord groups/clayton-discord # etc.
 ```
 
 **If stop the service:** unload, delete, reload:
 
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist
-rm -rf groups/spec-discord groups/agentflow-discord groups/ditto-discord # etc.
+rm -rf groups/spec-discord groups/agentflow-discord groups/clayton-discord # etc.
 launchctl load ~/Library/LaunchAgents/com.omniclaw.plist
 ```
 
 **If no containers running:** delete directly:
 
 ```bash
-rm -rf groups/spec-discord groups/agentflow-discord groups/ditto-discord # etc.
+rm -rf groups/spec-discord groups/agentflow-discord groups/clayton-discord # etc.
 ```
 
 **If no:** print a summary table of old → new paths so the user knows where to look:
@@ -210,7 +210,7 @@ rm -rf groups/spec-discord groups/agentflow-discord groups/ditto-discord # etc.
 Legacy folder                          → New location
 groups/spec-discord/                   → groups/servers/omni-aura/ditto-assistant/spec/
 groups/agentflow-discord/              → groups/servers/omni-aura/omniaura/agentflow/
-groups/ditto-discord/                  → groups/servers/omni-aura/omniaura/agent-debug/
+groups/clayton-discord/                  → groups/servers/omni-aura/omniaura/agent-debug/
 ...
 ```
 
@@ -233,14 +233,14 @@ done
 UPDATE channel_subscriptions
 SET channel_folder = 'servers/omni-aura/ditto-assistant/spec',
     category_folder = 'servers/omni-aura/ditto-assistant'
-WHERE channel_jid = 'dc:...' AND agent_id = 'ditto-discord';
+WHERE channel_jid = 'dc:...' AND agent_id = 'clayton-discord';
 ```
 
 ### Step 7: Set `is_primary` correctly
 
 ```sql
 -- Persona agent owns all channels
-UPDATE channel_subscriptions SET is_primary = 1 WHERE agent_id = 'ditto-discord';
+UPDATE channel_subscriptions SET is_primary = 1 WHERE agent_id = 'clayton-discord';
 -- Tool agents never own
 UPDATE channel_subscriptions SET is_primary = 0 WHERE agent_id = 'ocpeyton-discord';
 ```
