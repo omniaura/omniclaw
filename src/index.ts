@@ -1987,7 +1987,7 @@ async function main(): Promise<void> {
         undefined,
         lane,
       ),
-    sendMessage: async (jid, rawText, discordBotId?) => {
+    sendMessage: async (jid, rawText, discordBotId) => {
       const ch = findChannelForJid(jid, discordBotId);
       if (!ch) {
         logger.warn({ jid }, 'No channel found for scheduled message');
@@ -2004,7 +2004,7 @@ async function main(): Promise<void> {
         return msgId ? String(msgId) : undefined;
       }
     },
-    findChannel: (jid, discordBotId?) => findChannelForJid(jid, discordBotId),
+    findChannel: (jid, discordBotId) => findChannelForJid(jid, discordBotId),
   });
   startIpcWatcher({
     sendMessage: async (jid, rawText) => {

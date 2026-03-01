@@ -54,7 +54,11 @@ export interface SchedulerDependencies {
     groupFolder: string,
     lane: 'task',
   ) => void;
-  sendMessage: (jid: string, text: string, discordBotId?: string) => Promise<string | void>;
+  sendMessage: (
+    jid: string,
+    text: string,
+    discordBotId?: string,
+  ) => Promise<string | void>;
   findChannel: (jid: string, discordBotId?: string) => Channel | undefined;
 }
 
@@ -217,7 +221,11 @@ async function runTask(
 
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          await deps.sendMessage(task.chat_jid, streamedOutput.result, group.discordBotId);
+          await deps.sendMessage(
+            task.chat_jid,
+            streamedOutput.result,
+            group.discordBotId,
+          );
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
