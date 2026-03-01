@@ -33,6 +33,17 @@ import {
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
+  /**
+   * Resolve the RegisteredGroup for a scheduled task, incorporating the full
+   * 4-layer channel context (agent → server → category → channel).
+   * Looks up the subscription for (chatJid, agentFolder) first so that
+   * channelFolder/categoryFolder/agentContextFolder reflect the target channel,
+   * not the agent's own primary channel.
+   */
+  getGroupForTask: (
+    chatJid: string,
+    agentFolder: string,
+  ) => RegisteredGroup | undefined;
   getSessions: () => Record<string, string>;
   getResumePositions: () => Record<string, string>;
   queue: GroupQueue;
@@ -72,10 +83,7 @@ async function runTask(
   });
   log.info('Running scheduled task');
 
-  const groups = deps.registeredGroups();
-  const group = Object.values(groups).find(
-    (g) => g.folder === task.group_folder,
-  );
+  const group = deps.getGroupForTask(task.chat_jid, task.group_folder);
 
   if (!group) {
     log.error('Group not found for task');
@@ -181,6 +189,12 @@ async function runTask(
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
         agentRuntime: group.agentRuntime,
+        agentName: group.name,
+        discordBotId: group.discordBotId,
+        agentTrigger: group.trigger,
+        channelFolder: group.channelFolder,
+        categoryFolder: group.categoryFolder,
+        agentContextFolder: group.agentContextFolder,
       },
       (proc, containerName) =>
         deps.onProcess(
