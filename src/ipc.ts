@@ -477,8 +477,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
         try {
           fs.rmSync(staleDir, { recursive: true, force: true });
           logger.debug({ sourceGroup }, 'Cleaned up stale dispatch IPC folder');
-        } catch {
-          /* ignore — will retry next poll */
+        } catch (err) {
+          logger.debug({ sourceGroup, err }, 'Failed to clean up stale dispatch IPC folder — will retry next poll');
         }
       }
     }
