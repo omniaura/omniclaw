@@ -1005,7 +1005,7 @@ async function main(): Promise<void> {
   if (runtime === 'opencode') {
     const { runOpenCodeRuntime } = await import('./opencode-runtime.js');
     await runOpenCodeRuntime(containerInput);
-    return;
+    process.exit(0);
   }
   if (runtime !== 'claude-agent-sdk') {
     writeOutput({

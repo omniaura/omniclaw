@@ -197,7 +197,7 @@ describe('db migrations (bun:sqlite)', () => {
     `,
     ).run(
       'dc:940321040482074705',
-      'ditto-discord',
+      'clayton-discord',
       '@Omni',
       1,
       '753336633083953213',
@@ -210,7 +210,7 @@ describe('db migrations (bun:sqlite)', () => {
     `,
     ).run(
       'dc:1475568899452964874',
-      'ditto-discord',
+      'clayton-discord',
       '@Omni',
       1,
       '753336633083953213',
@@ -223,7 +223,7 @@ describe('db migrations (bun:sqlite)', () => {
     `,
     ).run(
       'dc:1475601379400745101',
-      'ditto-discord',
+      'clayton-discord',
       '@Omni',
       1,
       '753336633083953213',
@@ -237,10 +237,10 @@ describe('db migrations (bun:sqlite)', () => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     ).run(
-      'ditto-discord',
+      'clayton-discord',
       'Ditto Discord',
       'discord agent',
-      'ditto-discord',
+      'clayton-discord',
       'apple-container',
       null,
       null,
@@ -272,7 +272,7 @@ describe('db migrations (bun:sqlite)', () => {
 
     expect(migratedRows).toHaveLength(3);
     for (const row of migratedRows) {
-      expect(row.agent_id).toBe('ditto-discord');
+      expect(row.agent_id).toBe('clayton-discord');
       expect(row.trigger_pattern).toBe('@Omni');
       expect(row.requires_trigger).toBe(1);
       expect(row.priority).toBe(100);
@@ -433,10 +433,10 @@ describe('db migrations (bun:sqlite)', () => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     insertAgent.run(
-      'ditto-discord',
+      'clayton-discord',
       'Ditto Discord',
       'frontend/backend',
-      'ditto-discord',
+      'clayton-discord',
       'apple-container',
       null,
       null,
@@ -471,7 +471,7 @@ describe('db migrations (bun:sqlite)', () => {
     insertGroup.run(
       'dc:940321040482074705',
       'Ditto Discord',
-      'ditto-discord',
+      'clayton-discord',
       '@PeytonOmni',
       '2026-02-11T00:00:00.000Z',
       1,
@@ -533,14 +533,14 @@ describe('db migrations (bun:sqlite)', () => {
       GUILD,
     );
 
-    // channel_routes: ditto-discord owns 3 channels, landing-astro-discord owns 1
+    // channel_routes: clayton-discord owns 3 channels, landing-astro-discord owns 1
     const insertRoute = db.prepare(`
       INSERT INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_guild_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
     insertRoute.run(
       'dc:940321040482074705',
-      'ditto-discord',
+      'clayton-discord',
       '@PeytonOmni',
       1,
       GUILD,
@@ -548,7 +548,7 @@ describe('db migrations (bun:sqlite)', () => {
     );
     insertRoute.run(
       'dc:1475568899452964874',
-      'ditto-discord',
+      'clayton-discord',
       '@PeytonOmni',
       1,
       GUILD,
@@ -556,7 +556,7 @@ describe('db migrations (bun:sqlite)', () => {
     );
     insertRoute.run(
       'dc:1475601379400745101',
-      'ditto-discord',
+      'clayton-discord',
       '@PeytonOmni',
       1,
       GUILD,
@@ -609,9 +609,9 @@ describe('db migrations (bun:sqlite)', () => {
     const byChannel = Object.fromEntries(
       subs.map((r) => [r.channel_jid, r.agent_id]),
     );
-    expect(byChannel['dc:940321040482074705']).toBe('ditto-discord');
-    expect(byChannel['dc:1475568899452964874']).toBe('ditto-discord');
-    expect(byChannel['dc:1475601379400745101']).toBe('ditto-discord');
+    expect(byChannel['dc:940321040482074705']).toBe('clayton-discord');
+    expect(byChannel['dc:1475568899452964874']).toBe('clayton-discord');
+    expect(byChannel['dc:1475601379400745101']).toBe('clayton-discord');
     expect(byChannel['dc:1475576563176181964']).toBe('landing-astro-discord');
 
     // Legacy-only channels must NOT have leaked into channel_subscriptions
