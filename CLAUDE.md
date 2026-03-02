@@ -63,6 +63,8 @@ container builder stop && container builder rm && container builder start
 
 Always verify after rebuild: `container run -i --rm --entrypoint wc omniclaw-agent:latest -l /app/src/index.ts`
 
+**Always flush the builder cache** before rebuilding if you changed `container/agent-runner/` source files — buildkit caches `COPY` steps aggressively and will silently keep stale files otherwise.
+
 ## Git Remotes & Pull Requests
 
 This repo is `omniaura/omniclaw`. Always pass `--repo omniaura/omniclaw --base main` when creating PRs with `gh pr create`.

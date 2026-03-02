@@ -1166,5 +1166,9 @@ Please review these changes to understand your new capabilities and fixes.
 
 // Only run main() when this file is the entry point, not when imported as a module
 if (import.meta.main) {
-  main();
+  // Force-exit after main() completes: claude-code leaves dangling handles
+  // (WebSockets, HTTP connections, timers) that prevent a natural bun exit.
+  // Without this the container stays alive after the agent loop ends, causing
+  // OmniClaw to keep piping new messages to a dead IPC listener.
+  main().then(() => process.exit(0)).catch(() => process.exit(1));
 }
