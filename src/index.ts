@@ -22,6 +22,9 @@ import {
   SLACK_BOT_TOKEN,
   TELEGRAM_BOT_TOKEN,
   TRIGGER_PATTERN,
+  WEB_UI_PORT,
+  WEB_UI_USER,
+  WEB_UI_PASS,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
 import { SlackChannel } from './channels/slack.js';
@@ -51,6 +54,7 @@ import {
   getMessagesSince,
   getNewMessages,
   getRouterState,
+  getTaskById,
   initDatabase,
   setAgent,
   setChannelSubscription,
@@ -92,6 +96,7 @@ import { logger } from './logger.js';
 import { createResumePositionStore } from './resume-position-store.js';
 import { assertPathWithin } from './path-security.js';
 import { redactSensitiveData } from './security/redaction.js';
+import { startWebServer, type WebServerHandle } from './web/index.js';
 import { Effect } from 'effect';
 
 // Global error handlers to prevent crashes from unhandled rejections/exceptions
@@ -1791,6 +1796,32 @@ async function main(): Promise<void> {
     logger.info({ expired }, 'Expired stale sessions on startup');
   }
 
+  // --- Web UI (opt-in via WEB_UI_PORT env var) ---
+  let webServer: WebServerHandle | undefined;
+  if (WEB_UI_PORT) {
+    webServer = startWebServer(
+      {
+        port: WEB_UI_PORT,
+        auth:
+          WEB_UI_USER && WEB_UI_PASS
+            ? { username: WEB_UI_USER, password: WEB_UI_PASS }
+            : undefined,
+      },
+      {
+        getAgents: () => agents,
+        getChannelSubscriptions: () => channelSubscriptions,
+        getTasks: () => getAllTasks(),
+        getTaskById: (id) => getTaskById(id),
+        getMessages: (chatJid, since, limit) => {
+          const msgs = getMessagesSince(chatJid, since);
+          return limit ? msgs.slice(0, limit) : msgs;
+        },
+        getChats: () => getAllChats(),
+        getQueueStats: () => queue.getStats(),
+      },
+    );
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
@@ -1798,6 +1829,7 @@ async function main(): Promise<void> {
       githubWebhookServer.stop();
       githubWebhookServer = null;
     }
+    if (webServer) await webServer.stop();
     await queue.shutdown(10000);
     await shutdownBackends();
     for (const ch of channels) {
