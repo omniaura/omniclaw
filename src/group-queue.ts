@@ -694,6 +694,21 @@ export class GroupQueue {
     return state.messageActive || state.taskActive;
   }
 
+  /** Return a snapshot of queue concurrency stats (for the web UI). */
+  getStats(): {
+    activeContainers: number;
+    idleContainers: number;
+    maxActive: number;
+    maxIdle: number;
+  } {
+    return {
+      activeContainers: this.activeCount,
+      idleContainers: this.idleCount,
+      maxActive: MAX_ACTIVE_CONTAINERS,
+      maxIdle: MAX_IDLE_CONTAINERS,
+    };
+  }
+
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 

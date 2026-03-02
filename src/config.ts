@@ -172,3 +172,11 @@ export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || undefined;
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// --- Web UI ---
+// Set WEB_UI_PORT to enable the web dashboard. Unset = disabled.
+export const WEB_UI_PORT = process.env.WEB_UI_PORT
+  ? parseInt(process.env.WEB_UI_PORT, 10)
+  : undefined;
+export const WEB_UI_USER = process.env.WEB_UI_USER || undefined;
+export const WEB_UI_PASS = process.env.WEB_UI_PASS || undefined;
