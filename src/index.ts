@@ -2059,11 +2059,13 @@ async function main(): Promise<void> {
     onSubscriptionChanged: invalidateChannelSubscriptions,
     activeRuntimeFolders: () => activeRuntimeFolders,
     agentFolders: () => new Set(Object.values(agents).map((a) => a.folder)),
-    getSubscriptions: (jid) =>
-      (channelSubscriptions[jid] ?? []).map((s) => ({
+    getSubscriptions: (jid) => {
+      refreshChannelSubscriptions();
+      return (channelSubscriptions[jid] ?? []).map((s) => ({
         agentId: s.agentId,
         agentFolder: agents[s.agentId]?.folder ?? s.agentId,
-      })),
+      }));
+    },
   });
 }
 
