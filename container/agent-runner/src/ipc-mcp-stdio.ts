@@ -181,6 +181,7 @@ Note: when running as a scheduled task, your final output is NOT sent to the use
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,
+      discord_bot_id: process.env.OMNICLAW_AGENT_BOT_ID || undefined,
       timestamp: new Date().toISOString(),
     };
 

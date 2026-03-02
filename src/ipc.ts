@@ -43,7 +43,7 @@ import {
 } from './types.js';
 
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string) => Promise<string | void>;
+  sendMessage: (jid: string, text: string, discordBotId?: string) => Promise<string | void>;
   /** Store a message in a group's DB and enqueue it for agent processing.
    * Pass sourceFolder to tag the message so the source agent doesn't echo it. */
   notifyGroup: (jid: string, text: string, sourceFolder?: string) => void;
@@ -67,6 +67,8 @@ export interface IpcDeps {
   activeRuntimeFolders?: () => ReadonlySet<string>;
   /** All known agent folders (including secondary agents not in registeredGroups). */
   agentFolders?: () => ReadonlySet<string>;
+  /** Return all channel subscriptions for a JID (used to check if sourceGroup is a subscriber). */
+  getSubscriptions?: (jid: string) => Array<{ agentId: string }>;
 }
 
 /**
@@ -291,14 +293,20 @@ export async function processMessageIpc(
     }
     // Authorization: any registered agent can message any other registered agent
     const targetGroup = registeredGroups[msgChatJid];
-    const isSelf = targetGroup && targetGroup.folder === sourceGroup;
+    // isSelf: sourceGroup is the primary agent OR any subscriber of this channel.
+    // Prevents secondary agents (e.g. OCPeyton) posting to a shared channel from
+    // triggering notifyGroup, which would wake up the primary agent (Clayton) to respond.
+    const channelSubs = deps.getSubscriptions?.(msgChatJid) ?? [];
+    const isSelf =
+      (targetGroup && targetGroup.folder === sourceGroup) ||
+      channelSubs.some((s) => s.agentId === sourceGroup);
     const isRegisteredTarget = !!targetGroup;
     if (isMain || isSelf || isRegisteredTarget) {
-      await deps.sendMessage(msgChatJid, msgText);
+      await deps.sendMessage(msgChatJid, msgText, data.discord_bot_id);
       // Cross-group message: also wake up the target agent.
       // Pass sourceGroup so the notify message is tagged — the source
       // agent won't see its own IPC message echoed back at it.
-      if (targetGroup && targetGroup.folder !== sourceGroup) {
+      if (targetGroup && !isSelf) {
         deps.notifyGroup(msgChatJid, msgText, sourceGroup);
       }
       logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
