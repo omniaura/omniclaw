@@ -43,7 +43,11 @@ import {
 } from './types.js';
 
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string, discordBotId?: string) => Promise<string | void>;
+  sendMessage: (
+    jid: string,
+    text: string,
+    discordBotId?: string,
+  ) => Promise<string | void>;
   /** Store a message in a group's DB and enqueue it for agent processing.
    * Pass sourceFolder to tag the message so the source agent doesn't echo it. */
   notifyGroup: (jid: string, text: string, sourceFolder?: string) => void;
@@ -68,7 +72,9 @@ export interface IpcDeps {
   /** All known agent folders (including secondary agents not in registeredGroups). */
   agentFolders?: () => ReadonlySet<string>;
   /** Return all channel subscriptions for a JID (used to check if sourceGroup is a subscriber). */
-  getSubscriptions?: (jid: string) => Array<{ agentId: string }>;
+  getSubscriptions?: (
+    jid: string,
+  ) => Array<{ agentId: string; agentFolder: string }>;
 }
 
 /**
@@ -299,7 +305,7 @@ export async function processMessageIpc(
     const channelSubs = deps.getSubscriptions?.(msgChatJid) ?? [];
     const isSelf =
       (targetGroup && targetGroup.folder === sourceGroup) ||
-      channelSubs.some((s) => s.agentId === sourceGroup);
+      channelSubs.some((s) => s.agentFolder === sourceGroup);
     const isRegisteredTarget = !!targetGroup;
     if (isMain || isSelf || isRegisteredTarget) {
       await deps.sendMessage(msgChatJid, msgText, data.discord_bot_id);

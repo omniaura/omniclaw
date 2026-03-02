@@ -262,6 +262,7 @@ export interface IpcMessagePayload {
   platform?: string;
   requestId?: string;
   pubkey?: string;
+  discord_bot_id?: string;
 }
 
 /** IPC task payloads sent by agents to the orchestrator. */
