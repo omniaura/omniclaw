@@ -59,8 +59,15 @@ ARG GRAPHITE_VERSION=1.7.16
 RUN npm install -g @withgraphite/graphite-cli@${GRAPHITE_VERSION}
 
 # Install claude-code globally (default agent runtime)
-# Note: agent-browser is available as an on-demand skill (installed on first use)
 RUN bun install -g @anthropic-ai/claude-code
+
+# Pre-install agent-browser with Chromium for browser automation
+# Store browsers in a shared location accessible to both root and bun user.
+# --with-deps installs all required Chromium system libraries (libnss3, libgbm1, etc.)
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN bun install -g agent-browser \
+    && npx playwright install --with-deps chromium \
+    && chmod -R 755 $PLAYWRIGHT_BROWSERS_PATH
 
 # Install OpenCode CLI (alternative agent runtime)
 # Pin version to prevent supply-chain attacks via unsigned curl|bash.
