@@ -64,11 +64,9 @@ RUN bun install -g @anthropic-ai/claude-code
 # Pre-install agent-browser with Chromium for browser automation
 # Store browsers in a shared location accessible to both root and bun user.
 # --with-deps installs all required Chromium system libraries (libnss3, libgbm1, etc.)
-# Keep Playwright in the range expected by agent-browser's playwright-core dependency.
 ARG AGENT_BROWSER_VERSION=0.15.1
-ARG PLAYWRIGHT_VERSION=1.58.2
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
-RUN bun install -g "agent-browser@${AGENT_BROWSER_VERSION}" "playwright@${PLAYWRIGHT_VERSION}" \
+RUN bun install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
     && agent-browser install --with-deps \
     && chmod -R 755 $PLAYWRIGHT_BROWSERS_PATH
 
