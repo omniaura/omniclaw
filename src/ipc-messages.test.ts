@@ -33,6 +33,7 @@ const THIRD_GROUP: RegisteredGroup = {
 
 let groups: Record<string, RegisteredGroup>;
 let sentMessages: Array<{ jid: string; text: string }>;
+let sendCalls: Array<{ jid: string; text: string; discordBotId?: string }>;
 let notifiedGroups: Array<{ jid: string; text: string }>;
 let reactions: Array<{
   action: 'add' | 'remove';
@@ -51,6 +52,7 @@ beforeEach(() => {
   };
 
   sentMessages = [];
+  sendCalls = [];
   notifiedGroups = [];
   reactions = [];
 
@@ -58,6 +60,7 @@ beforeEach(() => {
 
   deps = {
     sendMessage: async (jid, text) => {
+      sendCalls.push({ jid, text });
       sentMessages.push({ jid, text });
       return `sent-${sentMessages.length}`;
     },
@@ -461,6 +464,52 @@ describe('processMessageIpc: ssh_pubkey', () => {
 // =============================================================================
 
 describe('processMessageIpc: message', () => {
+  it('passes discord_bot_id to sendMessage for multi-bot routing', async () => {
+    deps.sendMessage = async (jid, text, discordBotId) => {
+      sendCalls.push({ jid, text, discordBotId });
+      sentMessages.push({ jid, text });
+      return 'sent-1';
+    };
+
+    const result = await processMsg(
+      {
+        type: 'message',
+        chatJid: 'other@g.us',
+        text: 'Route via specific bot',
+        discord_bot_id: 'OPENCODE',
+      },
+      'main',
+      true,
+    );
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(sendCalls[0]).toEqual({
+      jid: 'other@g.us',
+      text: 'Route via specific bot',
+      discordBotId: 'OPENCODE',
+    });
+  });
+
+  it('allows subscriber agent to message a subscribed channel without notify echo', async () => {
+    deps.getSubscriptions = () => [
+      { agentId: 'subscriber', agentFolder: 'subscriber-folder' },
+    ];
+
+    const result = await processMsg(
+      {
+        type: 'message',
+        chatJid: 'other@g.us',
+        text: 'Subscriber message',
+      },
+      'subscriber-folder',
+      false,
+    );
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(sentMessages).toHaveLength(1);
+    expect(notifiedGroups).toHaveLength(0);
+  });
+
   it('main group can send to any registered group', async () => {
     const result = await processMsg(
       {
