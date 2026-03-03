@@ -88,6 +88,8 @@ export interface ContainerInput {
   agentTrigger?: string;
   /** Agent's identity + global notes folder, mounted read-write at /workspace/agent/ */
   agentContextFolder?: string; // e.g., 'agents/peytonomi'
+  /** Human-readable name of the channel that triggered this invocation. */
+  currentChannelName?: string;
   /** Channel workspace folder. If set, overrides groupFolder as /workspace/group/ mount. */
   channelFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant/spec'
   /** Category team workspace, mounted read-write at /workspace/category/ (shared across channels in same category) */

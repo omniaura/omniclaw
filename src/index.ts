@@ -1117,16 +1117,19 @@ function buildChannelsForAgent(agentId: string): ChannelInfo[] | undefined {
   const agentToChannels =
     buildAgentToChannelsMapFromSubscriptions(channelSubscriptions);
   const jids = agentToChannels.get(agentId);
-  if (!jids || jids.length <= 1) return undefined;
+  if (!jids || jids.length === 0) return undefined;
+
+  // Build a JID→chatName map from the chats table (has real channel names)
+  const chatNames = new Map(getAllChats().map((c) => [c.jid, c.name]));
 
   return jids.map((jid, i) => {
     const group = registeredGroups[jid];
-    // Derive human-readable name: use last segment of channelFolder if available,
-    // otherwise fall back to group name or JID
+    // Prefer chat metadata name (e.g. "MarketReaders") over registered group name
+    // (which is the agent name, e.g. "LocalPeyton")
     const channelFolderName = group?.channelFolder
       ? group.channelFolder.split('/').pop()
       : undefined;
-    const name = channelFolderName || group?.name || jid;
+    const name = chatNames.get(jid) || channelFolderName || group?.name || jid;
     return { id: String(i + 1), jid, name };
   });
 }
@@ -1164,8 +1167,20 @@ async function runAgent(
     group.folder,
   );
 
-  // Update available groups snapshot (main group only can see all groups)
+  // Resolve agent ID early so we can compute subscribed channels for snapshots
+  const { agentId: dispatchAgentId } = parseDispatchKey(processKeyJid);
+  const agentId =
+    dispatchAgentId ??
+    (channelSubscriptions[chatJid] || [])[0]?.agentId ??
+    Object.values(agents).find((a) => a.folder === group.folder)?.id ??
+    group.folder;
+
+  // Update available groups snapshot
+  // Non-main agents can see their subscribed channels; main sees all
   const availableGroups = getAvailableGroups();
+  const agentToChannels =
+    buildAgentToChannelsMapFromSubscriptions(channelSubscriptions);
+  const subscribedJids = new Set(agentToChannels.get(agentId) || []);
   writeGroupsSnapshot(
     runtimeGroupFolder,
     isMain,
@@ -1174,6 +1189,7 @@ async function runAgent(
       ...Object.keys(registeredGroups),
       ...Object.keys(channelSubscriptions),
     ]),
+    subscribedJids,
   );
 
   // Update agent registry for all groups
@@ -1197,13 +1213,10 @@ async function runAgent(
     const backend = resolveBackend(group);
     // Use the dispatch key's agent ID (from processKeyJid) so that in multi-agent
     // channels each agent gets its own channel map, not the first subscription's.
-    const { agentId: dispatchAgentId } = parseDispatchKey(processKeyJid);
-    const agentId =
-      dispatchAgentId ??
-      (channelSubscriptions[chatJid] || [])[0]?.agentId ??
-      Object.values(agents).find((a) => a.folder === group.folder)?.id ??
-      group.folder;
     const agentChannels = buildChannelsForAgent(agentId);
+    const currentChannelName =
+      agentChannels?.find((ch) => ch.jid === chatJid)?.name ||
+      availableGroups.find((g) => g.jid === chatJid)?.name;
     const output = await backend.runAgent(
       group,
       {
@@ -1218,6 +1231,7 @@ async function runAgent(
         serverFolder: group.serverFolder,
         agentRuntime: group.agentRuntime,
         channels: agentChannels,
+        currentChannelName,
         agentName: group.name,
         discordBotId: group.discordBotId,
         agentTrigger: group.trigger,
