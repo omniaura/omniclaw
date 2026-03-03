@@ -1119,14 +1119,17 @@ function buildChannelsForAgent(agentId: string): ChannelInfo[] | undefined {
   const jids = agentToChannels.get(agentId);
   if (!jids || jids.length === 0) return undefined;
 
+  // Build a JID→chatName map from the chats table (has real channel names)
+  const chatNames = new Map(getAllChats().map((c) => [c.jid, c.name]));
+
   return jids.map((jid, i) => {
     const group = registeredGroups[jid];
-    // Derive human-readable name: use last segment of channelFolder if available,
-    // otherwise fall back to group name or JID
+    // Prefer chat metadata name (e.g. "MarketReaders") over registered group name
+    // (which is the agent name, e.g. "LocalPeyton")
     const channelFolderName = group?.channelFolder
       ? group.channelFolder.split('/').pop()
       : undefined;
-    const name = channelFolderName || group?.name || jid;
+    const name = chatNames.get(jid) || channelFolderName || group?.name || jid;
     return { id: String(i + 1), jid, name };
   });
 }
@@ -1213,7 +1216,7 @@ async function runAgent(
     const agentChannels = buildChannelsForAgent(agentId);
     const currentChannelName =
       agentChannels?.find((ch) => ch.jid === chatJid)?.name ||
-      registeredGroups[chatJid]?.name;
+      availableGroups.find((g) => g.jid === chatJid)?.name;
     const output = await backend.runAgent(
       group,
       {
