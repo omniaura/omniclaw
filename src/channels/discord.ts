@@ -482,7 +482,8 @@ export class DiscordChannel implements Channel {
     // Ignore own messages
     if (message.author.id === this.client.user?.id) return;
 
-    let content = message.content;
+    const rawContent = message.content;
+    let content = rawContent;
 
     // Translate @bot mention into trigger format
     // FIX: Determine agent name from the channel's registered group, not global ASSISTANT_NAME
@@ -780,7 +781,7 @@ export class DiscordChannel implements Channel {
         if (!hasGroupTrigger) {
           content = `@${agentName} ${content}`;
         }
-      } else if (this.containsPlaintextName(content, group)) {
+      } else if (this.containsPlaintextName(rawContent, group)) {
         // Plaintext name mention — user referred to the bot by name without @
         const agentName = group?.trigger?.replace(/^@/, '') || ASSISTANT_NAME;
         logger.info(
