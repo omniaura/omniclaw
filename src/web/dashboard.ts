@@ -44,7 +44,9 @@ export function renderDashboard(state: WebStateProvider): string {
       const lastRun = t.last_run
         ? new Date(t.last_run).toLocaleString()
         : '—';
-      return `<tr>
+      const toggleLabel = t.status === 'active' ? 'Pause' : 'Resume';
+      const toggleStatus = t.status === 'active' ? 'paused' : 'active';
+      return `<tr data-task-id="${escapeHtml(t.id)}">
         <td title="${escapeHtml(t.id)}">${escapeHtml(t.id.slice(0, 8))}…</td>
         <td>${escapeHtml(t.group_folder)}</td>
         <td><span class="badge ${statusClass}">${escapeHtml(t.status)}</span></td>
@@ -52,8 +54,26 @@ export function renderDashboard(state: WebStateProvider): string {
         <td title="${escapeHtml(t.prompt)}">${escapeHtml(t.prompt.slice(0, 80))}${t.prompt.length > 80 ? '…' : ''}</td>
         <td>${nextRun}</td>
         <td>${lastRun}</td>
+        <td class="actions">
+          <button class="btn btn-sm btn-toggle" data-action="toggle" data-status="${toggleStatus}" title="${toggleLabel}">${toggleLabel}</button>
+          <button class="btn btn-sm btn-danger" data-action="delete" title="Delete">Delete</button>
+        </td>
       </tr>`;
     })
+    .join('\n');
+
+  // Build agent options for the create-task form dropdown
+  const agentOptions = agents
+    .map((a) => {
+      const jids = Object.entries(subs)
+        .filter(([, s]) => s.some((sub) => sub.agentId === a.id))
+        .map(([jid]) => jid);
+      return jids.map(
+        (jid) =>
+          `<option value="${escapeHtml(a.folder)}|${escapeHtml(jid)}">${escapeHtml(a.name)} (${escapeHtml(jid)})</option>`,
+      );
+    })
+    .flat()
     .join('\n');
 
   return `<!DOCTYPE html>
@@ -115,6 +135,8 @@ export function renderDashboard(state: WebStateProvider): string {
   .stat-card .value { font-size: 1.5rem; font-weight: 700; margin-top: 0.25rem; }
   section { margin-bottom: 2rem; }
   section h2 { font-size: 1rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
+  .section-header h2 { margin-bottom: 0; }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -143,6 +165,7 @@ export function renderDashboard(state: WebStateProvider): string {
     white-space: nowrap;
   }
   td.channels { white-space: normal; font-size: 0.75rem; color: var(--text-dim); }
+  td.actions { white-space: nowrap; }
   .badge {
     display: inline-block;
     padding: 0.125rem 0.5rem;
@@ -157,6 +180,26 @@ export function renderDashboard(state: WebStateProvider): string {
   .status-active { background: #14532d; color: var(--green); }
   .status-paused { background: #422006; color: var(--yellow); }
   .status-completed { background: #1e1e1e; color: var(--text-dim); }
+  .btn {
+    padding: 0.375rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 500;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .btn:hover { border-color: var(--accent); background: #1e2030; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #4f46e5; }
+  .btn-sm { padding: 0.2rem 0.5rem; font-size: 0.7rem; }
+  .btn-danger { color: var(--red); border-color: #5c1818; }
+  .btn-danger:hover { background: #2a0f0f; border-color: var(--red); }
+  .btn-toggle { color: var(--yellow); border-color: #5c4a08; }
+  .btn-toggle:hover { background: #2a2208; border-color: var(--yellow); }
   #log-container {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -172,6 +215,70 @@ export function renderDashboard(state: WebStateProvider): string {
   .log-line .ts { color: var(--text-dim); }
   .log-line.error { color: var(--red); }
   .log-line.warn { color: var(--yellow); }
+  /* Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    width: 480px;
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .modal h3 { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; }
+  .form-group { margin-bottom: 0.75rem; }
+  .form-group label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.25rem;
+  }
+  .form-group input,
+  .form-group select,
+  .form-group textarea {
+    width: 100%;
+    padding: 0.5rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85rem;
+  }
+  .form-group textarea { min-height: 80px; resize: vertical; }
+  .form-group input:focus,
+  .form-group select:focus,
+  .form-group textarea:focus { outline: none; border-color: var(--accent); }
+  .form-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+  .form-error { color: var(--red); font-size: 0.75rem; margin-top: 0.25rem; }
+  .toast {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.8rem;
+    z-index: 200;
+    animation: fadeIn 0.2s;
+  }
+  .toast.success { border-color: var(--green); color: var(--green); }
+  .toast.error { border-color: var(--red); color: var(--red); }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 </style>
 </head>
 <body>
@@ -196,9 +303,12 @@ export function renderDashboard(state: WebStateProvider): string {
   </section>
 
   <section>
-    <h2>Scheduled Tasks</h2>
+    <div class="section-header">
+      <h2>Scheduled Tasks</h2>
+      <button class="btn btn-primary" id="btn-create-task">+ New Task</button>
+    </div>
     <table>
-      <thead><tr><th>ID</th><th>Agent</th><th>Status</th><th>Schedule</th><th>Prompt</th><th>Next Run</th><th>Last Run</th></tr></thead>
+      <thead><tr><th>ID</th><th>Agent</th><th>Status</th><th>Schedule</th><th>Prompt</th><th>Next Run</th><th>Last Run</th><th>Actions</th></tr></thead>
       <tbody id="tasks-tbody">${taskRows}</tbody>
     </table>
   </section>
@@ -209,57 +319,214 @@ export function renderDashboard(state: WebStateProvider): string {
   </section>
 </main>
 
+<!-- Create Task Modal -->
+<div class="modal-overlay" id="create-task-modal">
+  <div class="modal">
+    <h3>Create Scheduled Task</h3>
+    <form id="create-task-form">
+      <div class="form-group">
+        <label for="ct-agent">Agent / Channel</label>
+        <select id="ct-agent" required>
+          <option value="">Select agent…</option>
+          ${agentOptions}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="ct-prompt">Prompt</label>
+        <textarea id="ct-prompt" placeholder="What should the agent do?" required></textarea>
+      </div>
+      <div class="form-group">
+        <label for="ct-schedule-type">Schedule Type</label>
+        <select id="ct-schedule-type" required>
+          <option value="cron">Cron</option>
+          <option value="interval">Interval (ms)</option>
+          <option value="once">Once (ISO timestamp)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="ct-schedule-value">Schedule Value</label>
+        <input id="ct-schedule-value" type="text" placeholder="0 9 * * * (cron) | 3600000 (ms) | 2026-03-02T15:00:00" required>
+      </div>
+      <div class="form-group">
+        <label for="ct-context-mode">Context Mode</label>
+        <select id="ct-context-mode">
+          <option value="isolated">Isolated (fresh session)</option>
+          <option value="group">Group (with chat history)</option>
+        </select>
+      </div>
+      <div id="ct-error" class="form-error"></div>
+      <div class="form-actions">
+        <button type="button" class="btn" id="ct-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="ct-submit">Create</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 (function() {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = proto + '//' + location.host + '/ws';
-  const statusEl = document.getElementById('ws-status');
-  const logContainer = document.getElementById('log-container');
-  const MAX_LOG_LINES = 200;
+  // ---- WebSocket ----
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var wsUrl = proto + '//' + location.host + '/ws';
+  var statusEl = document.getElementById('ws-status');
+  var logContainer = document.getElementById('log-container');
+  var MAX_LOG_LINES = 200;
 
   function connect() {
-    const ws = new WebSocket(wsUrl);
-    ws.onopen = () => {
+    var ws = new WebSocket(wsUrl);
+    ws.onopen = function() {
       statusEl.textContent = 'connected';
       statusEl.className = 'ws-status connected';
       logContainer.innerHTML = '';
       ws.send(JSON.stringify({ subscribe: ['logs', 'stats'] }));
     };
-    ws.onclose = () => {
+    ws.onclose = function() {
       statusEl.textContent = 'disconnected';
       statusEl.className = 'ws-status disconnected';
       setTimeout(connect, 3000);
     };
-    ws.onerror = () => ws.close();
-    ws.onmessage = (e) => {
+    ws.onerror = function() { ws.close(); };
+    ws.onmessage = function(e) {
       try {
-        const evt = JSON.parse(e.data);
+        var evt = JSON.parse(e.data);
         if (evt.type === 'log') {
-          const line = document.createElement('div');
+          var line = document.createElement('div');
           line.className = 'log-line' + (evt.data.level === 'error' ? ' error' : evt.data.level === 'warn' ? ' warn' : '');
-          const ts = new Date(evt.data.ts).toLocaleTimeString();
+          var ts = new Date(evt.data.ts).toLocaleTimeString();
           line.innerHTML = '<span class="ts">' + ts + '</span> ' + escapeHtml(evt.data.msg || '');
           logContainer.appendChild(line);
           while (logContainer.children.length > MAX_LOG_LINES) logContainer.removeChild(logContainer.firstChild);
           logContainer.scrollTop = logContainer.scrollHeight;
         }
         if (evt.type === 'stats') {
-          const d = evt.data;
-          const el = (id) => document.getElementById(id);
+          var d = evt.data;
+          var el = function(id) { return document.getElementById(id); };
           if (d.activeContainers != null) el('stat-active').textContent = (d.activeContainers - d.idleContainers) + '/' + d.maxActive;
           if (d.idleContainers != null) el('stat-idle').textContent = d.idleContainers + '/' + d.maxIdle;
         }
-      } catch {}
+      } catch(ex) {}
     };
   }
 
   function escapeHtml(s) {
-    const d = document.createElement('div');
+    var d = document.createElement('div');
     d.textContent = s;
     return d.innerHTML;
   }
 
   connect();
+
+  // ---- Toast notifications ----
+  function showToast(message, type) {
+    var existing = document.querySelector('.toast');
+    if (existing) existing.remove();
+    var el = document.createElement('div');
+    el.className = 'toast ' + (type || 'success');
+    el.textContent = message;
+    document.body.appendChild(el);
+    setTimeout(function() { el.remove(); }, 3000);
+  }
+
+  // ---- Task actions (pause/resume/delete) ----
+  var tasksTable = document.getElementById('tasks-tbody');
+  tasksTable.addEventListener('click', function(e) {
+    var btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    var row = btn.closest('tr');
+    var taskId = row.getAttribute('data-task-id');
+    var action = btn.getAttribute('data-action');
+
+    if (action === 'toggle') {
+      var newStatus = btn.getAttribute('data-status');
+      btn.disabled = true;
+      fetch('/api/tasks/' + encodeURIComponent(taskId), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      }).then(function(res) {
+        if (!res.ok) return res.json().then(function(d) { throw new Error(d.error); });
+        return res.json();
+      }).then(function(task) {
+        showToast('Task ' + (newStatus === 'paused' ? 'paused' : 'resumed'));
+        location.reload();
+      }).catch(function(err) {
+        showToast(err.message || 'Failed', 'error');
+        btn.disabled = false;
+      });
+    }
+
+    if (action === 'delete') {
+      if (!confirm('Delete this task? This cannot be undone.')) return;
+      btn.disabled = true;
+      fetch('/api/tasks/' + encodeURIComponent(taskId), {
+        method: 'DELETE'
+      }).then(function(res) {
+        if (!res.ok) return res.json().then(function(d) { throw new Error(d.error); });
+        return res.json();
+      }).then(function() {
+        showToast('Task deleted');
+        row.remove();
+      }).catch(function(err) {
+        showToast(err.message || 'Failed', 'error');
+        btn.disabled = false;
+      });
+    }
+  });
+
+  // ---- Create task modal ----
+  var modal = document.getElementById('create-task-modal');
+  var form = document.getElementById('create-task-form');
+  var errorEl = document.getElementById('ct-error');
+
+  document.getElementById('btn-create-task').addEventListener('click', function() {
+    modal.classList.add('open');
+    errorEl.textContent = '';
+  });
+  document.getElementById('ct-cancel').addEventListener('click', function() {
+    modal.classList.remove('open');
+  });
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) modal.classList.remove('open');
+  });
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    errorEl.textContent = '';
+    var submitBtn = document.getElementById('ct-submit');
+    submitBtn.disabled = true;
+
+    var agentVal = document.getElementById('ct-agent').value;
+    if (!agentVal) { errorEl.textContent = 'Select an agent'; submitBtn.disabled = false; return; }
+    var parts = agentVal.split('|');
+    var groupFolder = parts[0];
+    var chatJid = parts[1];
+
+    var payload = {
+      group_folder: groupFolder,
+      chat_jid: chatJid,
+      prompt: document.getElementById('ct-prompt').value,
+      schedule_type: document.getElementById('ct-schedule-type').value,
+      schedule_value: document.getElementById('ct-schedule-value').value,
+      context_mode: document.getElementById('ct-context-mode').value
+    };
+
+    fetch('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function(res) {
+      if (!res.ok) return res.json().then(function(d) { throw new Error(d.error); });
+      return res.json();
+    }).then(function(task) {
+      showToast('Task created: ' + task.id.slice(0, 12));
+      modal.classList.remove('open');
+      form.reset();
+      location.reload();
+    }).catch(function(err) {
+      errorEl.textContent = err.message || 'Failed to create task';
+      submitBtn.disabled = false;
+    });
+  });
 })();
 </script>
 </body>

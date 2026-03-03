@@ -51,6 +51,9 @@ import {
   getNewMessages,
   getRouterState,
   getTaskById,
+  createTask as dbCreateTask,
+  updateTask as dbUpdateTask,
+  deleteTask as dbDeleteTask,
   initDatabase,
   setAgent,
   setChannelSubscription,
@@ -85,6 +88,7 @@ import {
   registeredGroupToRoute,
 } from './types.js';
 import { findMainGroupJid } from './group-helpers.js';
+import { calculateNextRun } from './schedule-utils.js';
 import { logger } from './logger.js';
 import { assertPathWithin } from './path-security.js';
 import { startWebServer, type WebServerHandle } from './web/index.js';
@@ -1751,6 +1755,10 @@ async function main(): Promise<void> {
         },
         getChats: () => getAllChats(),
         getQueueStats: () => queue.getStats(),
+        createTask: (task) => dbCreateTask(task),
+        updateTask: (id, updates) => dbUpdateTask(id, updates),
+        deleteTask: (id) => dbDeleteTask(id),
+        calculateNextRun: (type, value) => calculateNextRun(type, value),
       },
     );
   }
