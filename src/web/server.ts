@@ -59,14 +59,20 @@ export function startWebServer(
         });
       }
 
-      const response = handleRequest(req, state);
-      // Add CORS headers to API responses
-      if (url.pathname.startsWith('/api/')) {
-        for (const [k, v] of Object.entries(corsHeaders())) {
-          response.headers.set(k, v);
+      const result = handleRequest(req, state);
+      // handleRequest may return a Promise (for POST/PATCH with body parsing)
+      const addCors = (response: Response) => {
+        if (url.pathname.startsWith('/api/')) {
+          for (const [k, v] of Object.entries(corsHeaders())) {
+            response.headers.set(k, v);
+          }
         }
+        return response;
+      };
+      if (result instanceof Promise) {
+        return result.then(addCors);
       }
-      return response;
+      return addCors(result);
     },
 
     websocket: {
@@ -184,7 +190,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 function corsHeaders(): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
   };
 }

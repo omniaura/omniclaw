@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach } from 'bun:test';
+import { describe, it, expect, afterEach } from 'bun:test';
 
 import { startWebServer, type WebServerHandle } from './server.js';
 import type { WebStateProvider, QueueStats } from './types.js';
@@ -44,7 +44,28 @@ const defaultStats: QueueStats = {
   maxIdle: 4,
 };
 
+/** In-memory task store for mutation tests. */
+function makeTaskStore(initial: ScheduledTask[] = [makeTask(), makeTask({ id: 'task-002', status: 'paused' })]) {
+  const tasks = new Map<string, ScheduledTask>(initial.map((t) => [t.id, t]));
+  return {
+    tasks,
+    getAll: () => [...tasks.values()],
+    getById: (id: string) => tasks.get(id),
+    create: (task: Omit<ScheduledTask, 'last_run' | 'last_result'>) => {
+      const full: ScheduledTask = { ...task, last_run: null, last_result: null };
+      tasks.set(task.id, full);
+    },
+    update: (id: string, updates: Partial<Pick<ScheduledTask, 'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'>>) => {
+      const existing = tasks.get(id);
+      if (!existing) throw new Error('Task not found');
+      tasks.set(id, { ...existing, ...updates });
+    },
+    delete: (id: string) => { tasks.delete(id); },
+  };
+}
+
 function makeState(overrides: Partial<WebStateProvider> = {}): WebStateProvider {
+  const store = makeTaskStore();
   return {
     getAgents: () => ({
       'test-agent': makeAgent(),
@@ -63,9 +84,8 @@ function makeState(overrides: Partial<WebStateProvider> = {}): WebStateProvider 
         },
       ] as ChannelSubscription[],
     }),
-    getTasks: () => [makeTask(), makeTask({ id: 'task-002', status: 'paused' })],
-    getTaskById: (id) =>
-      id === 'task-001' ? makeTask() : undefined,
+    getTasks: () => store.getAll(),
+    getTaskById: (id) => store.getById(id),
     getMessages: () => [
       {
         id: 'msg-1',
@@ -80,6 +100,16 @@ function makeState(overrides: Partial<WebStateProvider> = {}): WebStateProvider 
       { jid: 'dc:123', name: 'test-channel', last_message_time: '2026-03-01T12:00:00.000Z' },
     ],
     getQueueStats: () => defaultStats,
+    createTask: (task) => store.create(task),
+    updateTask: (id, updates) => store.update(id, updates),
+    deleteTask: (id) => store.delete(id),
+    calculateNextRun: (type, value) => {
+      // Simplified for tests — return a fixed future time for valid inputs
+      if (type === 'cron') return '2026-03-03T09:00:00.000Z';
+      if (type === 'interval') return new Date(Date.now() + parseInt(value, 10)).toISOString();
+      if (type === 'once') return value; // trust the ISO string
+      return null;
+    },
     ...overrides,
   };
 }
@@ -191,7 +221,7 @@ describe('GET /api/agents', () => {
   });
 });
 
-// ---- API: /api/tasks ----
+// ---- API: GET /api/tasks ----
 
 describe('GET /api/tasks', () => {
   it('returns all tasks', async () => {
@@ -208,6 +238,401 @@ describe('GET /api/tasks', () => {
     const data = (await res.json()) as ScheduledTask[];
     expect(data.length).toBe(1);
     expect(data[0].status).toBe('active');
+  });
+});
+
+// ---- API: GET /api/tasks/:id ----
+
+describe('GET /api/tasks/:id', () => {
+  it('returns a single task by ID', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/task-001'));
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as ScheduledTask;
+    expect(data.id).toBe('task-001');
+    expect(data.prompt).toBe('Run the daily check');
+  });
+
+  it('returns 404 for unknown task', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/nonexistent'));
+    expect(res.status).toBe(404);
+  });
+});
+
+// ---- API: POST /api/tasks ----
+
+describe('POST /api/tasks', () => {
+  it('creates a task with valid payload', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        group_folder: 'test-agent',
+        chat_jid: 'dc:123',
+        prompt: 'New scheduled task',
+        schedule_type: 'cron',
+        schedule_value: '0 12 * * *',
+        context_mode: 'isolated',
+      }),
+    });
+    expect(res.status).toBe(201);
+    const data = (await res.json()) as ScheduledTask;
+    expect(data.id).toStartWith('task-');
+    expect(data.prompt).toBe('New scheduled task');
+    expect(data.status).toBe('active');
+    expect(data.next_run).toBeTruthy();
+  });
+
+  it('creates a task with interval schedule', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        group_folder: 'test-agent',
+        chat_jid: 'dc:123',
+        prompt: 'Interval task',
+        schedule_type: 'interval',
+        schedule_value: '3600000',
+      }),
+    });
+    expect(res.status).toBe(201);
+    const data = (await res.json()) as ScheduledTask;
+    expect(data.schedule_type).toBe('interval');
+    expect(data.context_mode).toBe('isolated'); // default
+  });
+
+  it('defaults context_mode to isolated', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        group_folder: 'test-agent',
+        chat_jid: 'dc:123',
+        prompt: 'Test',
+        schedule_type: 'once',
+        schedule_value: '2026-12-31T23:59:00.000Z',
+      }),
+    });
+    expect(res.status).toBe(201);
+    const data = (await res.json()) as ScheduledTask;
+    expect(data.context_mode).toBe('isolated');
+  });
+
+  it('rejects missing prompt', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        group_folder: 'test-agent',
+        chat_jid: 'dc:123',
+        schedule_type: 'cron',
+        schedule_value: '0 9 * * *',
+      }),
+    });
+    expect(res.status).toBe(400);
+    const data = (await res.json()) as { error: string };
+    expect(data.error).toContain('prompt');
+  });
+
+  it('rejects invalid schedule_type', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        group_folder: 'test-agent',
+        chat_jid: 'dc:123',
+        prompt: 'Test',
+        schedule_type: 'weekly',
+        schedule_value: '0 9 * * *',
+      }),
+    });
+    expect(res.status).toBe(400);
+    const data = (await res.json()) as { error: string };
+    expect(data.error).toContain('schedule_type');
+  });
+
+  it('rejects missing group_folder', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_jid: 'dc:123',
+        prompt: 'Test',
+        schedule_type: 'cron',
+        schedule_value: '0 9 * * *',
+      }),
+    });
+    expect(res.status).toBe(400);
+    const data = (await res.json()) as { error: string };
+    expect(data.error).toContain('group_folder');
+  });
+
+  it('rejects missing chat_jid', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        group_folder: 'test-agent',
+        prompt: 'Test',
+        schedule_type: 'cron',
+        schedule_value: '0 9 * * *',
+      }),
+    });
+    expect(res.status).toBe(400);
+    const data = (await res.json()) as { error: string };
+    expect(data.error).toContain('chat_jid');
+  });
+
+  it('rejects invalid JSON body', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not json',
+    });
+    expect(res.status).toBe(400);
+    const data = (await res.json()) as { error: string };
+    expect(data.error).toContain('Invalid JSON');
+  });
+
+  it('rejects when calculateNextRun returns null', async () => {
+    const state = makeState({
+      calculateNextRun: () => null,
+    });
+    handle = startWebServer({ port: randomPort() }, state);
+    const res = await fetch(url('/api/tasks'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        group_folder: 'test-agent',
+        chat_jid: 'dc:123',
+        prompt: 'Test',
+        schedule_type: 'cron',
+        schedule_value: 'invalid-cron',
+      }),
+    });
+    expect(res.status).toBe(400);
+    const data = (await res.json()) as { error: string };
+    expect(data.error).toContain('Invalid schedule');
+  });
+
+  it('task is retrievable after creation', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const createRes = await fetch(url('/api/tasks'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        group_folder: 'test-agent',
+        chat_jid: 'dc:123',
+        prompt: 'Persistent task',
+        schedule_type: 'cron',
+        schedule_value: '0 9 * * *',
+      }),
+    });
+    const created = (await createRes.json()) as ScheduledTask;
+
+    // Fetch all tasks and verify the new one is included
+    const listRes = await fetch(url('/api/tasks'));
+    const tasks = (await listRes.json()) as ScheduledTask[];
+    expect(tasks.some((t) => t.id === created.id)).toBe(true);
+  });
+});
+
+// ---- API: PATCH /api/tasks/:id ----
+
+describe('PATCH /api/tasks/:id', () => {
+  it('updates task status to paused', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/task-001'), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'paused' }),
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as ScheduledTask;
+    expect(data.status).toBe('paused');
+  });
+
+  it('resumes a paused task', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/task-002'), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'active' }),
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as ScheduledTask;
+    expect(data.status).toBe('active');
+  });
+
+  it('updates task prompt', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/task-001'), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Updated prompt text' }),
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as ScheduledTask;
+    expect(data.prompt).toBe('Updated prompt text');
+  });
+
+  it('updates schedule type and value', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/task-001'), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schedule_type: 'interval',
+        schedule_value: '7200000',
+      }),
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as ScheduledTask;
+    expect(data.schedule_type).toBe('interval');
+    expect(data.schedule_value).toBe('7200000');
+  });
+
+  it('returns 404 for unknown task', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/nonexistent'), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'paused' }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects invalid status value', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/task-001'), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'deleted' }),
+    });
+    expect(res.status).toBe(400);
+    const data = (await res.json()) as { error: string };
+    expect(data.error).toContain('status');
+  });
+
+  it('rejects invalid schedule_type', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/task-001'), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schedule_type: 'weekly' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects empty update body', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/task-001'), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    const data = (await res.json()) as { error: string };
+    expect(data.error).toContain('No valid fields');
+  });
+
+  it('rejects invalid JSON body', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/task-001'), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not json',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects empty prompt string', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/task-001'), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: '' }),
+    });
+    expect(res.status).toBe(400);
+    const data = (await res.json()) as { error: string };
+    expect(data.error).toContain('prompt');
+  });
+});
+
+// ---- API: DELETE /api/tasks/:id ----
+
+describe('DELETE /api/tasks/:id', () => {
+  it('deletes an existing task', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/task-001'), {
+      method: 'DELETE',
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { deleted: boolean; id: string };
+    expect(data.deleted).toBe(true);
+    expect(data.id).toBe('task-001');
+
+    // Verify task is gone
+    const checkRes = await fetch(url('/api/tasks/task-001'));
+    expect(checkRes.status).toBe(404);
+  });
+
+  it('returns 404 for unknown task', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/nonexistent'), {
+      method: 'DELETE',
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('task count decreases after deletion', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+
+    // Get initial count
+    const beforeRes = await fetch(url('/api/tasks'));
+    const before = (await beforeRes.json()) as ScheduledTask[];
+    const initialCount = before.length;
+
+    // Delete a task
+    await fetch(url('/api/tasks/task-001'), { method: 'DELETE' });
+
+    // Get updated count
+    const afterRes = await fetch(url('/api/tasks'));
+    const after = (await afterRes.json()) as ScheduledTask[];
+    expect(after.length).toBe(initialCount - 1);
+  });
+});
+
+// ---- API: Method not allowed ----
+
+describe('method not allowed', () => {
+  it('returns 405 for PUT on /api/tasks', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(405);
+  });
+
+  it('returns 405 for POST on /api/tasks/:id', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks/task-001'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(405);
   });
 });
 
@@ -399,6 +824,15 @@ describe('CORS', () => {
     const res = await fetch(url('/api/stats'));
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
   });
+
+  it('CORS allows POST, PATCH, DELETE methods', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/tasks'), { method: 'OPTIONS' });
+    const methods = res.headers.get('Access-Control-Allow-Methods') || '';
+    expect(methods).toContain('POST');
+    expect(methods).toContain('PATCH');
+    expect(methods).toContain('DELETE');
+  });
 });
 
 // ---- Shutdown ----
@@ -422,5 +856,33 @@ describe('server shutdown', () => {
     } catch {
       // Expected: connection refused
     }
+  });
+});
+
+// ---- Dashboard content ----
+
+describe('dashboard', () => {
+  it('includes create task button', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/'));
+    const html = await res.text();
+    expect(html).toContain('btn-create-task');
+    expect(html).toContain('New Task');
+  });
+
+  it('includes task action buttons', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/'));
+    const html = await res.text();
+    expect(html).toContain('data-action="toggle"');
+    expect(html).toContain('data-action="delete"');
+  });
+
+  it('includes create task modal', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/'));
+    const html = await res.text();
+    expect(html).toContain('create-task-modal');
+    expect(html).toContain('create-task-form');
   });
 });

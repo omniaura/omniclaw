@@ -55,6 +55,9 @@ import {
   getNewMessages,
   getRouterState,
   getTaskById,
+  createTask as dbCreateTask,
+  updateTask as dbUpdateTask,
+  deleteTask as dbDeleteTask,
   initDatabase,
   setAgent,
   setChannelSubscription,
@@ -92,6 +95,7 @@ import { findMainGroupJid } from './group-helpers.js';
 import { getGitHubContextForAgent } from './github.js';
 import { startGitHubWebhookServer } from './github-webhooks.js';
 import type { GitHubWebhookNotification } from './github-webhooks.js';
+import { calculateNextRun } from './schedule-utils.js';
 import { logger } from './logger.js';
 import { createResumePositionStore } from './resume-position-store.js';
 import { assertPathWithin } from './path-security.js';
@@ -1818,6 +1822,10 @@ async function main(): Promise<void> {
         },
         getChats: () => getAllChats(),
         getQueueStats: () => queue.getStats(),
+        createTask: (task) => dbCreateTask(task),
+        updateTask: (id, updates) => dbUpdateTask(id, updates),
+        deleteTask: (id) => dbDeleteTask(id),
+        calculateNextRun: (type, value) => calculateNextRun(type, value),
       },
     );
   }
