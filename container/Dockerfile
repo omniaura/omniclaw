@@ -63,12 +63,23 @@ RUN bun install -g @anthropic-ai/claude-code
 
 # Pre-install agent-browser with Chromium for browser automation
 # Store browsers in a shared location accessible to both root and bun user.
-# --with-deps installs all required Chromium system libraries (libnss3, libgbm1, etc.)
+# bun blocks postinstall scripts by default (security policy). We must add agent-browser
+# to trustedDependencies in bunfig.toml BEFORE installing so bun runs its postinstall,
+# which downloads the platform-specific native binary (e.g. agent-browser-linux-arm64).
+# Without this, the binary is never downloaded and `agent-browser` silently does nothing.
+# `agent-browser install --with-deps` calls sudo internally which doesn't exist, so we
+# run `npx playwright install-deps` directly as root instead (no sudo needed).
+# The JS wrapper at /usr/local/bin/agent-browser uses Node's existsSync() which returns
+# false for paths under /root/.bun/ due to EACCES on access() in the container sandbox,
+# so we symlink the native binary directly to /usr/local/bin/agent-browser.
 ARG AGENT_BROWSER_VERSION=0.15.1
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
-RUN bun install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
-    && agent-browser install --with-deps \
-    && chmod -R 755 $PLAYWRIGHT_BROWSERS_PATH
+RUN echo 'trustedDependencies = ["agent-browser"]' >> /root/.bunfig.toml \
+    && bun install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
+    && agent-browser install \
+    && npx playwright install-deps \
+    && chmod -R 755 $PLAYWRIGHT_BROWSERS_PATH \
+    && ln -sf $(find /root/.bun -name 'agent-browser-linux-*' -type f | head -1) /usr/local/bin/agent-browser
 
 # Install OpenCode CLI (alternative agent runtime)
 # Pin version to prevent supply-chain attacks via unsigned curl|bash.
