@@ -421,7 +421,10 @@ export class DiscordChannel implements Channel {
    * Matches the group's trigger name with word boundaries, case-insensitive.
    * e.g., "hey NicholasOmni what do you think" matches if trigger is "@NicholasOmni".
    */
-  private containsPlaintextName(content: string, group: RegisteredGroup): boolean {
+  private containsPlaintextName(
+    content: string,
+    group: RegisteredGroup,
+  ): boolean {
     const name = (group?.trigger || `@${ASSISTANT_NAME}`).replace(/^@/, '');
     if (!name) return false;
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
