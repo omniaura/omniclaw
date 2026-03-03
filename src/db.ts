@@ -422,6 +422,32 @@ export function createSchema(database: Database): void {
   migrateRoutesToSubscriptions(database);
 }
 
+// One-time fix: Discord server channels (dc: but not dc:dm:) should require trigger.
+// Previously these were misconfigured with requires_trigger=0, causing bots to respond
+// to every message even when not mentioned. Must run after migrateJsonState() so that
+// legacy groups imported from JSON are also patched.
+function applyDiscordRequiresTriggerFix(database: Database): void {
+  const migrationKey = 'fix_discord_requires_trigger_v1';
+  const applied = database
+    .prepare('SELECT value FROM router_state WHERE key = ?')
+    .get(migrationKey) as { value: string } | null;
+  if (applied) return;
+
+  const result = database
+    .prepare(
+      `UPDATE registered_groups SET requires_trigger = 1
+     WHERE jid LIKE 'dc:%' AND jid NOT LIKE 'dc:dm:%' AND requires_trigger = 0`,
+    )
+    .run();
+  database
+    .prepare('INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)')
+    .run(migrationKey, '1');
+  logger.info(
+    { updatedCount: result.changes },
+    'Migration: Discord server channels now require trigger',
+  );
+}
+
 export function initDatabase(): void {
   const dbPath = path.join(STORE_DIR, 'messages.db');
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -431,6 +457,7 @@ export function initDatabase(): void {
 
   // Migrate from JSON files if they exist
   migrateJsonState();
+  applyDiscordRequiresTriggerFix(db);
 }
 
 /** @internal - for tests only. Creates a fresh in-memory database. */
