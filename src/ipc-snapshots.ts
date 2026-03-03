@@ -65,13 +65,18 @@ export function writeGroupsSnapshot(
   isMain: boolean,
   groups: AvailableGroup[],
   registeredJids: Set<string>,
+  subscribedJids?: Set<string>,
 ): void {
   const ipcBase = path.join(DATA_DIR, 'ipc');
   const groupIpcDir = path.join(ipcBase, groupFolder);
   assertPathWithin(groupIpcDir, ipcBase, 'writeGroupsSnapshot');
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  const visibleGroups = isMain ? groups : [];
+  const visibleGroups = isMain
+    ? groups
+    : subscribedJids?.size
+      ? groups.filter((g) => subscribedJids.has(g.jid))
+      : [];
 
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
   fs.writeFileSync(

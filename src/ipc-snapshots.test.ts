@@ -154,12 +154,17 @@ describe('ipc-snapshots', () => {
   });
 
   describe('writeGroupsSnapshot', () => {
-    it('returns empty groups array for non-main groups', () => {
+    it('returns empty groups array for non-main groups without subscriptions', () => {
       const groups = [
         { jid: 'j1', name: 'G1', lastActivity: '', isRegistered: true },
       ];
       const isMain = false;
-      const visibleGroups = isMain ? groups : [];
+      const subscribedJids = new Set<string>();
+      const visibleGroups = isMain
+        ? groups
+        : subscribedJids.size
+          ? groups.filter((g) => subscribedJids.has(g.jid))
+          : [];
       expect(visibleGroups).toEqual([]);
     });
 
@@ -181,6 +186,38 @@ describe('ipc-snapshots', () => {
       const isMain = true;
       const visibleGroups = isMain ? groups : [];
       expect(visibleGroups).toHaveLength(2);
+    });
+
+    it('returns only subscribed groups for non-main agents', () => {
+      const groups = [
+        {
+          jid: 'j1',
+          name: 'G1',
+          lastActivity: '2025-01-01',
+          isRegistered: true,
+        },
+        {
+          jid: 'j2',
+          name: 'G2',
+          lastActivity: '2025-01-02',
+          isRegistered: true,
+        },
+        {
+          jid: 'j3',
+          name: 'G3',
+          lastActivity: '2025-01-03',
+          isRegistered: false,
+        },
+      ];
+      const isMain = false;
+      const subscribedJids = new Set(['j1', 'j3']);
+      const visibleGroups = isMain
+        ? groups
+        : subscribedJids.size
+          ? groups.filter((g) => subscribedJids.has(g.jid))
+          : [];
+      expect(visibleGroups).toHaveLength(2);
+      expect(visibleGroups.map((g) => g.jid)).toEqual(['j1', 'j3']);
     });
   });
 });

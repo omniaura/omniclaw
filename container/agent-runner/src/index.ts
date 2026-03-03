@@ -50,6 +50,8 @@ interface ContainerInput {
   /** Agent's trigger word/phrase (e.g. "@OCPeyton"). */
   agentTrigger?: string;
   agentContextFolder?: string;
+  /** Human-readable name of the channel that triggered this invocation. */
+  currentChannelName?: string;
   channelFolder?: string;
   categoryFolder?: string;
 }
@@ -754,6 +756,25 @@ async function runQuery(
     }
     const identityBlock = `\n\n## Your Identity\n${identityParts.join(' ')}`;
     globalClaudeMd = globalClaudeMd ? globalClaudeMd + identityBlock : identityBlock.trim();
+  }
+
+  // Append channel context so the agent knows where it is
+  if (containerInput.channels && containerInput.channels.length > 1) {
+    // Multi-channel: list all channels, mark current
+    const channelLines = containerInput.channels.map((ch) => {
+      const marker = ch.jid === containerInput.chatJid ? ' **(current)**' : '';
+      return `- **${ch.name}** (\`${ch.jid}\`)${marker}`;
+    });
+    const channelBlock = `\n\n## Channel Context\nYou are subscribed to multiple channels:\n${channelLines.join('\n')}\n\nThe \`send_message\` tool defaults to the current channel. To send to a different channel, specify the target channel ID.`;
+    globalClaudeMd = globalClaudeMd ? globalClaudeMd + channelBlock : channelBlock.trim();
+  } else {
+    // Single-channel or no channels: just state where we are
+    const channelName = containerInput.currentChannelName || containerInput.chatJid;
+    const channelDisplay = containerInput.currentChannelName
+      ? `**${containerInput.currentChannelName}** (\`${containerInput.chatJid}\`)`
+      : `\`${containerInput.chatJid}\``;
+    const channelBlock = `\n\n## Channel Context\nYou are responding in ${channelDisplay}.`;
+    globalClaudeMd = globalClaudeMd ? globalClaudeMd + channelBlock : channelBlock.trim();
   }
 
   // Discover additional directories for CLAUDE.md auto-loading:
