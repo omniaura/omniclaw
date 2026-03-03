@@ -138,6 +138,12 @@ const activeRuntimeFolders = new Set<string>();
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
+// Attentive follow-up: when a bot is mentioned, it stays attentive for the
+// next human message in that channel even without an explicit trigger.
+// Maps chatJid → Set of agentIds that are attentive.
+// Consumed (cleared) when the follow-up message is routed.
+const attentiveAgents: Record<string, Set<string>> = {};
+
 // Track consecutive errors per group to prevent infinite error loops.
 // After MAX_CONSECUTIVE_ERRORS, the cursor advances past the failing batch
 // so the system doesn't re-trigger the same error on every poll.
@@ -1280,12 +1286,18 @@ function getMentionPatterns(sub: ChannelSubscription): RegExp[] {
   return patterns;
 }
 
+interface SubscriptionSelection {
+  selected: ChannelSubscription[];
+  /** True when agents were selected by explicit trigger/mention, not fallback. */
+  selectedByTrigger: boolean;
+}
+
 function selectSubscriptionsForMessage(
   chatJid: string,
   groupMessages: NewMessage[],
-): ChannelSubscription[] {
+): SubscriptionSelection {
   const subs = getSubscriptionsForChannelInMemory(chatJid);
-  if (subs.length === 0) return [];
+  if (subs.length === 0) return { selected: [], selectedByTrigger: false };
 
   // @allagents fan-out: regex check on stored message content — no Discord API call,
   // no GuildMembers privileged intent needed. Safe because it only reads already-stored text.
@@ -1305,12 +1317,16 @@ function selectSubscriptionsForMessage(
   });
 
   let selected: ChannelSubscription[];
+  let selectedByTrigger = false;
   if (hasAllAgents) {
     selected = [...subs];
+    selectedByTrigger = true;
   } else if (directBotMentions.length > 0) {
     selected = directBotMentions;
+    selectedByTrigger = true;
   } else if (explicitMatches.length > 0) {
     selected = explicitMatches;
+    selectedByTrigger = true;
   } else {
     const primaries = subs.filter((s) => s.isPrimary);
     selected = primaries.length > 0 ? primaries : [subs[0]];
@@ -1328,12 +1344,13 @@ function selectSubscriptionsForMessage(
     );
   }
 
-  return selected
+  const sorted = selected
     .sort(
       (a, b) =>
         a.priority - b.priority || a.createdAt.localeCompare(b.createdAt),
     )
     .slice(0, MAX_CHANNEL_AGENT_FANOUT);
+  return { selected: sorted, selectedByTrigger };
 }
 
 async function startMessageLoop(): Promise<void> {
@@ -1375,10 +1392,49 @@ async function startMessageLoop(): Promise<void> {
         }
 
         for (const [chatJid, groupMessages] of messagesByGroup) {
-          const selectedSubs = selectSubscriptionsForMessage(
-            chatJid,
-            groupMessages,
-          );
+          const { selected: triggerSelected, selectedByTrigger } =
+            selectSubscriptionsForMessage(chatJid, groupMessages);
+          let selectedSubs = triggerSelected;
+
+          // Attentive follow-up: if agents were selected by explicit trigger/mention,
+          // mark them attentive so the next human message is routed without a trigger.
+          if (selectedByTrigger && selectedSubs.length > 0) {
+            if (!attentiveAgents[chatJid]) attentiveAgents[chatJid] = new Set();
+            for (const s of selectedSubs) {
+              attentiveAgents[chatJid].add(s.agentId);
+            }
+          }
+
+          // If no trigger match (or only fallback agents selected), check if
+          // any agents are attentive from a recent mention — route the
+          // follow-up message to them.
+          if (!selectedByTrigger) {
+            const attentive = attentiveAgents[chatJid];
+            if (attentive && attentive.size > 0) {
+              const subs = getSubscriptionsForChannelInMemory(chatJid);
+              const attentiveSubs = subs.filter((s) =>
+                attentive.has(s.agentId),
+              );
+              if (attentiveSubs.length > 0) {
+                // Merge attentive agents into selection (alongside any fallback agents)
+                const existing = new Set(selectedSubs.map((s) => s.agentId));
+                for (const s of attentiveSubs) {
+                  if (!existing.has(s.agentId)) {
+                    selectedSubs = [...selectedSubs, s];
+                  }
+                }
+                // Consume attentive state — one follow-up per mention
+                for (const s of attentiveSubs) {
+                  attentive.delete(s.agentId);
+                }
+                if (attentive.size === 0) delete attentiveAgents[chatJid];
+                logger.debug(
+                  { chatJid, agents: attentiveSubs.map((s) => s.agentId) },
+                  'Follow-up message routed via attentive state',
+                );
+              }
+            }
+          }
 
           // Legacy fallback: one-to-one registered group handling
           if (selectedSubs.length === 0) {
