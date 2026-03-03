@@ -2,7 +2,12 @@ import type { Server, ServerWebSocket } from 'bun';
 
 import { logger } from '../logger.js';
 import { handleRequest } from './routes.js';
-import type { WebServerConfig, WebStateProvider, WsData, WsEvent } from './types.js';
+import type {
+  WebServerConfig,
+  WebStateProvider,
+  WsData,
+  WsEvent,
+} from './types.js';
 
 const MAX_WS_CLIENTS = 50;
 
@@ -34,7 +39,9 @@ export function startWebServer(
           });
         }
         if (wsClients.size >= MAX_WS_CLIENTS) {
-          return new Response('Too many WebSocket connections', { status: 429 });
+          return new Response('Too many WebSocket connections', {
+            status: 429,
+          });
         }
         const upgraded = server.upgrade(req, {
           data: { subscriptions: new Set<string>() },

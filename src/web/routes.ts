@@ -24,9 +24,7 @@ export function handleRequest(
     return json({ error: 'Method not allowed' }, 405);
   }
   if (pathname.startsWith('/api/tasks/')) {
-    const taskId = decodeURIComponent(
-      pathname.slice('/api/tasks/'.length),
-    );
+    const taskId = decodeURIComponent(pathname.slice('/api/tasks/'.length));
     if (!taskId) return json({ error: 'Missing task ID' }, 400);
     if (method === 'GET') return handleGetSingleTask(taskId, state);
     if (method === 'PATCH') return handleUpdateTask(taskId, req, state);
@@ -99,22 +97,47 @@ async function handleCreateTask(
   }
 
   // Validate required fields
-  const { group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode } = body;
+  const {
+    group_folder,
+    chat_jid,
+    prompt,
+    schedule_type,
+    schedule_value,
+    context_mode,
+  } = body;
 
   if (!prompt || typeof prompt !== 'string') {
-    return json({ error: 'Missing or invalid "prompt" (string required)' }, 400);
+    return json(
+      { error: 'Missing or invalid "prompt" (string required)' },
+      400,
+    );
   }
-  if (!schedule_type || !['cron', 'interval', 'once'].includes(schedule_type as string)) {
-    return json({ error: 'Missing or invalid "schedule_type" (cron | interval | once)' }, 400);
+  if (
+    !schedule_type ||
+    !['cron', 'interval', 'once'].includes(schedule_type as string)
+  ) {
+    return json(
+      { error: 'Missing or invalid "schedule_type" (cron | interval | once)' },
+      400,
+    );
   }
   if (!schedule_value || typeof schedule_value !== 'string') {
-    return json({ error: 'Missing or invalid "schedule_value" (string required)' }, 400);
+    return json(
+      { error: 'Missing or invalid "schedule_value" (string required)' },
+      400,
+    );
   }
   if (!group_folder || typeof group_folder !== 'string') {
-    return json({ error: 'Missing or invalid "group_folder" (string required)' }, 400);
+    return json(
+      { error: 'Missing or invalid "group_folder" (string required)' },
+      400,
+    );
   }
   if (!chat_jid || typeof chat_jid !== 'string') {
-    return json({ error: 'Missing or invalid "chat_jid" (string required)' }, 400);
+    return json(
+      { error: 'Missing or invalid "chat_jid" (string required)' },
+      400,
+    );
   }
 
   const validContextMode =
@@ -128,7 +151,10 @@ async function handleCreateTask(
     schedule_value as string,
   );
   if (nextRun === null) {
-    return json({ error: 'Invalid schedule: could not calculate next run time' }, 400);
+    return json(
+      { error: 'Invalid schedule: could not calculate next run time' },
+      400,
+    );
   }
 
   const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -149,7 +175,9 @@ async function handleCreateTask(
     state.createTask(task);
   } catch (err) {
     return json(
-      { error: `Failed to create task: ${err instanceof Error ? err.message : String(err)}` },
+      {
+        error: `Failed to create task: ${err instanceof Error ? err.message : String(err)}`,
+      },
       500,
     );
   }
@@ -187,13 +215,22 @@ async function handleUpdateTask(
   }
   if (body.schedule_type !== undefined) {
     if (!['cron', 'interval', 'once'].includes(body.schedule_type as string)) {
-      return json({ error: '"schedule_type" must be cron | interval | once' }, 400);
+      return json(
+        { error: '"schedule_type" must be cron | interval | once' },
+        400,
+      );
     }
     updates.schedule_type = body.schedule_type as 'cron' | 'interval' | 'once';
   }
   if (body.schedule_value !== undefined) {
-    if (typeof body.schedule_value !== 'string' || body.schedule_value.length === 0) {
-      return json({ error: '"schedule_value" must be a non-empty string' }, 400);
+    if (
+      typeof body.schedule_value !== 'string' ||
+      body.schedule_value.length === 0
+    ) {
+      return json(
+        { error: '"schedule_value" must be a non-empty string' },
+        400,
+      );
     }
     updates.schedule_value = body.schedule_value;
   }
@@ -211,7 +248,8 @@ async function handleUpdateTask(
   // Recalculate next_run when schedule changes or task is being resumed
   const effectiveStatus = updates.status ?? existing.status;
   const scheduleChanged = !!(updates.schedule_type || updates.schedule_value);
-  const beingResumed = updates.status === 'active' && existing.status !== 'active';
+  const beingResumed =
+    updates.status === 'active' && existing.status !== 'active';
 
   if (effectiveStatus === 'active' && (scheduleChanged || beingResumed)) {
     const newType = (updates.schedule_type ?? existing.schedule_type) as
@@ -229,7 +267,9 @@ async function handleUpdateTask(
     state.updateTask(taskId, updates);
   } catch (err) {
     return json(
-      { error: `Failed to update task: ${err instanceof Error ? err.message : String(err)}` },
+      {
+        error: `Failed to update task: ${err instanceof Error ? err.message : String(err)}`,
+      },
       500,
     );
   }
@@ -239,10 +279,7 @@ async function handleUpdateTask(
   return json(updated ?? { id: taskId, ...updates });
 }
 
-function handleDeleteTask(
-  taskId: string,
-  state: WebStateProvider,
-): Response {
+function handleDeleteTask(taskId: string, state: WebStateProvider): Response {
   const existing = state.getTaskById(taskId);
   if (!existing) return json({ error: 'Task not found' }, 404);
 
@@ -250,7 +287,9 @@ function handleDeleteTask(
     state.deleteTask(taskId);
   } catch (err) {
     return json(
-      { error: `Failed to delete task: ${err instanceof Error ? err.message : String(err)}` },
+      {
+        error: `Failed to delete task: ${err instanceof Error ? err.message : String(err)}`,
+      },
       500,
     );
   }
@@ -264,7 +303,9 @@ function handleGetChats(state: WebStateProvider): Response {
 
 function handleGetMessages(url: URL, state: WebStateProvider): Response {
   // /api/messages/{chatJid}?since=...&limit=...
-  const chatJid = decodeURIComponent(url.pathname.slice('/api/messages/'.length));
+  const chatJid = decodeURIComponent(
+    url.pathname.slice('/api/messages/'.length),
+  );
   if (!chatJid) return json({ error: 'Missing chatJid' }, 400);
 
   const since = url.searchParams.get('since') || '1970-01-01T00:00:00.000Z';
