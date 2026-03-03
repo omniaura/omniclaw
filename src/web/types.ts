@@ -28,6 +28,24 @@ export interface WebStateProvider {
   }>;
   /** Live queue stats from GroupQueue. */
   getQueueStats(): QueueStats;
+
+  // ---- Task mutations ----
+  createTask(task: Omit<ScheduledTask, 'last_run' | 'last_result'>): void;
+  updateTask(
+    id: string,
+    updates: Partial<
+      Pick<
+        ScheduledTask,
+        'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
+      >
+    >,
+  ): void;
+  deleteTask(id: string): void;
+  /** Calculate the next run time for a schedule. Returns null on invalid input. */
+  calculateNextRun(
+    scheduleType: 'cron' | 'interval' | 'once',
+    scheduleValue: string,
+  ): string | null;
 }
 
 export interface QueueStats {
