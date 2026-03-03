@@ -331,9 +331,23 @@ export function createSanitizeBashHook(): HookCallback {
     const command = (preInput.tool_input as { command?: string })?.command;
     if (!command) return {};
 
+    // Normalize shell quoting/escaping for path checks so patterns cannot be
+    // bypassed with variants like "/workspace/env-dir"/env or /workspace\/env-dir.
+    const normalizedForChecks = command
+      .replace(/\\([/"'])/g, '$1')
+      .replace(/["']/g, '');
+
     // Block commands accessing /proc/*/environ (any path component, not just numbered PIDs)
     // Broad match prevents traversal bypasses like /proc/self/../self/environ
     if (/\/proc\/[^ \t\n]*\/environ/.test(command)) {
+      throw new Error(
+        'Access to /proc/*/environ is not allowed for security reasons. ' +
+        'This file contains process environment variables which may include sensitive credentials. ' +
+        'See: https://github.com/omniaura/omniclaw/issues/79'
+      );
+    }
+
+    if (/\/proc\/[^ \t\n]*\/environ/.test(normalizedForChecks)) {
       throw new Error(
         'Access to /proc/*/environ is not allowed for security reasons. ' +
         'This file contains process environment variables which may include sensitive credentials. ' +
@@ -353,7 +367,7 @@ export function createSanitizeBashHook(): HookCallback {
     ];
 
     for (const pattern of blockedPaths) {
-      if (pattern.test(command)) {
+      if (pattern.test(command) || pattern.test(normalizedForChecks)) {
         throw new Error(
           'This command attempts to access a restricted file that could expose credentials. ' +
           'See: https://github.com/omniaura/omniclaw/issues/79'
