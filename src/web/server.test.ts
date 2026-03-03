@@ -45,31 +45,57 @@ const defaultStats: QueueStats = {
 };
 
 /** In-memory task store for mutation tests. */
-function makeTaskStore(initial: ScheduledTask[] = [makeTask(), makeTask({ id: 'task-002', status: 'paused' })]) {
+function makeTaskStore(
+  initial: ScheduledTask[] = [
+    makeTask(),
+    makeTask({ id: 'task-002', status: 'paused' }),
+  ],
+) {
   const tasks = new Map<string, ScheduledTask>(initial.map((t) => [t.id, t]));
   return {
     tasks,
     getAll: () => [...tasks.values()],
     getById: (id: string) => tasks.get(id),
     create: (task: Omit<ScheduledTask, 'last_run' | 'last_result'>) => {
-      const full: ScheduledTask = { ...task, last_run: null, last_result: null };
+      const full: ScheduledTask = {
+        ...task,
+        last_run: null,
+        last_result: null,
+      };
       tasks.set(task.id, full);
     },
-    update: (id: string, updates: Partial<Pick<ScheduledTask, 'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'>>) => {
+    update: (
+      id: string,
+      updates: Partial<
+        Pick<
+          ScheduledTask,
+          'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
+        >
+      >,
+    ) => {
       const existing = tasks.get(id);
       if (!existing) throw new Error('Task not found');
       tasks.set(id, { ...existing, ...updates });
     },
-    delete: (id: string) => { tasks.delete(id); },
+    delete: (id: string) => {
+      tasks.delete(id);
+    },
   };
 }
 
-function makeState(overrides: Partial<WebStateProvider> = {}): WebStateProvider {
+function makeState(
+  overrides: Partial<WebStateProvider> = {},
+): WebStateProvider {
   const store = makeTaskStore();
   return {
     getAgents: () => ({
       'test-agent': makeAgent(),
-      main: makeAgent({ id: 'main', name: 'Main', isAdmin: true, folder: 'main' }),
+      main: makeAgent({
+        id: 'main',
+        name: 'Main',
+        isAdmin: true,
+        folder: 'main',
+      }),
     }),
     getChannelSubscriptions: () => ({
       'dc:123': [
@@ -97,7 +123,11 @@ function makeState(overrides: Partial<WebStateProvider> = {}): WebStateProvider 
       },
     ],
     getChats: () => [
-      { jid: 'dc:123', name: 'test-channel', last_message_time: '2026-03-01T12:00:00.000Z' },
+      {
+        jid: 'dc:123',
+        name: 'test-channel',
+        last_message_time: '2026-03-01T12:00:00.000Z',
+      },
     ],
     getQueueStats: () => defaultStats,
     createTask: (task) => store.create(task),
@@ -106,7 +136,8 @@ function makeState(overrides: Partial<WebStateProvider> = {}): WebStateProvider 
     calculateNextRun: (type, value) => {
       // Simplified for tests — return a fixed future time for valid inputs
       if (type === 'cron') return '2026-03-03T09:00:00.000Z';
-      if (type === 'interval') return new Date(Date.now() + parseInt(value, 10)).toISOString();
+      if (type === 'interval')
+        return new Date(Date.now() + parseInt(value, 10)).toISOString();
       if (type === 'once') return value; // trust the ISO string
       return null;
     },
@@ -672,7 +703,9 @@ describe('GET /api/messages/:chatJid', () => {
       },
     });
     handle = startWebServer({ port: randomPort() }, state);
-    await fetch(url('/api/messages/dc:123?since=2026-01-01T00:00:00.000Z&limit=25'));
+    await fetch(
+      url('/api/messages/dc:123?since=2026-01-01T00:00:00.000Z&limit=25'),
+    );
     expect(capturedSince).toBe('2026-01-01T00:00:00.000Z');
     expect(capturedLimit).toBe(25);
   });

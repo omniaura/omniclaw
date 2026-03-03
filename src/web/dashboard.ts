@@ -38,12 +38,8 @@ export function renderDashboard(state: WebStateProvider): string {
           : t.status === 'paused'
             ? 'status-paused'
             : 'status-completed';
-      const nextRun = t.next_run
-        ? new Date(t.next_run).toLocaleString()
-        : '—';
-      const lastRun = t.last_run
-        ? new Date(t.last_run).toLocaleString()
-        : '—';
+      const nextRun = t.next_run ? new Date(t.next_run).toLocaleString() : '—';
+      const lastRun = t.last_run ? new Date(t.last_run).toLocaleString() : '—';
       const toggleLabel = t.status === 'active' ? 'Pause' : 'Resume';
       const toggleStatus = t.status === 'active' ? 'paused' : 'active';
       return `<tr data-task-id="${escapeHtml(t.id)}">
@@ -398,7 +394,7 @@ export function renderDashboard(state: WebStateProvider): string {
           while (logContainer.children.length > MAX_LOG_LINES) logContainer.removeChild(logContainer.firstChild);
           logContainer.scrollTop = logContainer.scrollHeight;
         }
-        if (evt.type === 'stats') {
+        if (evt.type === 'agent_status') {
           var d = evt.data;
           var el = function(id) { return document.getElementById(id); };
           if (d.activeContainers != null) el('stat-active').textContent = (d.activeContainers - d.idleContainers) + '/' + d.maxActive;
