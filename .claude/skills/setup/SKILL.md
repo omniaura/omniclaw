@@ -28,8 +28,9 @@ description: Run initial OmniClaw setup. Use when user wants to install dependen
 # 1. Which agents are registered?
 sqlite3 store/messages.db "SELECT folder, name FROM registered_groups"
 
-# 2. Is the service running?
-launchctl list | grep omniclaw
+# 2. Is the service running? (pick one)
+launchctl list | grep omniclaw          # macOS
+systemctl --user status omniclaw        # Linux
 
 # 3. Recent activity per agent
 for folder in $(sqlite3 store/messages.db "SELECT folder FROM registered_groups"); do
@@ -43,10 +44,17 @@ tail -20 logs/omniclaw.log
 
 Present agent status to user and ask which to reboot (all vs specific). Use **AskUserQuestion**.
 
-**Reboot all:**
+**Reboot all — macOS:**
 ```bash
 launchctl kickstart -k gui/$(id -u)/com.omniclaw
 sleep 3 && launchctl list | grep omniclaw
+tail -5 logs/omniclaw.log
+```
+
+**Reboot all — Linux:**
+```bash
+systemctl --user restart omniclaw
+sleep 3 && systemctl --user is-active omniclaw
 tail -5 logs/omniclaw.log
 ```
 

@@ -34,7 +34,10 @@ container builder stop && container builder rm && container builder start
 **Step 2 — Restart the service**
 
 ```bash
+# macOS
 launchctl kickstart -k gui/$(id -u)/com.omniclaw
+# Linux
+systemctl --user restart omniclaw
 ```
 
 **Step 3 — Verify**
@@ -50,7 +53,10 @@ git log --oneline -5        # find the previous commit
 git reset --hard <HASH>
 bun run build
 ./container/build.sh
+# macOS
 launchctl kickstart -k gui/$(id -u)/com.omniclaw
+# Linux
+systemctl --user restart omniclaw
 ```
 
 Schema changes are additive — rolling back code is safe even after migrations ran.

@@ -7,7 +7,7 @@ Ask: Do you want the agent to push branches and create pull requests?
 If yes: user needs a GitHub **classic** token with `repo` scope from https://github.com/settings/tokens
 
 Once they provide it, use the **Write tool** to append to `.env` (never echo tokens via shell — it leaks into shell history):
-```
+```dotenv
 GITHUB_TOKEN=<token>
 ```
 
@@ -25,7 +25,7 @@ User needs a Discord bot token:
 3. Invite via OAuth2 → URL Generator (scopes: `bot`, permissions: `Send Messages`, `Read Message History`)
 
 Use the **Write tool** to append to `.env` (never echo tokens):
-```
+```dotenv
 DISCORD_BOT_IDS=<BOT_ID>
 DISCORD_BOT_<BOT_ID>_TOKEN=<token>
 DISCORD_BOT_DEFAULT=<BOT_ID>

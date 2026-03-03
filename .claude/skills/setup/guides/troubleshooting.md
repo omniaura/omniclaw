@@ -34,17 +34,28 @@ bun run build && launchctl kickstart -k gui/$(id -u)/com.omniclaw
 
 ## Auto-update not running
 
-Check `logs/auto-update.log`. Verify the launchd job is loaded:
+Check `logs/auto-update.log`. Then verify the scheduler is loaded:
+
+**macOS:**
 ```bash
 launchctl list | grep omniclaw.autoupdate
-```
-
-If missing: re-run step 10b of fresh install, or load manually:
-```bash
+# If missing, load it:
 launchctl load ~/Library/LaunchAgents/com.omniclaw.autoupdate.plist
 ```
 
-Test the script directly:
+**Linux:**
+```bash
+systemctl --user status omniclaw-autoupdate.timer
+systemctl --user list-timers | grep omniclaw
+# If missing, re-enable:
+systemctl --user enable --now omniclaw-autoupdate.timer
+# To trigger immediately:
+systemctl --user start omniclaw-autoupdate.service
+```
+
+If the scheduler is missing entirely: re-run step 10b of fresh install.
+
+Test the script directly (both platforms):
 ```bash
 bash container/auto-update.sh
 ```

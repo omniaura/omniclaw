@@ -140,7 +140,9 @@ AskUserQuestion: Want the agent to access directories outside OmniClaw? (Git rep
 
 ## 10. Start Service
 
-Check if already running: `launchctl list | grep omniclaw`. If yes, unload first: `launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist`
+Check if already running and unload if so:
+- **macOS:** `launchctl list | grep omniclaw` — if running, `launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist`
+- **Linux:** `systemctl --user is-active --quiet omniclaw` — if running, `systemctl --user stop omniclaw && systemctl --user disable omniclaw`
 
 Run `./.claude/skills/setup/scripts/08-setup-service.sh` and parse.
 
