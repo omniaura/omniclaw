@@ -417,6 +417,19 @@ export class DiscordChannel implements Channel {
   }
 
   /**
+   * Check if message contains the bot's name in plaintext (without @ prefix).
+   * Matches the group's trigger name with word boundaries, case-insensitive.
+   * e.g., "hey NicholasOmni what do you think" matches if trigger is "@NicholasOmni".
+   */
+  private containsPlaintextName(content: string, group: RegisteredGroup): boolean {
+    const name = (group?.trigger || `@${ASSISTANT_NAME}`).replace(/^@/, '');
+    if (!name) return false;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`\\b${escaped}\\b`, 'i');
+    return pattern.test(content);
+  }
+
+  /**
    * Check if message should auto-respond based on group config
    */
   shouldAutoRespond(content: string, group: RegisteredGroup): boolean {
@@ -767,6 +780,14 @@ export class DiscordChannel implements Channel {
         if (!hasGroupTrigger) {
           content = `@${agentName} ${content}`;
         }
+      } else if (this.containsPlaintextName(content, group)) {
+        // Plaintext name mention — user referred to the bot by name without @
+        const agentName = group?.trigger?.replace(/^@/, '') || ASSISTANT_NAME;
+        logger.info(
+          { chatJid, sender: senderName },
+          'Plaintext name mention — treating as triggered',
+        );
+        content = `@${agentName} ${content}`;
       } else if (this.shouldAutoRespond(content, group)) {
         logger.debug(
           {

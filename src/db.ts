@@ -345,6 +345,29 @@ export function createSchema(database: Database): void {
     // columns may not exist on very old DBs — harmless
   }
 
+  // One-time fix: Discord server channels (dc: but not dc:dm:) should require trigger.
+  // Previously these were misconfigured with requires_trigger=0, causing bots to respond
+  // to every message even when not mentioned. Uses router_state to ensure single execution.
+  {
+    const migrationKey = 'fix_discord_requires_trigger_v1';
+    const applied = database.prepare(
+      'SELECT value FROM router_state WHERE key = ?',
+    ).get(migrationKey) as { value: string } | null;
+    if (!applied) {
+      const result = database.prepare(
+        `UPDATE registered_groups SET requires_trigger = 1
+         WHERE jid LIKE 'dc:%' AND jid NOT LIKE 'dc:dm:%' AND requires_trigger = 0`,
+      ).run();
+      database.prepare(
+        'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
+      ).run(migrationKey, '1');
+      logger.info(
+        { updatedCount: result.changes },
+        'Migration: Discord server channels now require trigger',
+      );
+    }
+  }
+
   // --- Agent-Channel Decoupling tables ---
   database.exec(`
     CREATE TABLE IF NOT EXISTS agents (
