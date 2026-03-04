@@ -61,9 +61,52 @@ systemctl --user restart omniclaw
 
 Schema changes are additive — rolling back code is safe even after migrations ran.
 
+## What's new (automatic)
+
+These features activate automatically after upgrading — no action required.
+
+### Sender identity pipeline
+
+Messages now carry `sender_platform` (discord, whatsapp, telegram, slack, ipc, system) and sender IDs are canonicalized to `<platform>:<immutable-id>` format across all adapters. The `sender_id` attribute is exposed in the `<message>` XML agents receive. DB migrations add `sender_platform` and `sender_user_id` columns to `messages` automatically.
+
+### Channel context injection
+
+Agents now receive a `## Channel Context` block in their system prompt listing all channels they're subscribed to, with the current channel marked. Multi-channel agents see the full list; single-channel agents see just their channel name and JID.
+
+### Live log streaming
+
+The web dashboard now supports real-time log streaming via WebSocket. Access it from the dashboard log panel — logs show level badges and color coding.
+
+### Rust toolchain in container
+
+`cargo` and `rustc` are now included in the base container image.
+
 ## New opt-in capabilities
 
 These require explicit action — existing agents are unaffected by default.
+
+### GitHub context injection
+
+Agents can see open PRs, issues, and review comments in their system prompt. See [advanced-setup.md](advanced-setup.md) for full config.
+
+Quick setup:
+1. Ensure `GITHUB_TOKEN` is in `.env`
+2. Create `data/github-watches.json` with agent → repo mappings
+3. Restart the service
+
+### GitHub webhooks
+
+For real-time GitHub event notifications, add `GITHUB_WEBHOOK_SECRET` to `.env` and configure a webhook in your GitHub repo. See [advanced-setup.md](advanced-setup.md).
+
+### Persistent resume position store
+
+Feature-flagged (off by default). When enabled, scheduled task resume positions survive service restarts. To enable, add to `.env`:
+
+```dotenv
+PERSISTENT_TASK_STATE=true
+```
+
+Currently in preview — fail-open on persistence errors (falls back to in-memory).
 
 ### OpenCode runtime
 

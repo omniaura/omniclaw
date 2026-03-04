@@ -15,8 +15,8 @@ description: Run initial OmniClaw setup. Use when user wants to install dependen
 | verify, status, health check | → run `09-verify.sh` directly |
 | update, upgrade, pulled latest, auto-update | → read [guides/upgrade.md](guides/upgrade.md) |
 | install, fresh setup, first time, configure | → read [guides/fresh-install.md](guides/fresh-install.md) |
-| github, discord bot/agent | → read [guides/advanced-setup.md](guides/advanced-setup.md) |
-| agent identity, context, workspace mounts, agent-to-agent routing, triggers, wrong identity | → read [guides/agents-and-context.md](guides/agents-and-context.md) |
+| github, discord bot/agent, webhooks, github watches | → read [guides/advanced-setup.md](guides/advanced-setup.md) |
+| agent identity, context, workspace mounts, agent-to-agent routing, triggers, wrong identity, sender identity, channel context | → read [guides/agents-and-context.md](guides/agents-and-context.md) |
 | broken, not working, error, troubleshoot | → read [guides/troubleshooting.md](guides/troubleshooting.md) |
 
 ---

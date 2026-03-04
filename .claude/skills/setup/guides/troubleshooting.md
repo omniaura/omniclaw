@@ -60,6 +60,34 @@ Test the script directly (both platforms):
 bash container/auto-update.sh
 ```
 
+## Sender identity issues
+
+If agents are confusing who sent a message, or messages route to the wrong agent:
+
+```bash
+# Check sender identity counters in logs
+grep 'senderIdentity' logs/omniclaw.log | tail -20
+
+# Verify sender canonicalization (should be <platform>:<id> format)
+sqlite3 store/messages.db \
+  "SELECT sender, sender_platform, sender_user_id FROM messages ORDER BY rowid DESC LIMIT 10"
+```
+
+Sender IDs are now canonicalized to `<platform>:<immutable-id>` format (e.g. `discord:123456`, `whatsapp:15551234567`). If you see old-format sender keys, the adapter hasn't processed messages since the upgrade.
+
+## GitHub context not appearing
+
+If agents aren't seeing PR/issue context in their system prompt:
+
+1. Verify `GITHUB_TOKEN` is in `.env`
+2. Verify `data/github-watches.json` exists and the `agentId` matches the agent's folder name
+3. Check logs for GitHub API errors: `grep 'github' logs/omniclaw.log | tail -10`
+4. Cache TTL is 5 minutes by default — wait or restart to force refresh
+
+## Live log streaming
+
+The web dashboard supports real-time log streaming. If the dashboard log panel isn't showing logs, verify the service is running and the WebSocket connection is established.
+
 ## Useful commands
 
 ```bash
@@ -74,4 +102,12 @@ tail -f logs/omniclaw.log
 
 # Tail auto-update log
 tail -f logs/auto-update.log
+
+# Check sender identity pipeline
+grep 'senderIdentity' logs/omniclaw.log | tail -20
+
+# Verify agent channel subscriptions
+sqlite3 store/messages.db \
+  "SELECT cs.channel_jid, a.name, cs.trigger_pattern, cs.channel_folder
+   FROM channel_subscriptions cs JOIN agents a ON a.id = cs.agent_id"
 ```
