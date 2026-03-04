@@ -1,39 +1,21 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { createHmac } from 'crypto';
-
-const loadGitHubWatchesConfig = mock(() => ({
-  watches: [
-    {
-      agentId: 'agent-a',
-      repos: [{ owner: 'omniaura', repo: 'omniclaw' }],
-    },
-  ],
-}));
-
-const getWatchingAgentsForRepo = mock(
-  (_config: unknown, owner: string, repo: string) => {
-    return owner.toLowerCase() === 'omniaura' &&
-      repo.toLowerCase() === 'omniclaw'
-      ? ['agent-a']
-      : [];
-  },
-);
-
-const invalidateGitHubContextCacheForAgents = mock((_agentIds: string[]) => 0);
-
-mock.module('./github.js', () => ({
-  loadGitHubWatchesConfig,
-  getWatchingAgentsForRepo,
-  invalidateGitHubContextCacheForAgents,
-}));
-
 import {
   buildGitHubWebhookNotification,
   verifyGitHubWebhookSignature,
 } from './github-webhooks.js';
+import type { GitHubWatchesConfig } from './types.js';
 
 describe('github webhooks', () => {
   const secret = 'super-secret-key';
+  const config: GitHubWatchesConfig = {
+    watches: [
+      {
+        agentId: 'agent-a',
+        repos: [{ owner: 'omniaura', repo: 'omniclaw' }],
+      },
+    ],
+  };
 
   it('verifies valid webhook signature', () => {
     const body = JSON.stringify({ hello: 'world' });
@@ -78,6 +60,7 @@ describe('github webhooks', () => {
           line: 120,
         },
       },
+      config,
     );
 
     expect(notification).not.toBeNull();
@@ -86,8 +69,6 @@ describe('github webhooks', () => {
     expect(notification?.agentIds).toEqual(['agent-a']);
     expect(notification?.summary).toContain('PR #195');
     expect(notification?.summary).toContain('@reviewer');
-    expect(getWatchingAgentsForRepo).toHaveBeenCalledTimes(1);
-    expect(loadGitHubWatchesConfig).toHaveBeenCalledTimes(1);
   });
 
   it('ignores events for repos with no watchers', () => {
@@ -108,6 +89,7 @@ describe('github webhooks', () => {
           html_url: 'https://github.com/otherorg/otherrepo/issues/1',
         },
       },
+      config,
     );
 
     expect(notification).toBeNull();

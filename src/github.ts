@@ -19,6 +19,7 @@ import type {
 const DEFAULT_CACHE_TTL_MS = 300_000; // 5 minutes
 const DEFAULT_PR_LIMIT = 10;
 const DEFAULT_ISSUE_LIMIT = 10;
+const MAX_LIST_LIMIT = 50;
 
 // --- Types for GitHub API responses ---
 
@@ -109,6 +110,16 @@ export function getWatchingAgentsForRepo(
       ),
     )
     .map((watch) => watch.agentId);
+}
+
+export function normalizeLimit(
+  value: number | undefined,
+  fallback: number,
+): number {
+  if (!Number.isFinite(value)) return fallback;
+  const rounded = Math.floor(value as number);
+  if (rounded <= 0) return fallback;
+  return Math.min(rounded, MAX_LIST_LIMIT);
 }
 
 // --- Config loading ---
@@ -295,8 +306,11 @@ function formatIssueMarkdown(issue: GitHubIssue): string {
 
 async function fetchRepoContext(watch: GitHubRepoWatch): Promise<string> {
   const { owner, repo } = watch;
-  const prLimit = watch.openPrs?.limit ?? DEFAULT_PR_LIMIT;
-  const issueLimit = watch.recentIssues?.limit ?? DEFAULT_ISSUE_LIMIT;
+  const prLimit = normalizeLimit(watch.openPrs?.limit, DEFAULT_PR_LIMIT);
+  const issueLimit = normalizeLimit(
+    watch.recentIssues?.limit,
+    DEFAULT_ISSUE_LIMIT,
+  );
   const includeReviewComments = watch.openPrs?.includeReviewComments ?? true;
 
   const sections: string[] = [];
