@@ -196,21 +196,53 @@ export function renderDashboard(state: WebStateProvider): string {
   .btn-danger:hover { background: #2a0f0f; border-color: var(--red); }
   .btn-toggle { color: var(--yellow); border-color: #5c4a08; }
   .btn-toggle:hover { background: #2a2208; border-color: var(--yellow); }
+  .log-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .log-toolbar .filter-btn {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .log-toolbar .filter-btn.active { border-color: var(--accent); color: var(--text); background: #1e2030; }
+  .log-toolbar .filter-btn:hover { border-color: var(--accent); }
+  .log-toolbar .spacer { flex: 1; }
+  .log-toolbar .log-count { font-size: 0.7rem; color: var(--text-dim); }
   #log-container {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 0.75rem;
-    max-height: 400px;
+    max-height: 500px;
     overflow-y: auto;
     font-family: 'SF Mono', 'Cascadia Code', monospace;
     font-size: 0.75rem;
     line-height: 1.6;
   }
-  .log-line { color: var(--text-dim); }
-  .log-line .ts { color: var(--text-dim); }
+  .log-line { color: var(--text-dim); display: flex; gap: 0.5rem; }
+  .log-line .ts { color: var(--text-dim); flex-shrink: 0; }
+  .log-line .level-badge { flex-shrink: 0; font-weight: 600; font-size: 0.65rem; text-transform: uppercase; padding: 0 0.25rem; border-radius: 2px; }
+  .log-line .level-badge.info { color: var(--green); }
+  .log-line .level-badge.debug { color: var(--text-dim); }
+  .log-line .level-badge.warn { color: var(--yellow); }
+  .log-line .level-badge.error { color: var(--red); }
+  .log-line .level-badge.fatal { color: #fff; background: var(--red); }
+  .log-line .context { color: #60a5fa; flex-shrink: 0; }
+  .log-line .op { color: var(--accent); flex-shrink: 0; }
+  .log-line .msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .log-line .err-detail { color: var(--red); }
   .log-line.error { color: var(--red); }
-  .log-line.warn { color: var(--yellow); }
+  .log-line.error .msg { color: var(--red); }
+  .log-line.warn .msg { color: var(--yellow); }
   /* Modal */
   .modal-overlay {
     display: none;
@@ -311,7 +343,18 @@ export function renderDashboard(state: WebStateProvider): string {
 
   <section>
     <h2>Live Logs</h2>
-    <div id="log-container"><div class="log-line">Waiting for WebSocket connection…</div></div>
+    <div class="log-toolbar">
+      <button class="filter-btn active" data-level="all">All</button>
+      <button class="filter-btn active" data-level="debug">Debug</button>
+      <button class="filter-btn active" data-level="info">Info</button>
+      <button class="filter-btn active" data-level="warn">Warn</button>
+      <button class="filter-btn active" data-level="error">Error</button>
+      <div class="spacer"></div>
+      <span class="log-count" id="log-count">0 lines</span>
+      <button class="filter-btn active" id="btn-autoscroll">Auto-scroll</button>
+      <button class="filter-btn" id="btn-clear-logs">Clear</button>
+    </div>
+    <div id="log-container"><div class="log-line"><span class="msg">Waiting for WebSocket connection…</span></div></div>
   </section>
 </main>
 
@@ -366,7 +409,13 @@ export function renderDashboard(state: WebStateProvider): string {
   var wsUrl = proto + '//' + location.host + '/ws';
   var statusEl = document.getElementById('ws-status');
   var logContainer = document.getElementById('log-container');
-  var MAX_LOG_LINES = 200;
+  var logCountEl = document.getElementById('log-count');
+  var MAX_LOG_LINES = 500;
+  var logCount = 0;
+  var autoScroll = true;
+
+  // Level filter state
+  var levelFilters = { debug: true, info: true, warn: true, error: true, fatal: true };
 
   function connect() {
     var ws = new WebSocket(wsUrl);
@@ -374,6 +423,8 @@ export function renderDashboard(state: WebStateProvider): string {
       statusEl.textContent = 'connected';
       statusEl.className = 'ws-status connected';
       logContainer.innerHTML = '';
+      logCount = 0;
+      logCountEl.textContent = '0 lines';
       ws.send(JSON.stringify({ subscribe: ['logs', 'stats'] }));
     };
     ws.onclose = function() {
@@ -386,19 +437,52 @@ export function renderDashboard(state: WebStateProvider): string {
       try {
         var evt = JSON.parse(e.data);
         if (evt.type === 'log') {
+          var d = evt.data;
+          var lvl = d.level || 'info';
+
           var line = document.createElement('div');
-          line.className = 'log-line' + (evt.data.level === 'error' ? ' error' : evt.data.level === 'warn' ? ' warn' : '');
-          var ts = new Date(evt.data.ts).toLocaleTimeString();
-          line.innerHTML = '<span class="ts">' + ts + '</span> ' + escapeHtml(evt.data.msg || '');
+          line.className = 'log-line' + (lvl === 'error' || lvl === 'fatal' ? ' error' : lvl === 'warn' ? ' warn' : '');
+          line.setAttribute('data-level', lvl);
+
+          // Hide if level is filtered out
+          if (!levelFilters[lvl]) line.style.display = 'none';
+
+          var ts = new Date(d.ts).toLocaleTimeString();
+          var parts = '<span class="ts">' + ts + '</span>';
+          parts += '<span class="level-badge ' + escapeHtml(lvl) + '">' + escapeHtml(lvl) + '</span>';
+
+          // Context: container/group name
+          var ctx = d.container || d.group;
+          if (ctx) parts += '<span class="context">' + escapeHtml(String(ctx)) + '</span>';
+
+          // Operation tag
+          if (d.op) parts += '<span class="op">[' + escapeHtml(String(d.op)) + ']</span>';
+
+          // Message
+          var msg = d.msg || '';
+          if (d.durationMs != null) msg += ' (' + d.durationMs + 'ms)';
+          if (d.costUsd != null) msg += ' $' + d.costUsd;
+          parts += '<span class="msg">' + escapeHtml(msg) + '</span>';
+
+          // Error detail
+          if (d.err) parts += '<span class="err-detail">' + escapeHtml(String(d.err)) + '</span>';
+
+          line.innerHTML = parts;
           logContainer.appendChild(line);
-          while (logContainer.children.length > MAX_LOG_LINES) logContainer.removeChild(logContainer.firstChild);
-          logContainer.scrollTop = logContainer.scrollHeight;
+          logCount++;
+
+          while (logContainer.children.length > MAX_LOG_LINES) {
+            logContainer.removeChild(logContainer.firstChild);
+            logCount = Math.max(0, logCount - 1);
+          }
+          logCountEl.textContent = logCount + ' lines';
+          if (autoScroll) logContainer.scrollTop = logContainer.scrollHeight;
         }
         if (evt.type === 'agent_status') {
-          var d = evt.data;
+          var s = evt.data;
           var el = function(id) { return document.getElementById(id); };
-          if (d.activeContainers != null) el('stat-active').textContent = (d.activeContainers - d.idleContainers) + '/' + d.maxActive;
-          if (d.idleContainers != null) el('stat-idle').textContent = d.idleContainers + '/' + d.maxIdle;
+          if (s.activeContainers != null) el('stat-active').textContent = (s.activeContainers - s.idleContainers) + '/' + s.maxActive;
+          if (s.idleContainers != null) el('stat-idle').textContent = s.idleContainers + '/' + s.maxIdle;
         }
       } catch(ex) {}
     };
@@ -411,6 +495,47 @@ export function renderDashboard(state: WebStateProvider): string {
   }
 
   connect();
+
+  // ---- Log toolbar: level filters ----
+  document.querySelectorAll('.log-toolbar .filter-btn[data-level]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var level = btn.getAttribute('data-level');
+      if (level === 'all') {
+        // Toggle all on/off
+        var allActive = Object.keys(levelFilters).every(function(k) { return levelFilters[k]; });
+        var newState = !allActive;
+        Object.keys(levelFilters).forEach(function(k) { levelFilters[k] = newState; });
+        document.querySelectorAll('.log-toolbar .filter-btn[data-level]').forEach(function(b) {
+          if (newState) b.classList.add('active'); else b.classList.remove('active');
+        });
+      } else {
+        levelFilters[level] = !levelFilters[level];
+        if (levelFilters[level]) btn.classList.add('active'); else btn.classList.remove('active');
+        // Update "All" button state
+        var allBtn = document.querySelector('.filter-btn[data-level="all"]');
+        var allOn = Object.keys(levelFilters).every(function(k) { return levelFilters[k]; });
+        if (allOn) allBtn.classList.add('active'); else allBtn.classList.remove('active');
+      }
+      // Apply filter to existing lines
+      logContainer.querySelectorAll('.log-line[data-level]').forEach(function(line) {
+        var lvl = line.getAttribute('data-level');
+        line.style.display = levelFilters[lvl] ? '' : 'none';
+      });
+    });
+  });
+
+  // ---- Auto-scroll toggle ----
+  document.getElementById('btn-autoscroll').addEventListener('click', function() {
+    autoScroll = !autoScroll;
+    this.classList.toggle('active', autoScroll);
+  });
+
+  // ---- Clear logs ----
+  document.getElementById('btn-clear-logs').addEventListener('click', function() {
+    logContainer.innerHTML = '';
+    logCount = 0;
+    logCountEl.textContent = '0 lines';
+  });
 
   // ---- Toast notifications ----
   function showToast(message, type) {

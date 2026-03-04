@@ -91,7 +91,11 @@ import { findMainGroupJid } from './group-helpers.js';
 import { calculateNextRun } from './schedule-utils.js';
 import { logger } from './logger.js';
 import { assertPathWithin } from './path-security.js';
-import { startWebServer, type WebServerHandle } from './web/index.js';
+import {
+  startWebServer,
+  startLogStream,
+  type WebServerHandle,
+} from './web/index.js';
 import { Effect } from 'effect';
 
 // Global error handlers to prevent crashes from unhandled rejections/exceptions
@@ -1791,6 +1795,7 @@ async function main(): Promise<void> {
 
   // --- Web UI (opt-in via WEB_UI_PORT env var) ---
   let webServer: WebServerHandle | undefined;
+  let stopLogStream: (() => void) | undefined;
   if (WEB_UI_PORT) {
     webServer = startWebServer(
       {
@@ -1817,11 +1822,13 @@ async function main(): Promise<void> {
         calculateNextRun: (type, value) => calculateNextRun(type, value),
       },
     );
+    stopLogStream = startLogStream(webServer);
   }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (stopLogStream) stopLogStream();
     if (webServer) await webServer.stop();
     await queue.shutdown(10000);
     await shutdownBackends();
