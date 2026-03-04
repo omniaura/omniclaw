@@ -11,10 +11,27 @@ export function escapeXml(s: string): string {
 }
 
 export function formatMessages(messages: NewMessage[]): string {
-  const lines = messages.map((m) =>
-    `<message id="${m.id}" sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
+  const lines = messages.map(
+    (m) =>
+      `<message id="${m.id}" sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
   );
-  return `<messages>\n${lines.join('\n')}\n</messages>`;
+
+  // Build a participant roster so that conversation compaction/summarization
+  // preserves correct sender attribution (see Issue #13).
+  const senders = Array.from(
+    new Set(
+      messages
+        .map((m) => m.sender_name)
+        .filter((name) => name && name !== 'System'),
+    ),
+  );
+
+  const header =
+    senders.length > 0
+      ? `<messages participants="${senders.map(escapeXml).join(', ')}">`
+      : '<messages>';
+
+  return `${header}\n${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {
@@ -26,28 +43,30 @@ export function getAgentName(group: RegisteredGroup): string {
   return group.trigger?.replace(/^@/, '') || ASSISTANT_NAME;
 }
 
-export function formatOutbound(channel: Channel, rawText: string, agentName?: string): string {
+export function formatOutbound(
+  channel: Channel,
+  rawText: string,
+  agentName?: string,
+): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
   const name = agentName || ASSISTANT_NAME;
-  const prefix =
-    channel.prefixAssistantName !== false ? `${name}: ` : '';
+  const prefix = channel.prefixAssistantName !== false ? `${name}: ` : '';
   return `${prefix}${text}`;
-}
-
-export async function routeOutbound(
-  channels: Channel[],
-  jid: string,
-  text: string,
-): Promise<void> {
-  const channel = channels.find((c) => c.ownsJid(jid) && c.isConnected());
-  if (!channel) throw new Error(`No channel for JID: ${jid}`);
-  await channel.sendMessage(jid, text);
 }
 
 export function findChannel(
   channels: Channel[],
   jid: string,
 ): Channel | undefined {
-  return channels.find((c) => c.ownsJid(jid));
+  const owned = channels.find((c) => c.ownsJid(jid));
+  if (owned) return owned;
+
+  // Multi-Discord mode: if no instance has learned this JID yet,
+  // fall back to the first connected Discord channel.
+  if (jid.startsWith('dc:')) {
+    return channels.find((c) => c.name === 'discord');
+  }
+
+  return undefined;
 }

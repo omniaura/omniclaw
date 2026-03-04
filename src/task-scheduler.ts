@@ -3,7 +3,6 @@ import path from 'path';
 
 import {
   GROUPS_DIR,
-  IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
@@ -11,7 +10,7 @@ import {
 import { calculateNextRun } from './schedule-utils.js';
 import { resolveBackend } from './backends/index.js';
 import type { ContainerOutput } from './backends/types.js';
-import { writeTasksSnapshot } from './container-runner.js';
+import { writeTasksSnapshot } from './ipc-snapshots.js';
 import { createThreadStreamer } from './thread-streaming.js';
 import {
   advanceTaskNextRun,
@@ -26,166 +25,73 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
 import { ResumePositionStore } from './resume-position-store.js';
-import { Channel, ContainerProcess, RegisteredGroup, ScheduledTask } from './types.js';
+import {
+  Channel,
+  ContainerProcess,
+  RegisteredGroup,
+  ScheduledTask,
+} from './types.js';
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
+  /**
+   * Resolve the RegisteredGroup for a scheduled task, incorporating the full
+   * 4-layer channel context (agent → server → category → channel).
+   * Looks up the subscription for (chatJid, agentFolder) first so that
+   * channelFolder/categoryFolder/agentContextFolder reflect the target channel,
+   * not the agent's own primary channel.
+   */
+  getGroupForTask: (
+    chatJid: string,
+    agentFolder: string,
+  ) => RegisteredGroup | undefined;
   getSessions: () => Record<string, string>;
   resumePositionStore: ResumePositionStore;
   queue: GroupQueue;
-  onProcess: (groupJid: string, proc: ContainerProcess, containerName: string, groupFolder: string, lane: 'task') => void;
-  sendMessage: (jid: string, text: string) => Promise<string | void>;
-  findChannel: (jid: string) => Channel | undefined;
-}
-
-const HEARTBEAT_SENTINEL = '[HEARTBEAT]';
-
-/**
- * Extract the ## Heartbeat section from a CLAUDE.md file.
- * Returns content between `## Heartbeat` and the next `##` heading (or EOF).
- */
-function extractHeartbeatSection(content: string): string | null {
-  const match = content.match(/^## Heartbeat\n([\s\S]*?)(?=\n## |\n$|$)/m);
-  return match ? match[1].trim() : null;
-}
-
-/**
- * Build the heartbeat prompt for a group by reading ## Heartbeat from CLAUDE.md.
- * Falls back: group CLAUDE.md → global CLAUDE.md → sensible default.
- */
-export function buildHeartbeatPrompt(groupFolder: string): string {
-  const groupClaudeMd = path.join(GROUPS_DIR, groupFolder, 'CLAUDE.md');
-  const globalClaudeMd = path.join(GROUPS_DIR, 'global', 'CLAUDE.md');
-
-  // Try group-specific CLAUDE.md first
-  try {
-    const content = fs.readFileSync(groupClaudeMd, 'utf-8');
-    const section = extractHeartbeatSection(content);
-    if (section) return section;
-  } catch {
-    // File doesn't exist, fall through
-  }
-
-  // Fall back to global CLAUDE.md
-  try {
-    const content = fs.readFileSync(globalClaudeMd, 'utf-8');
-    const section = extractHeartbeatSection(content);
-    if (section) return section;
-  } catch {
-    // File doesn't exist, fall through
-  }
-
-  // Sensible default
-  return 'Review your ## Goals section for current priorities. Pick the highest-priority actionable item and work on it. Only message the group if there is meaningful progress to report.';
-}
-
-/**
- * Reconcile heartbeat tasks with group config.
- * Creates/removes heartbeat scheduled tasks to match each group's heartbeat config.
- */
-export function reconcileHeartbeats(
-  registeredGroups: Record<string, RegisteredGroup>,
-): void {
-  const existingTasks = getAllTasks();
-  const heartbeatTasks = new Map(
-    existingTasks
-      .filter((t) => t.id.startsWith('heartbeat-'))
-      .map((t) => [t.id, t]),
-  );
-
-  for (const [jid, group] of Object.entries(registeredGroups)) {
-    const taskId = `heartbeat-${group.folder}`;
-    const existing = heartbeatTasks.get(taskId);
-
-    if (group.heartbeat?.enabled) {
-      if (!existing) {
-        // Create heartbeat task
-        const nextRun = calculateNextRun(group.heartbeat.scheduleType, group.heartbeat.interval);
-        if (!nextRun) {
-          logger.warn({ groupFolder: group.folder, interval: group.heartbeat.interval }, 'Invalid heartbeat schedule');
-          continue;
-        }
-
-        createTask({
-          id: taskId,
-          group_folder: group.folder,
-          chat_jid: jid,
-          prompt: HEARTBEAT_SENTINEL,
-          schedule_type: group.heartbeat.scheduleType,
-          schedule_value: group.heartbeat.interval,
-          context_mode: 'group',
-          next_run: nextRun,
-          status: 'active',
-          created_at: new Date().toISOString(),
-        });
-        logger.info({ taskId, groupFolder: group.folder }, 'Heartbeat task created');
-      } else {
-        // Update schedule if it changed
-        if (
-          existing.schedule_value !== group.heartbeat.interval ||
-          existing.schedule_type !== group.heartbeat.scheduleType
-        ) {
-          // Delete and recreate with new schedule
-          deleteTask(taskId);
-          const nextRun = calculateNextRun(group.heartbeat.scheduleType, group.heartbeat.interval);
-          if (!nextRun) {
-            logger.warn({ groupFolder: group.folder }, 'Invalid heartbeat schedule on update');
-            continue;
-          }
-          createTask({
-            id: taskId,
-            group_folder: group.folder,
-            chat_jid: jid,
-            prompt: HEARTBEAT_SENTINEL,
-            schedule_type: group.heartbeat.scheduleType,
-            schedule_value: group.heartbeat.interval,
-            context_mode: 'group',
-            next_run: nextRun,
-            status: 'active',
-            created_at: new Date().toISOString(),
-          });
-          logger.info({ taskId, groupFolder: group.folder }, 'Heartbeat task updated');
-        }
-      }
-      heartbeatTasks.delete(taskId);
-    } else if (existing) {
-      // Heartbeat disabled or removed — delete the task
-      deleteTask(taskId);
-      logger.info({ taskId, groupFolder: group.folder }, 'Heartbeat task removed');
-      heartbeatTasks.delete(taskId);
-    }
-  }
-
-  // Clean up orphaned heartbeat tasks (groups that were removed)
-  for (const [taskId] of heartbeatTasks) {
-    deleteTask(taskId);
-    logger.info({ taskId }, 'Orphaned heartbeat task removed');
-  }
+  onProcess: (
+    groupJid: string,
+    proc: ContainerProcess,
+    containerName: string,
+    groupFolder: string,
+    lane: 'task',
+  ) => void;
+  sendMessage: (
+    jid: string,
+    text: string,
+    discordBotId?: string,
+  ) => Promise<string | void>;
+  findChannel: (jid: string, discordBotId?: string) => Channel | undefined;
 }
 
 async function runTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
 ): Promise<void> {
+  // Re-check task status: may have been cancelled/paused while queued
+  const freshTask = getTaskById(task.id);
+  if (!freshTask || freshTask.status !== 'active') {
+    logger.info(
+      { taskId: task.id, status: freshTask?.status ?? 'deleted' },
+      'Task no longer active, skipping',
+    );
+    return;
+  }
+
   const startTime = Date.now();
   const groupDir = path.join(GROUPS_DIR, task.group_folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  logger.info(
-    { taskId: task.id, group: task.group_folder },
-    'Running scheduled task',
-  );
+  const log = logger.child({
+    op: 'taskRun',
+    taskId: task.id,
+    group: task.group_folder,
+  });
+  log.info('Running scheduled task');
 
-  const groups = deps.registeredGroups();
-  const group = Object.values(groups).find(
-    (g) => g.folder === task.group_folder,
-  );
+  const group = deps.getGroupForTask(task.chat_jid, task.group_folder);
 
   if (!group) {
-    logger.error(
-      { taskId: task.id, groupFolder: task.group_folder },
-      'Group not found for task',
-    );
+    log.error('Group not found for task');
     logTaskRun({
       task_id: task.id,
       run_at: new Date().toISOString(),
@@ -197,10 +103,7 @@ async function runTask(
     return;
   }
 
-  // For heartbeat tasks, replace sentinel with real prompt from CLAUDE.md
-  const prompt = task.id.startsWith('heartbeat-')
-    ? buildHeartbeatPrompt(task.group_folder)
-    : task.prompt;
+  const prompt = task.prompt;
 
   // Update tasks snapshot for container to read (filtered by group)
   const isMain = task.group_folder === MAIN_GROUP_FOLDER;
@@ -227,43 +130,48 @@ async function runTask(
   // For group-context tasks, pass resumeAt so the container can skip replaying
   // the full session history and resume from the last known position.
   const sessionId = undefined;
-  const resumeAt = task.context_mode === 'group'
-    ? deps.resumePositionStore.get(task.group_folder)
-    : undefined;
+  const resumeAt =
+    task.context_mode === 'group'
+      ? deps.resumePositionStore.get(task.group_folder)
+      : undefined;
 
-  // Idle timer: writes _close sentinel after IDLE_TIMEOUT of no output,
-  // so the container exits instead of hanging at waitForIpcMessage forever.
-  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  // [Upstream PR #354] After the task produces a result, close the container
+  // promptly. Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min)
+  // for the query loop to time out. A short delay handles any final MCP calls.
+  const TASK_CLOSE_DELAY_MS = 10_000;
+  let closeTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const resetIdleTimer = () => {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => {
-      logger.debug({ taskId: task.id }, 'Scheduled task idle timeout, closing container stdin');
+  const scheduleClose = () => {
+    if (closeTimer) return; // already scheduled
+    closeTimer = setTimeout(() => {
+      logger.debug({ taskId: task.id }, 'Closing task container after result');
       deps.queue.closeStdin(task.chat_jid, 'task');
-    }, IDLE_TIMEOUT);
+    }, TASK_CLOSE_DELAY_MS);
   };
 
-  // Set up thread streaming for non-heartbeat tasks
-  const isHeartbeat = task.id.startsWith('heartbeat-');
-  const channel = deps.findChannel(task.chat_jid);
+  const channel = deps.findChannel(task.chat_jid, group.discordBotId);
   let parentMessageId: string | null = null;
 
-  if (!isHeartbeat && group.streamIntermediates && channel?.createThread) {
+  if (group.streamIntermediates && channel?.createThread) {
     const preview = prompt.slice(0, 80).replace(/\n/g, ' ');
     try {
-      const msgId = await deps.sendMessage(task.chat_jid, `Running scheduled task: ${preview}...`);
+      const msgId = await deps.sendMessage(
+        task.chat_jid,
+        `Running scheduled task: ${preview}...`,
+        group.discordBotId,
+      );
       parentMessageId = msgId ? String(msgId) : null;
     } catch {
       // Announcement failed — continue without thread
     }
   }
 
-  const threadLabel = isHeartbeat ? 'heartbeat' : prompt.slice(0, 50);
+  const threadLabel = prompt.slice(0, 50);
   const streamer = createThreadStreamer(
     {
       channel,
       chatJid: task.chat_jid,
-      streamIntermediates: !isHeartbeat && !!group.streamIntermediates,
+      streamIntermediates: !!group.streamIntermediates,
       groupName: group.name,
       groupFolder: task.group_folder,
       label: threadLabel,
@@ -286,21 +194,43 @@ async function runTask(
         isScheduledTask: true,
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
+        agentRuntime: group.agentRuntime,
+        agentName: group.name,
+        discordBotId: group.discordBotId,
+        agentTrigger: group.trigger,
+        channelFolder: group.channelFolder,
+        categoryFolder: group.categoryFolder,
+        agentContextFolder: group.agentContextFolder,
       },
-      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder, 'task'),
+      (proc, containerName) =>
+        deps.onProcess(
+          task.chat_jid,
+          proc,
+          containerName,
+          task.group_folder,
+          'task',
+        ),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.intermediate && streamedOutput.result) {
-          const raw = typeof streamedOutput.result === 'string'
-            ? streamedOutput.result
-            : JSON.stringify(streamedOutput.result);
+          const raw =
+            typeof streamedOutput.result === 'string'
+              ? streamedOutput.result
+              : JSON.stringify(streamedOutput.result);
           await streamer.handleIntermediate(raw);
           return;
         }
 
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
-          resetIdleTimer();
+          await deps.sendMessage(
+            task.chat_jid,
+            streamedOutput.result,
+            group.discordBotId,
+          );
+          scheduleClose();
+        }
+        if (streamedOutput.status === 'success') {
+          deps.queue.notifyIdle(task.chat_jid);
         }
         if (streamedOutput.status === 'error') {
           error = streamedOutput.error || 'Unknown error';
@@ -308,7 +238,7 @@ async function runTask(
       },
     );
 
-    if (idleTimer) clearTimeout(idleTimer);
+    if (closeTimer) clearTimeout(closeTimer);
 
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
@@ -316,14 +246,11 @@ async function runTask(
       result = output.result;
     }
 
-    logger.info(
-      { taskId: task.id, durationMs: Date.now() - startTime },
-      'Task completed',
-    );
+    log.info({ durationMs: Date.now() - startTime }, 'Task completed');
   } catch (err) {
-    if (idleTimer) clearTimeout(idleTimer);
+    if (closeTimer) clearTimeout(closeTimer);
     error = err instanceof Error ? err.message : String(err);
-    logger.error({ taskId: task.id, error }, 'Task failed');
+    log.error({ err: error }, 'Task failed');
   }
 
   streamer.writeThoughtLog();
@@ -340,9 +267,10 @@ async function runTask(
   });
 
   // Calculate next run time (null for one-shot 'once' tasks)
-  const nextRun = task.schedule_type === 'once'
-    ? null
-    : calculateNextRun(task.schedule_type, task.schedule_value);
+  const nextRun =
+    task.schedule_type === 'once'
+      ? null
+      : calculateNextRun(task.schedule_type, task.schedule_value);
 
   const resultSummary = error
     ? `Error: ${error}`
@@ -380,14 +308,16 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         // re-discovered on subsequent ticks while it's running/queued.
         // 'once' tasks (no recurrence) get next_run set to null which
         // also removes them from getDueTasks results.
-        const nextRun = currentTask.schedule_type === 'once'
-          ? null
-          : calculateNextRun(currentTask.schedule_type, currentTask.schedule_value);
+        const nextRun =
+          currentTask.schedule_type === 'once'
+            ? null
+            : calculateNextRun(
+                currentTask.schedule_type,
+                currentTask.schedule_value,
+              );
         advanceTaskNextRun(currentTask.id, nextRun);
 
-        const promptPreview = currentTask.id.startsWith('heartbeat-')
-          ? 'Heartbeat'
-          : currentTask.prompt.slice(0, 100);
+        const promptPreview = currentTask.prompt.slice(0, 100);
         deps.queue.enqueueTask(
           currentTask.chat_jid,
           currentTask.id,

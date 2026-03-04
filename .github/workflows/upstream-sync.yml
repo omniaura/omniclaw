@@ -23,9 +23,9 @@ jobs:
       - name: Add upstream remotes
         run: |
           git remote add upstream https://github.com/qwibitai/nanoclaw.git || true
-          git remote add microclaw https://github.com/cosmin/microclaw.git || true
+          git remote add microclaw https://github.com/microclaw/microclaw.git || true
           git fetch upstream
-          git fetch microclaw
+          git fetch microclaw || echo "Warning: microclaw fetch failed, continuing..."
 
       - name: Check for new upstream PRs
         id: check_prs
@@ -38,8 +38,8 @@ jobs:
       - name: Check for upstream issues in microclaw
         id: check_issues
         run: |
-          echo "Checking cosmin/microclaw for upstream tracking issues..."
-          gh api repos/cosmin/microclaw/issues --jq '.[] | select(.state=="open" and (.title | contains("Upstream"))) | "#\(.number) - \(.title)"'
+          echo "Checking microclaw/microclaw for upstream tracking issues..."
+          gh api repos/microclaw/microclaw/issues --jq '.[] | select(.state=="open" and (.title | contains("Upstream"))) | "#\(.number) - \(.title)"' || echo "No microclaw issues found"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -50,7 +50,7 @@ jobs:
           echo "### qwibitai/nanoclaw PRs" >> $GITHUB_STEP_SUMMARY
           gh api repos/qwibitai/nanoclaw/pulls --jq '.[] | select(.state=="open") | "- [#\(.number)](\(.html_url)) - \(.title)"' | head -10 >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### cosmin/microclaw Issues" >> $GITHUB_STEP_SUMMARY
-          gh api repos/cosmin/microclaw/issues --jq '.[] | select(.state=="open" and (.title | contains("Upstream"))) | "- [#\(.number)](\(.html_url)) - \(.title)"' | head -10 >> $GITHUB_STEP_SUMMARY
+          echo "### microclaw/microclaw Issues" >> $GITHUB_STEP_SUMMARY
+          gh api repos/microclaw/microclaw/issues --jq '.[] | select(.state=="open" and (.title | contains("Upstream"))) | "- [#\(.number)](\(.html_url)) - \(.title)"' | head -10 >> $GITHUB_STEP_SUMMARY || echo "- No upstream issues" >> $GITHUB_STEP_SUMMARY
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -75,17 +75,6 @@ function getCurrentChatJid(): string {
 // For backwards compatibility, chatJid is a getter
 const chatJid = initialChatJid;
 
-// S3 mode detection
-const S3_ENDPOINT = process.env.OMNICLAW_S3_ENDPOINT || '';
-const S3_ACCESS_KEY_ID = process.env.OMNICLAW_S3_ACCESS_KEY_ID || '';
-const S3_SECRET_ACCESS_KEY = process.env.OMNICLAW_S3_SECRET_ACCESS_KEY || '';
-const S3_BUCKET = process.env.OMNICLAW_S3_BUCKET || '';
-const S3_REGION = process.env.OMNICLAW_S3_REGION || '';
-const S3_AGENT_ID = process.env.OMNICLAW_AGENT_ID || groupFolder;
-const IS_S3_MODE = !!S3_ENDPOINT;
-
-let s3Client: any = null;
-
 // User registry for mention formatting (Issue #66)
 interface UserInfo {
   id: string;
@@ -108,66 +97,50 @@ function loadUserRegistry(): UserRegistry {
   return {};
 }
 
-// Load registry on startup
-const userRegistry = loadUserRegistry();
-
-function getS3Client() {
-  if (s3Client) return s3Client;
-  if (!IS_S3_MODE) return null;
-  s3Client = new (globalThis as any).Bun.S3Client({
-    endpoint: S3_ENDPOINT,
-    accessKeyId: S3_ACCESS_KEY_ID,
-    secretAccessKey: S3_SECRET_ACCESS_KEY,
-    bucket: S3_BUCKET,
-    region: S3_REGION || undefined,
-  });
-  return s3Client;
-}
-
-async function writeS3File(key: string, data: string): Promise<void> {
-  const client = getS3Client();
-  if (!client) throw new Error('S3 client not available');
-  await client.write(key, data);
-}
-
-async function readS3File(key: string): Promise<string | null> {
-  const client = getS3Client();
-  if (!client) return null;
-  try {
-    const file = client.file(key);
-    const exists = await file.exists();
-    if (!exists) return null;
-    return await file.text();
-  } catch {
-    return null;
-  }
-}
-
 function writeIpcFile(dir: string, data: object): string {
   const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
 
-  if (IS_S3_MODE) {
-    // S3 mode: write to agent's IPC prefix in S3
-    // dir is like '/workspace/ipc/messages' → extract the last segment
-    const ipcType = path.basename(dir); // 'messages' or 'tasks'
-    const key = `agents/${S3_AGENT_ID}/ipc/${ipcType}/${filename}`;
-    writeS3File(key, JSON.stringify(data, null, 2)).catch((err) => {
-      // Fallback to filesystem
-      fs.mkdirSync(dir, { recursive: true });
-      const filepath = path.join(dir, filename);
-      fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
-    });
-  } else {
-    // Filesystem mode
-    fs.mkdirSync(dir, { recursive: true });
-    const filepath = path.join(dir, filename);
-    // Atomic write: temp file then rename
-    const tempPath = `${filepath}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
-    fs.renameSync(tempPath, filepath);
-  }
+  fs.mkdirSync(dir, { recursive: true });
+  const filepath = path.join(dir, filename);
+  // Atomic write: temp file then rename
+  const tempPath = `${filepath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
+  fs.renameSync(tempPath, filepath);
 
   return filename;
+}
+
+/** Check task ownership from the snapshot. Returns an error response if the
+ *  caller lacks permission, or an ownerWarning string (may be empty) if allowed. */
+function checkTaskOwnership(
+  taskId: string,
+  action: 'update' | 'cancel',
+): { allowed: true; ownerWarning: string } | { allowed: false; response: { content: [{ type: 'text'; text: string }]; isError: true } } {
+  const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+  try {
+    if (fs.existsSync(tasksFile)) {
+      const raw = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
+      if (Array.isArray(raw)) {
+        const task = raw.find((t: { id: string }) => t.id === taskId);
+        if (task) {
+          const taskOwner = task.groupFolder ?? 'unknown';
+          if (taskOwner !== groupFolder) {
+            if (!isMain) {
+              return {
+                allowed: false,
+                response: {
+                  content: [{ type: 'text' as const, text: `Cannot ${action} task ${taskId}: it belongs to "${taskOwner}", not "${groupFolder}". Only the owning group or the main agent can ${action} a task.` }],
+                  isError: true,
+                },
+              };
+            }
+            return { allowed: true, ownerWarning: ` WARNING: This task belongs to "${taskOwner}", not "${groupFolder}".` };
+          }
+        }
+      }
+    }
+  } catch { /* proceed — server will do final auth check */ }
+  return { allowed: true, ownerWarning: '' };
 }
 
 const server = new McpServer({
@@ -182,7 +155,11 @@ const channelListDesc = isMultiChannel
 
 server.tool(
   'send_message',
-  `Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group. You can also send to other agents by specifying target_jid (check agent_registry.json for available agents and their JIDs).${channelListDesc}`,
+  `Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. To message another agent, use the "sendTo" field from /workspace/ipc/agent_registry.json — it tells you exactly what target_jid to use and whether to prefix the message with their trigger word. Never use an agent's id or folder name as target_jid.
+
+IMPORTANT: Your final text response is ALSO sent to the user automatically. If send_message already contains your complete response, stay silent afterwards — wrap any remaining acknowledgment (e.g. "Done!", "Sent!") in <internal> tags so it isn't delivered as a duplicate message.
+
+Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.${channelListDesc}`,
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
@@ -204,6 +181,7 @@ server.tool(
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,
+      discord_bot_id: process.env.OMNICLAW_AGENT_BOT_ID || undefined,
       timestamp: new Date().toISOString(),
     };
 
@@ -211,7 +189,7 @@ server.tool(
 
     const channelName = channelByJid.get(targetJid)?.name;
     const targetDesc = channelName || (targetJid !== getCurrentChatJid() ? targetJid : '');
-    return { content: [{ type: 'text' as const, text: `Message sent${targetDesc ? ` to ${targetDesc}` : ''}.` }] };
+    return { content: [{ type: 'text' as const, text: `Message sent${targetDesc ? ` to ${targetDesc}` : ''}. If this was your final response, stay silent — wrap any remaining text in <internal> tags to avoid a duplicate.` }] };
   },
 );
 
@@ -234,7 +212,7 @@ MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It ca
 \u2022 Only send a message when there's something to report (e.g., "notify me if...")
 \u2022 Never send a message (background maintenance tasks)
 
-IMPORTANT: When MODIFYING an existing task, you MUST cancel the old task first using cancel_task, then create the new one. Otherwise you'll end up with duplicate tasks. Always call list_tasks first to find the old task ID, then cancel_task, then schedule_task.
+IMPORTANT: When MODIFYING an existing task, use update_task — it edits the task in place while preserving its ID and run history. Only use cancel_task to destructively delete a task the user no longer wants. Unlike pausing, the task cannot be restored on deletion.
 
 SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 \u2022 cron: Standard cron expression (e.g., "*/5 * * * *" for every 5 minutes, "0 9 * * *" for daily at 9am LOCAL time)
@@ -267,10 +245,16 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
         };
       }
     } else if (args.schedule_type === 'once') {
+      if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
+        return {
+          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
+          isError: true,
+        };
+      }
       const date = new Date(args.schedule_value);
       if (isNaN(date.getTime())) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use ISO 8601 format like "2026-02-01T15:30:00.000Z".` }],
+          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".` }],
           isError: true,
         };
       }
@@ -300,7 +284,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 
 server.tool(
   'list_tasks',
-  "List scheduled tasks for the current context.",
+  "List scheduled tasks for the current context. Shows task ownership so you can identify which group/agent each task belongs to.",
   {},
   async () => {
     const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
@@ -318,12 +302,16 @@ server.tool(
 
       const formatted = tasks
         .map(
-          (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
-            `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
+          (t: { id: string; groupFolder?: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) => {
+            const owner = t.groupFolder ?? 'unknown';
+            const ownerLabel = owner === groupFolder ? `${owner} (yours)` : owner;
+            const promptPreview = t.prompt.length > 50 ? `${t.prompt.slice(0, 50)}...` : t.prompt;
+            return `- [${t.id}] (owner: ${ownerLabel}) ${promptPreview} (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`;
+          },
         )
         .join('\n');
 
-      return { content: [{ type: 'text' as const, text: `Scheduled tasks:\n${formatted}` }] };
+      return { content: [{ type: 'text' as const, text: `Scheduled tasks (current group: ${groupFolder}):\n${formatted}` }] };
     } catch (err) {
       return {
         content: [{ type: 'text' as const, text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}` }],
@@ -333,32 +321,84 @@ server.tool(
 );
 
 server.tool(
-  'pause_task',
-  'Pause a scheduled task. It will not run until resumed.',
-  { task_id: z.string().describe('The task ID to pause') },
-  async (args) => {
-    const data = {
-      type: 'pause_task',
-      taskId: args.task_id,
-      groupFolder,
-      isMain,
-      timestamp: new Date().toISOString(),
-    };
+  'update_task',
+  `Update an existing scheduled task. Change its prompt, schedule, and/or status (active/paused). The task keeps the same ID and run history.
 
-    writeIpcFile(TASKS_DIR, data);
-
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.` }] };
+Examples:
+- update_task({ task_id: "...", prompt: "new instructions" })
+- update_task({ task_id: "...", schedule_type: "cron", schedule_value: "0 9 * * *" })
+- update_task({ task_id: "...", status: "paused" })
+- update_task({ task_id: "...", status: "active" })`,
+  {
+    task_id: z.string().describe('ID of the task to update'),
+    prompt: z.string().optional().describe('New instructions for the task'),
+    schedule_type: z.enum(['cron', 'interval', 'once']).optional(),
+    schedule_value: z.string().optional().describe('New cron expression, interval ms, or ISO timestamp'),
+    status: z.enum(['active', 'paused']).optional().describe('Pause or resume the task'),
+    context_mode: z.enum(['group', 'isolated']).optional().describe('group=runs with chat history and memory, isolated=fresh session'),
   },
-);
-
-server.tool(
-  'resume_task',
-  'Resume a paused task.',
-  { task_id: z.string().describe('The task ID to resume') },
   async (args) => {
+    if (!args.prompt && !args.schedule_type && !args.schedule_value && !args.status && !args.context_mode) {
+      return {
+        content: [{ type: 'text' as const, text: 'At least one of prompt, schedule_type, schedule_value, or status must be provided.' }],
+        isError: true,
+      };
+    }
+
+    // Require schedule_value when schedule_type changes to avoid type/format mismatch
+    if (args.schedule_type && !args.schedule_value) {
+      return {
+        content: [{ type: 'text' as const, text: `When changing schedule_type to "${args.schedule_type}", you must also provide schedule_value so the format matches.` }],
+        isError: true,
+      };
+    }
+
+    // Validate schedule fields if provided
+    if (args.schedule_type === 'cron' && args.schedule_value) {
+      try {
+        CronExpressionParser.parse(args.schedule_value);
+      } catch {
+        return {
+          content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).` }],
+          isError: true,
+        };
+      }
+    } else if (args.schedule_type === 'interval' && args.schedule_value) {
+      const ms = parseInt(args.schedule_value, 10);
+      if (isNaN(ms) || ms <= 0) {
+        return {
+          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}". Must be positive milliseconds (e.g., "300000" for 5 min).` }],
+          isError: true,
+        };
+      }
+    } else if (args.schedule_type === 'once' && args.schedule_value) {
+      if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
+        return {
+          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
+          isError: true,
+        };
+      }
+      const date = new Date(args.schedule_value);
+      if (isNaN(date.getTime())) {
+        return {
+          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".` }],
+          isError: true,
+        };
+      }
+    }
+
+    const ownerCheck = checkTaskOwnership(args.task_id, 'update');
+    if (!ownerCheck.allowed) return ownerCheck.response;
+    const { ownerWarning } = ownerCheck;
+
     const data = {
-      type: 'resume_task',
+      type: 'edit_task',
       taskId: args.task_id,
+      prompt: args.prompt,
+      schedule_type: args.schedule_type,
+      schedule_value: args.schedule_value,
+      status: args.status,
+      context_mode: args.context_mode,
       groupFolder,
       isMain,
       timestamp: new Date().toISOString(),
@@ -366,15 +406,24 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.` }] };
+    const changed: string[] = [];
+    if (args.prompt) changed.push('prompt');
+    if (args.schedule_type || args.schedule_value) changed.push('schedule');
+    if (args.status) changed.push(`status → ${args.status}`);
+    if (args.context_mode) changed.push(`context_mode → ${args.context_mode}`);
+    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} update requested (changed: ${changed.join(', ')}).${ownerWarning}` }] };
   },
 );
 
 server.tool(
   'cancel_task',
-  'Cancel and delete a scheduled task.',
+  'Cancel and delete a scheduled task. Non-main agents can only cancel their own tasks.',
   { task_id: z.string().describe('The task ID to cancel') },
   async (args) => {
+    const ownerCheck = checkTaskOwnership(args.task_id, 'cancel');
+    if (!ownerCheck.allowed) return ownerCheck.response;
+    const { ownerWarning } = ownerCheck;
+
     const data = {
       type: 'cancel_task',
       taskId: args.task_id,
@@ -385,67 +434,7 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
-  },
-);
-
-server.tool(
-  'configure_heartbeat',
-  `Enable or disable the heartbeat for a group. The heartbeat is a recurring background task that runs on a schedule.
-
-What the heartbeat does is controlled by the ## Heartbeat section in CLAUDE.md — edit that to customize behavior. The heartbeat also reads ## Goals from CLAUDE.md, so maintain your goals there.
-
-After enabling, edit your CLAUDE.md to add/update the ## Heartbeat and ## Goals sections to control what the heartbeat does.`,
-  {
-    enabled: z.boolean().describe('Whether to enable or disable the heartbeat'),
-    interval: z.string().default('1800000').describe('Schedule: milliseconds for interval type, or cron expression for cron type (default: "1800000" = 30 min)'),
-    schedule_type: z.enum(['cron', 'interval']).default('interval').describe('Type of schedule (default: "interval")'),
-    target_group_jid: z.string().optional().describe('(Main group only) JID of the group to configure. Defaults to current group.'),
-  },
-  async (args) => {
-    // Non-main groups can only configure themselves
-    const targetJid = isMain && args.target_group_jid ? args.target_group_jid : getCurrentChatJid();
-
-    if (args.enabled && args.schedule_type === 'cron') {
-      try {
-        CronExpressionParser.parse(args.interval);
-      } catch {
-        return {
-          content: [{ type: 'text' as const, text: `Invalid cron expression: "${args.interval}". Use format like "0 */30 * * *" (every 30 min) or "0 9 * * *" (daily 9am).` }],
-          isError: true,
-        };
-      }
-    } else if (args.enabled && args.schedule_type === 'interval') {
-      const ms = parseInt(args.interval, 10);
-      if (isNaN(ms) || ms <= 0) {
-        return {
-          content: [{ type: 'text' as const, text: `Invalid interval: "${args.interval}". Must be positive milliseconds (e.g., "1800000" for 30 min).` }],
-          isError: true,
-        };
-      }
-    }
-
-    const data = {
-      type: 'configure_heartbeat',
-      enabled: args.enabled,
-      interval: args.interval,
-      heartbeat_schedule_type: args.schedule_type,
-      target_group_jid: targetJid,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    if (args.enabled) {
-      return {
-        content: [{ type: 'text' as const, text: `Heartbeat enabled (${args.schedule_type}: ${args.interval}). Edit ## Heartbeat and ## Goals in your CLAUDE.md to customize what the heartbeat does.` }],
-      };
-    } else {
-      return {
-        content: [{ type: 'text' as const, text: 'Heartbeat disabled. The recurring heartbeat task has been removed.' }],
-      };
-    }
+    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.${ownerWarning}` }] };
   },
 );
 
@@ -455,7 +444,7 @@ server.tool(
 
 Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat"). For Discord channels, provide the discord_guild_id to enable server-level shared context.
 
-Backend options: "apple-container" (local VM, default), "sprites" (cloud VM on Fly.io — persistent, always-on).`,
+Backend options: "apple-container" (local VM, default), "docker" (Docker container).`,
   {
     jid: z.string().describe('The group JID (e.g., "120363336345536173@g.us" for WhatsApp, "dc:123456" for Discord)'),
     name: z.string().describe('Display name for the group'),
@@ -465,7 +454,7 @@ Backend options: "apple-container" (local VM, default), "sprites" (cloud VM on F
       .describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
     discord_guild_id: z.string().optional().describe('Discord guild/server ID — enables server-level shared context across channels'),
-    backend: z.enum(['apple-container', 'docker', 'sprites']).optional().describe('Backend to run this agent on (default: apple-container)'),
+    backend: z.enum(['apple-container', 'docker']).optional().describe('Backend to run this agent on (default: apple-container)'),
     description: z.string().optional().describe('What this agent does (shown in agent registry, helps other agents route requests)'),
   },
   async (args) => {
@@ -507,7 +496,7 @@ You can also share files to another agent or request files from them.
 The request is sent to the target agent (or admin if no target specified) who can then share the relevant context.`,
   {
     description: z.string().describe('What context or information you need and why'),
-    target_agent: z.string().optional().describe('Agent ID to request from (e.g., "main", "ditto-discord"). Check agent_registry.json for available agents.'),
+    target_agent: z.string().optional().describe('Agent ID to request from (e.g., "main", "clayton-discord"). Check agent_registry.json for available agents.'),
     scope: z.enum(['channel', 'server', 'auto']).default('auto')
       .describe('Where the shared context should go: channel (just this channel), server (all channels in this Discord server), or auto (let admin decide)'),
     files: z.array(z.string()).optional().describe('Paths to SHARE (send TO target agent). Relative to /workspace/group/.'),
@@ -568,6 +557,10 @@ and notify you when results are available via context storage.`,
   },
 );
 
+// Shared topic-name regex: alphanumeric start, then alphanumeric/dot/hyphen/underscore, max 128 chars.
+// Rejects path separators ('/', '\') and leading dots to prevent directory traversal.
+const TOPIC_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+
 server.tool(
   'request_context',
   `Request context or information from the local agent or admin.
@@ -575,7 +568,9 @@ Use this when you need project status, repo information, or any context that has
 The request goes to the admin for approval, then the local agent writes the context to your shared storage.`,
   {
     description: z.string().describe('What context or information you need and why'),
-    requested_topics: z.array(z.string()).optional().describe('Specific topic names to request (e.g., ["api-refactor", "project-overview"])'),
+    requested_topics: z.array(
+      z.string().regex(TOPIC_NAME_REGEX, 'Topic must be a simple name (no path separators)')
+    ).optional().describe('Specific topic names to request (e.g., ["api-refactor", "project-overview"])'),
   },
   async (args) => {
     writeIpcFile(TASKS_DIR, {
@@ -598,32 +593,33 @@ server.tool(
   `Read shared context that has been written to your context storage.
 Context is stored as markdown files by topic name. Use list_context_topics first to see what's available.`,
   {
-    topic: z.string().describe('The topic name to read (e.g., "project-overview", "api-refactor")'),
+    topic: z.string()
+      .regex(TOPIC_NAME_REGEX, 'Topic must be a simple name (no path separators)')
+      .describe('The topic name to read (e.g., "project-overview", "api-refactor")'),
   },
   async (args) => {
-    if (IS_S3_MODE) {
-      // S3 mode: read from agent's context prefix
-      const key = `agents/${S3_AGENT_ID}/context/${args.topic}.md`;
-      const content = await readS3File(key);
-      if (!content) {
+    const contextDir = path.resolve('/workspace/group/context');
+    const contextPath = path.resolve(contextDir, `${args.topic}.md`);
+    // Belt-and-suspenders: verify resolved path stays within context directory
+    if (!contextPath.startsWith(`${contextDir}${path.sep}`)) {
+      return { content: [{ type: 'text' as const, text: 'Error: invalid topic name' }] };
+    }
+    try {
+      if (!fs.existsSync(contextPath)) {
         return { content: [{ type: 'text' as const, text: `No context found for topic "${args.topic}".` }] };
       }
-      return { content: [{ type: 'text' as const, text: content }] };
-    } else {
-      // Filesystem mode: read from workspace
-      const contextPath = path.join('/workspace/group/context', `${args.topic}.md`);
-      try {
-        if (!fs.existsSync(contextPath)) {
-          return { content: [{ type: 'text' as const, text: `No context found for topic "${args.topic}".` }] };
-        }
-        const content = fs.readFileSync(contextPath, 'utf-8');
-        return { content: [{ type: 'text' as const, text: content }] };
-      } catch (err) {
-        return {
-          content: [{ type: 'text' as const, text: `Error reading context: ${err instanceof Error ? err.message : String(err)}` }],
-          isError: true,
-        };
+      // Reject symlinks — prevents escape via symlink planted in context dir
+      const stat = fs.lstatSync(contextPath);
+      if (stat.isSymbolicLink()) {
+        return { content: [{ type: 'text' as const, text: 'Error: invalid topic name' }] };
       }
+      const content = fs.readFileSync(contextPath, 'utf-8');
+      return { content: [{ type: 'text' as const, text: content }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error reading context: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
     }
   },
 );
@@ -633,28 +629,28 @@ server.tool(
   'List all available context topics in your shared context storage.',
   {},
   async () => {
-    if (IS_S3_MODE) {
-      // S3 mode: list context prefix
-      // We can't easily list S3 without the full client, so check known paths
-      return { content: [{ type: 'text' as const, text: 'S3 context listing not yet implemented. Use read_context with a specific topic name.' }] };
-    } else {
-      const contextDir = '/workspace/group/context';
-      try {
-        if (!fs.existsSync(contextDir)) {
-          return { content: [{ type: 'text' as const, text: 'No context directory found. No context has been shared yet.' }] };
-        }
-        const files = fs.readdirSync(contextDir).filter((f) => f.endsWith('.md'));
-        if (files.length === 0) {
-          return { content: [{ type: 'text' as const, text: 'No context topics found.' }] };
-        }
-        const topics = files.map((f) => f.replace(/\.md$/, ''));
-        return { content: [{ type: 'text' as const, text: `Available context topics:\n${topics.map((t) => `- ${t}`).join('\n')}` }] };
-      } catch (err) {
-        return {
-          content: [{ type: 'text' as const, text: `Error listing context: ${err instanceof Error ? err.message : String(err)}` }],
-          isError: true,
-        };
+    const contextDir = path.resolve('/workspace/group/context');
+    try {
+      if (!fs.existsSync(contextDir)) {
+        return { content: [{ type: 'text' as const, text: 'No context directory found. No context has been shared yet.' }] };
       }
+      // Only list regular .md files (skip symlinks)
+      const files = fs.readdirSync(contextDir).filter((f) => {
+        if (!f.endsWith('.md')) return false;
+        try {
+          return fs.lstatSync(path.join(contextDir, f)).isFile();
+        } catch { return false; }
+      });
+      if (files.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No context topics found.' }] };
+      }
+      const topics = files.map((f) => f.replace(/\.md$/, ''));
+      return { content: [{ type: 'text' as const, text: `Available context topics:\n${topics.map((t) => `- ${t}`).join('\n')}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error listing context: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
     }
   },
 );
@@ -666,7 +662,7 @@ server.tool(
 Returns information about each agent including their ID, name, description, backend type, and JID (for messaging).
 This is useful when you need to send messages to specific agents or request context from them.`,
   {
-    filter_backend: z.enum(['apple-container', 'docker', 'sprites', 'daytona', 'railway', 'hetzner']).optional()
+    filter_backend: z.enum(['apple-container', 'docker']).optional()
       .describe('Optional: filter agents by backend type'),
     include_self: z.boolean().default(true)
       .describe('Include the current agent in results (default: true)'),
@@ -760,20 +756,24 @@ This is useful when you need to send messages to specific agents or request cont
   },
 );
 
-// Discord-only tools
-if (chatJid.startsWith('dc:')) {
+// Reaction tool — Discord and Telegram
+if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
+  const isTelegram = chatJid.startsWith('tg:');
+  const reactionDesc = isTelegram
+    ? 'Add or remove an emoji reaction on a Telegram message. Telegram only supports a fixed set of emoji reactions — using an invalid one will return an API error. The set grows over time; see https://core.telegram.org/bots/api#reactiontypeemoji for the current list.'
+    : 'Add or remove an emoji reaction on a Discord message. Use message IDs from the conversation.';
   server.tool(
     'react_to_message',
-    'Add or remove an emoji reaction on a Discord message. Use message IDs from the conversation.',
+    reactionDesc,
     {
-      message_id: z.string().describe('The Discord message ID to react to'),
+      message_id: z.string().describe('The message ID to react to'),
       emoji: z.string().describe('Emoji to react with (e.g. "\ud83d\udc4d", "\u2764\ufe0f", "\ud83c\udf89", "\u2705")'),
       remove: z.boolean().optional().describe('Set to true to remove the reaction instead of adding it'),
     },
     async (args) => {
       writeIpcFile(MESSAGES_DIR, {
         type: 'react_to_message',
-        chatJid,
+        chatJid: getCurrentChatJid(),
         messageId: args.message_id,
         emoji: args.emoji,
         remove: args.remove || false,
@@ -784,13 +784,15 @@ if (chatJid.startsWith('dc:')) {
     },
   );
 
-  server.tool(
+  if (!isTelegram) server.tool(
     'format_mention',
     'Format a user mention for Discord using their display name. Returns the proper <@USER_ID> format for Discord mentions.',
     {
       user_name: z.string().describe('Display name of the user to mention (e.g. "OmarOmni", "PeytonOmni")'),
     },
     async (args) => {
+      // Reload on each request so long-lived containers do not use stale registry data.
+      const userRegistry = loadUserRegistry();
       // Look up user in registry (case-insensitive)
       const key = args.user_name.toLowerCase().trim();
       const user = userRegistry[key];

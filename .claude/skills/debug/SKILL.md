@@ -12,9 +12,9 @@ This guide covers debugging the containerized agent execution system.
 ```
 Host (macOS)                          Container (Linux VM)
 ─────────────────────────────────────────────────────────────
-src/container-runner.ts               container/agent-runner/
+src/backends/local-backend.ts          container/agent-runner/
     │                                      │
-    │ spawns Apple Container               │ runs Claude Agent SDK
+    │ spawns container via backend         │ runs Claude Agent SDK
     │ with volume mounts                   │ with MCP servers
     │                                      │
     ├── data/env/env ──────────────> /workspace/env-dir/env
@@ -146,8 +146,8 @@ If sessions aren't being resumed (new session ID every time), or Claude Code exi
 
 **Check the mount path:**
 ```bash
-# In container-runner.ts, verify mount is to /home/node/.claude/, NOT /root/.claude/
-grep -A3 "Claude sessions" src/container-runner.ts
+# In local-backend.ts, verify mount is to /home/node/.claude/, NOT /root/.claude/
+grep -A3 "Claude sessions" src/backends/local-backend.ts
 ```
 
 **Verify sessions are accessible:**
@@ -160,7 +160,7 @@ ls -la $HOME/.claude/projects/ 2>&1 | head -5
 '
 ```
 
-**Fix:** Ensure `container-runner.ts` mounts to `/home/node/.claude/`:
+**Fix:** Ensure `local-backend.ts` mounts to `/home/node/.claude/`:
 ```typescript
 mounts.push({
   hostPath: claudeDir,
@@ -286,6 +286,60 @@ grep "Session initialized" logs/omniclaw.log | tail -5
 # Should show the SAME session ID for consecutive messages in the same group
 ```
 
+## Discord Multi-Bot Routing
+
+### Internal bot key vs Discord snowflake ID
+
+OmniClaw uses **two completely different identifiers** for Discord bots — they must not be confused:
+
+| Identifier | Where it lives | Example | Used for |
+|---|---|---|---|
+| **Internal bot key** | `DISCORD_BOT_IDS` in `.env` | `PRIMARY`, `OCPEYTON` | OmniClaw routing |
+| **Discord snowflake ID** | Discord Developer Portal → App → General | `1476396931709276191` | Discord's own API |
+
+The internal bot key is set by **you** when you configure `.env`. It must match exactly across:
+- `DISCORD_BOT_IDS=PRIMARY,OCPEYTON`
+- `DISCORD_BOT_<KEY>_TOKEN=<token>` (e.g., `DISCORD_BOT_OCPEYTON_TOKEN`)
+- `channel_subscriptions.discord_bot_id` in SQLite
+
+The Discord snowflake ID is **never stored in OmniClaw's DB** and is never used for routing. It only appears in Discord API responses.
+
+**Common mistake:** Looking up the bot's numeric ID in the Discord Developer Portal and writing it into `channel_subscriptions.discord_bot_id`. This breaks routing silently — `findChannelForJid` won't match any bot and falls back to the default, so the wrong bot sends all messages.
+
+### Diagnosing wrong-bot-sending issues
+
+```bash
+# Check what keys are configured in env
+grep DISCORD_BOT_IDS .env
+
+# Check what's stored in the DB (should match keys above, NOT numeric IDs)
+sqlite3 store/messages.db "SELECT DISTINCT discord_bot_id FROM channel_subscriptions WHERE discord_bot_id IS NOT NULL"
+
+# Check which bot actually sent a message (look for the jid in logs)
+grep "Discord message sent" logs/omniclaw.log | tail -10
+```
+
+If the DB contains numeric snowflake IDs instead of human-readable keys, fix them:
+```bash
+# Example: replace numeric ID with the correct key
+sqlite3 store/messages.db "UPDATE channel_subscriptions SET discord_bot_id = 'OCPEYTON' WHERE discord_bot_id = '1476396931709276191'"
+```
+
+### Scheduled task routing
+
+Scheduled tasks route their result message through `group.discordBotId`, which comes from the task's assigned agent's `channel_subscriptions.discord_bot_id`. If the task was assigned to `ocpeyton-discord` but the reply came from the wrong bot, check:
+
+```bash
+sqlite3 store/messages.db "
+SELECT st.id, st.group_folder, cs.discord_bot_id, cs.is_primary
+FROM scheduled_tasks st
+JOIN channel_subscriptions cs ON cs.channel_jid = st.chat_jid AND cs.agent_id = st.group_folder
+WHERE st.status = 'active' LIMIT 10;
+"
+```
+
+The `discord_bot_id` shown must match a key in `DISCORD_BOT_IDS`.
+
 ## IPC Debugging
 
 The container communicates back to the host via files in `/workspace/ipc/`:
@@ -333,7 +387,7 @@ echo -e "\n4. Container image exists?"
 echo '{}' | container run -i --entrypoint /bin/echo omniclaw-agent:latest "OK" 2>/dev/null || echo "MISSING - run ./container/build.sh"
 
 echo -e "\n5. Session mount path correct?"
-grep -q "/home/node/.claude" src/container-runner.ts 2>/dev/null && echo "OK" || echo "WRONG - should mount to /home/node/.claude/, not /root/.claude/"
+grep -q "/home/node/.claude" src/backends/local-backend.ts 2>/dev/null && echo "OK" || echo "WRONG - should mount to /home/node/.claude/, not /root/.claude/"
 
 echo -e "\n6. Groups directory?"
 ls -la groups/ 2>/dev/null || echo "MISSING - run setup"

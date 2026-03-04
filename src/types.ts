@@ -37,16 +37,14 @@ export interface ContainerProcess {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
-  memory?: number;  // Container memory in MB. Default: 4096
+  memory?: number; // Container memory in MB. Default: 4096
+  networkMode?: 'full' | 'none'; // Default: 'none' for non-main, 'full' for main
 }
 
-export interface HeartbeatConfig {
-  enabled: boolean;
-  interval: string;        // cron expression or ms interval
-  scheduleType: 'cron' | 'interval';
-}
+export type BackendType = 'apple-container' | 'docker';
 
-export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona' | 'railway';
+/** Which agent runtime runs inside the container. */
+export type AgentRuntime = 'claude-agent-sdk' | 'opencode';
 
 export interface RegisteredGroup {
   name: string;
@@ -57,13 +55,19 @@ export interface RegisteredGroup {
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   autoRespondToQuestions?: boolean; // Respond to messages ending with '?' (default: false)
   autoRespondKeywords?: string[]; // Keywords that trigger response without mention (e.g., ["omni", "help"])
-  heartbeat?: HeartbeatConfig;
-  discordGuildId?: string;  // Discord guild/server ID (for server-level context)
-  serverFolder?: string;    // e.g., "servers/omniaura-discord" (shared across channels in same server)
-  backend?: BackendType;     // Which backend runs this group's agent (default: apple-container)
-  description?: string;      // What this agent does (for agent registry)
-  devUrl?: string;           // Sprites dev URL (auto-populated for sprites backend)
+  discordBotId?: string; // Stable Discord bot identity key (e.g., "CLAUDE", "OPENCODE")
+  discordGuildId?: string; // Discord guild/server ID (for server-level context)
+  serverFolder?: string; // e.g., "servers/omniaura-discord" (shared across channels in same server)
+  backend?: BackendType; // Which container backend runs this group's agent (default: apple-container)
+  agentRuntime?: AgentRuntime; // Which agent runtime runs inside the container (default: claude-agent-sdk)
+  description?: string; // What this agent does (for agent registry)
   streamIntermediates?: boolean; // Stream intermediate output (thinking, tool calls) to channel threads. Default: false
+  /** Channel workspace folder. Mounted at /workspace/group/. Falls back to agent folder if unset. */
+  channelFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant/spec'
+  /** Category team workspace. Mounted read-write at /workspace/category/. */
+  categoryFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant'
+  /** Agent identity folder. Mounted read-write at /workspace/agent/. */
+  agentContextFolder?: string; // e.g., 'agents/peytonomi'
 }
 
 export interface NewMessage {
@@ -113,15 +117,20 @@ export interface TaskRunLog {
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string, replyToMessageId?: string): Promise<string | void>;
+  sendMessage(
+    jid: string,
+    text: string,
+    replyToMessageId?: string,
+  ): Promise<string | void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: thread support for streaming intermediate output.
-  createThread?(jid: string, messageId: string, name: string): Promise<any>;
-  sendToThread?(thread: any, text: string): Promise<void>;
+  // Thread handles are opaque — callers store the value from createThread and pass it to sendToThread.
+  createThread?(jid: string, messageId: string, name: string): Promise<unknown>;
+  sendToThread?(thread: unknown, text: string): Promise<void>;
   // Optional: add/remove emoji reactions on messages.
   addReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
   removeReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
@@ -137,7 +146,11 @@ export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 // Callback for chat metadata discovery.
 // name is optional — channels that deliver names inline (Telegram) pass it here;
 // channels that sync names separately (WhatsApp syncGroupMetadata) omit it.
-export type OnChatMetadata = (chatJid: string, timestamp: string, name?: string) => void;
+export type OnChatMetadata = (
+  chatJid: string,
+  timestamp: string,
+  name?: string,
+) => void;
 
 // --- Agent-Channel Decoupling ---
 
@@ -146,17 +159,18 @@ export type OnChatMetadata = (chatJid: string, timestamp: string, name?: string)
  * Replaces RegisteredGroup as the primary routing unit.
  */
 export interface Agent {
-  id: string;                    // "main", "omniaura-discord"
+  id: string; // "main", "omniaura-discord"
   name: string;
   description?: string;
-  folder: string;                // Workspace folder (= id for backwards compat)
+  folder: string; // Workspace folder (= id for backwards compat)
   backend: BackendType;
+  agentRuntime: AgentRuntime; // Which agent runtime runs inside the container
   containerConfig?: ContainerConfig;
-  heartbeat?: HeartbeatConfig;
-  isAdmin: boolean;              // Local agent = true (can approve tasks, access local FS)
-  isLocal: boolean;              // Runs on local machine (Apple Container)
-  serverFolder?: string;         // Shared server context (e.g., "servers/omniaura-discord")
+  isAdmin: boolean; // Local agent = true (can approve tasks, access local FS)
+  serverFolder?: string; // Shared server context (e.g., "servers/omniaura-discord")
   createdAt: string;
+  /** Agent identity + global notes folder, mounted read-write at /workspace/agent/. */
+  agentContextFolder?: string; // e.g., 'agents/peytonomi'
 }
 
 /**
@@ -164,18 +178,42 @@ export interface Agent {
  * Multiple channels can route to the same agent.
  */
 export interface ChannelRoute {
-  channelJid: string;            // "dc:123", "tg:-100...", "123@g.us"
-  agentId: string;               // FK to Agent.id
+  channelJid: string; // "dc:123", "tg:-100...", "123@g.us"
+  agentId: string; // FK to Agent.id
   trigger: string;
   requiresTrigger: boolean;
+  discordBotId?: string;
   discordGuildId?: string;
   createdAt: string;
 }
 
 /**
+ * Multi-agent channel subscription.
+ * Multiple agents can subscribe to the same channel.
+ */
+export interface ChannelSubscription {
+  channelJid: string;
+  agentId: string;
+  trigger: string;
+  requiresTrigger: boolean;
+  priority: number;
+  isPrimary: boolean;
+  discordBotId?: string;
+  discordGuildId?: string;
+  createdAt: string;
+  /** Channel workspace folder. Overrides agent folder as /workspace/group/ mount when set. */
+  channelFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant/spec'
+  /** Category team workspace folder, mounted at /workspace/category/. */
+  categoryFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant'
+}
+
+/**
  * Convert a RegisteredGroup + JID into an Agent (for migration).
  */
-export function registeredGroupToAgent(jid: string, group: RegisteredGroup): Agent {
+export function registeredGroupToAgent(
+  jid: string,
+  group: RegisteredGroup,
+): Agent {
   const isMainGroup = group.folder === 'main';
   const backendType = group.backend || 'apple-container';
   return {
@@ -184,10 +222,9 @@ export function registeredGroupToAgent(jid: string, group: RegisteredGroup): Age
     description: group.description,
     folder: group.folder,
     backend: backendType,
+    agentRuntime: group.agentRuntime || 'claude-agent-sdk',
     containerConfig: group.containerConfig,
-    heartbeat: group.heartbeat,
     isAdmin: isMainGroup,
-    isLocal: backendType === 'apple-container' || backendType === 'docker',
     serverFolder: group.serverFolder,
     createdAt: group.added_at,
   };
@@ -196,13 +233,96 @@ export function registeredGroupToAgent(jid: string, group: RegisteredGroup): Age
 /**
  * Convert a RegisteredGroup + JID into a ChannelRoute (for migration).
  */
-export function registeredGroupToRoute(jid: string, group: RegisteredGroup): ChannelRoute {
+export function registeredGroupToRoute(
+  jid: string,
+  group: RegisteredGroup,
+): ChannelRoute {
   return {
     channelJid: jid,
     agentId: group.folder,
     trigger: group.trigger,
     requiresTrigger: group.requiresTrigger !== false,
+    discordBotId: group.discordBotId,
     discordGuildId: group.discordGuildId,
     createdAt: group.added_at,
   };
+}
+
+// --- GitHub Watch Config ---
+
+export interface GitHubRepoWatch {
+  owner: string;
+  repo: string;
+  openPrs?: { limit?: number; includeReviewComments?: boolean };
+  recentIssues?: { limit?: number };
+}
+
+export interface GitHubAgentWatch {
+  agentId: string;
+  repos: GitHubRepoWatch[];
+}
+
+export interface GitHubWatchesConfig {
+  watches: GitHubAgentWatch[];
+  /** Cache TTL in milliseconds. Default: 300000 (5 minutes) */
+  cacheTtlMs?: number;
+}
+
+// --- IPC Data Types ---
+
+/** IPC message payloads sent by agents to the orchestrator. */
+export interface IpcMessagePayload {
+  type: string;
+  chatJid?: string;
+  text?: string;
+  messageId?: string;
+  emoji?: string;
+  remove?: boolean;
+  userName?: string;
+  platform?: string;
+  requestId?: string;
+  pubkey?: string;
+  discord_bot_id?: string;
+}
+
+/** IPC task payloads sent by agents to the orchestrator. */
+export interface IpcTaskPayload {
+  type: string;
+  taskId?: string;
+  prompt?: string;
+  schedule_type?: string;
+  schedule_value?: string;
+  context_mode?: string;
+  groupFolder?: string;
+  chatJid?: string;
+  targetJid?: string;
+  channel_jid?: string;
+  // For register_group
+  jid?: string;
+  name?: string;
+  folder?: string;
+  trigger?: string;
+  requiresTrigger?: boolean;
+  containerConfig?: ContainerConfig;
+  discord_bot_id?: string;
+  discord_guild_id?: string;
+  // For share_request
+  description?: string;
+  sourceGroup?: string;
+  scope?: string;
+  serverFolder?: string;
+  discordGuildId?: string;
+  target_agent?: string;
+  files?: string[];
+  request_files?: string[];
+  // For register_group: backend config
+  backend?: BackendType;
+  agent_runtime?: AgentRuntime;
+  group_description?: string;
+  // For delegate_task
+  callbackAgentId?: string;
+  // For context_request
+  requestedTopics?: string[];
+  // For edit_task
+  status?: string;
 }

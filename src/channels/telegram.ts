@@ -1,11 +1,96 @@
 import { Bot } from 'grammy';
+import telegramifyMarkdown from 'telegramify-markdown';
 
-import {
-  ASSISTANT_NAME,
-  TRIGGER_PATTERN,
-} from '../config.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
+import { splitMessage } from './utils.js';
+
+type TelegramReactionEmoji =
+  import('@grammyjs/types').ReactionTypeEmoji['emoji'];
+export const VALID_TELEGRAM_REACTIONS: readonly TelegramReactionEmoji[] = [
+  '👍',
+  '👎',
+  '❤',
+  '🔥',
+  '🥰',
+  '👏',
+  '😁',
+  '🤔',
+  '🤯',
+  '😱',
+  '🤬',
+  '😢',
+  '🎉',
+  '🤩',
+  '🤮',
+  '💩',
+  '🙏',
+  '👌',
+  '🕊',
+  '🤡',
+  '🥱',
+  '🥴',
+  '😍',
+  '🐳',
+  '❤‍🔥',
+  '🌚',
+  '🌭',
+  '💯',
+  '🤣',
+  '⚡',
+  '🍌',
+  '🏆',
+  '💔',
+  '🤨',
+  '😐',
+  '🍓',
+  '🍾',
+  '💋',
+  '🖕',
+  '😈',
+  '😴',
+  '😭',
+  '🤓',
+  '👻',
+  '👨‍💻',
+  '👀',
+  '🎃',
+  '🙈',
+  '😇',
+  '😨',
+  '🤝',
+  '✍',
+  '🤗',
+  '🫡',
+  '🎅',
+  '🎄',
+  '☃',
+  '💅',
+  '🤪',
+  '🗿',
+  '🆒',
+  '💘',
+  '🙉',
+  '🦄',
+  '😘',
+  '💊',
+  '🙊',
+  '😎',
+  '👾',
+  '🤷‍♂',
+  '🤷',
+  '🤷‍♀',
+  '😡',
+];
+export function isTelegramReactionEmoji(v: string): v is TelegramReactionEmoji {
+  return (VALID_TELEGRAM_REACTIONS as readonly string[]).includes(v);
+}
 
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
@@ -36,7 +121,9 @@ export class TelegramChannel implements Channel {
       const chatName =
         chatType === 'private'
           ? ctx.from?.first_name || 'Private'
-          : (ctx.chat as any).title || 'Unknown';
+          : 'title' in ctx.chat
+            ? ctx.chat.title
+            : 'Unknown';
 
       ctx.reply(
         `Chat ID: \`tg:${chatId}\`\nName: ${chatName}\nType: ${chatType}`,
@@ -68,7 +155,9 @@ export class TelegramChannel implements Channel {
       const chatName =
         ctx.chat.type === 'private'
           ? senderName
-          : (ctx.chat as any).title || chatJid;
+          : 'title' in ctx.chat
+            ? ctx.chat.title
+            : chatJid;
 
       // Translate Telegram @bot_username mentions into TRIGGER_PATTERN format.
       const botUsername = ctx.me?.username?.toLowerCase();
@@ -91,8 +180,12 @@ export class TelegramChannel implements Channel {
       // Prepend reply context so the agent knows what's being replied to
       const replyTo = ctx.message.reply_to_message;
       if (replyTo && 'text' in replyTo && replyTo.text) {
-        const truncated = replyTo.text.length > 200 ? replyTo.text.slice(0, 200) + '…' : replyTo.text;
-        const replyAuthor = replyTo.from?.first_name || replyTo.from?.username || 'someone';
+        const truncated =
+          replyTo.text.length > 200
+            ? replyTo.text.slice(0, 200) + '…'
+            : replyTo.text;
+        const replyAuthor =
+          replyTo.from?.first_name || replyTo.from?.username || 'someone';
         content = `[Replying to ${replyAuthor}: "${truncated}"]\n${content}`;
       }
 
@@ -134,7 +227,10 @@ export class TelegramChannel implements Channel {
 
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
       const senderName =
-        ctx.from?.first_name || ctx.from?.username || ctx.from?.id?.toString() || 'Unknown';
+        ctx.from?.first_name ||
+        ctx.from?.username ||
+        ctx.from?.id?.toString() ||
+        'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
 
       this.opts.onChatMetadata(chatJid, timestamp);
@@ -177,9 +273,9 @@ export class TelegramChannel implements Channel {
             { username: botInfo.username, id: botInfo.id },
             'Telegram bot connected',
           );
-          console.log(`\n  Telegram bot: @${botInfo.username}`);
-          console.log(
-            `  Send /chatid to the bot to get a chat's registration ID\n`,
+          logger.info(
+            { username: botInfo.username },
+            'Telegram bot ready — send /chatid to get a chat registration ID',
           );
           resolve();
         },
@@ -187,7 +283,11 @@ export class TelegramChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string, replyToMessageId?: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    replyToMessageId?: string,
+  ): Promise<void> {
     if (!this.bot) {
       logger.warn('Telegram bot not initialized');
       return;
@@ -195,23 +295,83 @@ export class TelegramChannel implements Channel {
 
     try {
       const numericId = jid.replace(/^tg:/, '');
-      const replyParams = replyToMessageId
-        ? { reply_parameters: { message_id: parseInt(replyToMessageId, 10) } }
+      const parsedReplyId = replyToMessageId
+        ? parseInt(replyToMessageId, 10)
+        : NaN;
+      const replyParams = !isNaN(parsedReplyId)
+        ? { reply_parameters: { message_id: parsedReplyId } }
         : {};
 
-      // Telegram has a 4096 character limit per message — split if needed
-      const MAX_LENGTH = 4096;
-      if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text, replyParams);
-      } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          const opts = i === 0 ? replyParams : {};
-          await this.bot.api.sendMessage(numericId, text.slice(i, i + MAX_LENGTH), opts);
-        }
+      // Convert Markdown to Telegram's MarkdownV2 format for proper rendering
+      // (bold, italic, code blocks, links). Must convert before splitting to
+      // avoid breaking escaped sequences at chunk boundaries.
+      const formatted = telegramifyMarkdown(text, 'escape');
+
+      // Telegram has a 4096 character limit per message — split if needed.
+      // Preserve leading whitespace so code blocks / indented content aren't mangled.
+      const chunks = splitMessage(formatted, 4096, {
+        preserveLeadingWhitespace: true,
+      });
+      for (let i = 0; i < chunks.length; i++) {
+        const opts = {
+          parse_mode: 'MarkdownV2' as const,
+          ...(i === 0 ? replyParams : {}),
+        };
+        await this.bot.api.sendMessage(numericId, chunks[i], opts);
       }
       logger.info({ jid, length: text.length }, 'Telegram message sent');
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
+    }
+  }
+
+  async addReaction(
+    jid: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void> {
+    if (!this.bot) return;
+    const numericChatId = jid.replace(/^tg:/, '');
+    const numericMsgId = parseInt(messageId, 10);
+    if (isNaN(numericMsgId)) return;
+    if (!isTelegramReactionEmoji(emoji)) {
+      logger.warn(
+        { jid, messageId, emoji },
+        'Unsupported Telegram reaction emoji — skipping',
+      );
+      return;
+    }
+    try {
+      await this.bot.api.setMessageReaction(numericChatId, numericMsgId, [
+        { type: 'emoji', emoji },
+      ]);
+    } catch (err) {
+      logger.warn(
+        { jid, messageId, emoji, err },
+        'Failed to add Telegram reaction',
+      );
+    }
+  }
+
+  // NOTE: Telegram's Bot API has no single-reaction removal endpoint. This clears
+  // all reactions on the message. The emoji param is accepted for interface
+  // compatibility but is not used in the API call.
+  async removeReaction(
+    jid: string,
+    messageId: string,
+    _emoji: string,
+  ): Promise<void> {
+    if (!this.bot) return;
+    const numericChatId = jid.replace(/^tg:/, '');
+    const numericMsgId = parseInt(messageId, 10);
+    if (isNaN(numericMsgId)) return;
+    try {
+      await this.bot.api.setMessageReaction(numericChatId, numericMsgId, []);
+    } catch (err) {
+      logger.warn(
+        { jid, messageId, err },
+        'Failed to remove Telegram reaction',
+      );
     }
   }
 

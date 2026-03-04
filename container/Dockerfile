@@ -1,10 +1,10 @@
 # OmniClaw Agent Container
-# Runs Claude Agent SDK in isolated Linux VM
+# Runs agent runtimes (Claude Agent SDK or OpenCode) in isolated Linux VM
 
 FROM oven/bun:slim
 
 # Install Node.js (agents expect node/npm/npx to be available alongside bun)
-# and essential system tools including Go
+# and essential system tools including Go and Rust (cargo/rustc)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     npm \
@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     ripgrep \
     build-essential \
+    cargo \
+    rustc \
     && rm -rf /var/lib/apt/lists/*
 
 # Install yq (YAML processor, like jq for YAML)
@@ -58,9 +60,34 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 ARG GRAPHITE_VERSION=1.7.16
 RUN npm install -g @withgraphite/graphite-cli@${GRAPHITE_VERSION}
 
-# Install claude-code globally
-# Note: agent-browser is available as an on-demand skill (installed on first use)
+# Install claude-code globally (default agent runtime)
 RUN bun install -g @anthropic-ai/claude-code
+
+# Pre-install agent-browser with Chromium for browser automation
+# Store browsers in a shared location accessible to both root and bun user.
+# bun blocks postinstall scripts by default (security policy). We must add agent-browser
+# to trustedDependencies in bunfig.toml BEFORE installing so bun runs its postinstall,
+# which downloads the platform-specific native binary (e.g. agent-browser-linux-arm64).
+# Without this, the binary is never downloaded and `agent-browser` silently does nothing.
+# `agent-browser install --with-deps` calls sudo internally which doesn't exist, so we
+# run `npx playwright install-deps` directly as root instead (no sudo needed).
+# The JS wrapper at /usr/local/bin/agent-browser uses Node's existsSync() which returns
+# false for paths under /root/.bun/ due to EACCES on access() in the container sandbox,
+# so we symlink the native binary directly to /usr/local/bin/agent-browser.
+ARG AGENT_BROWSER_VERSION=0.15.1
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN echo 'trustedDependencies = ["agent-browser"]' >> /root/.bunfig.toml \
+    && bun install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
+    && agent-browser install \
+    && npx playwright install-deps \
+    && chmod -R 755 $PLAYWRIGHT_BROWSERS_PATH \
+    && ln -sf $(find /root/.bun -name 'agent-browser-linux-*' -type f | head -1) /usr/local/bin/agent-browser
+
+# Install OpenCode CLI (alternative agent runtime)
+# Pin version to prevent supply-chain attacks via unsigned curl|bash.
+ARG OPENCODE_VERSION=1.2.15
+RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} OPENCODE_INSTALL_DIR=/usr/local/bin bash
+RUN ln -sf /root/.opencode/bin/opencode /usr/local/bin/opencode
 
 # Create app directory
 WORKDIR /app
@@ -73,10 +100,6 @@ RUN bun install
 
 # Copy source code
 COPY container/agent-runner/ ./
-
-# Copy shared utilities and MCP servers
-COPY container/mcp-servers/ /app/mcp-servers/
-COPY src/shared/ /app/shared/
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/server /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input

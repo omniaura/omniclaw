@@ -15,7 +15,8 @@ Single Bun process that connects to WhatsApp, routes messages to Claude Agent SD
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |
-| `src/container-runner.ts` | Spawns agent containers with mounts |
+| `src/backends/` | Backend system (Apple Container, Docker) |
+| `src/ipc-snapshots.ts` | Task and group snapshot utilities for IPC |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
@@ -61,6 +62,8 @@ container builder stop && container builder rm && container builder start
 ```
 
 Always verify after rebuild: `container run -i --rm --entrypoint wc omniclaw-agent:latest -l /app/src/index.ts`
+
+**Always flush the builder cache** before rebuilding if you changed `container/agent-runner/` source files — buildkit caches `COPY` steps aggressively and will silently keep stale files otherwise.
 
 ## Git Remotes & Pull Requests
 

@@ -3,9 +3,15 @@
  * Defines the AgentBackend interface that all backends implement.
  */
 
-import { Agent, ContainerProcess, RegisteredGroup } from '../types.js';
+import {
+  Agent,
+  type AgentRuntime,
+  type BackendType,
+  ContainerProcess,
+  RegisteredGroup,
+} from '../types.js';
 
-export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona' | 'railway' | 'hetzner';
+export type { AgentRuntime, BackendType };
 
 /**
  * Unified group-or-agent type for backwards compatibility.
@@ -29,7 +35,9 @@ export function isAgent(entity: AgentOrGroup): entity is Agent {
 }
 
 /** Get containerConfig from either type. */
-export function getContainerConfig(entity: AgentOrGroup): RegisteredGroup['containerConfig'] {
+export function getContainerConfig(
+  entity: AgentOrGroup,
+): RegisteredGroup['containerConfig'] {
   return entity.containerConfig;
 }
 
@@ -44,6 +52,12 @@ export function getBackendType(entity: AgentOrGroup): BackendType {
   return (entity as RegisteredGroup).backend || 'apple-container';
 }
 
+/** Get agent runtime from either type. */
+export function getAgentRuntime(entity: AgentOrGroup): AgentRuntime {
+  if (isAgent(entity)) return entity.agentRuntime;
+  return (entity as RegisteredGroup).agentRuntime || 'claude-agent-sdk';
+}
+
 export interface ChannelInfo {
   id: string;
   jid: string;
@@ -55,13 +69,33 @@ export interface ContainerInput {
   sessionId?: string;
   resumeAt?: string;
   groupFolder: string;
+  /** Host-side runtime key for IPC/session isolation (defaults to groupFolder). */
+  runtimeFolder?: string;
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
   discordGuildId?: string;
   serverFolder?: string;
+  /** Which agent runtime to use inside the container. Default: claude-agent-sdk */
+  agentRuntime?: AgentRuntime;
   /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
   channels?: ChannelInfo[];
+  /** Agent's display name (e.g. "OCPeyton"). Injected into system prompt for self-awareness. */
+  agentName?: string;
+  /** Agent's Discord bot ID. Injected into system prompt so agent knows its own bot identity. */
+  discordBotId?: string;
+  /** Agent's trigger word/phrase (e.g. "@OCPeyton"). */
+  agentTrigger?: string;
+  /** Agent's identity + global notes folder, mounted read-write at /workspace/agent/ */
+  agentContextFolder?: string; // e.g., 'agents/peytonomi'
+  /** Human-readable name of the channel that triggered this invocation. */
+  currentChannelName?: string;
+  /** Channel workspace folder. If set, overrides groupFolder as /workspace/group/ mount. */
+  channelFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant/spec'
+  /** Category team workspace, mounted read-write at /workspace/category/ (shared across channels in same category) */
+  categoryFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant'
+  /** Pre-fetched GitHub context markdown (open PRs, issues, review comments) for injection into system prompt. */
+  githubContext?: string;
 }
 
 export interface ContainerOutput {
@@ -101,7 +135,11 @@ export interface AgentBackend {
 
   /** Send a follow-up message to an active agent via IPC. Returns true if sent.
    *  opts.chatJid is included so the container can route responses to the correct channel. */
-  sendMessage(groupFolder: string, text: string, opts?: { chatJid?: string }): boolean;
+  sendMessage(
+    groupFolder: string,
+    text: string,
+    opts?: { chatJid?: string },
+  ): boolean;
 
   /** Signal an active agent to wind down. Optional inputSubdir for task lane isolation. */
   closeStdin(groupFolder: string, inputSubdir?: string): void;
@@ -113,7 +151,11 @@ export interface AgentBackend {
   readFile(groupFolder: string, relativePath: string): Promise<Buffer | null>;
 
   /** Write a file to a group's workspace. Path is relative to /workspace/group/. */
-  writeFile(groupFolder: string, relativePath: string, content: Buffer | string): Promise<void>;
+  writeFile(
+    groupFolder: string,
+    relativePath: string,
+    content: Buffer | string,
+  ): Promise<void>;
 
   /** Initialize the backend (called once at startup). */
   initialize(): Promise<void>;

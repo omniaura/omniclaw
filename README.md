@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/omniclaw-logo.png" alt="OmniClaw" width="400">
+  <img src="assets/omniclaw-logo.png" alt="OmniClaw" width="800">
 </p>
 
 <p align="center">
@@ -127,7 +127,8 @@ Key files:
 - `src/ipc.ts` - IPC watcher and task processing
 - `src/router.ts` - Message formatting and outbound routing
 - `src/group-queue.ts` - Per-group queue with global concurrency limit
-- `src/container-runner.ts` - Spawns streaming agent containers
+- `src/backends/` - Pluggable backend system (Apple Container, Docker)
+- `src/ipc-snapshots.ts` - Task and group snapshot utilities for IPC
 - `src/task-scheduler.ts` - Runs scheduled tasks
 - `src/db.ts` - SQLite operations (messages, groups, sessions, state)
 - `groups/*/CLAUDE.md` - Per-group memory

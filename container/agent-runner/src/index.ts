@@ -26,6 +26,8 @@ interface ChannelInfo {
   name: string;
 }
 
+type AgentRuntime = 'claude-agent-sdk' | 'opencode';
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -37,8 +39,23 @@ interface ContainerInput {
   discordGuildId?: string;
   serverFolder?: string;
   secrets?: Record<string, string>;
+  /** Which agent runtime to use. Default: claude-agent-sdk */
+  agentRuntime?: AgentRuntime;
   /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
   channels?: ChannelInfo[];
+  /** Agent's display name (e.g. "OCPeyton"). Injected into system prompt for self-awareness. */
+  agentName?: string;
+  /** Agent's Discord bot ID. Injected into system prompt so agent knows its own bot identity. */
+  discordBotId?: string;
+  /** Agent's trigger word/phrase (e.g. "@OCPeyton"). */
+  agentTrigger?: string;
+  agentContextFolder?: string;
+  /** Human-readable name of the channel that triggered this invocation. */
+  currentChannelName?: string;
+  channelFolder?: string;
+  categoryFolder?: string;
+  /** Pre-fetched GitHub context markdown (open PRs, issues, review comments). */
+  githubContext?: string;
 }
 
 interface ContainerOutput {
@@ -73,62 +90,19 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
-const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+// Defaults to the message lane; reassigned to input-task/ after stdin is parsed
+// when containerInput.isScheduledTask is true.
+let IPC_INPUT_DIR = '/workspace/ipc/input';
+let IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+
+/**
+ * Determine the IPC input directory based on whether this is a scheduled task.
+ * Exported for testing.
+ */
+export function resolveIpcInputDir(isScheduledTask?: boolean): string {
+  return isScheduledTask ? '/workspace/ipc/input-task' : '/workspace/ipc/input';
+}
 const IPC_POLL_MS = 500;
-
-// S3 mode detection: if OMNICLAW_S3_ENDPOINT is set, use S3 for output instead of stdout
-const S3_ENDPOINT = process.env.OMNICLAW_S3_ENDPOINT || '';
-const S3_ACCESS_KEY_ID = process.env.OMNICLAW_S3_ACCESS_KEY_ID || '';
-const S3_SECRET_ACCESS_KEY = process.env.OMNICLAW_S3_SECRET_ACCESS_KEY || '';
-const S3_BUCKET = process.env.OMNICLAW_S3_BUCKET || '';
-const S3_REGION = process.env.OMNICLAW_S3_REGION || '';
-const S3_AGENT_ID = process.env.OMNICLAW_AGENT_ID || '';
-const IS_S3_MODE = !!S3_ENDPOINT;
-
-let s3Client: any = null;
-
-function getS3Client() {
-  if (s3Client) return s3Client;
-  if (!IS_S3_MODE) return null;
-  // Use Bun.S3Client for S3 mode
-  s3Client = new (globalThis as any).Bun.S3Client({
-    endpoint: S3_ENDPOINT,
-    accessKeyId: S3_ACCESS_KEY_ID,
-    secretAccessKey: S3_SECRET_ACCESS_KEY,
-    bucket: S3_BUCKET,
-    region: S3_REGION || undefined,
-  });
-  return s3Client;
-}
-
-async function writeS3Output(output: ContainerOutput): Promise<void> {
-  const client = getS3Client();
-  if (!client) return;
-
-  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const key = `agents/${S3_AGENT_ID}/outbox/${new Date().toISOString()}-${id}.json`;
-  const data = JSON.stringify({
-    id,
-    timestamp: new Date().toISOString(),
-    agentId: S3_AGENT_ID,
-    status: output.status,
-    result: output.result,
-    newSessionId: output.newSessionId,
-    error: output.error,
-  });
-  await client.write(key, data);
-  log(`S3 output written: ${key}`);
-}
-
-async function writeS3Ipc(dir: string, data: object): Promise<void> {
-  const client = getS3Client();
-  if (!client) return;
-
-  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const key = `agents/${S3_AGENT_ID}/ipc/${dir}/${id}.json`;
-  await client.write(key, JSON.stringify(data));
-}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -182,21 +156,9 @@ const OUTPUT_END_MARKER = '---OMNICLAW_OUTPUT_END---';
 function writeOutput(output: ContainerOutput): void {
   // Inject current chatJid so the host can route responses to the correct channel
   const enriched = currentChatJidValue ? { ...output, chatJid: currentChatJidValue } : output;
-  if (IS_S3_MODE) {
-    // S3 mode: write to S3 outbox instead of stdout
-    writeS3Output(enriched).catch((err) => {
-      log(`Failed to write S3 output: ${err instanceof Error ? err.message : String(err)}`);
-      // Fallback to stdout
-      console.log(OUTPUT_START_MARKER);
-      console.log(JSON.stringify(enriched));
-      console.log(OUTPUT_END_MARKER);
-    });
-  } else {
-    // Stdout mode: use markers (local/Daytona)
-    console.log(OUTPUT_START_MARKER);
-    console.log(JSON.stringify(enriched));
-    console.log(OUTPUT_END_MARKER);
-  }
+  console.log(OUTPUT_START_MARKER);
+  console.log(JSON.stringify(enriched));
+  console.log(OUTPUT_END_MARKER);
 }
 
 function log(message: string): void {
@@ -213,12 +175,19 @@ const EXT_TO_MEDIA_TYPE: Record<string, string> = {
   '.webp': 'image/webp',
 };
 
+const MEDIA_DIR = '/workspace/group/media';
+
 /**
  * Parse [attachment:image file=...] markers in text.
  * Returns the original string if no images found, or ContentBlock[] with
  * interleaved text and base64-encoded image blocks.
+ *
+ * Security: Validates that resolved file paths stay within the media directory
+ * to prevent path traversal attacks that could bypass Read/Bash hook protections.
+ * See: https://github.com/omniaura/omniclaw/issues/40
  */
-function buildContent(text: string): string | ContentBlock[] {
+/** @internal exported for testing */
+export function buildContent(text: string): string | ContentBlock[] {
   const matches = [...text.matchAll(IMAGE_MARKER_RE)];
   if (matches.length === 0) return text;
 
@@ -233,7 +202,17 @@ function buildContent(text: string): string | ContentBlock[] {
     }
 
     const filename = match[1];
-    const filePath = path.join('/workspace/group/media', filename);
+    const filePath = path.resolve(MEDIA_DIR, filename);
+
+    // Security: Ensure resolved path stays within the media directory.
+    // Without this check, a crafted filename like "../../../../workspace/env-dir/env"
+    // could read secrets, bypassing createSanitizeReadHook protections.
+    if (!filePath.startsWith(MEDIA_DIR + '/')) {
+      log(`Path traversal blocked in image attachment: ${filename}`);
+      blocks.push({ type: 'text', text: '[Image blocked: invalid path]' });
+      lastIndex = match.index! + match[0].length;
+      continue;
+    }
 
     try {
       if (fs.existsSync(filePath)) {
@@ -290,7 +269,7 @@ function getSessionSummary(sessionId: string, transcriptPath: string): string | 
 /**
  * Archive the full transcript to conversations/ before compaction.
  */
-function createPreCompactHook(): HookCallback {
+function createPreCompactHook(assistantName: string): HookCallback {
   return async (input, _toolUseId, _context) => {
     const preCompact = input as PreCompactHookInput;
     const transcriptPath = preCompact.transcript_path;
@@ -320,7 +299,7 @@ function createPreCompactHook(): HookCallback {
       const filename = `${date}-${name}.md`;
       const filePath = path.join(conversationsDir, filename);
 
-      const markdown = formatTranscriptMarkdown(messages, summary);
+      const markdown = formatTranscriptMarkdown(messages, summary, assistantName);
       fs.writeFileSync(filePath, markdown);
 
       log(`Archived conversation to ${filePath}`);
@@ -335,7 +314,7 @@ function createPreCompactHook(): HookCallback {
 // Secrets to strip from Bash tool subprocess environments.
 // These are needed by claude-code for API auth but should never
 // be visible to commands Kit runs.
-const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_OAUTH_TOKEN'];
 
 /**
  * createSanitizeBashHook
@@ -356,9 +335,23 @@ export function createSanitizeBashHook(): HookCallback {
     const command = (preInput.tool_input as { command?: string })?.command;
     if (!command) return {};
 
+    // Normalize shell quoting/escaping for path checks so patterns cannot be
+    // bypassed with variants like "/workspace/env-dir"/env or /workspace\/env-dir.
+    const normalizedForChecks = command
+      .replace(/\\([/"'])/g, '$1')
+      .replace(/["']/g, '');
+
     // Block commands accessing /proc/*/environ (any path component, not just numbered PIDs)
     // Broad match prevents traversal bypasses like /proc/self/../self/environ
     if (/\/proc\/[^ \t\n]*\/environ/.test(command)) {
+      throw new Error(
+        'Access to /proc/*/environ is not allowed for security reasons. ' +
+        'This file contains process environment variables which may include sensitive credentials. ' +
+        'See: https://github.com/omniaura/omniclaw/issues/79'
+      );
+    }
+
+    if (/\/proc\/[^ \t\n]*\/environ/.test(normalizedForChecks)) {
       throw new Error(
         'Access to /proc/*/environ is not allowed for security reasons. ' +
         'This file contains process environment variables which may include sensitive credentials. ' +
@@ -370,6 +363,7 @@ export function createSanitizeBashHook(): HookCallback {
     const blockedPaths = [
       /\/tmp\/input\.json/,              // Stdin buffer
       /\/workspace\/env-dir(?:\/|$)/,   // Mounted env directory (with or without trailing slash)
+      /\/workspace\/project\/\.env(?:\s|$|[;|&><)\n]|\$\()/,  // Project root .env (masked by /dev/null mount, defense-in-depth)
       /\/proc\/.*\/mountinfo/,       // Mount enumeration
       /\/proc\/.*\/mounts/,          // Mount list
       /\/etc\/mtab/,                 // Mount table
@@ -377,7 +371,7 @@ export function createSanitizeBashHook(): HookCallback {
     ];
 
     for (const pattern of blockedPaths) {
-      if (pattern.test(command)) {
+      if (pattern.test(command) || pattern.test(normalizedForChecks)) {
         throw new Error(
           'This command attempts to access a restricted file that could expose credentials. ' +
           'See: https://github.com/omniaura/omniclaw/issues/79'
@@ -400,6 +394,51 @@ export function createSanitizeBashHook(): HookCallback {
   };
 }
 
+const MAX_READ_BYTES = 50 * 1024; // 50 KB
+const DEFAULT_READ_LIMIT_LINES = 500;
+
+/**
+ * createFileSizeHook
+ *
+ * Prevents large files from flooding the context window.
+ * If a file exceeds MAX_READ_BYTES and the agent hasn't already specified
+ * a `limit`, injects `limit: DEFAULT_READ_LIMIT_LINES` so the agent sees
+ * a truncated preview rather than the full file.
+ *
+ * The agent can still read specific sections using offset+limit.
+ */
+export function createFileSizeHook(): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const preInput = input as PreToolUseHookInput;
+    const { file_path, limit } = preInput.tool_input as { file_path?: string; limit?: number };
+    if (!file_path) return {};
+    // Respect an explicit limit the agent already set
+    if (limit != null) return {};
+
+    let size: number;
+    try {
+      size = fs.statSync(file_path).size;
+    } catch {
+      return {}; // File doesn't exist — let Read handle it
+    }
+
+    if (size > MAX_READ_BYTES) {
+      log(`Large file: ${file_path} (${Math.round(size / 1024)}KB), injecting limit=${DEFAULT_READ_LIMIT_LINES}`);
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          updatedInput: {
+            ...(preInput.tool_input as Record<string, unknown>),
+            limit: DEFAULT_READ_LIMIT_LINES,
+          },
+        },
+      };
+    }
+
+    return {};
+  };
+}
+
 /**
  * createSanitizeReadHook
  *
@@ -407,6 +446,7 @@ export function createSanitizeBashHook(): HookCallback {
  * - /proc/[pid]/environ (kernel env snapshot)
  * - /tmp/input.json (stdin buffer with secrets)
  * - /workspace/env-dir/ (mounted env files)
+ * - /workspace/project/.env (project root secrets, masked by /dev/null mount)
  * - Mount enumeration files (mountinfo, mtab, fstab)
  *
  * Related: Issue #79, upstream PR #216
@@ -431,6 +471,7 @@ export function createSanitizeReadHook(): HookCallback {
       /^\/proc\/(?:\d+|self)(?:\/[^/]+)*\/environ$/, // Process/task environ (any depth: /proc/<pid>/task/<tid>/environ)
       /^\/tmp\/input\.json$/,         // Stdin buffer
       /^\/workspace\/env-dir\//,      // Mounted env directory
+      /^\/workspace\/project\/\.env$/, // Project root .env (masked by /dev/null mount, defense-in-depth)
       /^\/proc\/(\d+|self)\/mountinfo$/,  // Mount enumeration for any PID (Issue #79)
       /^\/proc\/(\d+|self)\/mounts$/,    // Mount list for any PID
       /^\/etc\/mtab$/,                // Mount table
@@ -495,7 +536,11 @@ function parseTranscript(content: string): ParsedMessage[] {
   return messages;
 }
 
-function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null): string {
+function formatTranscriptMarkdown(
+  messages: ParsedMessage[],
+  title?: string | null,
+  assistantName: string = 'Assistant',
+): string {
   const now = new Date();
   const formatDateTime = (d: Date) => d.toLocaleString('en-US', {
     month: 'short',
@@ -514,7 +559,7 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
   lines.push('');
 
   for (const msg of messages) {
-    const sender = msg.role === 'user' ? 'User' : 'Andy';
+    const sender = msg.role === 'user' ? 'User' : assistantName;
     const content = msg.content.length > 2000
       ? msg.content.slice(0, 2000) + '...'
       : msg.content;
@@ -662,7 +707,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; sessionStale?: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -690,6 +735,7 @@ async function runQuery(
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
+  let lastAssistantText: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
 
@@ -700,9 +746,53 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
-  // Discover additional directories mounted at /workspace/extra/*
-  // These are passed to the SDK so their CLAUDE.md files are loaded automatically
+  // Append agent identity as a fallback for agents without /workspace/agent/CLAUDE.md
+  // When the agent has an identity file, the SDK auto-loads it via additionalDirectories
+  if (containerInput.agentName && !fs.existsSync('/workspace/agent/CLAUDE.md')) {
+    const identityParts = [`You are **${containerInput.agentName}**.`];
+    if (containerInput.agentTrigger) {
+      identityParts.push(`Your trigger is \`${containerInput.agentTrigger}\`.`);
+    }
+    if (containerInput.discordBotId) {
+      identityParts.push(`Your Discord Bot ID is \`${containerInput.discordBotId}\`.`);
+    }
+    const identityBlock = `\n\n## Your Identity\n${identityParts.join(' ')}`;
+    globalClaudeMd = globalClaudeMd ? globalClaudeMd + identityBlock : identityBlock.trim();
+  }
+
+  // Append channel context so the agent knows where it is
+  if (containerInput.channels && containerInput.channels.length > 1) {
+    // Multi-channel: list all channels, mark current
+    const channelLines = containerInput.channels.map((ch) => {
+      const marker = ch.jid === containerInput.chatJid ? ' **(current)**' : '';
+      return `- **${ch.name}** (\`${ch.jid}\`)${marker}`;
+    });
+    const channelBlock = `\n\n## Channel Context\nYou are subscribed to multiple channels:\n${channelLines.join('\n')}\n\nThe \`send_message\` tool defaults to the current channel. To send to a different channel, specify the target channel ID.`;
+    globalClaudeMd = globalClaudeMd ? globalClaudeMd + channelBlock : channelBlock.trim();
+  } else {
+    // Single-channel or no channels: just state where we are
+    const channelName = containerInput.currentChannelName || containerInput.chatJid;
+    const channelDisplay = containerInput.currentChannelName
+      ? `**${containerInput.currentChannelName}** (\`${containerInput.chatJid}\`)`
+      : `\`${containerInput.chatJid}\``;
+    const channelBlock = `\n\n## Channel Context\nYou are responding in ${channelDisplay}.`;
+    globalClaudeMd = globalClaudeMd ? globalClaudeMd + channelBlock : channelBlock.trim();
+  }
+
+  // Append GitHub context (pre-fetched open PRs, issues, review comments)
+  if (containerInput.githubContext) {
+    const githubBlock = `\n\n${containerInput.githubContext}`;
+    globalClaudeMd = globalClaudeMd ? globalClaudeMd + githubBlock : containerInput.githubContext;
+  }
+
+  // Discover additional directories for CLAUDE.md auto-loading:
+  // 1. Context layers: /workspace/agent, /workspace/server, /workspace/category
+  // 2. Extra mounts: /workspace/extra/*
   const extraDirs: string[] = [];
+  const contextDirs = ['/workspace/agent', '/workspace/server', '/workspace/category'];
+  for (const dir of contextDirs) {
+    if (fs.existsSync(dir)) extraDirs.push(dir);
+  }
   const extraBase = '/workspace/extra';
   if (fs.existsSync(extraBase)) {
     for (const entry of fs.readdirSync(extraBase)) {
@@ -719,10 +809,11 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: sdkEnv.CLAUDE_MODEL || 'claude-opus-4-6',
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
-      resumeSessionAt: resumeAt,
+      resumeSessionAt: sessionId ? resumeAt : undefined,
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
@@ -753,14 +844,17 @@ async function runQuery(
             ...(containerInput.discordGuildId ? { OMNICLAW_DISCORD_GUILD_ID: containerInput.discordGuildId } : {}),
             ...(containerInput.serverFolder ? { OMNICLAW_SERVER_FOLDER: containerInput.serverFolder } : {}),
             ...(containerInput.channels ? { OMNICLAW_CHANNELS: JSON.stringify(containerInput.channels) } : {}),
+            ...(containerInput.agentName ? { OMNICLAW_AGENT_NAME: containerInput.agentName } : {}),
+            ...(containerInput.discordBotId ? { OMNICLAW_AGENT_BOT_ID: containerInput.discordBotId } : {}),
+            ...(containerInput.agentTrigger ? { OMNICLAW_AGENT_TRIGGER: containerInput.agentTrigger } : {}),
           },
         },
       },
       hooks: {
-        PreCompact: [{ hooks: [createPreCompactHook()] }],
+        PreCompact: [{ hooks: [createPreCompactHook(containerInput.agentName || 'Assistant')] }],
         PreToolUse: [
           { matcher: 'Bash', hooks: [createSanitizeBashHook()] },
-          { matcher: 'Read', hooks: [createSanitizeReadHook()] },
+          { matcher: 'Read', hooks: [createSanitizeReadHook(), createFileSizeHook()] },
         ],
       },
     }
@@ -861,11 +955,38 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+      // Track the last assistant text so we can use it as fallback when the
+      // result event has no text (e.g. agent wrote text then did a final tool call)
+      const content = (message as { message?: { content?: unknown } }).message?.content;
+      if (Array.isArray(content)) {
+        const textBlocks = content
+          .filter((b: { type: string }) => b.type === 'text')
+          .map((b: { text: string }) => b.text)
+          .join('');
+        if (textBlocks) lastAssistantText = textBlocks;
+      } else if (typeof content === 'string' && content) {
+        lastAssistantText = content;
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
       log(`Session initialized: ${newSessionId}`);
+    }
+
+    // Detect stale session: if we get error_during_execution before system/init,
+    // the session transcript no longer exists (e.g. container was recreated).
+    // Discard the stale session and retry as fresh. [Upstream PR #503]
+    if (
+      message.type === 'system' &&
+      (message as { subtype?: string }).subtype === 'error_during_execution' &&
+      !newSessionId &&
+      sessionId
+    ) {
+      log(`Session ${sessionId} appears stale (error_during_execution before init), will retry as fresh session`);
+      ipcPolling = false;
+      stream.end();
+      return { newSessionId: undefined, lastAssistantUuid: undefined, closedDuringQuery, sessionStale: true };
     }
 
     if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
@@ -876,13 +997,26 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
+      // When the agent writes text then does a final tool call (e.g. closing the
+      // browser), the result event has no text. Fall back to the last assistant
+      // text so the user still gets the response.
+      const effectiveResult = textResult || lastAssistantText || null;
       const rm = message as any;
-      log(`Result #${resultCount}: subtype=${message.subtype} turns=${rm.num_turns || '?'} duration=${rm.duration_ms || '?'}ms cost=$${rm.total_cost_usd?.toFixed(4) || '?'}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      log(`Result #${resultCount}: subtype=${message.subtype} turns=${rm.num_turns || '?'} duration=${rm.duration_ms || '?'}ms cost=$${rm.total_cost_usd?.toFixed(4) || '?'}${effectiveResult ? ` text=${effectiveResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
-        result: textResult || null,
+        result: effectiveResult,
         newSessionId
       });
+      lastAssistantText = undefined;
+
+      // Break out of the for-await loop after receiving a result.
+      // This allows control to return to the outer while(true) loop where
+      // waitForIpcMessage() can properly handle follow-up messages.
+      // Without this break, the for-await loop hangs waiting for more stream
+      // input that the SDK will never process after yielding a result.
+      // See: https://github.com/qwibitai/nanoclaw/issues/233
+      break;
     }
   }
 
@@ -899,7 +1033,7 @@ async function main(): Promise<void> {
     containerInput = JSON.parse(stdinData);
     // Delete the temp file the entrypoint wrote — it contains secrets
     try { fs.unlinkSync('/tmp/input.json'); } catch { /* may not exist */ }
-    log(`Received input for group: ${containerInput.groupFolder}`);
+    log(`Received input for group: ${containerInput.groupFolder} (runtime: ${containerInput.agentRuntime || 'claude-agent-sdk'})`);
   } catch (err) {
     writeOutput({
       status: 'error',
@@ -907,6 +1041,30 @@ async function main(): Promise<void> {
       error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
     });
     process.exit(1);
+  }
+
+  // Runtime dispatch: select which agent runtime to use
+  const runtime = containerInput.agentRuntime || 'claude-agent-sdk';
+  if (runtime === 'opencode') {
+    const { runOpenCodeRuntime } = await import('./opencode-runtime.js');
+    await runOpenCodeRuntime(containerInput);
+    process.exit(0);
+  }
+  if (runtime !== 'claude-agent-sdk') {
+    writeOutput({
+      status: 'error',
+      result: null,
+      error: `Agent runtime '${runtime}' is not yet implemented. Supported: 'claude-agent-sdk', 'opencode'.`,
+    });
+    process.exit(1);
+  }
+
+  // Scheduled tasks use a separate IPC input directory so reactions and
+  // follow-up messages don't leak into the task lane.
+  if (containerInput.isScheduledTask) {
+    IPC_INPUT_DIR = '/workspace/ipc/input-task';
+    IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+    log('Using task IPC lane: /workspace/ipc/input-task');
   }
 
   // Build SDK env: merge secrets into process.env for the SDK only.
@@ -995,18 +1153,27 @@ Please review these changes to understand your new capabilities and fixes.
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
-      if (queryResult.newSessionId) {
-        sessionId = queryResult.newSessionId;
+      let effectiveResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+
+      // Handle stale session: discard session state and retry as fresh [Upstream PR #503]
+      if (effectiveResult.sessionStale) {
+        log('Retrying query as fresh session (stale session discarded)');
+        sessionId = undefined;
+        resumeAt = undefined;
+        effectiveResult = await runQuery(prompt, undefined, mcpServerPath, containerInput, sdkEnv, undefined);
       }
-      if (queryResult.lastAssistantUuid) {
-        resumeAt = queryResult.lastAssistantUuid;
+
+      if (effectiveResult.newSessionId) {
+        sessionId = effectiveResult.newSessionId;
+      }
+      if (effectiveResult.lastAssistantUuid) {
+        resumeAt = effectiveResult.lastAssistantUuid;
       }
 
       // If _close was consumed during the query, exit immediately.
       // Don't emit a session-update marker (it would reset the host's
       // idle timer and cause a 30-min delay before the next _close).
-      if (queryResult.closedDuringQuery) {
+      if (effectiveResult.closedDuringQuery) {
         log('Close sentinel consumed during query, exiting');
         break;
       }
@@ -1042,5 +1209,9 @@ Please review these changes to understand your new capabilities and fixes.
 
 // Only run main() when this file is the entry point, not when imported as a module
 if (import.meta.main) {
-  main();
+  // Force-exit after main() completes: claude-code leaves dangling handles
+  // (WebSockets, HTTP connections, timers) that prevent a natural bun exit.
+  // Without this the container stays alive after the agent loop ends, causing
+  // OmniClaw to keep piping new messages to a dead IPC listener.
+  main().then(() => process.exit(0)).catch(() => process.exit(1));
 }

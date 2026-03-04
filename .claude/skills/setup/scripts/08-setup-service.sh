@@ -91,9 +91,9 @@ case "$PLATFORM" in
         <string>${HOME_PATH}</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>${PROJECT_PATH}/logs/omniclaw.log</string>
+    <string>${PROJECT_PATH}/logs/omniclaw.stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>${PROJECT_PATH}/logs/omniclaw.error.log</string>
+    <string>${PROJECT_PATH}/logs/omniclaw.log</string>
 </dict>
 </plist>
 PLISTEOF
@@ -146,8 +146,8 @@ Restart=always
 RestartSec=5
 Environment=HOME=${HOME_PATH}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:${HOME_PATH}/.local/bin
-StandardOutput=append:${PROJECT_PATH}/logs/omniclaw.log
-StandardError=append:${PROJECT_PATH}/logs/omniclaw.error.log
+StandardOutput=append:${PROJECT_PATH}/logs/omniclaw.stdout.log
+StandardError=append:${PROJECT_PATH}/logs/omniclaw.log
 
 [Install]
 WantedBy=default.target

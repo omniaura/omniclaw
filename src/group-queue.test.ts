@@ -4,12 +4,17 @@ import { mock as mockModule } from 'bun:test';
 
 mockModule.module('./config.js', () => ({
   DATA_DIR: '/tmp/omniclaw-test-data',
-  MAX_CONCURRENT_CONTAINERS: 3,
+  MAX_ACTIVE_CONTAINERS: 3,
+  MAX_IDLE_CONTAINERS: 0, // disable idle slots so tests see hard limit of 3
+  MAX_CONCURRENT_CONTAINERS: 3, // backward-compat alias
   MAX_TASK_CONTAINERS: 2,
 }));
 
+import realFs from 'fs';
+
 mockModule.module('fs', () => ({
   default: {
+    ...realFs,
     mkdirSync: mock(),
     writeFileSync: mock(),
     renameSync: mock(),
@@ -71,8 +76,13 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(processMessages);
 
     // Start a task (occupies task lane)
-    queue.enqueueTask('group1@g.us', 'task-1', () =>
-      new Promise<void>((resolve) => { taskResolve = resolve; }),
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-1',
+      () =>
+        new Promise<void>((resolve) => {
+          taskResolve = resolve;
+        }),
       'Test task',
     );
     await Bun.sleep(10);
@@ -97,7 +107,9 @@ describe('GroupQueue', () => {
     let taskRan = false;
 
     const processMessages = mock(async () => {
-      await new Promise<void>((resolve) => { messageResolve = resolve; });
+      await new Promise<void>((resolve) => {
+        messageResolve = resolve;
+      });
       return true;
     });
 
@@ -110,7 +122,14 @@ describe('GroupQueue', () => {
     expect(queue.isActive('group1@g.us', 'message')).toBe(true);
 
     // Enqueue a task — should run immediately on task lane
-    queue.enqueueTask('group1@g.us', 'task-1', async () => { taskRan = true; }, 'Test task');
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-1',
+      async () => {
+        taskRan = true;
+      },
+      'Test task',
+    );
     await Bun.sleep(10);
 
     expect(taskRan).toBe(true);
@@ -127,7 +146,9 @@ describe('GroupQueue', () => {
     let taskResolve: () => void;
 
     const processMessages = mock(async () => {
-      await new Promise<void>((resolve) => { messageResolve = resolve; });
+      await new Promise<void>((resolve) => {
+        messageResolve = resolve;
+      });
       return true;
     });
 
@@ -136,8 +157,13 @@ describe('GroupQueue', () => {
     queue.enqueueMessageCheck('group1@g.us');
     await Bun.sleep(10);
 
-    queue.enqueueTask('group1@g.us', 'task-1', () =>
-      new Promise<void>((resolve) => { taskResolve = resolve; }),
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-1',
+      () =>
+        new Promise<void>((resolve) => {
+          taskResolve = resolve;
+        }),
       'Test task',
     );
     await Bun.sleep(10);
@@ -165,8 +191,10 @@ describe('GroupQueue', () => {
 
     // Fill all 3 slots (MAX_CONCURRENT_CONTAINERS = 3)
     queue.enqueueMessageCheck('group1@g.us');
-    queue.enqueueTask('group2@g.us', 'task-1', () =>
-      new Promise<void>((resolve) => resolvers.push(resolve)),
+    queue.enqueueTask(
+      'group2@g.us',
+      'task-1',
+      () => new Promise<void>((resolve) => resolvers.push(resolve)),
       'Task 1',
     );
     queue.enqueueMessageCheck('group3@g.us');
@@ -176,7 +204,14 @@ describe('GroupQueue', () => {
 
     // 4th should be queued (over global limit)
     let fourthStarted = false;
-    queue.enqueueTask('group4@g.us', 'task-2', async () => { fourthStarted = true; }, 'Task 2');
+    queue.enqueueTask(
+      'group4@g.us',
+      'task-2',
+      async () => {
+        fourthStarted = true;
+      },
+      'Task 2',
+    );
     await Bun.sleep(10);
     expect(fourthStarted).toBe(false);
 
@@ -198,12 +233,16 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(mock(async () => true));
 
     // Start 2 tasks (MAX_TASK_CONTAINERS = 2)
-    queue.enqueueTask('group1@g.us', 'task-1', () =>
-      new Promise<void>((resolve) => resolvers.push(resolve)),
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-1',
+      () => new Promise<void>((resolve) => resolvers.push(resolve)),
       'Task 1',
     );
-    queue.enqueueTask('group2@g.us', 'task-2', () =>
-      new Promise<void>((resolve) => resolvers.push(resolve)),
+    queue.enqueueTask(
+      'group2@g.us',
+      'task-2',
+      () => new Promise<void>((resolve) => resolvers.push(resolve)),
       'Task 2',
     );
     await Bun.sleep(10);
@@ -212,13 +251,25 @@ describe('GroupQueue', () => {
 
     // 3rd task should be queued
     let thirdStarted = false;
-    queue.enqueueTask('group3@g.us', 'task-3', async () => { thirdStarted = true; }, 'Task 3');
+    queue.enqueueTask(
+      'group3@g.us',
+      'task-3',
+      async () => {
+        thirdStarted = true;
+      },
+      'Task 3',
+    );
     await Bun.sleep(10);
     expect(thirdStarted).toBe(false);
 
     // But a message should still get through
     let messageStarted = false;
-    queue.setProcessMessagesFn(mock(async () => { messageStarted = true; return true; }));
+    queue.setProcessMessagesFn(
+      mock(async () => {
+        messageStarted = true;
+        return true;
+      }),
+    );
     queue.enqueueMessageCheck('group3@g.us');
     await Bun.sleep(10);
     expect(messageStarted).toBe(true);
@@ -242,8 +293,13 @@ describe('GroupQueue', () => {
 
     expect(queue.getActiveTaskInfo('group1@g.us')).toBeNull();
 
-    queue.enqueueTask('group1@g.us', 'task-42', () =>
-      new Promise<void>((resolve) => { taskResolve = resolve; }),
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-42',
+      () =>
+        new Promise<void>((resolve) => {
+          taskResolve = resolve;
+        }),
       'Run daily report',
     );
     await Bun.sleep(10);
@@ -319,7 +375,9 @@ describe('GroupQueue', () => {
     let taskResolve: () => void;
 
     const processMessages = mock(async () => {
-      await new Promise<void>((resolve) => { messageResolve = resolve; });
+      await new Promise<void>((resolve) => {
+        messageResolve = resolve;
+      });
       return true;
     });
 
@@ -336,8 +394,13 @@ describe('GroupQueue', () => {
     expect(queue.isActive('group1@g.us', 'message')).toBe(true);
     expect(queue.isActive('group1@g.us', 'task')).toBe(false);
 
-    queue.enqueueTask('group1@g.us', 'task-1', () =>
-      new Promise<void>((resolve) => { taskResolve = resolve; }),
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-1',
+      () =>
+        new Promise<void>((resolve) => {
+          taskResolve = resolve;
+        }),
       'Test',
     );
     await Bun.sleep(10);
@@ -355,6 +418,336 @@ describe('GroupQueue', () => {
     await Bun.sleep(10);
   });
 
+  // --- IPC lane isolation ---
+
+  describe('IPC lane isolation', () => {
+    it('sendMessage returns false when only task lane active', async () => {
+      let taskResolve: () => void;
+      const processMessages = mock(async () => true);
+      queue.setProcessMessagesFn(processMessages);
+
+      queue.enqueueTask(
+        'group1@g.us',
+        'task-1',
+        () =>
+          new Promise<void>((resolve) => {
+            taskResolve = resolve;
+          }),
+        'Test task',
+      );
+      await Bun.sleep(10);
+
+      expect(queue.isActive('group1@g.us', 'task')).toBe(true);
+      expect(queue.isActive('group1@g.us', 'message')).toBe(false);
+
+      // sendMessage targets message lane only — should return false
+      const result = await queue.sendMessage('group1@g.us', 'hello');
+      expect(result).toBe(false);
+
+      taskResolve!();
+      await Bun.sleep(10);
+    });
+
+    it('sendMessage targets message backend only, not task backend', async () => {
+      let messageResolve: () => void;
+      let taskResolve: () => void;
+
+      const messageSendMock = mock(() => true);
+      const taskSendMock = mock(() => true);
+
+      const messageBackend = {
+        sendMessage: messageSendMock,
+        closeStdin: mock(),
+        runAgent: mock(async () => ({
+          status: 'success' as const,
+          result: null,
+        })),
+      };
+      const taskBackend = {
+        sendMessage: taskSendMock,
+        closeStdin: mock(),
+        runAgent: mock(async () => ({
+          status: 'success' as const,
+          result: null,
+        })),
+      };
+
+      const processMessages = mock(async () => {
+        await new Promise<void>((resolve) => {
+          messageResolve = resolve;
+        });
+        return true;
+      });
+      queue.setProcessMessagesFn(processMessages);
+
+      // Start message lane
+      queue.enqueueMessageCheck('group1@g.us');
+      await Bun.sleep(10);
+
+      // Register message backend
+      queue.registerProcess(
+        'group1@g.us',
+        {} as any,
+        'msg-ctr',
+        'group1-folder',
+        messageBackend as any,
+        'message',
+      );
+
+      // Start task lane
+      queue.enqueueTask(
+        'group1@g.us',
+        'task-1',
+        () =>
+          new Promise<void>((resolve) => {
+            taskResolve = resolve;
+          }),
+        'Test task',
+      );
+      await Bun.sleep(10);
+
+      // Register task backend
+      queue.registerProcess(
+        'group1@g.us',
+        {} as any,
+        'task-ctr',
+        'group1-folder',
+        taskBackend as any,
+        'task',
+      );
+
+      // sendMessage should only go to message backend
+      await queue.sendMessage('group1@g.us', 'reaction text');
+
+      expect(messageSendMock).toHaveBeenCalled();
+      expect(taskSendMock).not.toHaveBeenCalled();
+
+      messageResolve!();
+      taskResolve!();
+      await Bun.sleep(10);
+    });
+
+    it('reaction flow: sendMessage returns false when only task active, triggers new message container', async () => {
+      let taskResolve: () => void;
+      let messageRan = false;
+
+      const processMessages = mock(async () => {
+        messageRan = true;
+        return true;
+      });
+      queue.setProcessMessagesFn(processMessages);
+
+      // Start only a task
+      queue.enqueueTask(
+        'group1@g.us',
+        'task-1',
+        () =>
+          new Promise<void>((resolve) => {
+            taskResolve = resolve;
+          }),
+        'Test task',
+      );
+      await Bun.sleep(10);
+
+      // Simulate reaction handler: sendMessage fails → enqueue message check
+      const sent = await queue.sendMessage('group1@g.us', 'reaction');
+      expect(sent).toBe(false);
+
+      // This is what the reaction handler would do on failure
+      queue.enqueueMessageCheck('group1@g.us');
+      await Bun.sleep(10);
+
+      expect(messageRan).toBe(true);
+      expect(queue.isActive('group1@g.us', 'message')).toBe(false); // already completed
+      expect(queue.isActive('group1@g.us', 'task')).toBe(true);
+
+      taskResolve!();
+      await Bun.sleep(10);
+    });
+
+    it('reaction flow: sendMessage succeeds when both lanes active', async () => {
+      let messageResolve: () => void;
+      let taskResolve: () => void;
+
+      const messageSendMock = mock(() => true);
+      const messageBackend = {
+        sendMessage: messageSendMock,
+        closeStdin: mock(),
+        runAgent: mock(async () => ({
+          status: 'success' as const,
+          result: null,
+        })),
+      };
+
+      const processMessages = mock(async () => {
+        await new Promise<void>((resolve) => {
+          messageResolve = resolve;
+        });
+        return true;
+      });
+      queue.setProcessMessagesFn(processMessages);
+
+      // Start both lanes
+      queue.enqueueMessageCheck('group1@g.us');
+      await Bun.sleep(10);
+      queue.registerProcess(
+        'group1@g.us',
+        {} as any,
+        'msg-ctr',
+        'group1-folder',
+        messageBackend as any,
+        'message',
+      );
+
+      queue.enqueueTask(
+        'group1@g.us',
+        'task-1',
+        () =>
+          new Promise<void>((resolve) => {
+            taskResolve = resolve;
+          }),
+        'Test task',
+      );
+      await Bun.sleep(10);
+
+      // sendMessage should succeed via message backend
+      const sent = await queue.sendMessage('group1@g.us', 'reaction text');
+      expect(sent).toBe(true);
+      expect(messageSendMock).toHaveBeenCalled();
+
+      messageResolve!();
+      taskResolve!();
+      await Bun.sleep(10);
+    });
+
+    it('closeStdin targets correct lane subdirectory', async () => {
+      let messageResolve: () => void;
+      let taskResolve: () => void;
+
+      const messageCloseMock = mock((_folder: string, _subdir: string) => {});
+      const taskCloseMock = mock((_folder: string, _subdir: string) => {});
+
+      const messageBackend = {
+        sendMessage: mock(() => true),
+        closeStdin: messageCloseMock,
+        runAgent: mock(async () => ({
+          status: 'success' as const,
+          result: null,
+        })),
+      };
+      const taskBackend = {
+        sendMessage: mock(() => true),
+        closeStdin: taskCloseMock,
+        runAgent: mock(async () => ({
+          status: 'success' as const,
+          result: null,
+        })),
+      };
+
+      const processMessages = mock(async () => {
+        await new Promise<void>((resolve) => {
+          messageResolve = resolve;
+        });
+        return true;
+      });
+      queue.setProcessMessagesFn(processMessages);
+
+      // Start both lanes
+      queue.enqueueMessageCheck('group1@g.us');
+      await Bun.sleep(10);
+      queue.registerProcess(
+        'group1@g.us',
+        {} as any,
+        'msg-ctr',
+        'group1-folder',
+        messageBackend as any,
+        'message',
+      );
+
+      queue.enqueueTask(
+        'group1@g.us',
+        'task-1',
+        () =>
+          new Promise<void>((resolve) => {
+            taskResolve = resolve;
+          }),
+        'Test task',
+      );
+      await Bun.sleep(10);
+      queue.registerProcess(
+        'group1@g.us',
+        {} as any,
+        'task-ctr',
+        'group1-folder',
+        taskBackend as any,
+        'task',
+      );
+
+      // Close message lane → should use 'input'
+      queue.closeStdin('group1@g.us', 'message');
+      expect(messageCloseMock).toHaveBeenCalledWith('group1-folder', 'input');
+
+      // Close task lane → should use 'input-task'
+      queue.closeStdin('group1@g.us', 'task');
+      expect(taskCloseMock).toHaveBeenCalledWith('group1-folder', 'input-task');
+
+      messageResolve!();
+      taskResolve!();
+      await Bun.sleep(10);
+    });
+  });
+
+  it('normalizes dispatch JID to channel JID for IPC routing', async () => {
+    const queue = new GroupQueue();
+    queue.setProcessMessagesFn(
+      mock(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        return true;
+      }),
+    );
+
+    const writes: Array<{
+      groupFolder: string;
+      text: string;
+      chatJid?: string;
+    }> = [];
+    const backend = {
+      name: 'test',
+      runAgent: async () => ({ status: 'success', result: 'ok' as const }),
+      sendMessage: (
+        groupFolder: string,
+        text: string,
+        opts?: { chatJid?: string },
+      ) => {
+        writes.push({ groupFolder, text, chatJid: opts?.chatJid });
+        return true;
+      },
+      closeStdin: () => {},
+      writeIpcData: () => {},
+      readFile: async () => null,
+      writeFile: async () => {},
+      initialize: async () => {},
+      shutdown: async () => {},
+    };
+
+    const dispatchJid = 'dc:123::agent::ocpeyton-discord';
+    queue.enqueueMessageCheck(dispatchJid);
+    queue.registerProcess(
+      dispatchJid,
+      { killed: false } as any,
+      'container-1',
+      'ocpeyton-discord',
+      backend as any,
+      'message',
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const sent = await queue.sendMessage(dispatchJid, 'hello');
+    expect(sent).toBe(true);
+    expect(writes.length).toBe(1);
+    expect(writes[0].chatJid).toBe('dc:123');
+  });
+
   // --- Task deduplication ---
 
   it('prevents double-queuing of the same task', async () => {
@@ -364,15 +757,34 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(mock(async () => true));
 
     // Start a task to occupy the lane
-    queue.enqueueTask('group1@g.us', 'task-blocker', () =>
-      new Promise<void>((resolve) => { taskResolve = resolve; }),
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-blocker',
+      () =>
+        new Promise<void>((resolve) => {
+          taskResolve = resolve;
+        }),
       'Blocker',
     );
     await Bun.sleep(10);
 
     // Try to enqueue the same task twice while lane is occupied
-    queue.enqueueTask('group1@g.us', 'task-dup', async () => { taskRunCount++; }, 'Dup');
-    queue.enqueueTask('group1@g.us', 'task-dup', async () => { taskRunCount++; }, 'Dup');
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-dup',
+      async () => {
+        taskRunCount++;
+      },
+      'Dup',
+    );
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-dup',
+      async () => {
+        taskRunCount++;
+      },
+      'Dup',
+    );
 
     // Release the blocker
     taskResolve!();

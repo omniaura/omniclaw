@@ -1,16 +1,17 @@
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'crypto';
 
 import {
   ASSISTANT_NAME,
-  B2_ACCESS_KEY_ID,
-  B2_BUCKET,
-  B2_ENDPOINT,
-  B2_REGION,
-  B2_SECRET_ACCESS_KEY,
   buildTriggerPattern,
   DATA_DIR,
-  DISCORD_BOT_TOKEN,
+  DISPATCH_RUNTIME_SEP,
+  DISCORD_BOTS,
+  DISCORD_DEFAULT_BOT_ID,
+  GITHUB_WEBHOOK_PATH,
+  GITHUB_WEBHOOK_PORT,
+  GITHUB_WEBHOOK_SECRET,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
@@ -33,12 +34,14 @@ import {
 } from './backends/index.js';
 import type { ChannelInfo, ContainerOutput } from './backends/types.js';
 import {
+  mapTasksForSnapshot,
   writeGroupsSnapshot,
   writeTasksSnapshot,
-} from './container-runner.js';
+} from './ipc-snapshots.js';
 import {
   expireStaleSessions,
   getAllAgents,
+  getAllChannelSubscriptions,
   getAllChannelRoutes,
   getAllChats,
   getAllRegisteredGroups,
@@ -50,6 +53,7 @@ import {
   getRouterState,
   initDatabase,
   setAgent,
+  setChannelSubscription,
   setChannelRoute,
   setRegisteredGroup,
   setRouterState,
@@ -57,23 +61,37 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
-import { getCloudAgentIds } from './agents.js';
-import { resolveAgentForChannel, buildAgentToChannelsMap } from './channel-routes.js';
+import { buildAgentToChannelsMapFromSubscriptions } from './channel-routes.js';
 import { GroupQueue } from './group-queue.js';
 import { consumeShareRequest, startIpcWatcher } from './ipc.js';
-import { OmniClawS3 } from './s3/client.js';
-import { startS3IpcPoller } from './s3/ipc-poller.js';
-import { findChannel, formatMessages, formatOutbound, getAgentName } from './router.js';
-import { reconcileHeartbeats, startSchedulerLoop } from './task-scheduler.js';
+import {
+  findChannel,
+  formatMessages,
+  formatOutbound,
+  getAgentName,
+} from './router.js';
+import { startSchedulerLoop } from './task-scheduler.js';
 import { createThreadStreamer } from './thread-streaming.js';
-import { Agent, BackendType, Channel, ChannelRoute, NewMessage, RegisteredGroup, registeredGroupToAgent, registeredGroupToRoute } from './types.js';
+import {
+  Agent,
+  AgentRuntime,
+  BackendType,
+  Channel,
+  ChannelRoute,
+  ChannelSubscription,
+  NewMessage,
+  RegisteredGroup,
+  registeredGroupToAgent,
+  registeredGroupToRoute,
+} from './types.js';
 import { findMainGroupJid } from './group-helpers.js';
+import { getGitHubContextForAgent } from './github.js';
+import { startGitHubWebhookServer } from './github-webhooks.js';
+import type { GitHubWebhookNotification } from './github-webhooks.js';
 import { logger } from './logger.js';
 import { createResumePositionStore } from './resume-position-store.js';
+import { assertPathWithin } from './path-security.js';
 import { Effect } from 'effect';
-
-// Re-export for backwards compatibility during refactor
-export { escapeXml, formatMessages } from './router.js';
 
 // Global error handlers to prevent crashes from unhandled rejections/exceptions
 // See: https://github.com/omniaura/omniclaw/issues/221
@@ -122,9 +140,18 @@ const resumePositionStore = createResumePositionStore({
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let agents: Record<string, Agent> = {};
 let channelRoutes: Record<string, ChannelRoute> = {};
+let channelSubscriptions: Record<string, ChannelSubscription[]> = {};
+let channelSubscriptionsDirty = true;
+/** Runtime folders currently in use by the orchestrator (for IPC auth). */
+const activeRuntimeFolders = new Set<string>();
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
-let processedIds = new Set<string>(); // Deduplication for timestamp boundary messages
+
+// Attentive follow-up: when a bot is mentioned, it stays attentive for the
+// next human message in that channel even without an explicit trigger.
+// Maps chatJid → Set of agentIds that are attentive.
+// Consumed (cleared) when the follow-up message is routed.
+const attentiveAgents: Record<string, Set<string>> = {};
 
 // Track consecutive errors per group to prevent infinite error loops.
 // After MAX_CONSECUTIVE_ERRORS, the cursor advances past the failing batch
@@ -134,8 +161,268 @@ const MAX_CONSECUTIVE_ERRORS = 3;
 
 let whatsapp: WhatsAppChannel | null = null;
 let channels: Channel[] = [];
-let s3: OmniClawS3 | null = null;
 const queue = new GroupQueue();
+let githubWebhookServer: { stop: () => void } | null = null;
+
+const MAX_CHANNEL_AGENT_FANOUT = parseInt(
+  process.env.MAX_CHANNEL_AGENT_FANOUT || '3',
+  10,
+);
+const DISPATCH_KEY_SEP = '::agent::';
+
+function makeDispatchKey(channelJid: string, agentId: string): string {
+  return `${channelJid}${DISPATCH_KEY_SEP}${agentId}`;
+}
+
+function parseDispatchKey(key: string): {
+  channelJid: string;
+  agentId?: string;
+} {
+  const idx = key.indexOf(DISPATCH_KEY_SEP);
+  if (idx === -1) return { channelJid: key };
+  return {
+    channelJid: key.slice(0, idx),
+    agentId: key.slice(idx + DISPATCH_KEY_SEP.length),
+  };
+}
+
+function getRuntimeGroupFolder(
+  baseFolder: string,
+  processKeyJid: string,
+): string {
+  const { agentId } = parseDispatchKey(processKeyJid);
+  if (!agentId) return baseFolder;
+  const digest = createHash('sha1')
+    .update(processKeyJid)
+    .digest('hex')
+    .slice(0, 16);
+  const runtimeFolder = `${baseFolder}${DISPATCH_RUNTIME_SEP}${digest}`;
+  // Guard against path traversal from user-controlled baseFolder
+  const ipcBase = path.join(DATA_DIR, 'ipc');
+  assertPathWithin(
+    path.join(ipcBase, runtimeFolder),
+    ipcBase,
+    'runtime group folder',
+  );
+  return runtimeFolder;
+}
+
+function getSubscriptionsForChannelInMemory(
+  channelJid: string,
+): ChannelSubscription[] {
+  return channelSubscriptions[channelJid] || [];
+}
+
+function buildRegisteredGroupFromSubscription(
+  channelJid: string,
+  sub: ChannelSubscription,
+): RegisteredGroup | undefined {
+  const agent = agents[sub.agentId];
+  const fallback = registeredGroups[channelJid];
+  if (!agent && !fallback) return undefined;
+
+  const resolvedBotId = sub.discordBotId || fallback?.discordBotId;
+  const runtimeDefault = getDiscordRuntimeDefault(resolvedBotId);
+  return {
+    name: agent?.name || fallback?.name || sub.agentId,
+    folder: agent?.folder || fallback?.folder || sub.agentId,
+    trigger: sub.trigger,
+    added_at: sub.createdAt,
+    containerConfig: agent?.containerConfig || fallback?.containerConfig,
+    requiresTrigger: sub.requiresTrigger,
+    discordBotId: resolvedBotId,
+    discordGuildId: sub.discordGuildId || fallback?.discordGuildId,
+    serverFolder: agent?.serverFolder || fallback?.serverFolder,
+    backend: agent?.backend || fallback?.backend || 'apple-container',
+    agentRuntime:
+      agent?.agentRuntime || fallback?.agentRuntime || runtimeDefault,
+    description: agent?.description || fallback?.description,
+    autoRespondToQuestions: fallback?.autoRespondToQuestions,
+    autoRespondKeywords: fallback?.autoRespondKeywords,
+    streamIntermediates: fallback?.streamIntermediates,
+    channelFolder: sub.channelFolder || undefined,
+    categoryFolder: sub.categoryFolder || undefined,
+    agentContextFolder: agent?.agentContextFolder || undefined,
+  };
+}
+
+function getDiscordRuntimeDefault(botId?: string): AgentRuntime | undefined {
+  if (!botId) return undefined;
+  return DISCORD_BOTS.find((b) => b.id === botId)?.runtime;
+}
+
+function getDiscordBotIdForJid(jid: string): string | undefined {
+  if (!jid.startsWith('dc:')) return undefined;
+  const primarySub = (channelSubscriptions[jid] || []).find((s) => s.isPrimary);
+  if (primarySub?.discordBotId) return primarySub.discordBotId;
+  const routeBotId = channelRoutes[jid]?.discordBotId;
+  if (routeBotId) return routeBotId;
+  return DISCORD_DEFAULT_BOT_ID;
+}
+
+function findChannelForJid(
+  jid: string,
+  preferredBotId?: string,
+): Channel | undefined {
+  if (!jid.startsWith('dc:')) return findChannel(channels, jid);
+
+  const botId = preferredBotId || getDiscordBotIdForJid(jid);
+  if (botId) {
+    const preferred = channels.find(
+      (c) => c.name === 'discord' && (c as { botId?: string }).botId === botId,
+    );
+    if (preferred) return preferred;
+  }
+
+  return findChannel(channels, jid);
+}
+
+function backfillDiscordBotIds(): void {
+  if (!DISCORD_DEFAULT_BOT_ID) return;
+
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (!jid.startsWith('dc:')) continue;
+    const routeBotId = channelRoutes[jid]?.discordBotId;
+    const resolvedBotId =
+      group.discordBotId || routeBotId || DISCORD_DEFAULT_BOT_ID;
+
+    let updatedGroup = group;
+    if (!updatedGroup.discordBotId && resolvedBotId) {
+      updatedGroup = {
+        ...updatedGroup,
+        discordBotId: resolvedBotId,
+      };
+    }
+    if (!updatedGroup.agentRuntime) {
+      const runtimeDefault = getDiscordRuntimeDefault(
+        updatedGroup.discordBotId,
+      );
+      if (runtimeDefault) {
+        updatedGroup = { ...updatedGroup, agentRuntime: runtimeDefault };
+      }
+    }
+    if (updatedGroup !== group) {
+      registeredGroups[jid] = updatedGroup;
+      setRegisteredGroup(jid, updatedGroup);
+    }
+
+    const route = channelRoutes[jid];
+    if (route && !route.discordBotId) {
+      const updatedRoute: ChannelRoute = {
+        ...route,
+        discordBotId: updatedGroup.discordBotId || DISCORD_DEFAULT_BOT_ID,
+      };
+      channelRoutes[jid] = updatedRoute;
+      setChannelRoute(updatedRoute);
+    }
+
+    const subs = channelSubscriptions[jid] || [];
+    for (let i = 0; i < subs.length; i++) {
+      const sub = subs[i];
+      if (!sub.discordBotId) {
+        const updatedSub: ChannelSubscription = {
+          ...sub,
+          discordBotId: updatedGroup.discordBotId || DISCORD_DEFAULT_BOT_ID,
+        };
+        subs[i] = updatedSub;
+        setChannelSubscription(updatedSub);
+      }
+    }
+    channelSubscriptions[jid] = subs;
+  }
+}
+
+function refreshChannelSubscriptions(): void {
+  if (!channelSubscriptionsDirty) return;
+  channelSubscriptions = getAllChannelSubscriptions();
+  channelSubscriptionsDirty = false;
+}
+
+/** Mark channel subscriptions as stale so the next loop tick re-reads from DB. */
+function invalidateChannelSubscriptions(): void {
+  channelSubscriptionsDirty = true;
+  mentionPatternCache.clear();
+}
+
+function refreshRegisteredGroupsFromCanonicalState(): {
+  synthesized: number;
+  legacyOnly: number;
+} {
+  const legacyGroups = getAllRegisteredGroups();
+  const nextGroups: Record<string, RegisteredGroup> = {};
+  let synthesized = 0;
+  let legacyOnly = 0;
+
+  const allJids = new Set<string>([
+    ...Object.keys(channelRoutes),
+    ...Object.keys(channelSubscriptions),
+  ]);
+
+  for (const jid of allJids) {
+    const subs = channelSubscriptions[jid] || [];
+    const preferredSub = subs.find((s) => s.isPrimary) || subs[0];
+    const route = channelRoutes[jid];
+    const legacy = legacyGroups[jid];
+    const agentId = preferredSub?.agentId || route?.agentId;
+    const agent = agentId ? agents[agentId] : undefined;
+
+    if (!agent && !legacy) continue;
+
+    const discordBotId =
+      preferredSub?.discordBotId || route?.discordBotId || legacy?.discordBotId;
+    const runtimeDefault = getDiscordRuntimeDefault(discordBotId);
+    nextGroups[jid] = {
+      name: agent?.name || legacy?.name || agentId || jid,
+      folder: agent?.folder || legacy?.folder || agentId || jid,
+      trigger:
+        preferredSub?.trigger ||
+        route?.trigger ||
+        legacy?.trigger ||
+        `@${ASSISTANT_NAME}`,
+      added_at:
+        preferredSub?.createdAt ||
+        route?.createdAt ||
+        legacy?.added_at ||
+        new Date().toISOString(),
+      containerConfig: agent?.containerConfig || legacy?.containerConfig,
+      requiresTrigger:
+        preferredSub?.requiresTrigger ??
+        route?.requiresTrigger ??
+        legacy?.requiresTrigger ??
+        true,
+      discordBotId,
+      discordGuildId:
+        preferredSub?.discordGuildId ||
+        route?.discordGuildId ||
+        legacy?.discordGuildId,
+      serverFolder: agent?.serverFolder || legacy?.serverFolder,
+      backend: (agent?.backend ||
+        legacy?.backend ||
+        'apple-container') as BackendType,
+      agentRuntime:
+        agent?.agentRuntime || legacy?.agentRuntime || runtimeDefault,
+      description: agent?.description || legacy?.description,
+      autoRespondToQuestions: legacy?.autoRespondToQuestions,
+      autoRespondKeywords: legacy?.autoRespondKeywords,
+      streamIntermediates: legacy?.streamIntermediates,
+      channelFolder: preferredSub?.channelFolder,
+      categoryFolder: preferredSub?.categoryFolder,
+      agentContextFolder: agent?.agentContextFolder,
+    };
+    synthesized++;
+  }
+
+  // Keep legacy-only rows as a compatibility fallback while non-Discord channels
+  // are still wired around registeredGroups.
+  for (const [jid, group] of Object.entries(legacyGroups)) {
+    if (nextGroups[jid]) continue;
+    nextGroups[jid] = group;
+    legacyOnly++;
+  }
+
+  registeredGroups = nextGroups;
+  return { synthesized, legacyOnly };
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -147,51 +434,29 @@ function loadState(): void {
     lastAgentTimestamp = {};
   }
   sessions = getAllSessions();
-  registeredGroups = getAllRegisteredGroups();
 
   // Load agent-channel decoupling state (auto-migrated from registered_groups)
   agents = getAllAgents();
   channelRoutes = getAllChannelRoutes();
-
-  // Backfill registeredGroups from channel_routes + agents.
-  // The registered_groups table has UNIQUE(folder), so it can only hold one JID
-  // per agent. But agents can have multiple channel routes (e.g. DM + group).
-  // Merge any missing JIDs so message routing works for all channels.
-  let backfilled = 0;
-  for (const [jid, route] of Object.entries(channelRoutes)) {
-    if (!registeredGroups[jid]) {
-      const agent = agents[route.agentId];
-      if (agent) {
-        registeredGroups[jid] = {
-          name: agent.name,
-          folder: agent.folder,
-          trigger: route.trigger,
-          added_at: route.createdAt,
-          containerConfig: agent.containerConfig,
-          requiresTrigger: route.requiresTrigger,
-          backend: agent.backend as BackendType,
-          description: agent.description,
-          discordGuildId: route.discordGuildId,
-          serverFolder: agent.serverFolder,
-          heartbeat: agent.heartbeat,
-        };
-        backfilled++;
-      }
-    }
-  }
+  refreshChannelSubscriptions();
+  const { synthesized, legacyOnly } =
+    refreshRegisteredGroupsFromCanonicalState();
 
   // Register JID→folder mappings in the queue so multiple JIDs
   // for the same agent share one container (GroupState keyed by folder).
   for (const [jid, group] of Object.entries(registeredGroups)) {
     queue.registerJidMapping(jid, group.folder);
   }
+  backfillDiscordBotIds();
 
   logger.info(
     {
       groupCount: Object.keys(registeredGroups).length,
       agentCount: Object.keys(agents).length,
       routeCount: Object.keys(channelRoutes).length,
-      backfilled,
+      subscriptionChannelCount: Object.keys(channelSubscriptions).length,
+      synthesizedGroups: synthesized,
+      legacyOnlyGroups: legacyOnly,
     },
     'State loaded',
   );
@@ -199,10 +464,7 @@ function loadState(): void {
 
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
-  setRouterState(
-    'last_agent_timestamp',
-    JSON.stringify(lastAgentTimestamp),
-  );
+  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -213,8 +475,18 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     );
   }
 
-  registeredGroups[jid] = group;
-  setRegisteredGroup(jid, group);
+  const normalizedGroup: RegisteredGroup = { ...group };
+  if (jid.startsWith('dc:') && !normalizedGroup.discordBotId) {
+    normalizedGroup.discordBotId = DISCORD_DEFAULT_BOT_ID;
+  }
+  if (!normalizedGroup.agentRuntime && normalizedGroup.discordBotId) {
+    normalizedGroup.agentRuntime = getDiscordRuntimeDefault(
+      normalizedGroup.discordBotId,
+    );
+  }
+
+  registeredGroups[jid] = normalizedGroup;
+  setRegisteredGroup(jid, normalizedGroup);
 
   // Register JID→folder mapping for multi-channel container sharing
   queue.registerJidMapping(jid, group.folder);
@@ -265,21 +537,44 @@ Then read the code directly — don't ask the admin to copy files for you.
   }
 
   // Create server-level directory for Discord groups with a serverFolder
-  if (group.serverFolder) {
-    ensureServerDirectory(group.serverFolder);
+  if (normalizedGroup.serverFolder) {
+    ensureServerDirectory(normalizedGroup.serverFolder);
   }
 
   // Also create Agent and ChannelRoute entries
-  const agent = registeredGroupToAgent(jid, group);
+  const agent = registeredGroupToAgent(jid, normalizedGroup);
   agents[agent.id] = agent;
   setAgent(agent);
 
-  const route = registeredGroupToRoute(jid, group);
+  const route = registeredGroupToRoute(jid, normalizedGroup);
   channelRoutes[jid] = route;
   setChannelRoute(route);
 
+  const sub: ChannelSubscription = {
+    channelJid: jid,
+    agentId: agent.id,
+    trigger: route.trigger,
+    requiresTrigger: route.requiresTrigger,
+    priority: 100,
+    isPrimary: true,
+    discordBotId: route.discordBotId,
+    discordGuildId: route.discordGuildId,
+    createdAt: route.createdAt,
+  };
+  const existing = channelSubscriptions[jid] || [];
+  const filtered = existing.filter((s) => s.agentId !== agent.id);
+  filtered.push(sub);
+  channelSubscriptions[jid] = filtered;
+  setChannelSubscription(sub);
   logger.info(
-    { jid, name: group.name, folder: group.folder, serverFolder: group.serverFolder },
+    {
+      jid,
+      name: normalizedGroup.name,
+      folder: normalizedGroup.folder,
+      serverFolder: normalizedGroup.serverFolder,
+      discordBotId: normalizedGroup.discordBotId,
+      agentRuntime: normalizedGroup.agentRuntime,
+    },
     'Group registered',
   );
 }
@@ -295,7 +590,9 @@ function slugifyGuildName(guildName: string): string {
 
 /** Ensure the server-level shared directory exists and has a CLAUDE.md */
 function ensureServerDirectory(serverFolder: string): void {
-  const serverDir = path.join(DATA_DIR, '..', 'groups', serverFolder);
+  const groupsBase = path.join(DATA_DIR, '..', 'groups');
+  const serverDir = path.join(groupsBase, serverFolder);
+  assertPathWithin(serverDir, groupsBase, 'ensureServerDirectory');
   fs.mkdirSync(serverDir, { recursive: true });
 
   const claudeMdPath = path.join(serverDir, 'CLAUDE.md');
@@ -344,7 +641,10 @@ async function backfillDiscordGuildIds(discord: DiscordChannel): Promise<void> {
     }
 
     if (!guildId) {
-      logger.warn({ jid, name: group.name }, 'Could not resolve Discord guild ID');
+      logger.warn(
+        { jid, name: group.name },
+        'Could not resolve Discord guild ID',
+      );
       continue;
     }
 
@@ -357,7 +657,11 @@ async function backfillDiscordGuildIds(discord: DiscordChannel): Promise<void> {
     }
 
     // Update the group
-    const updated: RegisteredGroup = { ...group, discordGuildId: guildId, serverFolder };
+    const updated: RegisteredGroup = {
+      ...group,
+      discordGuildId: guildId,
+      serverFolder,
+    };
     registeredGroups[jid] = updated;
     setRegisteredGroup(jid, updated);
 
@@ -373,9 +677,12 @@ async function backfillDiscordGuildIds(discord: DiscordChannel): Promise<void> {
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
  */
-export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
+export function getAvailableGroups(): import('./ipc-snapshots.js').AvailableGroup[] {
   const chats = getAllChats();
-  const registeredJids = new Set(Object.keys(registeredGroups));
+  const registeredJids = new Set([
+    ...Object.keys(registeredGroups),
+    ...Object.keys(channelSubscriptions),
+  ]);
 
   return chats
     .filter((c) => {
@@ -397,7 +704,9 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
 }
 
 /** @internal - exported for testing */
-export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): void {
+export function _setRegisteredGroups(
+  groups: Record<string, RegisteredGroup>,
+): void {
   registeredGroups = groups;
 }
 
@@ -405,17 +714,27 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  */
-async function processGroupMessages(chatJid: string): Promise<boolean> {
-  const group = registeredGroups[chatJid];
+async function processGroupMessages(dispatchJid: string): Promise<boolean> {
+  const { channelJid: chatJid, agentId } = parseDispatchKey(dispatchJid);
+  const sub = agentId
+    ? getSubscriptionsForChannelInMemory(chatJid).find(
+        (s) => s.agentId === agentId,
+      )
+    : undefined;
+  const group = sub
+    ? buildRegisteredGroupFromSubscription(chatJid, sub)
+    : registeredGroups[chatJid];
   if (!group) return true;
 
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
-  const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(
-    chatJid,
-    sinceTimestamp,
-  ).filter((m) => m.content.trim().length > 0);
+  const sinceTimestamp = lastAgentTimestamp[dispatchJid] || '';
+  const missedMessages = getMessagesSince(chatJid, sinceTimestamp).filter(
+    (m) =>
+      m.content.trim().length > 0 &&
+      // Skip IPC notify messages tagged as sent by this agent (self-echo prevention)
+      (!agentId || m.sender !== `agent:${agentId}`),
+  );
 
   if (missedMessages.length === 0) return true;
 
@@ -423,7 +742,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Use buildTriggerPattern(group.trigger) so @PeytonOmni / @OmarOmni groups
   // aren't silently dropped by the global @Omni TRIGGER_PATTERN (mirrors the
   // same fix already applied in startMessageLoop by PR #138).
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  // For dispatch-selected agent runs, trigger routing already happened in
+  // selectSubscriptionsForMessage(). Don't re-apply trigger gating here.
+  if (!agentId && !isMainGroup && group.requiresTrigger !== false) {
     const groupTriggerPattern = buildTriggerPattern(group.trigger);
     const hasTrigger = missedMessages.some((m) =>
       groupTriggerPattern.test(m.content.trim()),
@@ -431,10 +752,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
+  const log = logger.child({
+    op: 'agentRun',
+    group: group.name,
+    groupName: group.folder,
+    chatJid,
+    messageCount: missedMessages.length,
+  });
+
   let prompt = formatMessages(missedMessages);
 
   // Inject context about active background tasks
-  const activeTask = queue.getActiveTaskInfo(chatJid);
+  const activeTask = queue.getActiveTaskInfo(dispatchJid);
   if (activeTask) {
     const elapsed = Math.round((Date.now() - activeTask.startedAt) / 60000);
     prompt = `[Background Task Running: "${activeTask.promptPreview}" — started ${elapsed} min ago]\n\n${prompt}`;
@@ -442,15 +771,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
+  const previousCursor = lastAgentTimestamp[dispatchJid] || '';
+  lastAgentTimestamp[dispatchJid] =
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
 
-  logger.info(
-    { group: group.name, messageCount: missedMessages.length },
-    'Processing messages',
-  );
+  log.info('Processing messages');
 
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -458,31 +784,41 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      logger.debug({ group: group.name }, 'Idle timeout, closing container stdin');
-      queue.closeStdin(chatJid, 'message');
+      log.debug('Idle timeout, closing container stdin');
+      queue.closeStdin(dispatchJid, 'message');
     }, IDLE_TIMEOUT);
   };
 
-  const channel = findChannel(channels, chatJid);
+  const channel = findChannelForJid(chatJid, group.discordBotId);
 
-  // Keep the typing indicator alive for the entire agent run.
-  // Discord's typing indicator expires after ~10 seconds, so we refresh
-  // every 8 seconds until the agent finishes. Other channels (Telegram,
-  // WhatsApp) send a one-shot update and ignore subsequent calls gracefully.
+  // Keep the typing indicator alive for the agent run. Discord's indicator
+  // expires after ~10 seconds; 15s refresh is sufficient with some overlap.
+  // Cap at 20 refreshes (~5 min) to avoid excessive API calls on long tasks
+  // and reduce risk of triggering Discord's abuse detection.
+  const TYPING_REFRESH_MS = 15_000;
+  const TYPING_MAX_REFRESHES = 20;
   let typingInterval: ReturnType<typeof setInterval> | null = null;
   if (channel?.setTyping) {
     try {
       await channel.setTyping(chatJid, true);
+      let typingCount = 0;
       typingInterval = setInterval(() => {
-        channel.setTyping!(chatJid, true).catch(() => {
-          // Non-fatal — typing indicator is best-effort
+        typingCount++;
+        if (typingCount >= TYPING_MAX_REFRESHES) {
+          if (typingInterval) clearInterval(typingInterval);
+          typingInterval = null;
+          log.debug({ chatJid }, 'Typing indicator capped after max refreshes');
+          return;
+        }
+        channel.setTyping!(chatJid, true).catch((err) => {
+          log.debug(
+            { err, chatJid, dispatchJid },
+            'Typing indicator refresh failed (non-fatal)',
+          );
         });
-      }, 8_000);
+      }, TYPING_REFRESH_MS);
     } catch (err) {
-      logger.debug(
-        { group: group.name, error: err },
-        'Typing indicator failed to start',
-      );
+      log.debug({ error: err }, 'Typing indicator failed to start');
     }
   }
 
@@ -501,21 +837,32 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Redact sensitive data from error messages before logging
   function redactSensitiveData(text: string): string {
-    return text
-      // Redact bearer tokens
-      .replace(/Bearer\s+[A-Za-z0-9_\-\.]{20,}/gi, 'Bearer [REDACTED]')
-      // Redact API keys (common patterns: sk-..., key_..., etc.)
-      .replace(/\b(?:sk|key|api)[_-][A-Za-z0-9_\-]{16,}/gi, '[API_KEY_REDACTED]')
-      // Redact long hex strings (likely tokens/secrets)
-      .replace(/\b[a-f0-9]{32,}\b/gi, '[HEX_TOKEN_REDACTED]')
-      // Redact JWT tokens
-      .replace(/eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/g, '[JWT_REDACTED]')
-      // Redact common password/secret field values in JSON
-      .replace(/"(?:password|secret|token|apikey)":\s*"[^"]+"/gi, '"$1":"[REDACTED]"');
+    return (
+      text
+        // Redact bearer tokens
+        .replace(/Bearer\s+[A-Za-z0-9_\-\.]{20,}/gi, 'Bearer [REDACTED]')
+        // Redact API keys (common patterns: sk-..., key_..., etc.)
+        .replace(
+          /\b(?:sk|key|api)[_-][A-Za-z0-9_\-]{16,}/gi,
+          '[API_KEY_REDACTED]',
+        )
+        // Redact long hex strings (likely tokens/secrets)
+        .replace(/\b[a-f0-9]{32,}\b/gi, '[HEX_TOKEN_REDACTED]')
+        // Redact JWT tokens
+        .replace(
+          /eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/g,
+          '[JWT_REDACTED]',
+        )
+        // Redact common password/secret field values in JSON
+        .replace(
+          /"(?:password|secret|token|apikey)":\s*"[^"]+"/gi,
+          '"$1":"[REDACTED]"',
+        )
+    );
   }
 
   // Thread streaming via shared helper
-  // Synthetic IDs (synth-*, react-*, notify-*, s3-*) aren't real channel message IDs
+  // Synthetic IDs (synth-*, react-*, notify-*) aren't real channel message IDs
   // and will cause Discord/Telegram API failures if passed as reply references.
   // Find the LAST message that triggered the agent (most recent @mention or reply-to-bot).
   // Messages are ordered oldest-first, so findLast() gives us the newest trigger.
@@ -526,23 +873,43 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // 2. content contains the trigger pattern anywhere — catches explicit @mentions
   //    and DM/auto-respond messages where "@Omni" is prepended to content.
   const agentName = (group.trigger ?? `@${ASSISTANT_NAME}`).replace(/^@/, '');
-  const groupTriggerRe = new RegExp(`@${agentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+  const groupTriggerRe = new RegExp(
+    `@${agentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+    'i',
+  );
   // Bot names to match in the mentions array: the per-group agent name AND the global
   // assistant name. Replies-to-bot store the bot's display name (ASSISTANT_NAME) in mentions.
-  const botNames = new Set([agentName.toLowerCase(), ASSISTANT_NAME.toLowerCase()]);
-  const isTriggerMessage = (m: { content: string; mentions?: Array<{ name: string }> }): boolean =>
+  const botNames = new Set([
+    agentName.toLowerCase(),
+    ASSISTANT_NAME.toLowerCase(),
+  ]);
+  const isTriggerMessage = (m: {
+    content: string;
+    mentions?: Array<{ name: string }>;
+  }): boolean =>
     groupTriggerRe.test(m.content) ||
     TRIGGER_PATTERN.test(m.content) ||
-    (m.mentions?.some((mention) => botNames.has(mention.name.toLowerCase())) ?? false);
+    (m.mentions?.some((mention) => botNames.has(mention.name.toLowerCase())) ??
+      false);
   const triggeringMessage = missedMessages.findLast(isTriggerMessage);
   // Always reply to the last message in the batch, not the triggering message.
   // triggeringMessage is used to decide whether to process; the reply should
   // thread to what the user most recently said.
-  const lastMessageId = missedMessages[missedMessages.length - 1]?.id || triggeringMessage?.id || null;
-  const triggeringMessageId = lastMessageId && /^(synth|react|notify|s3)-/.test(lastMessageId) ? null : lastMessageId;
+  const lastMessageId =
+    missedMessages[missedMessages.length - 1]?.id ||
+    triggeringMessage?.id ||
+    null;
+  const triggeringMessageId =
+    lastMessageId && /^(synth|react|notify)-/.test(lastMessageId)
+      ? null
+      : lastMessageId;
+  // Use reply threading only for the first outbound message in this run.
+  // Subsequent outputs should not keep replying to the original trigger.
+  let replyAnchorMessageId: string | null = triggeringMessageId;
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
-  const threadName = lastContent
-    .replace(TRIGGER_PATTERN, '').trim().slice(0, 80) || 'Agent working...';
+  const threadName =
+    lastContent.replace(TRIGGER_PATTERN, '').trim().slice(0, 80) ||
+    'Agent working...';
 
   const streamer = createThreadStreamer(
     {
@@ -559,63 +926,114 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   let output: 'success' | 'error';
   try {
-    output = await runAgent(group, prompt, chatJid, async (result) => {
-      // Wrap in try/catch to prevent unhandled rejections
-      // Adopted from [Upstream PR #243] - Critical stability fix
-      try {
-        if (result.intermediate && result.result) {
-          const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-          await streamer.handleIntermediate(raw);
-          return;
-        }
+    output = await runAgent(
+      group,
+      prompt,
+      chatJid,
+      dispatchJid,
+      async (result) => {
+        // Wrap in try/catch to prevent unhandled rejections
+        // Adopted from [Upstream PR #243] - Critical stability fix
+        try {
+          if (result.intermediate && result.result) {
+            const raw =
+              typeof result.result === 'string'
+                ? result.result
+                : JSON.stringify(result.result);
+            await streamer.handleIntermediate(raw);
+            return;
+          }
 
-        // Final output — send to main channel as before
-        if (result.result) {
-          const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-          // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-          const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-          logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
+          // Final output — send to main channel as before
+          if (result.result) {
+            const raw =
+              typeof result.result === 'string'
+                ? result.result
+                : JSON.stringify(result.result);
+            // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+            const text = raw
+              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+              .trim();
+            log.info(`Agent output: ${raw.slice(0, 200)}`);
 
-          // Suppress system/auth errors — log them but don't send to channels
-          // This prevents infinite loops when auth fails (error echoed back → triggers agent → fails again)
-          const isSystemError = systemErrorPatterns.some((p) => p.test(text));
-          if (isSystemError) {
-            const redactedText = redactSensitiveData(text.slice(0, 300));
-            logger.error({ group: group.name }, `Suppressed system error (not sent to user): ${redactedText}`);
-            hadError = true;
-            // Skip sending to channel but continue processing
-          } else if (text) {
-            // Route to the chatJid from the container output (multi-channel support).
-            // Falls back to the original launch chatJid for single-channel agents.
-            const targetJid = result.chatJid || chatJid;
-            const targetChannel = findChannel(channels, targetJid) || channel;
-            if (targetChannel) {
-              const formatted = formatOutbound(targetChannel, text, getAgentName(group));
-              if (formatted) {
-                // Don't use triggeringMessageId for cross-channel responses — it belongs to the original chat
-                const replyId = targetJid === chatJid ? triggeringMessageId : null;
-                await targetChannel.sendMessage(targetJid, formatted, replyId || undefined);
-                outputSentToUser = true;
+            // Suppress system/auth errors — log them but don't send to channels
+            // This prevents infinite loops when auth fails (error echoed back → triggers agent → fails again)
+            const isSystemError = systemErrorPatterns.some((p) => p.test(text));
+            if (isSystemError) {
+              const redactedText = redactSensitiveData(text.slice(0, 300));
+              log.error(
+                `Suppressed system error (not sent to user): ${redactedText}`,
+              );
+              hadError = true;
+              // Skip sending to channel but continue processing
+            } else if (text) {
+              // Route to the chatJid from the container output (multi-channel support).
+              // Falls back to the original launch chatJid for single-channel agents.
+              const targetJid = parseDispatchKey(
+                result.chatJid || chatJid,
+              ).channelJid;
+              const targetChannel =
+                findChannelForJid(targetJid, group.discordBotId) || channel;
+              if (targetChannel) {
+                const formatted = formatOutbound(
+                  targetChannel,
+                  text,
+                  getAgentName(group),
+                );
+                if (formatted) {
+                  // Don't use triggeringMessageId for cross-channel responses — it belongs to the original chat
+                  const replyId =
+                    targetJid === chatJid ? replyAnchorMessageId : null;
+                  await targetChannel.sendMessage(
+                    targetJid,
+                    formatted,
+                    replyId || undefined,
+                  );
+                  if (replyAnchorMessageId) replyAnchorMessageId = null;
+                  outputSentToUser = true;
+                  // Stop typing refresh — prevents the 8s interval from
+                  // re-triggering typing AFTER the response is visible.
+                  if (typingInterval) {
+                    clearInterval(typingInterval);
+                    typingInterval = null;
+                  }
+                }
               }
             }
+            // Only reset idle timer on actual results, not session-update markers (result: null)
+            resetIdleTimer();
           }
-          // Only reset idle timer on actual results, not session-update markers (result: null)
-          resetIdleTimer();
-        }
 
-        if (result.status === 'error') {
+          // [Upstream PR #354] Mark container as idle when it finishes work
+          // (status: success with null result = session-update marker = idle-waiting)
+          if (result.status === 'success') {
+            queue.notifyIdle(dispatchJid);
+            // Stop typing indicator when agent goes idle — otherwise the 8s
+            // refresh loop keeps the indicator alive until the container exits,
+            // which can be minutes later. Fixes #9.
+            if (typingInterval) {
+              clearInterval(typingInterval);
+              typingInterval = null;
+            }
+          }
+
+          if (result.status === 'error') {
+            hadError = true;
+          }
+        } catch (err) {
+          log.error({ err }, 'Error in streaming output callback');
           hadError = true;
         }
-      } catch (err) {
-        logger.error({ group: group.name, err }, 'Error in streaming output callback');
-        hadError = true;
-      }
-    });
+      },
+    );
   } finally {
     // Stop the typing keep-alive loop — must be in finally to prevent stuck
     // typing indicators when runAgent throws or the process is interrupted.
     if (typingInterval) clearInterval(typingInterval);
-    if (channel?.setTyping) await channel.setTyping(chatJid, false).catch(() => {});
+    if (channel?.setTyping)
+      await channel.setTyping(chatJid, false).catch((err) => {
+        logger.debug({ err, chatJid }, 'Failed to clear typing indicator');
+      });
     if (idleTimer) clearTimeout(idleTimer);
   }
 
@@ -625,49 +1043,103 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
-      consecutiveErrors[chatJid] = 0;
-      logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
+      consecutiveErrors[dispatchJid] = 0;
+      log.warn(
+        'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
+      );
       return true;
     }
 
-    const errorCount = (consecutiveErrors[chatJid] || 0) + 1;
-    consecutiveErrors[chatJid] = errorCount;
+    const errorCount = (consecutiveErrors[dispatchJid] || 0) + 1;
+    consecutiveErrors[dispatchJid] = errorCount;
 
     if (errorCount >= MAX_CONSECUTIVE_ERRORS) {
       // Too many consecutive failures — advance cursor to prevent a permanently
       // stuck queue where every future message re-triggers the same failing batch.
-      logger.error(
-        { group: group.name, errorCount },
+      log.error(
+        { errorCount },
         'Max consecutive errors reached, advancing cursor past failing messages',
       );
-      consecutiveErrors[chatJid] = 0;
+
+      // Notify the user so the message isn't silently dropped (fixes #94)
+      if (channel) {
+        const errorMsg =
+          "Sorry, I hit a server error a few times and couldn't process your message. Please try again.";
+        const formatted = formatOutbound(
+          channel,
+          errorMsg,
+          getAgentName(group),
+        );
+        if (formatted) {
+          channel
+            .sendMessage(chatJid, formatted, triggeringMessageId || undefined)
+            .catch((err) => {
+              log.warn({ err }, 'Failed to send error notification to user');
+            });
+        }
+      }
+
+      consecutiveErrors[dispatchJid] = 0;
       return false;
     }
 
     // Roll back cursor so retries can re-process these messages
-    lastAgentTimestamp[chatJid] = previousCursor;
+    lastAgentTimestamp[dispatchJid] = previousCursor;
     saveState();
-    logger.warn({ group: group.name, errorCount }, 'Agent error, rolled back message cursor for retry');
+    log.warn(
+      { errorCount },
+      'Agent error, rolled back message cursor for retry',
+    );
     return false;
   }
 
-  consecutiveErrors[chatJid] = 0;
+  consecutiveErrors[dispatchJid] = 0;
   return true;
 }
 
 /**
- * Build the channels array for multi-channel agents.
+ * Build the channels array for a multi-channel agent ID.
  * Returns undefined if the agent only has one channel (no routing needed).
  */
-function buildChannelsForAgent(agentFolder: string): ChannelInfo[] | undefined {
-  const agentToChannels = buildAgentToChannelsMap(channelRoutes);
-  const jids = agentToChannels.get(agentFolder);
-  if (!jids || jids.length <= 1) return undefined;
+/**
+ * Resolve the RegisteredGroup for a scheduled task.
+ * Prefers the channel subscription for (chatJid, agentFolder) so that
+ * channelFolder/categoryFolder/agentContextFolder reflect the target channel's
+ * 4-layer hierarchy rather than the agent's own primary channel.
+ */
+function getGroupForTask(
+  chatJid: string,
+  agentFolder: string,
+): RegisteredGroup | undefined {
+  const subs = channelSubscriptions[chatJid] || [];
+  const matchingSub = subs.find((s) => {
+    const agent = agents[s.agentId];
+    return s.agentId === agentFolder || agent?.folder === agentFolder;
+  });
+  if (matchingSub) {
+    return buildRegisteredGroupFromSubscription(chatJid, matchingSub);
+  }
+  // Fallback: direct lookup for agents without channel subscriptions
+  return Object.values(registeredGroups).find((g) => g.folder === agentFolder);
+}
+
+function buildChannelsForAgent(agentId: string): ChannelInfo[] | undefined {
+  const agentToChannels =
+    buildAgentToChannelsMapFromSubscriptions(channelSubscriptions);
+  const jids = agentToChannels.get(agentId);
+  if (!jids || jids.length === 0) return undefined;
+
+  // Build a JID→chatName map from the chats table (has real channel names)
+  const chatNames = new Map(getAllChats().map((c) => [c.jid, c.name]));
 
   return jids.map((jid, i) => {
     const group = registeredGroups[jid];
-    // Generate a human-readable name: use chat metadata or fall back to JID
-    const name = group?.name || jid;
+    // Prefer chat metadata name (e.g. "MarketReaders") over registered group name
+    // (which is the agent name, e.g. "LocalPeyton")
+    const channelFolderName = group?.channelFolder
+      ? group.channelFolder.split('/').pop()
+      : undefined;
+    const name = chatNames.get(jid) || channelFolderName || group?.name || jid;
     return { id: String(i + 1), jid, name };
   });
 }
@@ -676,9 +1148,12 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  processKeyJid: string = chatJid,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
+  const runtimeGroupFolder = getRuntimeGroupFolder(group.folder, processKeyJid);
+  activeRuntimeFolders.add(runtimeGroupFolder);
 
   // Expire stale sessions before each run to prevent unbounded context growth
   const expired = expireStaleSessions(SESSION_MAX_AGE);
@@ -686,45 +1161,56 @@ async function runAgent(
     for (const folder of expired) {
       delete sessions[folder];
     }
-    logger.info({ expired, trigger: group.folder }, 'Expired stale sessions before agent run');
+    logger.info(
+      { expired, trigger: group.folder },
+      'Expired stale sessions before agent run',
+    );
   }
 
-  const sessionId = sessions[group.folder];
+  const sessionId = sessions[runtimeGroupFolder];
 
   // Update tasks snapshot for container to read (filtered by group)
-  const tasks = getAllTasks();
   writeTasksSnapshot(
-    group.folder,
+    runtimeGroupFolder,
     isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
+    mapTasksForSnapshot(getAllTasks()),
+    group.folder,
   );
 
-  // Update available groups snapshot (main group only can see all groups)
+  // Resolve agent ID early so we can compute subscribed channels for snapshots
+  const { agentId: dispatchAgentId } = parseDispatchKey(processKeyJid);
+  const agentId =
+    dispatchAgentId ??
+    (channelSubscriptions[chatJid] || [])[0]?.agentId ??
+    Object.values(agents).find((a) => a.folder === group.folder)?.id ??
+    group.folder;
+
+  // Update available groups snapshot
+  // Non-main agents can see their subscribed channels; main sees all
   const availableGroups = getAvailableGroups();
+  const agentToChannels =
+    buildAgentToChannelsMapFromSubscriptions(channelSubscriptions);
+  const subscribedJids = new Set(agentToChannels.get(agentId) || []);
   writeGroupsSnapshot(
-    group.folder,
+    runtimeGroupFolder,
     isMain,
     availableGroups,
-    new Set(Object.keys(registeredGroups)),
+    new Set([
+      ...Object.keys(registeredGroups),
+      ...Object.keys(channelSubscriptions),
+    ]),
+    subscribedJids,
   );
 
   // Update agent registry for all groups
-  buildAgentRegistry();
+  buildAgentRegistry([runtimeGroupFolder]);
 
   // Wrap onOutput to track session ID and resumeAt from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          sessions[runtimeGroupFolder] = output.newSessionId;
+          setSession(runtimeGroupFolder, output.newSessionId);
         }
         if (output.resumeAt) {
           resumePositionStore.set(group.folder, output.resumeAt);
@@ -735,7 +1221,22 @@ async function runAgent(
 
   try {
     const backend = resolveBackend(group);
-    const agentChannels = buildChannelsForAgent(group.folder);
+    // Use the dispatch key's agent ID (from processKeyJid) so that in multi-agent
+    // channels each agent gets its own channel map, not the first subscription's.
+    const agentChannels = buildChannelsForAgent(agentId);
+    const currentChannelName =
+      agentChannels?.find((ch) => ch.jid === chatJid)?.name ||
+      availableGroups.find((g) => g.jid === chatJid)?.name;
+
+    // Fetch GitHub context for this agent (cached, non-blocking on failure)
+    let githubContext: string | undefined;
+    try {
+      githubContext =
+        (await getGitHubContextForAgent(agentId)) ?? undefined;
+    } catch (err) {
+      logger.warn({ err, agentId }, 'Failed to fetch GitHub context');
+    }
+
     const output = await backend.runAgent(
       group,
       {
@@ -743,19 +1244,37 @@ async function runAgent(
         sessionId,
         resumeAt: resumePositionStore.get(group.folder),
         groupFolder: group.folder,
+        runtimeFolder: runtimeGroupFolder,
         chatJid,
         isMain,
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
+        agentRuntime: group.agentRuntime,
         channels: agentChannels,
+        currentChannelName,
+        agentName: group.name,
+        discordBotId: group.discordBotId,
+        agentTrigger: group.trigger,
+        channelFolder: group.channelFolder,
+        categoryFolder: group.categoryFolder,
+        agentContextFolder: group.agentContextFolder,
+        githubContext,
       },
-      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder, backend, 'message'),
+      (proc, containerName) =>
+        queue.registerProcess(
+          processKeyJid,
+          proc,
+          containerName,
+          runtimeGroupFolder,
+          backend,
+          'message',
+        ),
       wrappedOnOutput,
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      sessions[runtimeGroupFolder] = output.newSessionId;
+      setSession(runtimeGroupFolder, output.newSessionId);
     }
     if (output.resumeAt) {
       resumePositionStore.set(group.folder, output.resumeAt);
@@ -773,7 +1292,100 @@ async function runAgent(
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
+  } finally {
+    activeRuntimeFolders.delete(runtimeGroupFolder);
   }
+}
+
+/** Pre-compiled mention patterns per subscription, invalidated when subscriptions change. */
+const mentionPatternCache = new Map<string, RegExp[]>();
+
+function getMentionPatterns(sub: ChannelSubscription): RegExp[] {
+  // Key by composite to handle same agent with different triggers/bots across channels
+  const cacheKey = `${sub.agentId}|${sub.trigger}|${sub.discordBotId ?? ''}`;
+  const cached = mentionPatternCache.get(cacheKey);
+  if (cached) return cached;
+  const agent = agents[sub.agentId];
+  const triggerHandle = sub.trigger.replace(/^@/, '');
+  const handles = [agent?.name, sub.discordBotId, triggerHandle]
+    .filter((v): v is string => Boolean(v && v.trim()))
+    .map((v) => v.trim().toLowerCase());
+  const patterns = handles.map(
+    (handle) =>
+      new RegExp(
+        `(^|\\s)@${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|\\s|$)`,
+        'i',
+      ),
+  );
+  mentionPatternCache.set(cacheKey, patterns);
+  return patterns;
+}
+
+interface SubscriptionSelection {
+  selected: ChannelSubscription[];
+  /** True when agents were selected by explicit trigger/mention, not fallback. */
+  selectedByTrigger: boolean;
+}
+
+function selectSubscriptionsForMessage(
+  chatJid: string,
+  groupMessages: NewMessage[],
+): SubscriptionSelection {
+  const subs = getSubscriptionsForChannelInMemory(chatJid);
+  if (subs.length === 0) return { selected: [], selectedByTrigger: false };
+
+  // @allagents fan-out: regex check on stored message content — no Discord API call,
+  // no GuildMembers privileged intent needed. Safe because it only reads already-stored text.
+  const hasAllAgents = groupMessages.some((m) => /@allagents/i.test(m.content));
+  const directBotMentions = subs.filter((sub) => {
+    const patterns = getMentionPatterns(sub);
+    if (patterns.length === 0) return false;
+
+    return groupMessages.some((m) => {
+      const text = m.content.toLowerCase();
+      return patterns.some((p) => p.test(text));
+    });
+  });
+  const explicitMatches = subs.filter((sub) => {
+    const triggerPattern = buildTriggerPattern(sub.trigger);
+    return groupMessages.some((m) => triggerPattern.test(m.content.trim()));
+  });
+
+  let selected: ChannelSubscription[];
+  let selectedByTrigger = false;
+  if (hasAllAgents) {
+    selected = [...subs];
+    selectedByTrigger = true;
+  } else if (directBotMentions.length > 0) {
+    selected = directBotMentions;
+    selectedByTrigger = true;
+  } else if (explicitMatches.length > 0) {
+    selected = explicitMatches;
+    selectedByTrigger = true;
+  } else {
+    const primaries = subs.filter((s) => s.isPrimary);
+    selected = primaries.length > 0 ? primaries : [subs[0]];
+    selected = selected.filter((s) => {
+      const agent = agents[s.agentId];
+      const isMain = agent?.isAdmin === true;
+      return isMain || s.requiresTrigger === false;
+    });
+  }
+
+  if (selected.length === 0) {
+    logger.debug(
+      { chatJid, subsCount: subs.length },
+      'No agents selected after trigger filter — all candidates require explicit trigger',
+    );
+  }
+
+  const sorted = selected
+    .sort(
+      (a, b) =>
+        a.priority - b.priority || a.createdAt.localeCompare(b.createdAt),
+    )
+    .slice(0, MAX_CHANNEL_AGENT_FANOUT);
+  return { selected: sorted, selectedByTrigger };
 }
 
 async function startMessageLoop(): Promise<void> {
@@ -787,26 +1399,17 @@ async function startMessageLoop(): Promise<void> {
 
   while (true) {
     try {
-      const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(
-        jids,
-        lastTimestamp,
+      refreshChannelSubscriptions();
+      const jids = Array.from(
+        new Set([
+          ...Object.keys(registeredGroups),
+          ...Object.keys(channelSubscriptions),
+        ]),
       );
+      const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp);
 
-      // Clear processedIds when timestamp advances (prevents memory growth)
-      if (newTimestamp > lastTimestamp) {
-        processedIds.clear();
-      }
-
-      // Filter out already-processed messages (deduplication at timestamp boundaries)
-      const uniqueMessages = messages.filter((msg) => {
-        if (processedIds.has(msg.id)) return false;
-        processedIds.add(msg.id);
-        return true;
-      });
-
-      if (uniqueMessages.length > 0) {
-        logger.info({ count: uniqueMessages.length }, 'New messages');
+      if (messages.length > 0) {
+        logger.info({ count: messages.length }, 'New messages');
 
         // Advance the "seen" cursor for all messages immediately
         lastTimestamp = newTimestamp;
@@ -814,7 +1417,7 @@ async function startMessageLoop(): Promise<void> {
 
         // Deduplicate by group
         const messagesByGroup = new Map<string, NewMessage[]>();
-        for (const msg of uniqueMessages) {
+        for (const msg of messages) {
           const existing = messagesByGroup.get(msg.chat_jid);
           if (existing) {
             existing.push(msg);
@@ -824,50 +1427,142 @@ async function startMessageLoop(): Promise<void> {
         }
 
         for (const [chatJid, groupMessages] of messagesByGroup) {
-          const group = registeredGroups[chatJid];
-          if (!group) continue;
+          const { selected: triggerSelected, selectedByTrigger } =
+            selectSubscriptionsForMessage(chatJid, groupMessages);
+          let selectedSubs = triggerSelected;
 
-          const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
-
-          // For non-main groups, only act on trigger messages.
-          // Non-trigger messages accumulate in DB and get pulled as
-          // context when a trigger eventually arrives.
-          if (needsTrigger) {
-            // Use per-group trigger pattern so @PeytonOmni channels aren't
-            // silently dropped by the global @Omni TRIGGER_PATTERN.
-            const groupTriggerPattern = buildTriggerPattern(group.trigger);
-            const hasTrigger = groupMessages.some((m) =>
-              groupTriggerPattern.test(m.content.trim()),
-            );
-            if (!hasTrigger) continue;
+          // Attentive follow-up: if agents were selected by explicit trigger/mention,
+          // mark them attentive so the next human message is routed without a trigger.
+          if (selectedByTrigger && selectedSubs.length > 0) {
+            if (!attentiveAgents[chatJid]) attentiveAgents[chatJid] = new Set();
+            for (const s of selectedSubs) {
+              attentiveAgents[chatJid].add(s.agentId);
+            }
           }
 
-          // Pull all messages since lastAgentTimestamp so non-trigger
-          // context that accumulated between triggers is included.
-          const allPending = getMessagesSince(
-            chatJid,
-            lastAgentTimestamp[chatJid] || '',
-          );
-          const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend);
+          // If no trigger match (or only fallback agents selected), check if
+          // any agents are attentive from a recent mention — route the
+          // follow-up message to them.
+          if (!selectedByTrigger) {
+            const attentive = attentiveAgents[chatJid];
+            if (attentive && attentive.size > 0) {
+              const subs = getSubscriptionsForChannelInMemory(chatJid);
+              const attentiveSubs = subs.filter((s) =>
+                attentive.has(s.agentId),
+              );
+              if (attentiveSubs.length > 0) {
+                // Merge attentive agents into selection (alongside any fallback agents)
+                const existing = new Set(selectedSubs.map((s) => s.agentId));
+                for (const s of attentiveSubs) {
+                  if (!existing.has(s.agentId)) {
+                    selectedSubs = [...selectedSubs, s];
+                  }
+                }
+                // Consume attentive state — one follow-up per mention
+                for (const s of attentiveSubs) {
+                  attentive.delete(s.agentId);
+                }
+                if (attentive.size === 0) delete attentiveAgents[chatJid];
+                logger.debug(
+                  { chatJid, agents: attentiveSubs.map((s) => s.agentId) },
+                  'Follow-up message routed via attentive state',
+                );
+              }
+            }
+          }
 
-          if (await queue.sendMessage(chatJid, formatted)) {
-            logger.info(
-              { chatJid, count: messagesToSend.length },
-              'Piped messages to active container',
+          // Legacy fallback: one-to-one registered group handling
+          if (selectedSubs.length === 0) {
+            const group = registeredGroups[chatJid];
+            if (!group) continue;
+
+            const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+            const needsTrigger =
+              !isMainGroup && group.requiresTrigger !== false;
+            if (needsTrigger) {
+              const groupTriggerPattern = buildTriggerPattern(group.trigger);
+              const hasTrigger = groupMessages.some((m) =>
+                groupTriggerPattern.test(m.content.trim()),
+              );
+              if (!hasTrigger) continue;
+            }
+
+            const allPending = getMessagesSince(
+              chatJid,
+              lastAgentTimestamp[chatJid] || '',
             );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
-            // Show typing indicator while the container processes the piped message
-            const typingCh = findChannel(channels, chatJid);
-            if (typingCh?.setTyping) typingCh.setTyping(chatJid, true);
-          } else {
-            // No active container — enqueue for a new one
-            logger.info({ chatJid, count: messagesToSend.length }, 'No active container, enqueuing for new one');
-            queue.enqueueMessageCheck(chatJid);
+            if (allPending.length === 0) continue;
+            const messagesToSend = allPending;
+            const formatted = formatMessages(messagesToSend);
+
+            if (await queue.sendMessage(chatJid, formatted)) {
+              logger.info(
+                { chatJid, count: messagesToSend.length },
+                'Piped messages to active container',
+              );
+              lastAgentTimestamp[chatJid] =
+                messagesToSend[messagesToSend.length - 1].timestamp;
+              saveState();
+              const typingCh = findChannelForJid(chatJid, group.discordBotId);
+              if (typingCh?.setTyping)
+                typingCh
+                  .setTyping(chatJid, true)
+                  .catch((err) =>
+                    logger.warn(
+                      { chatJid, err },
+                      'Failed to set typing indicator',
+                    ),
+                  );
+            } else {
+              logger.info(
+                { chatJid, count: messagesToSend.length },
+                'No active container, enqueuing for new one',
+              );
+              queue.enqueueMessageCheck(chatJid);
+            }
+            continue;
+          }
+
+          for (const sub of selectedSubs) {
+            const dispatchJid = makeDispatchKey(chatJid, sub.agentId);
+            const allPending = getMessagesSince(
+              chatJid,
+              lastAgentTimestamp[dispatchJid] || '',
+            );
+            // Filter out messages this agent sent via IPC (tagged sender: 'agent:<id>')
+            // to prevent self-echo compute waste.
+            const filteredPending = allPending.filter(
+              (m) => m.sender !== `agent:${sub.agentId}`,
+            );
+            if (filteredPending.length === 0) continue;
+            const messagesToSend = filteredPending;
+            const formatted = formatMessages(messagesToSend);
+
+            if (await queue.sendMessage(dispatchJid, formatted)) {
+              logger.info(
+                { chatJid, agentId: sub.agentId, count: messagesToSend.length },
+                'Piped messages to active agent container',
+              );
+              lastAgentTimestamp[dispatchJid] =
+                messagesToSend[messagesToSend.length - 1].timestamp;
+              saveState();
+              const typingCh = findChannelForJid(chatJid, sub.discordBotId);
+              if (typingCh?.setTyping)
+                typingCh
+                  .setTyping(chatJid, true)
+                  .catch((err) =>
+                    logger.warn(
+                      { chatJid, err },
+                      'Failed to set typing indicator',
+                    ),
+                  );
+            } else {
+              logger.info(
+                { chatJid, agentId: sub.agentId, count: messagesToSend.length },
+                'No active agent container, enqueuing',
+              );
+              queue.enqueueMessageCheck(dispatchJid);
+            }
           }
         }
       }
@@ -883,7 +1578,23 @@ async function startMessageLoop(): Promise<void> {
  * Handles crash between advancing lastTimestamp and processing messages.
  */
 function recoverPendingMessages(): void {
+  for (const [chatJid, subs] of Object.entries(channelSubscriptions)) {
+    for (const sub of subs) {
+      const dispatchJid = makeDispatchKey(chatJid, sub.agentId);
+      const sinceTimestamp = lastAgentTimestamp[dispatchJid] || '';
+      const pending = getMessagesSince(chatJid, sinceTimestamp);
+      if (pending.length > 0) {
+        logger.info(
+          { chatJid, agentId: sub.agentId, pendingCount: pending.length },
+          'Recovery: found unprocessed messages for subscription',
+        );
+        queue.enqueueMessageCheck(dispatchJid);
+      }
+    }
+  }
+
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    if ((channelSubscriptions[chatJid] || []).length > 0) continue;
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp);
     if (pending.length > 0) {
@@ -900,24 +1611,40 @@ function recoverPendingMessages(): void {
  * Build agent registry and write it to all groups' IPC dirs.
  * Every agent can discover every other agent's name, purpose, backend, and dev URL.
  */
-function buildAgentRegistry(): void {
+function buildAgentRegistry(extraFolders: string[] = []): void {
   // Build registry from agents (new system) with channel route info
-  const agentToChannels = buildAgentToChannelsMap(channelRoutes);
+  const agentToChannels =
+    buildAgentToChannelsMapFromSubscriptions(channelSubscriptions);
 
   const registry = Object.values(agents).map((agent) => {
     const jids = agentToChannels.get(agent.id) || [];
     // Get trigger from first route for backwards compat
-    const firstRoute = jids.length > 0 ? channelRoutes[jids[0]] : undefined;
+    const firstSub =
+      jids.length > 0
+        ? (channelSubscriptions[jids[0]] || []).find(
+            (s) => s.agentId === agent.id,
+          )
+        : undefined;
+    const primaryJid = jids[0] || agent.id;
+    const trigger = firstSub?.trigger || `@${ASSISTANT_NAME}`;
+    const requiresTrigger = firstSub?.requiresTrigger !== false;
+    // Pre-computed send instructions so agents don't have to guess how to
+    // reach each other. Sending to a shared channel with the wrong target_jid
+    // or without the trigger silently routes to the wrong agent.
+    const sendTo = requiresTrigger
+      ? `target_jid="${primaryJid}", text must start with "${trigger} "`
+      : `target_jid="${primaryJid}"`;
     return {
       id: agent.id,
-      jid: jids[0] || agent.id, // Primary JID
+      jid: primaryJid,
       jids, // All JIDs
       name: agent.name,
       description: agent.description || '',
       backend: agent.backend,
+      agentRuntime: agent.agentRuntime,
       isMain: agent.isAdmin,
-      isLocal: agent.isLocal,
-      trigger: firstRoute?.trigger || `@${ASSISTANT_NAME}`,
+      trigger,
+      sendTo, // How to reach this agent via send_message
     };
   });
 
@@ -931,9 +1658,13 @@ function buildAgentRegistry(): void {
         name: group.name,
         description: group.description || '',
         backend: group.backend || 'apple-container',
+        agentRuntime: group.agentRuntime || 'claude-agent-sdk',
         isMain: group.folder === MAIN_GROUP_FOLDER,
-        isLocal: !group.backend || group.backend === 'apple-container' || group.backend === 'docker',
         trigger: group.trigger,
+        sendTo:
+          group.requiresTrigger !== false
+            ? `target_jid="${jid}", text must start with "${group.trigger} "`
+            : `target_jid="${jid}"`,
       });
     }
   }
@@ -948,11 +1679,125 @@ function buildAgentRegistry(): void {
   for (const group of Object.values(registeredGroups)) {
     folders.add(group.folder);
   }
+  for (const folder of extraFolders) {
+    if (folder) folders.add(folder);
+  }
 
+  const ipcBase = path.join(DATA_DIR, 'ipc');
   for (const folder of folders) {
-    const groupIpcDir = path.join(DATA_DIR, 'ipc', folder);
+    const groupIpcDir = path.join(ipcBase, folder);
+    assertPathWithin(groupIpcDir, ipcBase, 'agent registry target');
     fs.mkdirSync(groupIpcDir, { recursive: true });
-    fs.writeFileSync(path.join(groupIpcDir, 'agent_registry.json'), registryJson);
+    fs.writeFileSync(
+      path.join(groupIpcDir, 'agent_registry.json'),
+      registryJson,
+    );
+  }
+}
+
+/**
+ * Handle share-request approval via reaction emoji.
+ * Returns true if the reaction was consumed (was a tracked share request).
+ */
+function handleShareRequestApproval(
+  messageId: string,
+  emoji: string,
+  channelName: string,
+): boolean {
+  const request = consumeShareRequest(messageId);
+  if (!request) return false;
+
+  const mainJid = findMainGroupJid(registeredGroups);
+  if (!mainJid) return false;
+
+  logger.info(
+    {
+      messageId,
+      emoji,
+      sourceGroup: request.sourceGroup,
+      sourceName: request.sourceName,
+    },
+    `Share request approved via ${channelName} reaction`,
+  );
+
+  const writePaths = request.serverFolder
+    ? `groups/${request.sourceGroup}/CLAUDE.md and/or groups/${request.serverFolder}/CLAUDE.md`
+    : `groups/${request.sourceGroup}/CLAUDE.md`;
+  const syntheticContent = [
+    `Share request APPROVED from ${request.sourceName} (${request.sourceJid}):`,
+    '',
+    `${request.description}`,
+    '',
+    `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
+    `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
+  ].join('\n');
+
+  storeMessage({
+    id: `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    chat_jid: mainJid,
+    sender: 'system',
+    sender_name: 'System',
+    content: syntheticContent,
+    timestamp: new Date().toISOString(),
+    is_from_me: false,
+  });
+
+  queue.enqueueMessageCheck(mainJid);
+  return true;
+}
+
+/**
+ * Handle a reaction notification on a bot message (non-approval reactions).
+ * Pipes to the active container or stores in DB and enqueues.
+ */
+async function handleReactionNotification(
+  chatJid: string,
+  messageId: string,
+  emoji: string,
+  userName: string,
+  channelName: string,
+  discordBotId?: string,
+): Promise<void> {
+  // For multi-agent Discord channels, route to the subscription whose bot
+  // received the reaction rather than blindly using the primary registered group.
+  // Without this, a reaction on OCPeyton's message routes to Ditto (the primary).
+  let dispatchJid = chatJid;
+  let group = registeredGroups[chatJid];
+  const subs = getSubscriptionsForChannelInMemory(chatJid);
+  if (discordBotId && subs.length > 0) {
+    const matchingSub = subs.find((s) => s.discordBotId === discordBotId);
+    if (matchingSub) {
+      dispatchJid = makeDispatchKey(chatJid, matchingSub.agentId);
+      group =
+        buildRegisteredGroupFromSubscription(chatJid, matchingSub) ?? group;
+    }
+  }
+  if (!group) return;
+
+  logger.info(
+    { chatJid, messageId, emoji, userName, group: group.name },
+    `Reaction on bot message in ${channelName}`,
+  );
+
+  const reactionContent = `@${ASSISTANT_NAME} [${userName} reacted with ${emoji}]`;
+
+  const reactionMessage = {
+    id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    chat_jid: chatJid,
+    sender: 'system',
+    sender_name: 'System',
+    content: reactionContent,
+    timestamp: new Date().toISOString(),
+    is_from_me: false,
+  };
+
+  const piped = await queue.sendMessage(
+    dispatchJid,
+    formatMessages([reactionMessage]),
+  );
+  if (!piped) {
+    storeMessage(reactionMessage);
+    queue.enqueueMessageCheck(dispatchJid);
   }
 }
 
@@ -960,18 +1805,6 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
-
-  // Initialize S3 client if B2 is configured
-  if (B2_ENDPOINT) {
-    s3 = new OmniClawS3({
-      endpoint: B2_ENDPOINT,
-      accessKeyId: B2_ACCESS_KEY_ID,
-      secretAccessKey: B2_SECRET_ACCESS_KEY,
-      bucket: B2_BUCKET,
-      region: B2_REGION,
-    });
-    logger.info('B2 S3 client initialized');
-  }
 
   // Expire stale sessions on startup to prevent unbounded context growth
   const expired = expireStaleSessions(SESSION_MAX_AGE);
@@ -985,6 +1818,10 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (githubWebhookServer) {
+      githubWebhookServer.stop();
+      githubWebhookServer = null;
+    }
     await queue.shutdown(10000);
     await shutdownBackends();
     for (const ch of channels) {
@@ -998,70 +1835,97 @@ async function main(): Promise<void> {
   // Register shutdown function for global error handlers
   shutdownFn = () => shutdown('SHUTDOWN_SIGNAL');
 
-  // --- Parallel startup: backends + channels concurrently ---
+  // --- Startup: initialize backends first, then start message loop, then connect channels ---
   const startupT0 = Date.now();
 
-  const initBackends = Effect.promise(() => initializeBackends(registeredGroups));
+  if (GITHUB_WEBHOOK_PORT > 0 && GITHUB_WEBHOOK_SECRET) {
+    const dispatchGitHubWebhook = async (
+      notification: GitHubWebhookNotification,
+    ): Promise<void> => {
+      const targets = Object.entries(channelSubscriptions).flatMap(
+        ([chatJid, subs]) => {
+          const matches = subs.filter((s) =>
+            notification.agentIds.includes(s.agentId),
+          );
+          return matches
+            .sort((a, b) =>
+              Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)),
+            )
+            .map((sub) => ({ chatJid, sub }));
+        },
+      );
+
+      // Route one notification per agent to avoid flooding multi-channel agents.
+      const delivered = new Set<string>();
+      for (const { chatJid, sub } of targets) {
+        if (delivered.has(sub.agentId)) continue;
+        const group = buildRegisteredGroupFromSubscription(chatJid, sub);
+        if (!group) continue;
+        const trigger = group.trigger || `@${ASSISTANT_NAME}`;
+        const withLink = notification.url
+          ? `${notification.summary}\n${notification.url}`
+          : notification.summary;
+        storeMessage({
+          id: `ghhook-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          chat_jid: chatJid,
+          sender: 'system',
+          sender_name: 'GitHub Webhook',
+          content: `${trigger} ${withLink}`,
+          timestamp: new Date().toISOString(),
+          is_from_me: false,
+        });
+        queue.enqueueMessageCheck(makeDispatchKey(chatJid, sub.agentId));
+        delivered.add(sub.agentId);
+      }
+    };
+
+    githubWebhookServer = startGitHubWebhookServer({
+      secret: GITHUB_WEBHOOK_SECRET,
+      port: GITHUB_WEBHOOK_PORT,
+      path: GITHUB_WEBHOOK_PATH,
+      onNotification: dispatchGitHubWebhook,
+    });
+  } else if (GITHUB_WEBHOOK_PORT > 0 && !GITHUB_WEBHOOK_SECRET) {
+    logger.warn(
+      { port: GITHUB_WEBHOOK_PORT },
+      'GITHUB_WEBHOOK_PORT set without GITHUB_WEBHOOK_SECRET; webhook server disabled',
+    );
+  }
+
+  // Backends MUST be initialized before the message loop starts, because
+  // processGroupMessages → runAgent → resolveBackend() needs them.
+  await initializeBackends(registeredGroups);
+  logger.info({ durationMs: Date.now() - startupT0 }, 'Backends initialized');
 
   const WHATSAPP_RETRY_INTERVAL_MS = 60_000; // 1 minute between retries
   const WHATSAPP_MAX_RETRIES = 30; // give up after ~30 minutes
 
-  const createWhatsAppChannel = () => new WhatsAppChannel({
-    onMessage: (chatJid, msg) => storeMessage(msg),
-    onChatMetadata: (chatJid, timestamp) => storeChatMetadata(chatJid, timestamp),
-    registeredGroups: () => registeredGroups,
-    onReaction: (chatJid, messageId, emoji) => {
-      // Only handle approval emojis
-      if (!emoji.startsWith('👍') && emoji !== '❤️' && emoji !== '✅') return;
-
-      const request = consumeShareRequest(messageId);
-      if (!request) return; // Not a tracked share request
-
-      // Find the main group's JID
-      const mainJid = findMainGroupJid(registeredGroups);
-      if (!mainJid) return;
-
-      logger.info(
-        { messageId, emoji, sourceGroup: request.sourceGroup, sourceName: request.sourceName },
-        'Share request approved via reaction',
-      );
-
-      // Inject synthetic message into main group DB
-      const writePaths = request.serverFolder
-        ? `groups/${request.sourceGroup}/CLAUDE.md and/or groups/${request.serverFolder}/CLAUDE.md`
-        : `groups/${request.sourceGroup}/CLAUDE.md`;
-      const syntheticContent = [
-        `Share request APPROVED from ${request.sourceName} (${request.sourceJid}):`,
-        ``,
-        `${request.description}`,
-        ``,
-        `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
-        `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
-      ].join('\n');
-
-      storeMessage({
-        id: `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        chat_jid: mainJid,
-        sender: 'system',
-        sender_name: 'System',
-        content: syntheticContent,
-        timestamp: new Date().toISOString(),
-        is_from_me: false,
-      });
-
-      // Wake up the main agent
-      queue.enqueueMessageCheck(mainJid);
-    },
-  });
+  const createWhatsAppChannel = () =>
+    new WhatsAppChannel({
+      onMessage: (chatJid, msg) => storeMessage(msg),
+      onChatMetadata: (chatJid, timestamp) =>
+        storeChatMetadata(chatJid, timestamp),
+      registeredGroups: () => registeredGroups,
+      onReaction: (chatJid, messageId, emoji) => {
+        if (!emoji.startsWith('👍') && emoji !== '❤️' && emoji !== '✅') return;
+        handleShareRequestApproval(messageId, emoji, 'WhatsApp');
+      },
+    });
 
   /** Retry WhatsApp connection in the background with backoff */
   const scheduleWhatsAppRetry = (attempt = 1) => {
     if (attempt > WHATSAPP_MAX_RETRIES) {
-      logger.error({ attempts: attempt - 1 }, 'WhatsApp retry limit reached — giving up. Restart the service to try again.');
+      logger.error(
+        { attempts: attempt - 1 },
+        'WhatsApp retry limit reached — giving up. Restart the service to try again.',
+      );
       return;
     }
     const delayMs = Math.min(WHATSAPP_RETRY_INTERVAL_MS * attempt, 5 * 60_000); // cap at 5 min
-    logger.info({ attempt, delayMs, maxRetries: WHATSAPP_MAX_RETRIES }, `Scheduling WhatsApp reconnect in ${Math.round(delayMs / 1000)}s`);
+    logger.info(
+      { attempt, delayMs, maxRetries: WHATSAPP_MAX_RETRIES },
+      `Scheduling WhatsApp reconnect in ${Math.round(delayMs / 1000)}s`,
+    );
     setTimeout(async () => {
       try {
         const wa = createWhatsAppChannel();
@@ -1080,262 +1944,241 @@ async function main(): Promise<void> {
     const wa = createWhatsAppChannel();
     yield* Effect.tryPromise(() => wa.connect());
     return wa;
-  }).pipe(Effect.catchAll((err) => {
-    logger.error({ err }, 'Failed to connect WhatsApp (continuing without WhatsApp)');
-    scheduleWhatsAppRetry();
-    return Effect.succeed(null);
-  }));
+  }).pipe(
+    Effect.catchAll((err) => {
+      logger.error(
+        { err },
+        'Failed to connect WhatsApp (continuing without WhatsApp)',
+      );
+      scheduleWhatsAppRetry();
+      return Effect.succeed(null);
+    }),
+  );
 
-  const connectDiscord = DISCORD_BOT_TOKEN
-    ? Effect.gen(function* () {
-        const discord = new DiscordChannel({
-          token: DISCORD_BOT_TOKEN,
-          onReaction: async (chatJid, messageId, emoji, userName) => {
-            // 1. Check for share_request approval first (only approval emojis)
-            if (emoji.startsWith('👍') || emoji === '❤️' || emoji === '✅') {
-              const request = consumeShareRequest(messageId);
-              if (request) {
-                const mainJid = Object.entries(registeredGroups).find(
-                  ([, g]) => g.folder === MAIN_GROUP_FOLDER,
-                )?.[0];
-                if (!mainJid) return;
-
-                logger.info(
-                  { messageId, emoji, sourceGroup: request.sourceGroup, sourceName: request.sourceName },
-                  'Share request approved via Discord reaction',
-                );
-
-                const writePaths = request.serverFolder
-                  ? `groups/${request.sourceGroup}/CLAUDE.md and/or groups/${request.serverFolder}/CLAUDE.md`
-                  : `groups/${request.sourceGroup}/CLAUDE.md`;
-                const syntheticContent = [
-                  `Share request APPROVED from ${request.sourceName} (${request.sourceJid}):`,
-                  '',
-                  `${request.description}`,
-                  '',
-                  `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
-                  `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
-                ].join('\n');
-
-                storeMessage({
-                  id: `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                  chat_jid: mainJid,
-                  sender: 'system',
-                  sender_name: 'System',
-                  content: syntheticContent,
-                  timestamp: new Date().toISOString(),
-                  is_from_me: false,
-                });
-
-                queue.enqueueMessageCheck(mainJid);
-                return;
-              }
-            }
-
-            // 2. Context-aware reaction notification: include emoji and reactor name
-            const group = registeredGroups[chatJid];
-            if (!group) return;
-
-            logger.info(
-              { chatJid, messageId, emoji, userName, group: group.name },
-              'Reaction on bot message in Discord',
-            );
-
-            const reactionContent = `@${ASSISTANT_NAME} [${userName} reacted with ${emoji}]`;
-
-            // Try to pipe directly to active container
-            const piped = await queue.sendMessage(chatJid, formatMessages([{
-              id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              chat_jid: chatJid,
-              sender: 'system',
-              sender_name: 'System',
-              content: reactionContent,
-              timestamp: new Date().toISOString(),
-            }]));
-            if (!piped) {
-              // No active container — store in DB and enqueue
-              storeMessage({
-                id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                chat_jid: chatJid,
-                sender: 'system',
-                sender_name: 'System',
-                content: reactionContent,
-                timestamp: new Date().toISOString(),
-                is_from_me: false,
+  const connectDiscord =
+    DISCORD_BOTS.length > 0
+      ? Effect.forEach(
+          DISCORD_BOTS,
+          (bot, idx) =>
+            Effect.gen(function* () {
+              const discord = new DiscordChannel({
+                botId: bot.id,
+                token: bot.token,
+                multiBotMode: DISCORD_BOTS.length > 1,
+                onReaction: async (chatJid, messageId, emoji, userName) => {
+                  if (
+                    emoji.startsWith('👍') ||
+                    emoji === '❤️' ||
+                    emoji === '✅'
+                  ) {
+                    if (handleShareRequestApproval(messageId, emoji, 'Discord'))
+                      return;
+                  }
+                  await handleReactionNotification(
+                    chatJid,
+                    messageId,
+                    emoji,
+                    userName,
+                    'Discord',
+                    bot.id,
+                  );
+                },
               });
-              queue.enqueueMessageCheck(chatJid);
-            }
-          },
-        });
-        yield* Effect.tryPromise(() => discord.connect());
-        yield* Effect.tryPromise(() => backfillDiscordGuildIds(discord));
-        return discord as Channel;
-      }).pipe(Effect.catchAll((err) => {
-        logger.error({ err }, 'Failed to connect Discord bot (continuing without Discord)');
-        return Effect.succeed(null);
-      }))
-    : Effect.succeed(null);
+              yield* Effect.tryPromise(() => discord.connect());
+              return discord;
+            }).pipe(
+              Effect.catchAll((err) => {
+                logger.error(
+                  {
+                    err,
+                    index: idx + 1,
+                    total: DISCORD_BOTS.length,
+                    botId: bot.id,
+                  },
+                  'Failed to connect Discord bot token (continuing with remaining Discord bots)',
+                );
+                return Effect.succeed(null);
+              }),
+            ),
+          { concurrency: 'unbounded' },
+        ).pipe(
+          Effect.map((connected) =>
+            connected.filter((ch): ch is DiscordChannel => ch !== null),
+          ),
+        )
+      : Effect.succeed([] as DiscordChannel[]);
 
   const connectTelegram = TELEGRAM_BOT_TOKEN
     ? Effect.gen(function* () {
         const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, {
           onMessage: (chatJid, msg) => storeMessage(msg),
-          onChatMetadata: (chatJid, timestamp, name) => storeChatMetadata(chatJid, timestamp, name),
+          onChatMetadata: (chatJid, timestamp, name) =>
+            storeChatMetadata(chatJid, timestamp, name),
           registeredGroups: () => registeredGroups,
         });
         yield* Effect.tryPromise(() => telegram.connect());
         return telegram as Channel;
-      }).pipe(Effect.catchAll((err) => {
-        logger.error({ err }, 'Failed to connect Telegram bot (continuing without Telegram)');
-        return Effect.succeed(null);
-      }))
+      }).pipe(
+        Effect.catchAll((err) => {
+          logger.error(
+            { err },
+            'Failed to connect Telegram bot (continuing without Telegram)',
+          );
+          return Effect.succeed(null);
+        }),
+      )
     : Effect.succeed(null);
 
-  const [, wa, discord, telegram] = await Effect.runPromise(
-    Effect.all([initBackends, connectWhatsApp, connectDiscord, connectTelegram], { concurrency: 'unbounded' }),
-  );
+  // Start message loop BEFORE connecting channels — the loop polls the DB
+  // and spawns containers, which only needs backends (initialized above).
+  // Channel connections can take 30s+ (WhatsApp TLS handshake, Discord gateway)
+  // and should NOT block message processing for IPC/scheduled messages.
+  // See: https://github.com/qwibitai/nanoclaw/issues/553
+  queue.setProcessMessagesFn(processGroupMessages);
+  startMessageLoop().catch((err) => {
+    logger.fatal({ err }, 'Message loop crashed unexpectedly');
+    process.exit(1);
+  });
 
-  whatsapp = wa;
-  if (whatsapp) channels.push(whatsapp);
-  if (discord) channels.push(discord);
-  if (telegram) channels.push(telegram);
+  // Connect channels concurrently in the background — don't block the message loop.
+  // Channels are only needed for sending responses and typing indicators;
+  // the message loop reads from the DB and works without them.
+  const connectChannels = async () => {
+    const [wa, discordChannels, telegram] = await Effect.runPromise(
+      Effect.all([connectWhatsApp, connectDiscord, connectTelegram], {
+        concurrency: 'unbounded',
+      }),
+    );
 
-  logger.info({ durationMs: Date.now() - startupT0 }, 'Startup complete');
-
-  // Conditionally connect Slack (requires both bot token and app-level socket-mode token)
-  if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
-    try {
-      const slack = new SlackChannel({
-        token: SLACK_BOT_TOKEN,
-        appToken: SLACK_APP_TOKEN,
-        onMessage: (chatJid, msg) => storeMessage(msg),
-        onChatMetadata: (chatJid, timestamp, name) => storeChatMetadata(chatJid, timestamp, name),
-        registeredGroups: () => registeredGroups,
-        onReaction: async (chatJid, messageId, emoji, userName) => {
-          // Share-request approval via thumbs-up / heart / check
-          if (emoji === ':thumbsup:' || emoji === ':+1:' || emoji === ':heart:' || emoji === ':white_check_mark:') {
-            const request = consumeShareRequest(messageId);
-            if (request) {
-              const mainJid = Object.entries(registeredGroups).find(
-                ([, g]) => g.folder === MAIN_GROUP_FOLDER,
-              )?.[0];
-              if (!mainJid) return;
-
-              logger.info(
-                { messageId, emoji, sourceGroup: request.sourceGroup, sourceName: request.sourceName },
-                'Share request approved via Slack reaction',
-              );
-
-              const writePaths = request.serverFolder
-                ? `groups/${request.sourceGroup}/CLAUDE.md and/or groups/${request.serverFolder}/CLAUDE.md`
-                : `groups/${request.sourceGroup}/CLAUDE.md`;
-              const syntheticContent = [
-                `Share request APPROVED from ${request.sourceName} (${request.sourceJid}):`,
-                '',
-                `${request.description}`,
-                '',
-                `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
-                `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
-              ].join('\n');
-
-              storeMessage({
-                id: `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                chat_jid: mainJid,
-                sender: 'system',
-                sender_name: 'System',
-                content: syntheticContent,
-                timestamp: new Date().toISOString(),
-                is_from_me: false,
-              });
-
-              queue.enqueueMessageCheck(mainJid);
-              return;
-            }
-          }
-
-          // General reaction notification for registered groups
-          const group = registeredGroups[chatJid];
-          if (!group) return;
-
-          logger.info(
-            { chatJid, messageId, emoji, userName, group: group.name },
-            'Reaction on bot message in Slack',
-          );
-
-          const reactionContent = `@${ASSISTANT_NAME} [${userName} reacted with ${emoji}]`;
-          const piped = await queue.sendMessage(chatJid, formatMessages([{
-            id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            chat_jid: chatJid,
-            sender: 'system',
-            sender_name: 'System',
-            content: reactionContent,
-            timestamp: new Date().toISOString(),
-          }]));
-          if (!piped) {
-            storeMessage({
-              id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              chat_jid: chatJid,
-              sender: 'system',
-              sender_name: 'System',
-              content: reactionContent,
-              timestamp: new Date().toISOString(),
-              is_from_me: false,
-            });
-            queue.enqueueMessageCheck(chatJid);
-          }
-        },
-      });
-      await slack.connect();
-      channels.push(slack);
-    } catch (err) {
-      logger.error({ err }, 'Failed to connect Slack bot (continuing without Slack)');
+    whatsapp = wa;
+    if (whatsapp) channels.push(whatsapp);
+    channels.push(...discordChannels);
+    if (discordChannels.length > 0) {
+      const defaultDiscord =
+        (DISCORD_DEFAULT_BOT_ID
+          ? discordChannels.find((ch) => ch.botId === DISCORD_DEFAULT_BOT_ID)
+          : undefined) || discordChannels[0];
+      await backfillDiscordGuildIds(defaultDiscord);
     }
-  }
+    if (telegram) channels.push(telegram);
 
-  // Reconcile heartbeat tasks with group config before starting scheduler
-  reconcileHeartbeats(registeredGroups);
+    // Conditionally connect Slack (requires both bot token and app-level socket-mode token)
+    if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
+      try {
+        const slack = new SlackChannel({
+          token: SLACK_BOT_TOKEN,
+          appToken: SLACK_APP_TOKEN,
+          onMessage: (chatJid, msg) => storeMessage(msg),
+          onChatMetadata: (chatJid, timestamp, name) =>
+            storeChatMetadata(chatJid, timestamp, name),
+          registeredGroups: () => registeredGroups,
+          onReaction: async (chatJid, messageId, emoji, userName) => {
+            if (
+              emoji === ':thumbsup:' ||
+              emoji === ':+1:' ||
+              emoji === ':heart:' ||
+              emoji === ':white_check_mark:'
+            ) {
+              if (handleShareRequestApproval(messageId, emoji, 'Slack')) return;
+            }
+            await handleReactionNotification(
+              chatJid,
+              messageId,
+              emoji,
+              userName,
+              'Slack',
+            );
+          },
+        });
+        await slack.connect();
+        channels.push(slack);
+      } catch (err) {
+        logger.error(
+          { err },
+          'Failed to connect Slack bot (continuing without Slack)',
+        );
+      }
+    }
+
+    logger.info(
+      {
+        op: 'startup',
+        durationMs: Date.now() - startupT0,
+        channelCount: channels.length,
+      },
+      'Channel connections complete',
+    );
+
+    // Recover pending messages AFTER channels are connected so that
+    // findChannel() can route recovered output to the correct channel.
+    // (startMessageLoop already runs above for IPC/scheduled task responsiveness.)
+    recoverPendingMessages();
+  };
+
+  // Fire-and-forget: channels connect in background while message loop already runs
+  connectChannels().catch((err) => {
+    logger.error({ err }, 'Channel connection failed');
+  });
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
+    getGroupForTask,
     getSessions: () => sessions,
     resumePositionStore,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder, lane) => queue.registerProcess(groupJid, proc, containerName, groupFolder, undefined, lane),
-    sendMessage: async (jid, rawText) => {
-      const ch = findChannel(channels, jid);
+    onProcess: (groupJid, proc, containerName, groupFolder, lane) =>
+      queue.registerProcess(
+        groupJid,
+        proc,
+        containerName,
+        groupFolder,
+        undefined,
+        lane,
+      ),
+    sendMessage: async (jid, rawText, discordBotId) => {
+      const ch = findChannelForJid(jid, discordBotId);
       if (!ch) {
         logger.warn({ jid }, 'No channel found for scheduled message');
         return;
       }
       const group = registeredGroups[jid];
-      const text = formatOutbound(ch, rawText, group ? getAgentName(group) : undefined);
+      const text = formatOutbound(
+        ch,
+        rawText,
+        group ? getAgentName(group) : undefined,
+      );
       if (text) {
         const msgId = await ch.sendMessage(jid, text);
         return msgId ? String(msgId) : undefined;
       }
     },
-    findChannel: (jid) => findChannel(channels, jid),
+    findChannel: (jid, discordBotId) => findChannelForJid(jid, discordBotId),
   });
   startIpcWatcher({
-    sendMessage: async (jid, rawText) => {
-      const ch = findChannel(channels, jid);
+    sendMessage: async (jid, rawText, discordBotId) => {
+      const ch = findChannelForJid(jid, discordBotId);
       if (!ch) {
         logger.warn({ jid }, 'No channel found for IPC message');
         return;
       }
       const group = registeredGroups[jid];
-      const text = formatOutbound(ch, rawText, group ? getAgentName(group) : undefined);
+      const text = formatOutbound(
+        ch,
+        rawText,
+        group ? getAgentName(group) : undefined,
+      );
       if (text) return await ch.sendMessage(jid, text);
     },
-    notifyGroup: (jid, text) => {
+    notifyGroup: (jid, text, sourceFolder?) => {
       // Prefix with the group's trigger so it passes requiresTrigger filter
       const group = registeredGroups[jid];
       const trigger = group?.trigger || `@${ASSISTANT_NAME}`;
       storeMessage({
         id: `notify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         chat_jid: jid,
-        sender: 'system',
+        // Tag with source agent so routing skips echoing back to it
+        sender: sourceFolder ? `agent:${sourceFolder}` : 'system',
         sender_name: 'Omni (Main)',
         content: `${trigger} ${text}`,
         timestamp: new Date().toISOString(),
@@ -1349,113 +2192,37 @@ async function main(): Promise<void> {
       registeredGroups[jid] = group;
       setRegisteredGroup(jid, group);
     },
-    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: (force) =>
+      whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
-    findChannel: (jid) => findChannel(channels, jid),
+    writeGroupsSnapshot: (gf, im, ag, rj) =>
+      writeGroupsSnapshot(gf, im, ag, rj),
+    findChannel: (jid) => findChannelForJid(jid),
+    writeTasksSnapshot: (groupFolder, isMainGroup) => {
+      writeTasksSnapshot(
+        groupFolder,
+        isMainGroup,
+        mapTasksForSnapshot(getAllTasks()),
+      );
+    },
+    onSubscriptionChanged: invalidateChannelSubscriptions,
+    activeRuntimeFolders: () => activeRuntimeFolders,
+    agentFolders: () => new Set(Object.values(agents).map((a) => a.folder)),
+    getSubscriptions: (jid) => {
+      refreshChannelSubscriptions();
+      return (channelSubscriptions[jid] ?? []).map((s) => ({
+        agentId: s.agentId,
+        agentFolder: agents[s.agentId]?.folder ?? s.agentId,
+      }));
+    },
   });
-  // Start S3 IPC poller for cloud agents (if B2 is configured)
-  if (s3) {
-    startS3IpcPoller({
-      s3,
-      getCloudAgentIds,
-      processOutput: async (agentId, output) => {
-        // Find the channel route(s) for this agent
-        const agentToChannels = buildAgentToChannelsMap(channelRoutes);
-        const jids = agentToChannels.get(agentId) || [];
-        const targetJid = output.targetChannelJid || jids[0];
-
-        if (targetJid && output.result) {
-          const ch = findChannel(channels, targetJid);
-          if (ch) {
-            const agent = agents[agentId];
-            const text = formatOutbound(ch, output.result, agent?.name);
-            if (text) await ch.sendMessage(targetJid, text);
-          }
-        }
-
-        if (output.newSessionId) {
-          sessions[agentId] = output.newSessionId;
-          setSession(agentId, output.newSessionId);
-        }
-      },
-      processMessage: async (sourceAgentId, data) => {
-        if (data.type === 'message' && data.chatJid && data.text) {
-          const targetGroup = registeredGroups[data.chatJid];
-          const isRegisteredTarget = !!targetGroup;
-          const isMain = sourceAgentId === MAIN_GROUP_FOLDER;
-          if (isMain || isRegisteredTarget) {
-            const ch = findChannel(channels, data.chatJid);
-            if (ch) {
-              const agent = agents[sourceAgentId];
-              const text = formatOutbound(ch, data.text, agent?.name);
-              if (text) await ch.sendMessage(data.chatJid, text);
-            }
-            // Cross-agent: wake up the target agent
-            if (targetGroup && targetGroup.folder !== sourceAgentId) {
-              const trigger = targetGroup.trigger || `@${ASSISTANT_NAME}`;
-              storeMessage({
-                id: `s3-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                chat_jid: data.chatJid,
-                sender: 'system',
-                sender_name: `${agents[sourceAgentId]?.name || sourceAgentId}`,
-                content: `${trigger} ${data.text}`,
-                timestamp: new Date().toISOString(),
-                is_from_me: false,
-              });
-              queue.enqueueMessageCheck(data.chatJid);
-            }
-          }
-        }
-      },
-      processTask: async (sourceAgentId, isAdmin, data) => {
-        const { processTaskIpc } = await import('./ipc.js');
-        await processTaskIpc(data, sourceAgentId, isAdmin, {
-          sendMessage: async (jid, rawText) => {
-            const ch = findChannel(channels, jid);
-            if (!ch) return;
-            const agent = agents[sourceAgentId];
-            const text = formatOutbound(ch, rawText, agent?.name);
-            if (text) return await ch.sendMessage(jid, text);
-          },
-          notifyGroup: (jid, text) => {
-            const group = registeredGroups[jid];
-            const trigger = group?.trigger || `@${ASSISTANT_NAME}`;
-            storeMessage({
-              id: `notify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              chat_jid: jid,
-              sender: 'system',
-              sender_name: `${agents[sourceAgentId]?.name || sourceAgentId}`,
-              content: `${trigger} ${text}`,
-              timestamp: new Date().toISOString(),
-              is_from_me: false,
-            });
-            queue.enqueueMessageCheck(jid);
-          },
-          registeredGroups: () => registeredGroups,
-          registerGroup,
-          updateGroup: (jid, group) => {
-            registeredGroups[jid] = group;
-            setRegisteredGroup(jid, group);
-          },
-          syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
-          getAvailableGroups,
-          writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
-        });
-      },
-      isAdmin: (agentId) => agents[agentId]?.isAdmin ?? false,
-    });
-  }
-
-  queue.setProcessMessagesFn(processGroupMessages);
-  recoverPendingMessages();
-  startMessageLoop();
 }
 
 // Guard: only run when executed directly, not when imported by tests
 const isDirectRun =
   process.argv[1] &&
-  new URL(import.meta.url).pathname === new URL(`file://${process.argv[1]}`).pathname;
+  new URL(import.meta.url).pathname ===
+    new URL(`file://${process.argv[1]}`).pathname;
 
 if (isDirectRun) {
   main().catch((err) => {

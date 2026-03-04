@@ -4,11 +4,218 @@ import path from 'path';
 
 import { DATA_DIR, STORE_DIR } from './config.js';
 import { logger } from './logger.js';
-import { Agent, ChannelRoute, HeartbeatConfig, NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog, registeredGroupToAgent, registeredGroupToRoute } from './types.js';
+import {
+  Agent,
+  ChannelRoute,
+  ChannelSubscription,
+  NewMessage,
+  RegisteredGroup,
+  ScheduledTask,
+  TaskRunLog,
+  registeredGroupToAgent,
+  registeredGroupToRoute,
+} from './types.js';
 
 let db: Database;
 
-function createSchema(database: Database): void {
+/** Row type for registered_groups table SELECT * queries */
+interface RegisteredGroupRow {
+  jid: string;
+  name: string;
+  folder: string;
+  trigger_pattern: string;
+  added_at: string;
+  container_config: string | null;
+  requires_trigger: number | null;
+  discord_bot_id: string | null;
+  discord_guild_id: string | null;
+  server_folder: string | null;
+  backend: string | null;
+  description: string | null;
+  auto_respond_to_questions: number | null;
+  auto_respond_keywords: string | null;
+  stream_intermediates: number | null;
+}
+
+/** Row type for agents table SELECT * queries */
+interface AgentRow {
+  id: string;
+  name: string;
+  description: string | null;
+  folder: string;
+  backend: string;
+  agent_runtime: string | null;
+  container_config: string | null;
+  is_admin: number;
+  server_folder: string | null;
+  created_at: string;
+  agent_context_folder: string | null;
+}
+
+/** Row type for channel_routes table SELECT * queries */
+interface ChannelRouteRow {
+  channel_jid: string;
+  agent_id: string;
+  trigger_pattern: string;
+  requires_trigger: number;
+  discord_bot_id: string | null;
+  discord_guild_id: string | null;
+  created_at: string;
+}
+
+interface ChannelSubscriptionRow {
+  channel_jid: string;
+  agent_id: string;
+  trigger_pattern: string;
+  requires_trigger: number;
+  priority: number;
+  is_primary: number;
+  discord_bot_id: string | null;
+  discord_guild_id: string | null;
+  created_at: string;
+  channel_folder: string | null;
+  category_folder: string | null;
+}
+
+/** Safely parse JSON, returning undefined on null input or parse error */
+function safeJsonParse<T>(
+  value: string | null,
+  logContext: Record<string, string>,
+  label: string,
+): T | undefined {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    logger.warn(logContext, `Corrupt ${label} in DB, ignoring`);
+    return undefined;
+  }
+}
+
+const VALID_AGENT_RUNTIMES = new Set<Agent['agentRuntime']>([
+  'claude-agent-sdk',
+  'opencode',
+]);
+
+function normalizeAgentRuntime(
+  value: string | null | undefined,
+): Agent['agentRuntime'] {
+  if (value && VALID_AGENT_RUNTIMES.has(value as Agent['agentRuntime'])) {
+    return value as Agent['agentRuntime'];
+  }
+  return 'claude-agent-sdk';
+}
+
+/** Map a database row to a RegisteredGroup object (without jid field) */
+function mapRowToRegisteredGroup(
+  row: RegisteredGroupRow,
+): Omit<RegisteredGroup, 'jid'> {
+  return {
+    name: row.name,
+    folder: row.folder,
+    trigger: row.trigger_pattern,
+    added_at: row.added_at,
+    containerConfig: safeJsonParse(
+      row.container_config,
+      { jid: row.jid },
+      'container_config',
+    ),
+    requiresTrigger:
+      row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    discordBotId: row.discord_bot_id || undefined,
+    discordGuildId: row.discord_guild_id || undefined,
+    serverFolder: row.server_folder || undefined,
+    backend: (row.backend as RegisteredGroup['backend']) || undefined,
+    description: row.description || undefined,
+    autoRespondToQuestions: row.auto_respond_to_questions === 1 || undefined,
+    autoRespondKeywords: safeJsonParse<string[]>(
+      row.auto_respond_keywords,
+      { jid: row.jid },
+      'auto_respond_keywords',
+    ),
+    streamIntermediates: row.stream_intermediates === 1 || undefined,
+  };
+}
+
+/** Map a database row to an Agent object */
+function mapRowToAgent(row: AgentRow): Agent {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || undefined,
+    folder: row.folder,
+    backend: row.backend as Agent['backend'],
+    agentRuntime: normalizeAgentRuntime(row.agent_runtime),
+    containerConfig: safeJsonParse(
+      row.container_config,
+      { id: row.id },
+      'agent container_config',
+    ),
+    isAdmin: row.is_admin === 1,
+    serverFolder: row.server_folder || undefined,
+    createdAt: row.created_at,
+    agentContextFolder: row.agent_context_folder || undefined,
+  };
+}
+
+/** Map a database row to a ChannelRoute object */
+function mapRowToChannelRoute(row: ChannelRouteRow): ChannelRoute {
+  return {
+    channelJid: row.channel_jid,
+    agentId: row.agent_id,
+    trigger: row.trigger_pattern,
+    requiresTrigger: row.requires_trigger === 1,
+    discordBotId: row.discord_bot_id || undefined,
+    discordGuildId: row.discord_guild_id || undefined,
+    createdAt: row.created_at,
+  };
+}
+
+function mapRowToChannelSubscription(
+  row: ChannelSubscriptionRow,
+): ChannelSubscription {
+  return {
+    channelJid: row.channel_jid,
+    agentId: row.agent_id,
+    trigger: row.trigger_pattern,
+    requiresTrigger: row.requires_trigger === 1,
+    priority: row.priority,
+    isPrimary: row.is_primary === 1,
+    discordBotId: row.discord_bot_id || undefined,
+    discordGuildId: row.discord_guild_id || undefined,
+    createdAt: row.created_at,
+    channelFolder: row.channel_folder || undefined,
+    categoryFolder: row.category_folder || undefined,
+  };
+}
+
+/** Add a column to a table if it doesn't already exist (migration helper) */
+function addColumnIfNotExists(
+  database: Database,
+  table: string,
+  column: string,
+  type: string,
+  defaultValue?: string,
+): void {
+  try {
+    const def = defaultValue !== undefined ? ` DEFAULT ${defaultValue}` : '';
+    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}${def}`);
+  } catch (err) {
+    const message = (
+      err instanceof Error ? err.message : String(err)
+    ).toLowerCase();
+    if (
+      message.includes('duplicate column name') ||
+      message.includes('already exists')
+    ) {
+      return;
+    }
+    throw err;
+  }
+}
+
+/** @internal exported for migration tests */
+export function createSchema(database: Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
       jid TEXT PRIMARY KEY,
@@ -76,72 +283,67 @@ function createSchema(database: Database): void {
     );
   `);
 
-  // Add context_mode column if it doesn't exist (migration for existing DBs)
+  // Column migrations for existing DBs (addColumnIfNotExists is a no-op if column exists)
+  addColumnIfNotExists(
+    database,
+    'scheduled_tasks',
+    'context_mode',
+    'TEXT',
+    "'isolated'",
+  );
+  addColumnIfNotExists(database, 'registered_groups', 'heartbeat', 'TEXT');
+  addColumnIfNotExists(database, 'registered_groups', 'discord_bot_id', 'TEXT');
+  addColumnIfNotExists(
+    database,
+    'registered_groups',
+    'discord_guild_id',
+    'TEXT',
+  );
+  addColumnIfNotExists(database, 'registered_groups', 'server_folder', 'TEXT');
+  addColumnIfNotExists(database, 'messages', 'sender_user_id', 'TEXT');
+  addColumnIfNotExists(database, 'messages', 'mentions', 'TEXT');
+  addColumnIfNotExists(database, 'chats', 'discord_guild_id', 'TEXT');
+  // Note: SQLite ALTER TABLE requires constant defaults; new sessions get datetime('now') via INSERT in setSession().
+  addColumnIfNotExists(
+    database,
+    'sessions',
+    'created_at',
+    'TEXT NOT NULL',
+    "'1970-01-01 00:00:00'",
+  );
+  addColumnIfNotExists(database, 'registered_groups', 'backend', 'TEXT');
+  addColumnIfNotExists(database, 'registered_groups', 'description', 'TEXT');
+  addColumnIfNotExists(
+    database,
+    'registered_groups',
+    'auto_respond_to_questions',
+    'INTEGER',
+    '0',
+  );
+  addColumnIfNotExists(
+    database,
+    'registered_groups',
+    'auto_respond_keywords',
+    'TEXT',
+  );
+  addColumnIfNotExists(
+    database,
+    'registered_groups',
+    'stream_intermediates',
+    'INTEGER',
+    '0',
+  );
+
+  // Heartbeat feature removed — clear any existing heartbeat config so it doesn't
+  // get re-created on startup (reconcileHeartbeats is also removed).
   try {
-    database.exec(
-      `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
-    );
+    database.exec(`
+      UPDATE registered_groups SET heartbeat = NULL WHERE heartbeat IS NOT NULL;
+      UPDATE agents SET heartbeat = NULL WHERE heartbeat IS NOT NULL;
+    `);
   } catch {
-    /* column already exists */
+    // columns may not exist on very old DBs — harmless
   }
-
-  // Add heartbeat column to registered_groups (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN heartbeat TEXT`,
-    );
-  } catch {
-    /* column already exists */
-  }
-
-  // Add discord_guild_id and server_folder columns to registered_groups
-  try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN discord_guild_id TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN server_folder TEXT`);
-  } catch { /* column already exists */ }
-
-  // Add sender_user_id and mentions columns to messages table (Issue #66)
-  try {
-    database.exec(`ALTER TABLE messages ADD COLUMN sender_user_id TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    database.exec(`ALTER TABLE messages ADD COLUMN mentions TEXT`);
-  } catch { /* column already exists */ }
-
-  // Add discord_guild_id column to chats table
-  try {
-    database.exec(`ALTER TABLE chats ADD COLUMN discord_guild_id TEXT`);
-  } catch { /* column already exists */ }
-
-  // Add created_at column to sessions table
-  // Note: SQLite ALTER TABLE requires constant defaults, so we use a fixed epoch.
-  // New sessions get datetime('now') via INSERT in setSession().
-  try {
-    database.exec(`ALTER TABLE sessions ADD COLUMN created_at TEXT NOT NULL DEFAULT '1970-01-01 00:00:00'`);
-  } catch { /* column already exists */ }
-
-  // Add backend and description columns to registered_groups (sprites backend support)
-  try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN backend TEXT`);
-  } catch { /* column already exists */ }
-  try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN description TEXT`);
-  } catch { /* column already exists */ }
-
-  // Add auto-respond columns to registered_groups
-  try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN auto_respond_to_questions INTEGER DEFAULT 0`);
-  } catch { /* column already exists */ }
-  try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN auto_respond_keywords TEXT`);
-  } catch { /* column already exists */ }
-
-  // Add stream_intermediates column to registered_groups (off by default)
-  try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN stream_intermediates INTEGER DEFAULT 0`);
-  } catch { /* column already exists */ }
 
   // --- Agent-Channel Decoupling tables ---
   database.exec(`
@@ -151,27 +353,99 @@ function createSchema(database: Database): void {
       description TEXT,
       folder TEXT NOT NULL UNIQUE,
       backend TEXT NOT NULL DEFAULT 'apple-container',
+      agent_runtime TEXT DEFAULT 'claude-agent-sdk',
       container_config TEXT,
-      heartbeat TEXT,
       is_admin INTEGER NOT NULL DEFAULT 0,
-      is_local INTEGER NOT NULL DEFAULT 1,
       server_folder TEXT,
       created_at TEXT NOT NULL
     );
 
+    -- TODO: Deprecated — channel_subscriptions is now the canonical source of truth.
+    -- Kept for backwards compat with rollback scenarios. Remove in a future cycle.
     CREATE TABLE IF NOT EXISTS channel_routes (
       channel_jid TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL REFERENCES agents(id),
       trigger_pattern TEXT NOT NULL,
       requires_trigger INTEGER NOT NULL DEFAULT 1,
+      discord_bot_id TEXT,
       discord_guild_id TEXT,
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_channel_routes_agent ON channel_routes(agent_id);
+
+    CREATE TABLE IF NOT EXISTS channel_subscriptions (
+      channel_jid TEXT NOT NULL,
+      agent_id TEXT NOT NULL REFERENCES agents(id),
+      trigger_pattern TEXT NOT NULL,
+      requires_trigger INTEGER NOT NULL DEFAULT 1,
+      priority INTEGER NOT NULL DEFAULT 100,
+      is_primary INTEGER NOT NULL DEFAULT 0,
+      discord_bot_id TEXT,
+      discord_guild_id TEXT,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (channel_jid, agent_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_channel_subscriptions_channel
+      ON channel_subscriptions(channel_jid, priority, created_at);
+    CREATE INDEX IF NOT EXISTS idx_channel_subscriptions_agent
+      ON channel_subscriptions(agent_id);
   `);
+
+  addColumnIfNotExists(database, 'channel_routes', 'discord_bot_id', 'TEXT');
+
+  // Migrate agents table for existing DBs
+  addColumnIfNotExists(
+    database,
+    'agents',
+    'agent_runtime',
+    'TEXT',
+    "'claude-agent-sdk'",
+  );
+
+  // New context layer columns (agent/server/category/channel architecture)
+  addColumnIfNotExists(database, 'agents', 'agent_context_folder', 'TEXT');
+  addColumnIfNotExists(
+    database,
+    'channel_subscriptions',
+    'channel_folder',
+    'TEXT',
+  );
+  addColumnIfNotExists(
+    database,
+    'channel_subscriptions',
+    'category_folder',
+    'TEXT',
+  );
 
   // Auto-migrate from registered_groups → agents + channel_routes
   migrateRegisteredGroupsToAgents(database);
+  migrateRoutesToSubscriptions(database);
+}
+
+// One-time fix: Discord server channels (dc: but not dc:dm:) should require trigger.
+// Previously these were misconfigured with requires_trigger=0, causing bots to respond
+// to every message even when not mentioned. Must run after migrateJsonState() so that
+// legacy groups imported from JSON are also patched.
+function applyDiscordRequiresTriggerFix(database: Database): void {
+  const migrationKey = 'fix_discord_requires_trigger_v1';
+  const applied = database
+    .prepare('SELECT value FROM router_state WHERE key = ?')
+    .get(migrationKey) as { value: string } | null;
+  if (applied) return;
+
+  const result = database
+    .prepare(
+      `UPDATE registered_groups SET requires_trigger = 1
+     WHERE jid LIKE 'dc:%' AND jid NOT LIKE 'dc:dm:%' AND requires_trigger = 0`,
+    )
+    .run();
+  database
+    .prepare('INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)')
+    .run(migrationKey, '1');
+  logger.info(
+    { updatedCount: result.changes },
+    'Migration: Discord server channels now require trigger',
+  );
 }
 
 export function initDatabase(): void {
@@ -183,12 +457,24 @@ export function initDatabase(): void {
 
   // Migrate from JSON files if they exist
   migrateJsonState();
+  applyDiscordRequiresTriggerFix(db);
 }
 
 /** @internal - for tests only. Creates a fresh in-memory database. */
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
+}
+
+/** @internal - for tests only. Backdates a session's created_at timestamp. */
+export function _backdateSessionForTest(
+  groupJid: string,
+  isoTimestamp: string,
+): void {
+  db.prepare('UPDATE sessions SET created_at = ? WHERE group_folder = ?').run(
+    isoTimestamp,
+    groupJid,
+  );
 }
 
 /**
@@ -201,28 +487,17 @@ export function storeChatMetadata(
   name?: string,
   discordGuildId?: string,
 ): void {
-  if (name) {
-    // Update with name, preserving existing timestamp if newer
-    db.query(
-      `
-      INSERT INTO chats (jid, name, last_message_time, discord_guild_id) VALUES (?, ?, ?, ?)
-      ON CONFLICT(jid) DO UPDATE SET
-        name = excluded.name,
-        last_message_time = MAX(last_message_time, excluded.last_message_time),
-        discord_guild_id = COALESCE(excluded.discord_guild_id, discord_guild_id)
-    `,
-    ).run(chatJid, name, timestamp, discordGuildId || null);
-  } else {
-    // Update timestamp only, preserve existing name if any
-    db.query(
-      `
-      INSERT INTO chats (jid, name, last_message_time, discord_guild_id) VALUES (?, ?, ?, ?)
-      ON CONFLICT(jid) DO UPDATE SET
-        last_message_time = MAX(last_message_time, excluded.last_message_time),
-        discord_guild_id = COALESCE(excluded.discord_guild_id, discord_guild_id)
-    `,
-    ).run(chatJid, chatJid, timestamp, discordGuildId || null);
-  }
+  // When name is provided, update it on conflict; otherwise preserve existing name
+  const nameClause = name ? 'name = excluded.name,' : '';
+  db.query(
+    `
+    INSERT INTO chats (jid, name, last_message_time, discord_guild_id) VALUES (?, ?, ?, ?)
+    ON CONFLICT(jid) DO UPDATE SET
+      ${nameClause}
+      last_message_time = MAX(last_message_time, excluded.last_message_time),
+      discord_guild_id = COALESCE(excluded.discord_guild_id, discord_guild_id)
+  `,
+  ).run(chatJid, name || chatJid, timestamp, discordGuildId || null);
 }
 
 /**
@@ -311,33 +586,19 @@ export function storeMessage(msg: NewMessage): void {
   );
 }
 
-/**
- * Store a message directly (for non-WhatsApp channels that don't use Baileys proto).
- */
-export function storeMessageDirect(msg: {
-  id: string;
-  chat_jid: string;
-  sender: string;
-  sender_name: string;
-  content: string;
-  timestamp: string;
-  is_from_me: boolean;
-  sender_user_id?: string; // Platform-specific user ID (Issue #66)
-  mentions?: Array<{ id: string; name: string; platform: string }>; // User mentions (Issue #66)
-}): void {
-  db.query(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, sender_user_id, mentions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    msg.id,
-    msg.chat_jid,
-    msg.sender,
-    msg.sender_name,
-    msg.content,
-    msg.timestamp,
-    msg.is_from_me ? 1 : 0,
-    msg.sender_user_id ?? null,
-    msg.mentions ? JSON.stringify(msg.mentions) : null,
-  );
+/** DB row type with nullable JSON fields that need conversion to NewMessage */
+type MessageRow = NewMessage & {
+  mentions: string | null;
+  sender_user_id: string | null;
+};
+
+/** Convert a raw DB message row to a NewMessage (parse mentions JSON, null→undefined) */
+function mapMessageRow(row: MessageRow): NewMessage {
+  return {
+    ...row,
+    sender_user_id: row.sender_user_id ?? undefined,
+    mentions: row.mentions ? JSON.parse(row.mentions) : undefined,
+  };
 }
 
 export function getNewMessages(
@@ -351,22 +612,17 @@ export function getNewMessages(
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp, sender_user_id, mentions
     FROM messages
-    WHERE timestamp >= ? AND chat_jid IN (${placeholders}) AND (is_from_me IS NULL OR is_from_me = 0)
+    WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND (is_from_me IS NULL OR is_from_me = 0)
     ORDER BY timestamp
   `;
 
-  const rows = db
-    .prepare(sql)
-    .all(lastTimestamp, ...jids) as Array<NewMessage & { mentions: string | null; sender_user_id: string | null }>;
+  const rows = db.prepare(sql).all(lastTimestamp, ...jids) as MessageRow[];
 
   let newTimestamp = lastTimestamp;
   const messages: NewMessage[] = rows.map((row) => {
-    if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
-    return {
-      ...row,
-      sender_user_id: row.sender_user_id ?? undefined,
-      mentions: row.mentions ? JSON.parse(row.mentions) : undefined,
-    };
+    if (new Date(row.timestamp) > new Date(newTimestamp))
+      newTimestamp = row.timestamp;
+    return mapMessageRow(row);
   });
 
   return { messages, newTimestamp };
@@ -383,14 +639,8 @@ export function getMessagesSince(
     WHERE chat_jid = ? AND timestamp > ? AND (is_from_me IS NULL OR is_from_me = 0)
     ORDER BY timestamp
   `;
-  const rows = db
-    .prepare(sql)
-    .all(chatJid, sinceTimestamp) as Array<NewMessage & { mentions: string | null; sender_user_id: string | null }>;
-  return rows.map((row) => ({
-    ...row,
-    sender_user_id: row.sender_user_id ?? undefined,
-    mentions: row.mentions ? JSON.parse(row.mentions) : undefined,
-  }));
+  const rows = db.prepare(sql).all(chatJid, sinceTimestamp) as MessageRow[];
+  return rows.map(mapMessageRow);
 }
 
 export function createTask(
@@ -474,9 +724,9 @@ export function updateTask(
   if (fields.length === 0) return;
 
   values.push(id);
-  db.query(
-    `UPDATE scheduled_tasks SET ${fields.join(', ')} WHERE id = ?`,
-  ).run(...values);
+  db.query(`UPDATE scheduled_tasks SET ${fields.join(', ')} WHERE id = ?`).run(
+    ...values,
+  );
 }
 
 export function deleteTask(id: string): void {
@@ -526,10 +776,12 @@ export function updateTaskAfterRun(
 }
 
 export function logTaskRun(log: TaskRunLog): void {
+  // Use SELECT ... WHERE EXISTS to skip gracefully if the task was deleted while running.
   db.query(
     `
     INSERT INTO task_run_logs (task_id, run_at, duration_ms, status, result, error)
-    VALUES (?, ?, ?, ?, ?, ?)
+    SELECT ?, ?, ?, ?, ?, ?
+    WHERE EXISTS (SELECT 1 FROM scheduled_tasks WHERE id = ?)
   `,
   ).run(
     log.task_id,
@@ -538,6 +790,7 @@ export function logTaskRun(log: TaskRunLog): void {
     log.status,
     log.result,
     log.error,
+    log.task_id,
   );
 }
 
@@ -576,7 +829,7 @@ export function setSession(groupFolder: string, sessionId: string): void {
   }
 
   db.query(
-    'INSERT OR REPLACE INTO sessions (group_folder, session_id, created_at) VALUES (?, ?, datetime(\'now\'))',
+    "INSERT OR REPLACE INTO sessions (group_folder, session_id, created_at) VALUES (?, ?, datetime('now'))",
   ).run(groupFolder, sessionId);
 }
 
@@ -607,30 +860,13 @@ export function expireStaleSessions(maxAgeMs: number): string[] {
 
 // --- Registered group accessors ---
 
+/** Look up a registered group by JID, with folder-name validation against path traversal. */
 export function getRegisteredGroup(
   jid: string,
 ): (RegisteredGroup & { jid: string }) | undefined {
   const row = db
     .prepare('SELECT * FROM registered_groups WHERE jid = ?')
-    .get(jid) as
-    | {
-        jid: string;
-        name: string;
-        folder: string;
-        trigger_pattern: string;
-        added_at: string;
-        container_config: string | null;
-        requires_trigger: number | null;
-        heartbeat: string | null;
-        discord_guild_id: string | null;
-        server_folder: string | null;
-        backend: string | null;
-        description: string | null;
-        auto_respond_to_questions: number | null;
-        auto_respond_keywords: string | null;
-        stream_intermediates: number | null;
-      }
-    | undefined;
+    .get(jid) as RegisteredGroupRow | undefined;
   if (!row) return undefined;
 
   // Validate folder name against traversal attacks
@@ -642,36 +878,13 @@ export function getRegisteredGroup(
     return undefined;
   }
 
-  return {
-    jid: row.jid,
-    name: row.name,
-    folder: row.folder,
-    trigger: row.trigger_pattern,
-    added_at: row.added_at,
-    containerConfig: (() => {
-      if (!row.container_config) return undefined;
-      try { return JSON.parse(row.container_config); } catch { logger.warn({ jid }, 'Corrupt container_config in DB, ignoring'); return undefined; }
-    })(),
-    requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-    heartbeat: row.heartbeat
-      ? (JSON.parse(row.heartbeat) as HeartbeatConfig)
-      : undefined,
-    discordGuildId: row.discord_guild_id || undefined,
-    serverFolder: row.server_folder || undefined,
-    backend: (row.backend as any) || undefined,
-    description: row.description || undefined,
-    autoRespondToQuestions: row.auto_respond_to_questions === 1 || undefined,
-    autoRespondKeywords: row.auto_respond_keywords ? JSON.parse(row.auto_respond_keywords) : undefined,
-    streamIntermediates: row.stream_intermediates === 1 || undefined,
-  };
+  return { jid: row.jid, ...mapRowToRegisteredGroup(row) };
 }
 
-export function setRegisteredGroup(
-  jid: string,
-  group: RegisteredGroup,
-): void {
+/** Insert or replace a registered group entry. */
+export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   db.query(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, heartbeat, discord_guild_id, server_folder, backend, description, auto_respond_to_questions, auto_respond_keywords, stream_intermediates)
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, discord_bot_id, discord_guild_id, server_folder, backend, description, auto_respond_to_questions, auto_respond_keywords, stream_intermediates)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
@@ -681,37 +894,24 @@ export function setRegisteredGroup(
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
-    group.heartbeat ? JSON.stringify(group.heartbeat) : null,
+    group.discordBotId || null,
     group.discordGuildId || null,
     group.serverFolder || null,
     group.backend || null,
     group.description || null,
     group.autoRespondToQuestions ? 1 : 0,
-    group.autoRespondKeywords ? JSON.stringify(group.autoRespondKeywords) : null,
+    group.autoRespondKeywords
+      ? JSON.stringify(group.autoRespondKeywords)
+      : null,
     group.streamIntermediates ? 1 : 0,
   );
 }
 
+/** Return all registered groups keyed by JID, skipping entries with invalid folder names. */
 export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   const rows = db
     .prepare('SELECT * FROM registered_groups')
-    .all() as Array<{
-    jid: string;
-    name: string;
-    folder: string;
-    trigger_pattern: string;
-    added_at: string;
-    container_config: string | null;
-    requires_trigger: number | null;
-    heartbeat: string | null;
-    discord_guild_id: string | null;
-    server_folder: string | null;
-    backend: string | null;
-    description: string | null;
-    auto_respond_to_questions: number | null;
-    auto_respond_keywords: string | null;
-    stream_intermediates: number | null;
-  }>;
+    .all() as RegisteredGroupRow[];
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
     // Validate folder name against traversal attacks
@@ -723,27 +923,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       continue;
     }
 
-    result[row.jid] = {
-      name: row.name,
-      folder: row.folder,
-      trigger: row.trigger_pattern,
-      added_at: row.added_at,
-      containerConfig: (() => {
-        if (!row.container_config) return undefined;
-        try { return JSON.parse(row.container_config); } catch { logger.warn({ jid: row.jid }, 'Corrupt container_config in DB, ignoring'); return undefined; }
-      })(),
-      requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-      heartbeat: row.heartbeat
-        ? (JSON.parse(row.heartbeat) as HeartbeatConfig)
-        : undefined,
-      discordGuildId: row.discord_guild_id || undefined,
-      serverFolder: row.server_folder || undefined,
-      backend: (row.backend as any) || undefined,
-      description: row.description || undefined,
-      autoRespondToQuestions: row.auto_respond_to_questions === 1 || undefined,
-      autoRespondKeywords: row.auto_respond_keywords ? JSON.parse(row.auto_respond_keywords) : undefined,
-      streamIntermediates: row.stream_intermediates === 1 || undefined,
-    };
+    result[row.jid] = mapRowToRegisteredGroup(row);
   }
   return result;
 }
@@ -751,12 +931,37 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
 // --- Agent + ChannelRoute CRUD ---
 
 function migrateRegisteredGroupsToAgents(database: Database): void {
-  // Check if migration already happened (agents table has data)
-  const agentCount = database.prepare('SELECT COUNT(*) as cnt FROM agents').get() as { cnt: number };
-  if (agentCount.cnt > 0) return;
+  // Idempotency: check the dedicated flag (same pattern as migrateRoutesToSubscriptions).
+  const migrationKey = 'registered_groups_to_agents_migrated';
+  const migrationRow = database
+    .prepare('SELECT value FROM router_state WHERE key = ?')
+    .get(migrationKey) as { value: string } | undefined;
+  if (migrationRow?.value === '1') return;
+
+  // If both new tables already have data but the flag was never set (pre-flag DB),
+  // mark migration complete. This prevents re-importing legacy registered_groups
+  // rows into an already-migrated multi-channel setup.
+  const agentCount = database
+    .prepare('SELECT COUNT(*) as cnt FROM agents')
+    .get() as { cnt: number };
+  const routeCount = database
+    .prepare('SELECT COUNT(*) as cnt FROM channel_routes')
+    .get() as { cnt: number };
+  if (agentCount.cnt > 0 && routeCount.cnt > 0) {
+    logger.info(
+      { agentCount: agentCount.cnt, routeCount: routeCount.cnt },
+      'Agents and routes already exist — marking migration as complete',
+    );
+    database
+      .prepare('INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)')
+      .run(migrationKey, '1');
+    return;
+  }
 
   // Read all registered_groups
-  const rows = database.prepare('SELECT * FROM registered_groups').all() as Array<{
+  const rows = database
+    .prepare('SELECT * FROM registered_groups')
+    .all() as Array<{
     jid: string;
     name: string;
     folder: string;
@@ -764,222 +969,278 @@ function migrateRegisteredGroupsToAgents(database: Database): void {
     added_at: string;
     container_config: string | null;
     requires_trigger: number | null;
-    heartbeat: string | null;
+    discord_bot_id: string | null;
     discord_guild_id: string | null;
     server_folder: string | null;
     backend: string | null;
     description: string | null;
   }>;
 
-  if (rows.length === 0) return;
+  if (rows.length === 0) {
+    database
+      .prepare('INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)')
+      .run(migrationKey, '1');
+    return;
+  }
+
+  const validRows = rows.filter((row) => {
+    if (/^[a-z0-9][a-z0-9_-]*$/i.test(row.folder)) {
+      return true;
+    }
+    logger.warn(
+      { jid: row.jid, folder: row.folder },
+      'Skipping legacy migration row with invalid folder name',
+    );
+    return false;
+  });
 
   // Group rows by folder to deduplicate (multiple JIDs can map to same folder)
-  const agentsByFolder = new Map<string, typeof rows[0]>();
-  for (const row of rows) {
+  const agentsByFolder = new Map<string, (typeof rows)[number]>();
+  for (const row of validRows) {
     if (!agentsByFolder.has(row.folder)) {
       agentsByFolder.set(row.folder, row);
     }
   }
 
   const insertAgent = database.prepare(`
-    INSERT OR IGNORE INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, is_local, server_folder, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertRoute = database.prepare(`
-    INSERT OR IGNORE INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_guild_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_bot_id, discord_guild_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const [folder, row] of agentsByFolder) {
     const isMain = folder === 'main';
     const backend = row.backend || 'apple-container';
-    const isLocal = backend === 'apple-container' || backend === 'docker';
 
     insertAgent.run(
-      folder,              // id
+      folder, // id
       row.name,
       row.description,
       folder,
       backend,
+      'claude-agent-sdk', // agent_runtime (default for migration)
       row.container_config,
-      row.heartbeat,
-      isMain ? 1 : 0,     // is_admin
-      isLocal ? 1 : 0,    // is_local
+      isMain ? 1 : 0, // is_admin
       row.server_folder,
       row.added_at,
     );
   }
 
   // Insert all routes (including multiple JIDs per agent)
-  for (const row of rows) {
+  for (const row of validRows) {
     insertRoute.run(
       row.jid,
-      row.folder,          // agent_id = folder
+      row.folder, // agent_id = folder
       row.trigger_pattern,
       row.requires_trigger === null ? 1 : row.requires_trigger,
+      row.discord_bot_id,
       row.discord_guild_id,
       row.added_at,
     );
   }
+
+  database
+    .prepare('INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)')
+    .run(migrationKey, '1');
 }
 
+function migrateRoutesToSubscriptions(database: Database): void {
+  const migrated = database
+    .prepare(
+      "SELECT value FROM router_state WHERE key = 'channel_subscriptions_migrated'",
+    )
+    .get() as { value: string } | undefined;
+  if (migrated?.value === '1') return;
+
+  const rows = database
+    .prepare('SELECT * FROM channel_routes')
+    .all() as ChannelRouteRow[];
+  if (rows.length > 0) {
+    const insertSub = database.prepare(`
+      INSERT OR IGNORE INTO channel_subscriptions
+      (channel_jid, agent_id, trigger_pattern, requires_trigger, priority, is_primary, discord_bot_id, discord_guild_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const row of rows) {
+      insertSub.run(
+        row.channel_jid,
+        row.agent_id,
+        row.trigger_pattern,
+        row.requires_trigger,
+        100,
+        1,
+        row.discord_bot_id,
+        row.discord_guild_id,
+        row.created_at,
+      );
+    }
+  }
+  database
+    .prepare('INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)')
+    .run('channel_subscriptions_migrated', '1');
+}
+
+/** Look up an agent by ID, returning undefined if not found. */
 export function getAgent(id: string): Agent | undefined {
-  const row = db.prepare('SELECT * FROM agents WHERE id = ?').get(id) as {
-    id: string;
-    name: string;
-    description: string | null;
-    folder: string;
-    backend: string;
-    container_config: string | null;
-    heartbeat: string | null;
-    is_admin: number;
-    is_local: number;
-    server_folder: string | null;
-    created_at: string;
-  } | undefined;
+  const row = db.prepare('SELECT * FROM agents WHERE id = ?').get(id) as
+    | AgentRow
+    | undefined;
   if (!row) return undefined;
-  return {
-    id: row.id,
-    name: row.name,
-    description: row.description || undefined,
-    folder: row.folder,
-    backend: row.backend as Agent['backend'],
-    containerConfig: (() => { if (!row.container_config) return undefined; try { return JSON.parse(row.container_config); } catch { logger.warn({ id: row.id }, 'Corrupt agent container_config in DB, ignoring'); return undefined; } })(),
-    heartbeat: row.heartbeat ? JSON.parse(row.heartbeat) as HeartbeatConfig : undefined,
-    isAdmin: row.is_admin === 1,
-    isLocal: row.is_local === 1,
-    serverFolder: row.server_folder || undefined,
-    createdAt: row.created_at,
-  };
+  return mapRowToAgent(row);
 }
 
+/** Return all agents keyed by agent ID. */
 export function getAllAgents(): Record<string, Agent> {
-  const rows = db.prepare('SELECT * FROM agents').all() as Array<{
-    id: string;
-    name: string;
-    description: string | null;
-    folder: string;
-    backend: string;
-    container_config: string | null;
-    heartbeat: string | null;
-    is_admin: number;
-    is_local: number;
-    server_folder: string | null;
-    created_at: string;
-  }>;
+  const rows = db.prepare('SELECT * FROM agents').all() as AgentRow[];
   const result: Record<string, Agent> = {};
   for (const row of rows) {
-    result[row.id] = {
-      id: row.id,
-      name: row.name,
-      description: row.description || undefined,
-      folder: row.folder,
-      backend: row.backend as Agent['backend'],
-      containerConfig: (() => { if (!row.container_config) return undefined; try { return JSON.parse(row.container_config); } catch { logger.warn({ id: row.id }, 'Corrupt agent container_config in DB, ignoring'); return undefined; } })(),
-      heartbeat: row.heartbeat ? JSON.parse(row.heartbeat) as HeartbeatConfig : undefined,
-      isAdmin: row.is_admin === 1,
-      isLocal: row.is_local === 1,
-      serverFolder: row.server_folder || undefined,
-      createdAt: row.created_at,
-    };
+    result[row.id] = mapRowToAgent(row);
   }
   return result;
 }
 
+/** Insert or replace an agent record. */
 export function setAgent(agent: Agent): void {
-  db.query(`
-    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, is_local, server_folder, created_at)
+  db.query(
+    `
+    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at, agent_context_folder)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `,
+  ).run(
     agent.id,
     agent.name,
     agent.description || null,
     agent.folder,
     agent.backend,
+    normalizeAgentRuntime(agent.agentRuntime),
     agent.containerConfig ? JSON.stringify(agent.containerConfig) : null,
-    agent.heartbeat ? JSON.stringify(agent.heartbeat) : null,
     agent.isAdmin ? 1 : 0,
-    agent.isLocal ? 1 : 0,
     agent.serverFolder || null,
     agent.createdAt,
+    agent.agentContextFolder || null,
   );
 }
 
+/** Look up a channel route by JID, returning undefined if not found. */
 export function getChannelRoute(channelJid: string): ChannelRoute | undefined {
-  const row = db.prepare('SELECT * FROM channel_routes WHERE channel_jid = ?').get(channelJid) as {
-    channel_jid: string;
-    agent_id: string;
-    trigger_pattern: string;
-    requires_trigger: number;
-    discord_guild_id: string | null;
-    created_at: string;
-  } | undefined;
+  const row = db
+    .prepare('SELECT * FROM channel_routes WHERE channel_jid = ?')
+    .get(channelJid) as ChannelRouteRow | undefined;
   if (!row) return undefined;
-  return {
-    channelJid: row.channel_jid,
-    agentId: row.agent_id,
-    trigger: row.trigger_pattern,
-    requiresTrigger: row.requires_trigger === 1,
-    discordGuildId: row.discord_guild_id || undefined,
-    createdAt: row.created_at,
-  };
+  return mapRowToChannelRoute(row);
 }
 
+/** Return all channel routes keyed by channel JID. */
 export function getAllChannelRoutes(): Record<string, ChannelRoute> {
-  const rows = db.prepare('SELECT * FROM channel_routes').all() as Array<{
-    channel_jid: string;
-    agent_id: string;
-    trigger_pattern: string;
-    requires_trigger: number;
-    discord_guild_id: string | null;
-    created_at: string;
-  }>;
+  const rows = db
+    .prepare('SELECT * FROM channel_routes')
+    .all() as ChannelRouteRow[];
   const result: Record<string, ChannelRoute> = {};
   for (const row of rows) {
-    result[row.channel_jid] = {
-      channelJid: row.channel_jid,
-      agentId: row.agent_id,
-      trigger: row.trigger_pattern,
-      requiresTrigger: row.requires_trigger === 1,
-      discordGuildId: row.discord_guild_id || undefined,
-      createdAt: row.created_at,
-    };
+    result[row.channel_jid] = mapRowToChannelRoute(row);
   }
   return result;
 }
 
+/** Insert or replace a channel route record. */
 export function setChannelRoute(route: ChannelRoute): void {
-  db.query(`
-    INSERT OR REPLACE INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_guild_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(
+  db.query(
+    `
+    INSERT OR REPLACE INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_bot_id, discord_guild_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `,
+  ).run(
     route.channelJid,
     route.agentId,
     route.trigger,
     route.requiresTrigger ? 1 : 0,
+    route.discordBotId || null,
     route.discordGuildId || null,
     route.createdAt,
   );
 }
 
+/** Return all channel routes associated with a given agent ID. */
 export function getRoutesForAgent(agentId: string): ChannelRoute[] {
-  const rows = db.prepare('SELECT * FROM channel_routes WHERE agent_id = ?').all(agentId) as Array<{
-    channel_jid: string;
-    agent_id: string;
-    trigger_pattern: string;
-    requires_trigger: number;
-    discord_guild_id: string | null;
-    created_at: string;
-  }>;
-  return rows.map((row) => ({
-    channelJid: row.channel_jid,
-    agentId: row.agent_id,
-    trigger: row.trigger_pattern,
-    requiresTrigger: row.requires_trigger === 1,
-    discordGuildId: row.discord_guild_id || undefined,
-    createdAt: row.created_at,
-  }));
+  const rows = db
+    .prepare('SELECT * FROM channel_routes WHERE agent_id = ?')
+    .all(agentId) as ChannelRouteRow[];
+  return rows.map(mapRowToChannelRoute);
+}
+
+export function getSubscriptionsForChannel(
+  channelJid: string,
+): ChannelSubscription[] {
+  const rows = db
+    .prepare(
+      'SELECT * FROM channel_subscriptions WHERE channel_jid = ? ORDER BY priority ASC, created_at ASC',
+    )
+    .all(channelJid) as ChannelSubscriptionRow[];
+  return rows.map(mapRowToChannelSubscription);
+}
+
+export function getSubscriptionsForAgent(
+  agentId: string,
+): ChannelSubscription[] {
+  const rows = db
+    .prepare(
+      'SELECT * FROM channel_subscriptions WHERE agent_id = ? ORDER BY priority ASC, created_at ASC',
+    )
+    .all(agentId) as ChannelSubscriptionRow[];
+  return rows.map(mapRowToChannelSubscription);
+}
+
+export function getAllChannelSubscriptions(): Record<
+  string,
+  ChannelSubscription[]
+> {
+  const rows = db
+    .prepare(
+      'SELECT * FROM channel_subscriptions ORDER BY channel_jid ASC, priority ASC, created_at ASC',
+    )
+    .all() as ChannelSubscriptionRow[];
+  const result: Record<string, ChannelSubscription[]> = {};
+  for (const row of rows) {
+    const sub = mapRowToChannelSubscription(row);
+    if (!result[sub.channelJid]) result[sub.channelJid] = [];
+    result[sub.channelJid].push(sub);
+  }
+  return result;
+}
+
+export function setChannelSubscription(sub: ChannelSubscription): void {
+  db.query(
+    `
+    INSERT OR REPLACE INTO channel_subscriptions
+    (channel_jid, agent_id, trigger_pattern, requires_trigger, priority, is_primary, discord_bot_id, discord_guild_id, created_at, channel_folder, category_folder)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `,
+  ).run(
+    sub.channelJid,
+    sub.agentId,
+    sub.trigger,
+    sub.requiresTrigger ? 1 : 0,
+    sub.priority,
+    sub.isPrimary ? 1 : 0,
+    sub.discordBotId || null,
+    sub.discordGuildId || null,
+    sub.createdAt,
+    sub.channelFolder || null,
+    sub.categoryFolder || null,
+  );
+}
+
+export function removeChannelSubscription(
+  channelJid: string,
+  agentId: string,
+): void {
+  db.query(
+    'DELETE FROM channel_subscriptions WHERE channel_jid = ? AND agent_id = ?',
+  ).run(channelJid, agentId);
 }
 
 // --- JSON migration ---

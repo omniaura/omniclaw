@@ -1,23 +1,92 @@
+import os from 'os';
 import path from 'path';
 
+export type AgentRuntime = 'claude-agent-sdk' | 'opencode';
+
+export interface DiscordBotConfig {
+  id: string;
+  token: string;
+  runtime?: AgentRuntime;
+}
+
+export function parseEnvList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(/[\n,]/)
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+}
+
+function parseAgentRuntime(
+  value: string | undefined,
+): AgentRuntime | undefined {
+  if (!value) return undefined;
+  if (value === 'claude-agent-sdk' || value === 'opencode') return value;
+  return undefined;
+}
+
+function sanitizeBotId(raw: string): string {
+  return raw
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+export function buildDiscordBotConfigFromEnv(env: NodeJS.ProcessEnv): {
+  bots: DiscordBotConfig[];
+  defaultBotId?: string;
+} {
+  const ids = parseEnvList(env.DISCORD_BOT_IDS)
+    .map(sanitizeBotId)
+    .filter((id) => id.length > 0);
+
+  if (ids.length > 0) {
+    const bots: DiscordBotConfig[] = [];
+    for (const id of ids) {
+      const token = env[`DISCORD_BOT_${id}_TOKEN`]?.trim();
+      if (!token) continue;
+      const runtime = parseAgentRuntime(env[`DISCORD_BOT_${id}_RUNTIME`]);
+      bots.push({ id, token, runtime });
+    }
+    if (bots.length === 0) return { bots: [] };
+    const preferredDefault = sanitizeBotId(env.DISCORD_BOT_DEFAULT || '');
+    const defaultBotId = bots.some((b) => b.id === preferredDefault)
+      ? preferredDefault
+      : bots[0].id;
+    return { bots, defaultBotId };
+  }
+
+  const token = (env.DISCORD_BOT_TOKEN || '').trim();
+  const bots = token
+    ? [{ id: 'PRIMARY', token, runtime: undefined as AgentRuntime | undefined }]
+    : [];
+  return {
+    bots,
+    defaultBotId: bots[0]?.id,
+  };
+}
+
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Omni';
-export const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || '';
+const discordEnv = buildDiscordBotConfigFromEnv(process.env);
+export const DISCORD_BOTS = discordEnv.bots;
+export const DISCORD_DEFAULT_BOT_ID = discordEnv.defaultBotId;
+export const DISCORD_BOT_IDS = DISCORD_BOTS.map((b) => b.id);
+export const DISCORD_BOT_TOKEN = DISCORD_BOTS[0]?.token || '';
 export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 // Slack: bot token (xoxb-...) + app-level token for Socket Mode (xapp-...)
 export const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
 export const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN || '';
-export const TELEGRAM_ONLY = process.env.TELEGRAM_ONLY === 'true';
-export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
-  .split(',')
-  .map((t) => t.trim())
-  .filter(Boolean);
 export const POLL_INTERVAL = 2000;
+
+/** Separator used in runtime group folders to isolate multi-agent dispatch state. */
+export const DISPATCH_RUNTIME_SEP = '__dispatch__';
 export const SCHEDULER_POLL_INTERVAL = 60000;
 export const PERSISTENT_TASK_STATE = process.env.PERSISTENT_TASK_STATE === 'true';
 
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
-const HOME_DIR = process.env.HOME || '/Users/user';
+const HOME_DIR = process.env.HOME || os.homedir();
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
 export const MOUNT_ALLOWLIST_PATH = path.join(
@@ -31,6 +100,7 @@ export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 export const MAIN_GROUP_FOLDER = 'main';
 
+export const LOCAL_RUNTIME = process.env.LOCAL_RUNTIME || 'container';
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'omniclaw-agent:latest';
 export const CONTAINER_MEMORY = process.env.CONTAINER_MEMORY || '4G';
@@ -43,10 +113,7 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   10,
 ); // 10MB default
 export const IPC_POLL_INTERVAL = 1000;
-export const IDLE_TIMEOUT = parseInt(
-  process.env.IDLE_TIMEOUT || '1800000',
-  10,
-); // 30min default — how long to keep container alive after last result
+export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const CONTAINER_STARTUP_TIMEOUT = parseInt(
   process.env.CONTAINER_STARTUP_TIMEOUT || '120000',
   10,
@@ -55,13 +122,29 @@ export const SESSION_MAX_AGE = parseInt(
   process.env.SESSION_MAX_AGE || '14400000',
   10,
 ); // 4 hours — rotate sessions to prevent unbounded context growth
-export const MAX_CONCURRENT_CONTAINERS = Math.max(
+/** Max containers actively processing messages or tasks. */
+export const MAX_ACTIVE_CONTAINERS = Math.max(
   1,
-  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '8', 10) || 8,
+  parseInt(
+    process.env.MAX_ACTIVE_CONTAINERS ||
+      process.env.MAX_CONCURRENT_CONTAINERS ||
+      '8',
+    10,
+  ) || 8,
 );
+/** Max warm containers sitting idle, waiting for the next message. */
+export const MAX_IDLE_CONTAINERS = Math.max(
+  0,
+  parseInt(process.env.MAX_IDLE_CONTAINERS || '4', 10) || 4,
+);
+/** Backward-compat alias. */
+export const MAX_CONCURRENT_CONTAINERS = MAX_ACTIVE_CONTAINERS;
 export const MAX_TASK_CONTAINERS = Math.max(
   1,
-  parseInt(process.env.MAX_TASK_CONTAINERS || String(MAX_CONCURRENT_CONTAINERS - 1), 10),
+  parseInt(
+    process.env.MAX_TASK_CONTAINERS || String(MAX_ACTIVE_CONTAINERS - 1),
+    10,
+  ),
 );
 
 export function escapeRegex(str: string): string {
@@ -83,34 +166,18 @@ export function buildTriggerPattern(trigger?: string): RegExp {
   return new RegExp(`^@${escapeRegex(name)}\\b`, 'i');
 }
 
+// Allow overriding the Anthropic model (e.g. switch to cheaper model)
+export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || undefined;
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-// Sprites cloud backend configuration
-export const SPRITES_TOKEN = process.env.SPRITES_TOKEN || '';
-export const SPRITES_ORG = process.env.SPRITES_ORG || '';
-export const SPRITES_REGION = process.env.SPRITES_REGION || '';
-export const SPRITES_RAM_MB = parseInt(process.env.SPRITES_RAM_MB || '0', 10) || 0;
-
-// Daytona cloud backend configuration
-export const DAYTONA_API_KEY = process.env.DAYTONA_API_KEY || '';
-export const DAYTONA_API_URL = process.env.DAYTONA_API_URL || '';
-export const DAYTONA_SNAPSHOT = process.env.DAYTONA_SNAPSHOT || '';
-
-// B2 (Backblaze S3) storage bus configuration
-export const B2_ENDPOINT = process.env.B2_ENDPOINT || '';
-export const B2_ACCESS_KEY_ID = process.env.B2_ACCESS_KEY_ID || '';
-export const B2_SECRET_ACCESS_KEY = process.env.B2_SECRET_ACCESS_KEY || '';
-export const B2_BUCKET = process.env.B2_BUCKET || '';
-export const B2_REGION = process.env.B2_REGION || '';
-
-// Railway cloud backend configuration
-export const RAILWAY_API_TOKEN = process.env.RAILWAY_API_TOKEN || '';
-
-// Hetzner Cloud
-export const HETZNER_API_TOKEN = process.env.HETZNER_API_TOKEN || '';
-export const HETZNER_LOCATION = process.env.HETZNER_LOCATION || 'ash'; // Ashburn, US
-export const HETZNER_SERVER_TYPE = process.env.HETZNER_SERVER_TYPE || 'cpx11'; // 2 vCPU, 2GB RAM
-export const HETZNER_IMAGE = process.env.HETZNER_IMAGE || 'ubuntu-22.04';
+export const GITHUB_WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || '';
+export const GITHUB_WEBHOOK_PORT = parseInt(
+  process.env.GITHUB_WEBHOOK_PORT || '0',
+  10,
+);
+export const GITHUB_WEBHOOK_PATH =
+  process.env.GITHUB_WEBHOOK_PATH || '/webhooks/github';

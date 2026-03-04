@@ -30,7 +30,10 @@ export type UserRegistry = Record<string, UserInfo>;
  */
 export class UserRegistryError {
   readonly _tag = 'UserRegistryError';
-  constructor(readonly message: string, readonly cause?: unknown) {}
+  constructor(
+    readonly message: string,
+    readonly cause?: unknown,
+  ) {}
 }
 
 /**
@@ -38,14 +41,18 @@ export class UserRegistryError {
  */
 export interface UserRegistryService {
   /** Get user info by name (case-insensitive) */
-  readonly getUser: (name: string) => Effect.Effect<UserInfo | null, UserRegistryError>;
+  readonly getUser: (
+    name: string,
+  ) => Effect.Effect<UserInfo | null, UserRegistryError>;
 
   /** Add or update user in registry */
-  readonly upsertUser: (user: UserInfo) => Effect.Effect<void, UserRegistryError>;
+  readonly upsertUser: (
+    user: UserInfo,
+  ) => Effect.Effect<void, UserRegistryError>;
 
   /** Get all users for a platform */
   readonly getUsersByPlatform: (
-    platform: UserInfo['platform']
+    platform: UserInfo['platform'],
   ) => Effect.Effect<UserInfo[], UserRegistryError>;
 
   /** Load registry from disk */
@@ -56,7 +63,7 @@ export interface UserRegistryService {
 }
 
 export const UserRegistryService = Context.GenericTag<UserRegistryService>(
-  'UserRegistryService'
+  'UserRegistryService',
 );
 
 const REGISTRY_PATH = '/workspace/ipc/user_registry.json';
@@ -70,7 +77,9 @@ export const makeUserRegistryService = Effect.gen(function* (_) {
 
   const normalizeKey = (name: string) => name.toLowerCase().trim();
 
-  const getUser = (name: string): Effect.Effect<UserInfo | null, UserRegistryError> =>
+  const getUser = (
+    name: string,
+  ): Effect.Effect<UserInfo | null, UserRegistryError> =>
     Effect.gen(function* (_) {
       const registry = yield* _(Ref.get(registryRef));
       const key = normalizeKey(name);
@@ -84,16 +93,18 @@ export const makeUserRegistryService = Effect.gen(function* (_) {
         Ref.update(registryRef, (registry) => ({
           ...registry,
           [key]: { ...user, lastSeen: new Date().toISOString() },
-        }))
+        })),
       );
     });
 
   const getUsersByPlatform = (
-    platform: UserInfo['platform']
+    platform: UserInfo['platform'],
   ): Effect.Effect<UserInfo[], UserRegistryError> =>
     Effect.gen(function* (_) {
       const registry = yield* _(Ref.get(registryRef));
-      return Object.values(registry).filter((user) => user.platform === platform);
+      return Object.values(registry).filter(
+        (user) => user.platform === platform,
+      );
     });
 
   const load = (): Effect.Effect<void, UserRegistryError> =>
@@ -107,15 +118,17 @@ export const makeUserRegistryService = Effect.gen(function* (_) {
 
         // Load registry if it exists
         if (existsSync(REGISTRY_PATH)) {
-          const data = yield* _(Effect.promise(() => readFile(REGISTRY_PATH, 'utf-8')));
+          const data = yield* _(
+            Effect.promise(() => readFile(REGISTRY_PATH, 'utf-8')),
+          );
           const registry = JSON.parse(data) as UserRegistry;
           yield* _(Ref.set(registryRef, registry));
         }
       } catch (error) {
         return yield* _(
           Effect.fail(
-            new UserRegistryError('Failed to load user registry', error)
-          )
+            new UserRegistryError('Failed to load user registry', error),
+          ),
         );
       }
     });
@@ -129,8 +142,8 @@ export const makeUserRegistryService = Effect.gen(function* (_) {
       } catch (error) {
         return yield* _(
           Effect.fail(
-            new UserRegistryError('Failed to save user registry', error)
-          )
+            new UserRegistryError('Failed to save user registry', error),
+          ),
         );
       }
     });
@@ -149,14 +162,14 @@ export const makeUserRegistryService = Effect.gen(function* (_) {
  */
 export const UserRegistryServiceLive = Layer.effect(
   UserRegistryService,
-  makeUserRegistryService
+  makeUserRegistryService,
 );
 
 /**
  * Helper to format a platform-specific mention
  */
 export const formatMention = (
-  name: string
+  name: string,
 ): Effect.Effect<string, UserRegistryError, UserRegistryService> =>
   Effect.gen(function* (_) {
     const registry = yield* _(UserRegistryService);

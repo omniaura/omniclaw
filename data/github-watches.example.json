@@ -1,0 +1,22 @@
+{
+  "watches": [
+    {
+      "agentId": "omniaura-discord",
+      "repos": [
+        {
+          "owner": "omniaura",
+          "repo": "omniclaw",
+          "openPrs": { "limit": 10, "includeReviewComments": true },
+          "recentIssues": { "limit": 10 }
+        },
+        {
+          "owner": "omniaura",
+          "repo": "acta",
+          "openPrs": { "limit": 5, "includeReviewComments": true },
+          "recentIssues": { "limit": 5 }
+        }
+      ]
+    }
+  ],
+  "cacheTtlMs": 300000
+}

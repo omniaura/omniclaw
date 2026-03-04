@@ -3,44 +3,54 @@ import path from 'path';
 
 import {
   DATA_DIR,
+  DISPATCH_RUNTIME_SEP,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
   TIMEZONE,
 } from './config.js';
 import { calculateNextRun } from './schedule-utils.js';
-import { AvailableGroup } from './container-runner.js';
+import { AvailableGroup } from './ipc-snapshots.js';
 import {
   createTask,
   deleteTask,
+  getSubscriptionsForChannel,
+  removeChannelSubscription,
+  setChannelSubscription,
   getTaskById,
   setRegisteredGroup,
   updateTask,
 } from './db.js';
 import { transferFiles } from './file-transfer.js';
+import { rejectTraversalSegments } from './path-security.js';
 import {
   findGroupByFolder,
   findJidByFolder,
   findMainGroupJid,
   isMainGroup,
 } from './group-helpers.js';
-import { logger } from './logger.js';
-import { reconcileHeartbeats } from './task-scheduler.js';
 import {
-  BackendType,
+  listIpcJsonFiles,
+  quarantineIpcFile,
+  readIpcJsonFile,
+} from './ipc-file-security.js';
+import { logger } from './logger.js';
+import { stripInternalTags } from './router.js';
+import {
   Channel,
-  HeartbeatConfig,
+  IpcMessagePayload,
+  IpcTaskPayload,
   RegisteredGroup,
 } from './types.js';
-import { DaytonaBackend } from './backends/daytona-backend.js';
-import { startDaytonaIpcPoller } from './backends/daytona-ipc-poller.js';
-import { startSpritesIpcPoller } from './backends/sprites-ipc-poller.js';
-import { SpritesBackend } from './backends/sprites-backend.js';
-import { getBackend } from './backends/index.js';
 
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string) => Promise<string | void>;
-  /** Store a message in a group's DB and enqueue it for agent processing */
-  notifyGroup: (jid: string, text: string) => void;
+  sendMessage: (
+    jid: string,
+    text: string,
+    discordBotId?: string,
+  ) => Promise<string | void>;
+  /** Store a message in a group's DB and enqueue it for agent processing.
+   * Pass sourceFolder to tag the message so the source agent doesn't echo it. */
+  notifyGroup: (jid: string, text: string, sourceFolder?: string) => void;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   updateGroup: (jid: string, group: RegisteredGroup) => void;
@@ -53,6 +63,51 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   findChannel?: (jid: string) => Channel | undefined;
+  /** Refresh the current_tasks.json snapshot so the agent sees updates immediately */
+  writeTasksSnapshot?: (groupFolder: string, isMain: boolean) => void;
+  /** Called when channel subscriptions are mutated via IPC */
+  onSubscriptionChanged?: () => void;
+  /** Runtime folders currently launched by the orchestrator (for auth). */
+  activeRuntimeFolders?: () => ReadonlySet<string>;
+  /** All known agent folders (including secondary agents not in registeredGroups). */
+  agentFolders?: () => ReadonlySet<string>;
+  /** Return all channel subscriptions for a JID (used to check if sourceGroup is a subscriber). */
+  getSubscriptions?: (
+    jid: string,
+  ) => Array<{ agentId: string; agentFolder: string }>;
+}
+
+/**
+ * Resolve a runtime group folder back to its canonical owner folder.
+ *
+ * Runtime folders have the format `{owner}{DISPATCH_RUNTIME_SEP}{16-char hex digest}`.
+ * We validate both parts: the owner must be a known folder AND the suffix must
+ * be exactly the 16-char hex digest format produced by getRuntimeGroupFolder().
+ *
+ * Returns null if the folder is unrecognized (unknown owner or malformed digest).
+ * Liveness checking (whether the container is still running) is handled by the
+ * caller — this function only validates structural ownership.
+ */
+const RUNTIME_DIGEST_RE = /^[0-9a-f]{16}$/;
+
+function resolveOwnerGroupFolder(
+  sourceGroup: string,
+  registeredGroups: Record<string, RegisteredGroup>,
+  agentFolders?: ReadonlySet<string>,
+): string | null {
+  const knownFolders = new Set([
+    ...Object.values(registeredGroups).map((g) => g.folder),
+    ...(agentFolders ?? []),
+  ]);
+  if (knownFolders.has(sourceGroup)) return sourceGroup;
+  const idx = sourceGroup.indexOf(DISPATCH_RUNTIME_SEP);
+  if (idx === -1) return null; // Unknown folder, not a runtime folder
+  const owner = sourceGroup.slice(0, idx);
+  const digest = sourceGroup.slice(idx + DISPATCH_RUNTIME_SEP.length);
+  if (!knownFolders.has(owner) || !RUNTIME_DIGEST_RE.test(digest)) {
+    return null; // Owner unknown or digest malformed
+  }
+  return owner;
 }
 
 // --- Pending share request tracking ---
@@ -68,6 +123,7 @@ export interface PendingShareRequest {
 
 const pendingShareRequests = new Map<string, PendingShareRequest>();
 const STALE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const MAX_PENDING_SHARE_REQUESTS = 1000;
 
 export function trackShareRequest(
   messageId: string,
@@ -77,6 +133,11 @@ export function trackShareRequest(
   const now = Date.now();
   for (const [id, entry] of pendingShareRequests) {
     if (now - entry.timestamp > STALE_TTL_MS) pendingShareRequests.delete(id);
+  }
+  // Cap size to prevent memory exhaustion from flooding
+  if (pendingShareRequests.size >= MAX_PENDING_SHARE_REQUESTS) {
+    const oldestKey = pendingShareRequests.keys().next().value;
+    if (oldestKey) pendingShareRequests.delete(oldestKey);
   }
   pendingShareRequests.set(messageId, meta);
   logger.info(
@@ -93,36 +154,182 @@ export function consumeShareRequest(
   return entry;
 }
 
-let ipcWatcherRunning = false;
+/** Result of processing an IPC message. */
+export type MessageResult =
+  | { action: 'handled' }
+  | { action: 'suppressed'; reason: string }
+  | { action: 'blocked'; reason: string }
+  | { action: 'unknown' };
 
 /**
- * Shared IPC message handler for cloud-backed group pollers (Sprites, Daytona).
- * Both backends route messages via the same logic; only the log label differs.
+ * Process a single IPC message payload. Extracted from startIpcWatcher to
+ * enable direct unit testing of message dispatch logic.
  */
-function makeCloudMessageHandler(deps: IpcDeps) {
-  return async (
-    sourceGroup: string,
-    data: any,
-    backendLabel: string,
-  ): Promise<void> => {
-    if (data.type !== 'message' || !data.chatJid || !data.text) return;
-    const registeredGroups = deps.registeredGroups();
-    const targetGroup = registeredGroups[data.chatJid];
-    const isSelf = targetGroup && targetGroup.folder === sourceGroup;
-    const isMain = sourceGroup === MAIN_GROUP_FOLDER;
-    if (isMain || isSelf || !!targetGroup) {
-      await deps.sendMessage(data.chatJid, data.text);
-      // Cross-group message: also wake up the target agent
-      if (targetGroup && targetGroup.folder !== sourceGroup) {
-        deps.notifyGroup(data.chatJid, data.text);
+export async function processMessageIpc(
+  data: IpcMessagePayload,
+  sourceGroup: string,
+  isMain: boolean,
+  ipcBaseDir: string,
+  registeredGroups: Record<string, RegisteredGroup>,
+  deps: IpcDeps,
+): Promise<MessageResult> {
+  // --- react_to_message ---
+  if (
+    data.type === 'react_to_message' &&
+    data.chatJid &&
+    data.messageId &&
+    data.emoji
+  ) {
+    const chatJid = data.chatJid;
+    const messageId = data.messageId;
+    const emoji = data.emoji;
+    const ch = deps.findChannel?.(chatJid);
+    if (data.remove) {
+      await (ch?.removeReaction?.(chatJid, messageId, emoji) ??
+        Promise.resolve());
+    } else {
+      await (ch?.addReaction?.(chatJid, messageId, emoji) ?? Promise.resolve());
+    }
+    logger.info(
+      {
+        chatJid,
+        messageId,
+        emoji,
+        remove: !!data.remove,
+        sourceGroup,
+      },
+      'IPC reaction processed',
+    );
+    return { action: 'handled' };
+  }
+
+  // --- format_mention ---
+  if (data.type === 'format_mention' && data.userName && data.platform) {
+    const userRegistryPath = path.join(ipcBaseDir, 'user_registry.json');
+    let formattedMention = `@${data.userName}`;
+    try {
+      if (fs.existsSync(userRegistryPath)) {
+        const registryData = JSON.parse(
+          fs.readFileSync(userRegistryPath, 'utf-8'),
+        );
+        const key = data.userName!.toLowerCase().trim();
+        const user = registryData[key];
+        if (user) {
+          switch (user.platform) {
+            case 'discord':
+            case 'slack':
+              formattedMention = `<@${user.id}>`;
+              break;
+            case 'whatsapp':
+              formattedMention = `@${user.id}`;
+              break;
+            default:
+              formattedMention = `@${user.name}`;
+          }
+        }
       }
-      logger.info(
-        { chatJid: data.chatJid, sourceGroup },
-        `${backendLabel} IPC message sent`,
+    } catch (err) {
+      logger.warn(
+        { err, userName: data.userName },
+        'format_mention: failed to read user registry',
       );
     }
-  };
+    // Write response back so the agent can read the result
+    if (data.requestId) {
+      const safeRequestId = String(data.requestId).replace(
+        /[^a-zA-Z0-9_-]/g,
+        '',
+      );
+      if (!safeRequestId) {
+        logger.warn(
+          { requestId: data.requestId },
+          'format_mention: requestId sanitized to empty string — skipping response',
+        );
+        return { action: 'blocked', reason: 'requestId sanitized to empty' };
+      }
+      const responseDir = path.join(ipcBaseDir, sourceGroup, 'responses');
+      fs.mkdirSync(responseDir, { recursive: true });
+      const responseFile = path.join(responseDir, `${safeRequestId}.json`);
+      const tempPath = `${responseFile}.tmp`;
+      fs.writeFileSync(
+        tempPath,
+        JSON.stringify(
+          {
+            type: 'format_mention_response',
+            requestId: safeRequestId,
+            result: formattedMention,
+          },
+          null,
+          2,
+        ),
+      );
+      fs.renameSync(tempPath, responseFile);
+    }
+    logger.info(
+      {
+        userName: data.userName,
+        platform: data.platform,
+        formattedMention,
+        sourceGroup,
+      },
+      'IPC format_mention processed',
+    );
+    return { action: 'handled' };
+  }
+
+  // --- ssh_pubkey ---
+  if (data.type === 'ssh_pubkey' && data.pubkey) {
+    logger.info(
+      { folder: sourceGroup, pubkey: data.pubkey },
+      'Agent generated new SSH key',
+    );
+    return { action: 'handled' };
+  }
+
+  // --- message ---
+  if (data.type === 'message' && data.chatJid && data.text) {
+    const msgChatJid = data.chatJid;
+    const msgText = stripInternalTags(data.text);
+    if (!msgText) {
+      logger.debug(
+        { chatJid: data.chatJid, sourceGroup },
+        'IPC message suppressed (internal-only)',
+      );
+      return { action: 'suppressed', reason: 'internal-only' };
+    }
+    // Authorization: any registered agent can message any other registered agent
+    const targetGroup = registeredGroups[msgChatJid];
+    // isSelf: sourceGroup is the primary agent OR any subscriber of this channel.
+    // Prevents secondary agents (e.g. OCPeyton) posting to a shared channel from
+    // triggering notifyGroup, which would wake up the primary agent (Clayton) to respond.
+    const channelSubs = deps.getSubscriptions?.(msgChatJid) ?? [];
+    const isSelf =
+      (targetGroup && targetGroup.folder === sourceGroup) ||
+      channelSubs.some((s) => s.agentFolder === sourceGroup);
+    const isRegisteredTarget = !!targetGroup;
+    if (isMain || isSelf || isRegisteredTarget) {
+      await deps.sendMessage(msgChatJid, msgText, data.discord_bot_id);
+      // Cross-group message: also wake up the target agent.
+      // Pass sourceGroup so the notify message is tagged — the source
+      // agent won't see its own IPC message echoed back at it.
+      if (targetGroup && !isSelf) {
+        deps.notifyGroup(msgChatJid, msgText, sourceGroup);
+      }
+      logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
+      return { action: 'handled' };
+    } else {
+      logger.warn(
+        { chatJid: data.chatJid, sourceGroup },
+        'Unauthorized IPC message attempt blocked (target not registered)',
+      );
+      return { action: 'blocked', reason: 'target not registered' };
+    }
+  }
+
+  return { action: 'unknown' };
 }
+
+let ipcWatcherRunning = false;
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -138,10 +345,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
     // Scan all group IPC directories (identity determined by directory)
     let groupFolders: string[];
     try {
-      groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
-        const stat = fs.statSync(path.join(ipcBaseDir, f));
-        return stat.isDirectory() && f !== 'errors';
-      });
+      groupFolders = fs
+        .readdirSync(ipcBaseDir, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && e.name !== 'errors')
+        .map((e) => e.name);
     } catch (err) {
       logger.error({ err }, 'Error reading IPC base directory');
       setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
@@ -150,160 +357,84 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
     const registeredGroups = deps.registeredGroups();
 
+    const runtimeFolders = deps.activeRuntimeFolders?.();
+    const agentFolders = deps.agentFolders?.();
     for (const sourceGroup of groupFolders) {
-      const isMain = sourceGroup === MAIN_GROUP_FOLDER;
+      const ownerGroup = resolveOwnerGroupFolder(
+        sourceGroup,
+        registeredGroups,
+        agentFolders,
+      );
+      if (ownerGroup === null) {
+        // Unknown sender — not a registered group or runtime folder.
+        // Log and quarantine to prevent unbounded disk growth from rogue dirs.
+        const rogueDir = path.join(ipcBaseDir, sourceGroup);
+        logger.warn(
+          { sourceGroup },
+          'Skipping IPC from unrecognized source folder — quarantining',
+        );
+        try {
+          const errDir = path.join(ipcBaseDir, 'errors');
+          fs.mkdirSync(errDir, { recursive: true });
+          fs.renameSync(rogueDir, path.join(errDir, sourceGroup));
+        } catch {
+          // If rename fails (e.g. cross-device), just delete
+          try {
+            fs.rmSync(rogueDir, { recursive: true, force: true });
+          } catch {
+            /* ignore */
+          }
+        }
+        continue;
+      }
+      // Detect stale dispatch folders: container has finished (removed from
+      // activeRuntimeFolders) but the IPC directory was not yet cleaned up.
+      // Process any remaining files first, then delete the directory.
+      const isStaleDispatch =
+        sourceGroup.includes(DISPATCH_RUNTIME_SEP) &&
+        runtimeFolders !== undefined &&
+        !runtimeFolders.has(sourceGroup);
+      const isMain = ownerGroup === MAIN_GROUP_FOLDER;
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
 
       // Process messages from this group's IPC directory
       try {
         if (fs.existsSync(messagesDir)) {
-          const messageFiles = fs
-            .readdirSync(messagesDir)
-            .filter((f) => f.endsWith('.json'));
+          const messageFiles = listIpcJsonFiles(messagesDir);
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (
-                data.type === 'react_to_message' &&
-                data.chatJid &&
-                data.messageId &&
-                data.emoji
-              ) {
-                const ch = deps.findChannel?.(data.chatJid);
-                if (data.remove) {
-                  await (ch?.removeReaction?.(
-                    data.chatJid,
-                    data.messageId,
-                    data.emoji,
-                  ) ?? Promise.resolve());
-                } else {
-                  await (ch?.addReaction?.(
-                    data.chatJid,
-                    data.messageId,
-                    data.emoji,
-                  ) ?? Promise.resolve());
-                }
-                logger.info(
-                  {
-                    chatJid: data.chatJid,
-                    messageId: data.messageId,
-                    emoji: data.emoji,
-                    remove: !!data.remove,
-                    sourceGroup,
-                  },
-                  'IPC reaction processed',
+              const result = readIpcJsonFile(filePath);
+              if (!result.ok) {
+                logger.warn(
+                  { file, sourceGroup, reason: result.reason },
+                  'Rejected IPC message file',
                 );
-                fs.unlinkSync(filePath);
-                continue;
-              }
-              if (
-                data.type === 'format_mention' &&
-                data.userName &&
-                data.platform
-              ) {
-                // Look up user in registry and write response back to agent
-                const userRegistryPath = path.join(
+                quarantineIpcFile(
+                  filePath,
                   ipcBaseDir,
-                  'user_registry.json',
+                  result.reason,
+                  sourceGroup,
                 );
-                let formattedMention = `@${data.userName}`;
-                try {
-                  if (fs.existsSync(userRegistryPath)) {
-                    const registryData = JSON.parse(
-                      fs.readFileSync(userRegistryPath, 'utf-8'),
-                    );
-                    const key = (data.userName as string).toLowerCase().trim();
-                    const user = registryData[key];
-                    if (user) {
-                      switch (user.platform) {
-                        case 'discord':
-                          formattedMention = `<@${user.id}>`;
-                          break;
-                        case 'whatsapp':
-                          formattedMention = `@${user.id}`;
-                          break;
-                        case 'slack':
-                          formattedMention = `<@${user.id}>`;
-                          break;
-                        default:
-                          formattedMention = `@${user.name}`;
-                      }
-                    }
-                  }
-                } catch (err) {
-                  logger.warn(
-                    { err, userName: data.userName },
-                    'format_mention: failed to read user registry',
-                  );
-                }
-                // Write response back so the agent can read the result
-                if (data.requestId) {
-                  const safeRequestId = String(data.requestId).replace(/[^a-zA-Z0-9_-]/g, '');
-                  if (!safeRequestId) {
-                    logger.warn({ requestId: data.requestId }, 'format_mention: requestId sanitized to empty string — skipping response');
-                    break;
-                  }
-                  const responseDir = path.join(ipcBaseDir, sourceGroup, 'responses');
-                  fs.mkdirSync(responseDir, { recursive: true });
-                  const responseFile = path.join(responseDir, `${safeRequestId}.json`);
-                  const tempPath = `${responseFile}.tmp`;
-                  fs.writeFileSync(tempPath, JSON.stringify({ type: 'format_mention_response', requestId: safeRequestId, result: formattedMention }, null, 2));
-                  fs.renameSync(tempPath, responseFile);
-                }
-                logger.info(
-                  {
-                    userName: data.userName,
-                    platform: data.platform,
-                    formattedMention,
-                    sourceGroup,
-                  },
-                  'IPC format_mention processed',
-                );
-                fs.unlinkSync(filePath);
                 continue;
               }
-              if (data.type === 'ssh_pubkey' && data.pubkey) {
-                logger.info({ folder: sourceGroup, pubkey: data.pubkey }, 'Agent generated new SSH key');
-                fs.unlinkSync(filePath);
-                continue;
-              }
-              if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: any registered agent can message any other registered agent
-                const targetGroup = registeredGroups[data.chatJid];
-                const isSelf =
-                  targetGroup && targetGroup.folder === sourceGroup;
-                const isRegisteredTarget = !!targetGroup;
-                if (isMain || isSelf || isRegisteredTarget) {
-                  await deps.sendMessage(data.chatJid, data.text);
-                  // Cross-group message: also wake up the target agent
-                  if (targetGroup && targetGroup.folder !== sourceGroup) {
-                    deps.notifyGroup(data.chatJid, data.text);
-                  }
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message sent',
-                  );
-                } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC message attempt blocked (target not registered)',
-                  );
-                }
-              }
+              const data = result.data as IpcMessagePayload;
+              await processMessageIpc(
+                data,
+                ownerGroup,
+                isMain,
+                ipcBaseDir,
+                registeredGroups,
+                deps,
+              );
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
                 'Error processing IPC message',
               );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
+              quarantineIpcFile(filePath, ipcBaseDir, String(err), sourceGroup);
             }
           }
         }
@@ -317,32 +448,55 @@ export function startIpcWatcher(deps: IpcDeps): void {
       // Process tasks from this group's IPC directory
       try {
         if (fs.existsSync(tasksDir)) {
-          const taskFiles = fs
-            .readdirSync(tasksDir)
-            .filter((f) => f.endsWith('.json'));
+          const taskFiles = listIpcJsonFiles(tasksDir);
           for (const file of taskFiles) {
             const filePath = path.join(tasksDir, file);
+            const taskResult = readIpcJsonFile(filePath);
+            if (!taskResult.ok) {
+              logger.warn(
+                { file, sourceGroup, reason: taskResult.reason },
+                'Rejected IPC task file',
+              );
+              quarantineIpcFile(
+                filePath,
+                ipcBaseDir,
+                taskResult.reason,
+                sourceGroup,
+              );
+              continue;
+            }
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              const data = taskResult.data as IpcTaskPayload;
               // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data, sourceGroup, isMain, deps);
+              await processTaskIpc(data, ownerGroup, isMain, deps);
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
                 'Error processing IPC task',
               );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
+              quarantineIpcFile(filePath, ipcBaseDir, String(err), sourceGroup);
             }
           }
         }
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+      }
+
+      // Clean up stale dispatch IPC folder after processing any remaining files.
+      // This avoids a race where the container exits, activeRuntimeFolders is
+      // updated, and the watcher finds the orphaned directory on the next poll.
+      if (isStaleDispatch) {
+        const staleDir = path.join(ipcBaseDir, sourceGroup);
+        try {
+          fs.rmSync(staleDir, { recursive: true, force: true });
+          logger.debug({ sourceGroup }, 'Cleaned up stale dispatch IPC folder');
+        } catch (err) {
+          logger.debug(
+            { sourceGroup, err },
+            'Failed to clean up stale dispatch IPC folder — will retry next poll',
+          );
+        }
       }
     }
 
@@ -351,93 +505,53 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   processIpcFiles();
   logger.info('IPC watcher started (per-group namespaces)');
-
-  const cloudMessageHandler = makeCloudMessageHandler(deps);
-  const cloudTaskHandler = async (
-    sourceGroup: string,
-    isMain: boolean,
-    data: any,
-  ) => {
-    await processTaskIpc(data, sourceGroup, isMain, deps);
-  };
-
-  // Also start Sprites IPC poller for cloud-backed groups
-  startSpritesIpcPoller({
-    spritesBackend: (() => {
-      try {
-        return getBackend('sprites') as SpritesBackend;
-      } catch {
-        return new SpritesBackend();
-      }
-    })(),
-    registeredGroups: deps.registeredGroups,
-    processMessage: (sourceGroup, data) =>
-      cloudMessageHandler(sourceGroup, data, 'Sprites'),
-    processTask: cloudTaskHandler,
-  });
-
-  // Also start Daytona IPC poller for Daytona-backed groups
-  startDaytonaIpcPoller({
-    daytonaBackend: (() => {
-      try {
-        return getBackend('daytona') as DaytonaBackend;
-      } catch {
-        return new DaytonaBackend();
-      }
-    })(),
-    registeredGroups: deps.registeredGroups,
-    processMessage: (sourceGroup, data) =>
-      cloudMessageHandler(sourceGroup, data, 'Daytona'),
-    processTask: cloudTaskHandler,
-  });
 }
 
 export async function processTaskIpc(
-  data: {
-    type: string;
-    taskId?: string;
-    prompt?: string;
-    schedule_type?: string;
-    schedule_value?: string;
-    context_mode?: string;
-    groupFolder?: string;
-    chatJid?: string;
-    targetJid?: string;
-    // For register_group
-    jid?: string;
-    name?: string;
-    folder?: string;
-    trigger?: string;
-    requiresTrigger?: boolean;
-    containerConfig?: RegisteredGroup['containerConfig'];
-    discord_guild_id?: string;
-    // For configure_heartbeat
-    enabled?: boolean;
-    interval?: string;
-    heartbeat_schedule_type?: string;
-    target_group_jid?: string;
-    // For share_request
-    description?: string;
-    sourceGroup?: string;
-    scope?: string;
-    serverFolder?: string;
-    discordGuildId?: string;
-    target_agent?: string;
-    files?: string[];
-    request_files?: string[];
-    // For register_group: backend config
-    backend?: BackendType;
-    group_description?: string;
-    // For delegate_task
-    callbackAgentId?: string;
-    // For context_request
-    requestedTopics?: string[];
-  },
+  data: IpcTaskPayload,
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
   deps: IpcDeps,
 ): Promise<void> {
   const registeredGroups = deps.registeredGroups();
+
+  /** Refresh current_tasks.json so the agent sees the mutation immediately */
+  const refreshTasksSnapshot = () => {
+    deps.writeTasksSnapshot?.(sourceGroup, isMain);
+  };
+
+  /** Shared handler for cancel — auth + dispatch pattern */
+  const handleTaskCancel = (
+    taskId: string | undefined,
+    srcGroup: string,
+    isMainGroup: boolean,
+  ) => {
+    if (!taskId) {
+      logger.warn(
+        { sourceGroup: srcGroup },
+        'Task cancel attempt with missing taskId',
+      );
+      return;
+    }
+    const task = getTaskById(taskId);
+    if (!task) {
+      logger.warn(
+        { taskId, sourceGroup: srcGroup },
+        'Task cancel attempt but task not found',
+      );
+      return;
+    }
+    if (isMainGroup || task.group_folder === srcGroup) {
+      deleteTask(taskId);
+      logger.info({ taskId, sourceGroup: srcGroup }, 'Task cancelled via IPC');
+      refreshTasksSnapshot();
+    } else {
+      logger.warn(
+        { taskId, sourceGroup: srcGroup },
+        'Unauthorized task cancel attempt',
+      );
+    }
+  };
 
   switch (data.type) {
     case 'schedule_task':
@@ -448,7 +562,7 @@ export async function processTaskIpc(
         data.targetJid
       ) {
         // Resolve the target group from JID
-        const targetJid = data.targetJid as string;
+        const targetJid = data.targetJid!;
         const targetGroupEntry = registeredGroups[targetJid];
 
         if (!targetGroupEntry) {
@@ -502,62 +616,87 @@ export async function processTaskIpc(
           { taskId, sourceGroup, targetFolder, contextMode },
           'Task created via IPC',
         );
-      }
-      break;
-
-    case 'pause_task':
-      if (data.taskId) {
-        const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'paused' });
-          logger.info(
-            { taskId: data.taskId, sourceGroup },
-            'Task paused via IPC',
-          );
-        } else {
-          logger.warn(
-            { taskId: data.taskId, sourceGroup },
-            'Unauthorized task pause attempt',
-          );
-        }
-      }
-      break;
-
-    case 'resume_task':
-      if (data.taskId) {
-        const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'active' });
-          logger.info(
-            { taskId: data.taskId, sourceGroup },
-            'Task resumed via IPC',
-          );
-        } else {
-          logger.warn(
-            { taskId: data.taskId, sourceGroup },
-            'Unauthorized task resume attempt',
-          );
-        }
+        refreshTasksSnapshot();
       }
       break;
 
     case 'cancel_task':
-      if (data.taskId) {
-        const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          deleteTask(data.taskId);
-          logger.info(
-            { taskId: data.taskId, sourceGroup },
-            'Task cancelled via IPC',
-          );
-        } else {
-          logger.warn(
-            { taskId: data.taskId, sourceGroup },
-            'Unauthorized task cancel attempt',
-          );
+      handleTaskCancel(data.taskId, sourceGroup, isMain);
+      break;
+
+    case 'edit_task': {
+      if (!data.taskId) {
+        logger.warn({ sourceGroup }, 'edit_task attempt with missing taskId');
+        break;
+      }
+      const task = getTaskById(data.taskId);
+      if (!task) {
+        logger.warn(
+          { taskId: data.taskId, sourceGroup },
+          'edit_task attempt but task not found',
+        );
+        break;
+      }
+      if (!isMain && task.group_folder !== sourceGroup) {
+        logger.warn(
+          { taskId: data.taskId, sourceGroup },
+          'Unauthorized edit_task attempt',
+        );
+        break;
+      }
+
+      const updates: Partial<
+        Pick<
+          typeof task,
+          | 'prompt'
+          | 'schedule_type'
+          | 'schedule_value'
+          | 'next_run'
+          | 'status'
+          | 'context_mode'
+        >
+      > = {};
+      if (data.prompt) updates.prompt = data.prompt;
+      if (data.schedule_type)
+        updates.schedule_type = data.schedule_type as
+          | 'cron'
+          | 'interval'
+          | 'once';
+      if (data.schedule_value) updates.schedule_value = data.schedule_value;
+      if (data.status) updates.status = data.status as 'active' | 'paused';
+      if (data.context_mode)
+        updates.context_mode = data.context_mode as 'group' | 'isolated';
+
+      const effectiveStatus = updates.status ?? task.status;
+      const scheduleChanged = !!(
+        updates.schedule_type || updates.schedule_value
+      );
+      const beingResumed =
+        updates.status === 'active' && task.status !== 'active';
+
+      if (effectiveStatus === 'active' && (scheduleChanged || beingResumed)) {
+        const newType = (updates.schedule_type ?? task.schedule_type) as
+          | 'cron'
+          | 'interval'
+          | 'once';
+        const newValue = updates.schedule_value ?? task.schedule_value;
+        // Always recalculate when schedule explicitly changed (including 'once').
+        // On resume without a schedule change, only recalculate cron/interval so
+        // the task fires at the next appropriate time rather than a stale next_run.
+        if (scheduleChanged || newType !== 'once') {
+          const nextRun = calculateNextRun(newType, newValue);
+          if (nextRun !== null) updates.next_run = nextRun;
         }
       }
+
+      updateTask(data.taskId, updates);
+      logger.info(
+        { taskId: data.taskId, sourceGroup, updates: Object.keys(updates) },
+        'Task edited via IPC',
+      );
+      refreshTasksSnapshot();
       break;
+    }
 
     case 'refresh_groups':
       // Only main group can request a refresh
@@ -607,12 +746,21 @@ export async function processTaskIpc(
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
           backend: data.backend,
+          agentRuntime: data.agent_runtime,
           description: data.group_description,
           requiresTrigger: data.requiresTrigger,
+          discordBotId: data.discord_bot_id,
         };
 
-        // If a Discord guild ID is provided, set it and compute serverFolder
+        // If a Discord guild ID is provided, validate it and compute serverFolder
         if (data.discord_guild_id) {
+          if (!/^\d+$/.test(data.discord_guild_id)) {
+            logger.warn(
+              { discordGuildId: data.discord_guild_id, sourceGroup },
+              'Invalid discord_guild_id rejected (must be numeric snowflake)',
+            );
+            break;
+          }
           groupToRegister.discordGuildId = data.discord_guild_id;
           groupToRegister.serverFolder = `servers/${data.discord_guild_id}`;
         }
@@ -626,62 +774,70 @@ export async function processTaskIpc(
       }
       break;
 
-    case 'configure_heartbeat': {
-      if (data.enabled === undefined) {
-        logger.warn({ data }, 'configure_heartbeat missing enabled field');
-        break;
-      }
-
-      // Resolve target group
-      const targetJid =
-        isMain && data.target_group_jid
-          ? data.target_group_jid
-          : findJidByFolder(registeredGroups, sourceGroup);
-
-      if (!targetJid) {
+    case 'subscribe_channel': {
+      if (!isMain) {
         logger.warn(
           { sourceGroup },
-          'configure_heartbeat: could not resolve target group',
+          'Unauthorized subscribe_channel attempt blocked',
         );
         break;
       }
-
-      const targetGroup = registeredGroups[targetJid];
-      if (!targetGroup) {
-        logger.warn(
-          { targetJid },
-          'configure_heartbeat: target group not registered',
-        );
+      if (!data.channel_jid || !data.target_agent) {
+        logger.warn({ data }, 'subscribe_channel missing required fields');
         break;
       }
-
-      // Authorization: non-main groups can only configure their own heartbeat
-      if (!isMain && targetGroup.folder !== sourceGroup) {
-        logger.warn(
-          { sourceGroup, targetFolder: targetGroup.folder },
-          'Unauthorized configure_heartbeat attempt',
-        );
-        break;
-      }
-
-      const heartbeat: HeartbeatConfig | undefined = data.enabled
-        ? {
-            enabled: true,
-            interval: data.interval || '1800000',
-            scheduleType: (data.heartbeat_schedule_type === 'cron'
-              ? 'cron'
-              : 'interval') as 'cron' | 'interval',
-          }
-        : undefined;
-
-      const updatedGroup: RegisteredGroup = { ...targetGroup, heartbeat };
-      deps.updateGroup(targetJid, updatedGroup);
-      reconcileHeartbeats(deps.registeredGroups());
-
-      logger.info(
-        { targetJid, folder: targetGroup.folder, enabled: data.enabled },
-        'Heartbeat configured via IPC',
+      const targetEntry = findGroupByFolder(
+        registeredGroups,
+        data.target_agent,
       );
+      if (!targetEntry) {
+        logger.warn(
+          { targetAgent: data.target_agent },
+          'subscribe_channel target agent not found',
+        );
+        break;
+      }
+      const targetGroup = targetEntry[1];
+      const subs = getSubscriptionsForChannel(data.channel_jid);
+      const existing = subs.find((s) => s.agentId === targetGroup.folder);
+      const now = new Date().toISOString();
+      setChannelSubscription({
+        channelJid: data.channel_jid,
+        agentId: targetGroup.folder,
+        trigger: data.trigger || targetGroup.trigger || `@${targetGroup.name}`,
+        requiresTrigger: data.requiresTrigger !== false,
+        priority: 100,
+        isPrimary: existing?.isPrimary ?? false,
+        discordBotId: data.discord_bot_id || targetGroup.discordBotId,
+        discordGuildId: data.discord_guild_id || targetGroup.discordGuildId,
+        createdAt: existing?.createdAt || now,
+      });
+      logger.info(
+        { channelJid: data.channel_jid, agentId: targetGroup.folder },
+        'Channel subscription upserted via IPC',
+      );
+      deps.onSubscriptionChanged?.();
+      break;
+    }
+
+    case 'unsubscribe_channel': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized unsubscribe_channel attempt blocked',
+        );
+        break;
+      }
+      if (!data.channel_jid || !data.target_agent) {
+        logger.warn({ data }, 'unsubscribe_channel missing required fields');
+        break;
+      }
+      removeChannelSubscription(data.channel_jid, data.target_agent);
+      logger.info(
+        { channelJid: data.channel_jid, agentId: data.target_agent },
+        'Channel subscription removed via IPC',
+      );
+      deps.onSubscriptionChanged?.();
       break;
     }
 
@@ -696,17 +852,35 @@ export async function processTaskIpc(
       const sourceName = sourceGroupEntry?.[1].name || sourceGroup;
       const sourceJid = sourceGroupEntry?.[0] || sourceGroup;
 
+      // Track validated files at case scope for notification message
+      let sharedFiles: string[] = [];
+      let requestedFiles: string[] = [];
+
       // If files are specified with a target_agent, do the file transfer
       if (data.target_agent && data.files && data.files.length > 0) {
+        // Validate all file paths before transfer (defense-in-depth)
+        const validFiles: string[] = [];
+        for (const file of data.files) {
+          try {
+            rejectTraversalSegments(file, 'share_request.files');
+            validFiles.push(file);
+          } catch (err) {
+            logger.warn(
+              { file, sourceGroup, error: err },
+              'Rejected share_request file path',
+            );
+          }
+        }
+
         const targetGroupEntry = findGroupByFolder(
           registeredGroups,
           data.target_agent!,
         );
-        if (targetGroupEntry && sourceGroupEntry) {
+        if (targetGroupEntry && sourceGroupEntry && validFiles.length > 0) {
           const result = await transferFiles({
             sourceGroup: sourceGroupEntry[1],
             targetGroup: targetGroupEntry[1],
-            files: data.files,
+            files: validFiles,
             direction: 'push',
           });
           logger.info(
@@ -719,6 +893,7 @@ export async function processTaskIpc(
             'Share request file transfer completed',
           );
         }
+        sharedFiles = validFiles;
       }
 
       // If request_files are specified, pull files from target to source
@@ -727,15 +902,33 @@ export async function processTaskIpc(
         data.request_files &&
         data.request_files.length > 0
       ) {
+        // Validate all requested file paths (defense-in-depth)
+        const validRequestFiles: string[] = [];
+        for (const file of data.request_files) {
+          try {
+            rejectTraversalSegments(file, 'share_request.request_files');
+            validRequestFiles.push(file);
+          } catch (err) {
+            logger.warn(
+              { file, sourceGroup, error: err },
+              'Rejected share_request request_files path',
+            );
+          }
+        }
+
         const targetGroupEntry = findGroupByFolder(
           registeredGroups,
           data.target_agent!,
         );
-        if (targetGroupEntry && sourceGroupEntry) {
+        if (
+          targetGroupEntry &&
+          sourceGroupEntry &&
+          validRequestFiles.length > 0
+        ) {
           const result = await transferFiles({
             sourceGroup: targetGroupEntry[1],
             targetGroup: sourceGroupEntry[1],
-            files: data.request_files,
+            files: validRequestFiles,
             direction: 'push',
           });
           logger.info(
@@ -747,6 +940,7 @@ export async function processTaskIpc(
             'Share request file pull completed',
           );
         }
+        requestedFiles = validRequestFiles;
       }
 
       // Determine target JID: specific agent or main
@@ -779,11 +973,11 @@ export async function processTaskIpc(
         pathGuidance = `\n\n*Write context to:* \`groups/${sourceGroup}/CLAUDE.md\``;
       }
 
-      const filesInfo = data.files?.length
-        ? `\n\n*Files shared:* ${data.files.join(', ')}`
+      const filesInfo = sharedFiles.length
+        ? `\n\n*Files shared:* ${sharedFiles.join(', ')}`
         : '';
-      const requestFilesInfo = data.request_files?.length
-        ? `\n\n*Files requested:* ${data.request_files.join(', ')}`
+      const requestFilesInfo = requestedFiles.length
+        ? `\n\n*Files requested:* ${requestedFiles.join(', ')}`
         : '';
       const targetInfo = data.target_agent
         ? ` (targeted to ${data.target_agent})`
@@ -819,95 +1013,58 @@ export async function processTaskIpc(
       break;
     }
 
-    case 'delegate_task': {
+    case 'delegate_task':
+    case 'context_request': {
       if (!data.description) {
-        logger.warn({ data }, 'delegate_task missing description');
+        logger.warn({ data }, `${data.type} missing description`);
         break;
       }
 
-      // Find the source group's display name and JID
       const sourceGroupEntry = findGroupByFolder(registeredGroups, sourceGroup);
       const sourceName = sourceGroupEntry?.[1].name || sourceGroup;
       const sourceJid = sourceGroupEntry?.[0] || sourceGroup;
-      const callbackAgent = data.callbackAgentId || sourceGroup;
 
-      // Route to admin (main) group for approval
       const mainJid = findMainGroupJid(registeredGroups);
       if (!mainJid) {
-        logger.warn('delegate_task: could not find main group JID');
+        logger.warn(`${data.type}: could not find main group JID`);
         break;
       }
 
-      const filesInfo = data.files?.length
-        ? `\n\n*Files included:* ${data.files.join(', ')}`
-        : '';
-      const delegateMsg = `*Task Request* from _${sourceName}_ (${sourceJid}):\n\n${data.description}${filesInfo}\n\n_React 👍 to approve, or reply manually._`;
-      const sentId = await deps.sendMessage(mainJid, delegateMsg);
+      let label: string;
+      let extraInfo: string;
+      let trackedDescription: string;
+      if (data.type === 'delegate_task') {
+        const callbackAgent = data.callbackAgentId || sourceGroup;
+        label = 'Task Request';
+        extraInfo = data.files?.length
+          ? `\n\n*Files included:* ${data.files.join(', ')}`
+          : '';
+        trackedDescription = `[DELEGATE TASK] ${data.description}\n\nCallback agent: ${callbackAgent}`;
+      } else {
+        label = 'Context Request';
+        extraInfo = data.requestedTopics?.length
+          ? `\n\n*Requested topics:* ${data.requestedTopics.join(', ')}`
+          : '';
+        trackedDescription = `[CONTEXT REQUEST] ${data.description}${data.requestedTopics?.length ? `\nTopics: ${data.requestedTopics.join(', ')}` : ''}`;
+      }
 
-      // Track for reaction-based approval
+      const requestMsg = `*${label}* from _${sourceName}_ (${sourceJid}):\n\n${data.description}${extraInfo}\n\n_React 👍 to approve, or reply manually._`;
+      const sentId = await deps.sendMessage(mainJid, requestMsg);
+
       if (sentId) {
         trackShareRequest(sentId, {
           sourceJid,
           sourceName,
           sourceGroup,
-          description: `[DELEGATE TASK] ${data.description}\n\nCallback agent: ${callbackAgent}`,
+          description: trackedDescription,
           serverFolder: undefined,
           timestamp: Date.now(),
         });
       }
 
       logger.info(
-        {
-          sourceGroup,
-          callbackAgent,
-          description: data.description.slice(0, 100),
-        },
-        'Delegate task forwarded for approval',
-      );
-      break;
-    }
-
-    case 'context_request': {
-      if (!data.description) {
-        logger.warn({ data }, 'context_request missing description');
-        break;
-      }
-
-      const sourceGroupEntry = findGroupByFolder(registeredGroups, sourceGroup);
-      const sourceName = sourceGroupEntry?.[1].name || sourceGroup;
-      const sourceJid = sourceGroupEntry?.[0] || sourceGroup;
-
-      // Route to admin for approval
-      const mainJid = findMainGroupJid(registeredGroups);
-      if (!mainJid) {
-        logger.warn('context_request: could not find main group JID');
-        break;
-      }
-
-      const topicsInfo = data.requestedTopics?.length
-        ? `\n\n*Requested topics:* ${data.requestedTopics.join(', ')}`
-        : '';
-      const contextMsg = `*Context Request* from _${sourceName}_ (${sourceJid}):\n\n${data.description}${topicsInfo}\n\n_React 👍 to approve, or reply manually._`;
-      const sentCtxId = await deps.sendMessage(mainJid, contextMsg);
-
-      if (sentCtxId) {
-        trackShareRequest(sentCtxId, {
-          sourceJid,
-          sourceName,
-          sourceGroup,
-          description: `[CONTEXT REQUEST] ${data.description}${data.requestedTopics?.length ? `\nTopics: ${data.requestedTopics.join(', ')}` : ''}`,
-          serverFolder: undefined,
-          timestamp: Date.now(),
-        });
-      }
-
-      logger.info(
-        {
-          sourceGroup,
-          description: data.description.slice(0, 100),
-          topics: data.requestedTopics,
-        },
-        'Context request forwarded for approval',
+        { sourceGroup, description: data.description.slice(0, 100) },
+        `${label} forwarded for approval`,
       );
       break;
     }

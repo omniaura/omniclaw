@@ -8,31 +8,35 @@
  */
 import fs from 'fs';
 import path from 'path';
-import pino from 'pino';
 import qrcode from 'qrcode-terminal';
 import readline from 'readline';
 
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
+
+import { createLogger } from './logger.js';
 
 const AUTH_DIR = './store/auth';
 const QR_FILE = './store/qr-data.txt';
 const STATUS_FILE = './store/auth-status.txt';
 
-const logger = pino({
-  level: 'warn', // Quiet logging - only show errors
-});
+// Quiet logger for Baileys — suppress info/debug noise during auth
+const logger = createLogger({}, 'warn');
 
 // Check for --pairing-code flag and phone number
 const usePairingCode = process.argv.includes('--pairing-code');
 const phoneArg = process.argv.find((_, i, arr) => arr[i - 1] === '--phone');
 
 function askQuestion(prompt: string): Promise<string> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
   return new Promise((resolve) => {
     rl.question(prompt, (answer) => {
       rl.close();
@@ -41,7 +45,10 @@ function askQuestion(prompt: string): Promise<string> {
   });
 }
 
-async function connectSocket(phoneNumber?: string, isReconnect = false): Promise<void> {
+async function connectSocket(
+  phoneNumber?: string,
+  isReconnect = false,
+): Promise<void> {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
   if (state.creds.registered && !isReconnect) {
@@ -53,7 +60,9 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
     process.exit(0);
   }
 
+  const { version } = await fetchLatestWaWebVersion({});
   const sock = makeWASocket({
+    version,
     auth: {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -96,7 +105,9 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
     }
 
     if (connection === 'close') {
-      const reason = (lastDisconnect?.error as any)?.output?.statusCode;
+      const reason = (
+        lastDisconnect?.error as { output?: { statusCode?: number } }
+      )?.output?.statusCode;
 
       if (reason === DisconnectReason.loggedOut) {
         fs.writeFileSync(STATUS_FILE, 'failed:logged_out');
@@ -109,7 +120,10 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
       } else if (reason === 515) {
         // 515 = stream error, often happens after pairing succeeds but before
         // registration completes. Reconnect to finish the handshake.
-        console.log('\n⟳ Stream error (515) after pairing — reconnecting...');
+        logger.warn(
+          { statusCode: 515 },
+          'Stream error after pairing — reconnecting',
+        );
         connectSocket(phoneNumber, true);
       } else {
         fs.writeFileSync(STATUS_FILE, `failed:${reason || 'unknown'}`);
@@ -121,7 +135,9 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
     if (connection === 'open') {
       fs.writeFileSync(STATUS_FILE, 'authenticated');
       // Clean up QR file now that we're connected
-      try { fs.unlinkSync(QR_FILE); } catch {}
+      try {
+        fs.unlinkSync(QR_FILE);
+      } catch {}
       console.log('\n✓ Successfully authenticated with WhatsApp!');
       console.log('  Credentials saved to store/auth/');
       console.log('  You can now start the OmniClaw service.\n');
@@ -138,12 +154,18 @@ async function authenticate(): Promise<void> {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
 
   // Clean up any stale QR/status files from previous runs
-  try { fs.unlinkSync(QR_FILE); } catch {}
-  try { fs.unlinkSync(STATUS_FILE); } catch {}
+  try {
+    fs.unlinkSync(QR_FILE);
+  } catch {}
+  try {
+    fs.unlinkSync(STATUS_FILE);
+  } catch {}
 
   let phoneNumber = phoneArg;
   if (usePairingCode && !phoneNumber) {
-    phoneNumber = await askQuestion('Enter your phone number (with country code, no + or spaces, e.g. 14155551234): ');
+    phoneNumber = await askQuestion(
+      'Enter your phone number (with country code, no + or spaces, e.g. 14155551234): ',
+    );
   }
 
   console.log('Starting WhatsApp authentication...\n');

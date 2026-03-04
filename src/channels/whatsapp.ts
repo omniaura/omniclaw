@@ -6,20 +6,29 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
 import { STORE_DIR } from '../config.js';
-import {
-  getLastGroupSync,
-  setLastGroupSync,
-  updateChatName,
-} from '../db.js';
+import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Circuit breaker: force process restart if too many reconnects in a short window.
+// Fixes 408 timeout loops after Mac sleep or network drops where reconnect →
+// AwaitingInitialSync timeout → disconnect cycles for hours without processing messages.
+// [Upstream PR #534]
+const RECONNECT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_RECONNECTS_BEFORE_RESTART = 3;
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -41,6 +50,14 @@ export class WhatsAppChannel implements Channel {
   private messageCache = new Map<string, { msg: any; ts: number }>();
   private static readonly MESSAGE_CACHE_MAX = 500;
   private static readonly MESSAGE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+  // Reconnect backoff state — resets to 0 on successful open
+  // [Upstream PR #466] exponential backoff: 2s → 4s → 8s → ... capped at 5min
+  private reconnectAttempt = 0;
+  private static readonly RECONNECT_BASE_MS = 2_000;
+  private static readonly RECONNECT_MAX_MS = 5 * 60_000; // 5 min cap
+  // Circuit breaker: track reconnect timestamps within sliding window
+  private reconnectTimestamps: number[] = [];
+
   // Track IDs of messages we sent so the upsert handler can ignore echoes (self-chat loop fix)
   private sentMessageIds = new Set<string>();
   // Also track sent text for reply-context lookups (WhatsApp strips quoted body in self-chat)
@@ -65,10 +82,34 @@ export class WhatsAppChannel implements Channel {
     this.opts = opts;
   }
 
+  /** How long to wait for the initial WhatsApp connection before giving up. */
+  private static readonly CONNECT_TIMEOUT_MS = 30_000;
+
   async connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       this.connectReject = reject;
-      this.connectInternal(resolve).catch(reject);
+
+      // Defense-in-depth: if the WhatsApp server is unreachable or the TLS
+      // handshake stalls, resolve (not reject) after 30s so the caller isn't
+      // blocked forever.  The socket will keep trying to connect in the
+      // background via connectInternal's reconnect logic, and messages will
+      // queue in outgoingQueue until it succeeds.
+      // See: https://github.com/qwibitai/nanoclaw/issues/553
+      const timeout = setTimeout(() => {
+        logger.warn(
+          { timeoutMs: WhatsAppChannel.CONNECT_TIMEOUT_MS },
+          'WhatsApp connect timed out — continuing without WhatsApp (will retry in background)',
+        );
+        resolve();
+      }, WhatsAppChannel.CONNECT_TIMEOUT_MS);
+
+      this.connectInternal(() => {
+        clearTimeout(timeout);
+        resolve();
+      }).catch((err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
     });
   }
 
@@ -94,7 +135,9 @@ export class WhatsAppChannel implements Channel {
       }
     }
 
+    const { version } = await fetchLatestWaWebVersion({});
     this.sock = makeWASocket({
+      version,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -114,7 +157,9 @@ export class WhatsAppChannel implements Channel {
         const msg =
           'WhatsApp authentication required. Run /setup in Claude Code.';
         logger.error(msg);
-        $`osascript -e ${`display notification "${msg}" with title "OmniClaw" sound name "Basso"`}`.quiet().nothrow();
+        $`osascript -e ${`display notification "${msg}" with title "OmniClaw" sound name "Basso"`}`
+          .quiet()
+          .nothrow();
         // Reject the connect() promise so the caller can handle gracefully
         if (this.connectReject) {
           this.connectReject(new Error(msg));
@@ -125,20 +170,58 @@ export class WhatsAppChannel implements Channel {
 
       if (connection === 'close') {
         this.connected = false;
-        const reason = (lastDisconnect?.error as any)?.output?.statusCode;
+        const reason = (
+          lastDisconnect?.error as { output?: { statusCode?: number } }
+        )?.output?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
-        logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
+        logger.info(
+          {
+            reason,
+            shouldReconnect,
+            queuedMessages: this.outgoingQueue.length,
+          },
+          'Connection closed',
+        );
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          // Circuit breaker: exit process if too many reconnects in window
+          const now = Date.now();
+          this.reconnectTimestamps.push(now);
+          this.reconnectTimestamps = this.reconnectTimestamps.filter(
+            (t) => now - t < RECONNECT_WINDOW_MS,
+          );
+          if (
+            this.reconnectTimestamps.length >= MAX_RECONNECTS_BEFORE_RESTART
+          ) {
+            logger.error(
+              {
+                count: this.reconnectTimestamps.length,
+                windowMs: RECONNECT_WINDOW_MS,
+              },
+              'Too many reconnections in window — restarting process',
+            );
+            process.exit(1);
+          }
+
+          this.reconnectAttempt++;
+          const delay = Math.min(
+            WhatsAppChannel.RECONNECT_BASE_MS *
+              2 ** (this.reconnectAttempt - 1),
+            WhatsAppChannel.RECONNECT_MAX_MS,
+          );
+          logger.info(
+            {
+              attempt: this.reconnectAttempt,
+              delayMs: delay,
+              reconnectsInWindow: this.reconnectTimestamps.length,
+            },
+            `WhatsApp disconnected — reconnecting in ${Math.round(delay / 1000)}s`,
+          );
+          setTimeout(() => {
+            this.connectInternal().catch((err) => {
+              logger.error({ err }, 'WhatsApp reconnect attempt failed');
+            });
+          }, delay);
         } else {
           const msg = 'Logged out. Run /setup to re-authenticate.';
           logger.info(msg);
@@ -150,19 +233,31 @@ export class WhatsAppChannel implements Channel {
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnectAttempt = 0;
+        this.reconnectTimestamps = [];
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
-        this.sock.sendPresenceUpdate('available').catch(() => {});
+        this.sock.sendPresenceUpdate('available').catch((err) => {
+          logger.warn({ err }, 'Failed to send presence update');
+        });
 
         // Clear stale typing indicators — WhatsApp "composing" persists across
         // reconnects, so any chats left in "composing" before the disconnect
         // will show a stuck typing indicator until we explicitly send "paused".
         if (this.activeTypingJids.size > 0) {
           const staleJids = [...this.activeTypingJids];
-          logger.info({ jids: staleJids }, 'Clearing stale typing indicators after reconnect');
+          logger.info(
+            { jids: staleJids },
+            'Clearing stale typing indicators after reconnect',
+          );
           for (const jid of staleJids) {
-            this.sock.sendPresenceUpdate('paused', jid).catch(() => {});
+            this.sock.sendPresenceUpdate('paused', jid).catch((err) => {
+              logger.warn(
+                { err, jid },
+                'Failed to clear stale typing indicator',
+              );
+            });
           }
           // Don't clear the set — the agent is still running and will re-assert
           // "composing" on the next 8s interval tick if needed.
@@ -213,81 +308,94 @@ export class WhatsAppChannel implements Channel {
     // Store message handler for later removal
     this.messageHandler = async ({ messages }) => {
       for (const msg of messages) {
-        if (!msg.message) continue;
-        const rawJid = msg.key.remoteJid;
-        if (!rawJid || rawJid === 'status@broadcast') continue;
+        try {
+          if (!msg.message) continue;
+          const rawJid = msg.key.remoteJid;
+          if (!rawJid || rawJid === 'status@broadcast') continue;
 
-        // Skip echoes of our own sent messages (prevents self-chat loop)
-        if (msg.key.id && this.sentMessageIds.has(msg.key.id)) {
-          this.sentMessageIds.delete(msg.key.id);
-          continue;
-        }
-
-        // Translate LID JID to phone JID if applicable
-        const chatJid = await this.translateJid(rawJid);
-
-        const timestamp = new Date(
-          Number(msg.messageTimestamp) * 1000,
-        ).toISOString();
-
-        // Always notify about chat metadata for group discovery
-        this.opts.onChatMetadata(chatJid, timestamp);
-
-        // Only deliver full message for registered groups
-        const groups = this.opts.registeredGroups();
-        if (groups[chatJid]) {
-          // Cache raw message for outbound quoting
-          const msgId = msg.key.id || '';
-          if (msgId) {
-            this.messageCache.set(msgId, { msg, ts: Date.now() });
-            this.pruneMessageCache();
+          // Skip echoes of our own sent messages (prevents self-chat loop)
+          if (msg.key.id && this.sentMessageIds.has(msg.key.id)) {
+            this.sentMessageIds.delete(msg.key.id);
+            continue;
           }
 
-          let content =
-            msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
-            '';
+          // Translate LID JID to phone JID if applicable
+          const chatJid = await this.translateJid(rawJid);
 
-          // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          if (!content) continue;
+          const timestamp = new Date(
+            Number(msg.messageTimestamp) * 1000,
+          ).toISOString();
 
-          const sender = msg.key.participant || msg.key.remoteJid || '';
-          const senderName = msg.pushName || sender.split('@')[0];
+          // Always notify about chat metadata for group discovery
+          this.opts.onChatMetadata(chatJid, timestamp);
 
-          // Prepend reply context so the agent knows what's being replied to
-          const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
-          if (contextInfo?.quotedMessage || contextInfo?.stanzaId) {
-            const qm = contextInfo.quotedMessage;
-            let quotedText = qm?.conversation
-              || qm?.extendedTextMessage?.text
-              || qm?.imageMessage?.caption
-              || qm?.videoMessage?.caption
-              || '';
-            // Self-chat: WhatsApp strips quoted body to "". Fall back to our sent message cache.
-            if (!quotedText && contextInfo.stanzaId) {
-              quotedText = this.sentMessageTexts.get(contextInfo.stanzaId) || '';
+          // Only deliver full message for registered groups
+          const groups = this.opts.registeredGroups();
+          if (groups[chatJid]) {
+            // Cache raw message for outbound quoting
+            const msgId = msg.key.id || '';
+            if (msgId) {
+              this.messageCache.set(msgId, { msg, ts: Date.now() });
+              this.pruneMessageCache();
             }
-            if (quotedText) {
-              const truncated = quotedText.length > 200 ? quotedText.slice(0, 200) + '…' : quotedText;
-              const quotedSender = contextInfo.participant?.split('@')[0] || 'someone';
-              content = `[Replying to ${quotedSender}: "${truncated}"]\n${content}`;
+
+            let content =
+              msg.message?.conversation ||
+              msg.message?.extendedTextMessage?.text ||
+              msg.message?.imageMessage?.caption ||
+              msg.message?.videoMessage?.caption ||
+              '';
+
+            // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
+            if (!content) continue;
+
+            const sender = msg.key.participant || msg.key.remoteJid || '';
+            const senderName = msg.pushName || sender.split('@')[0];
+
+            // Prepend reply context so the agent knows what's being replied to
+            const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
+            if (contextInfo?.quotedMessage || contextInfo?.stanzaId) {
+              const qm = contextInfo.quotedMessage;
+              let quotedText =
+                qm?.conversation ||
+                qm?.extendedTextMessage?.text ||
+                qm?.imageMessage?.caption ||
+                qm?.videoMessage?.caption ||
+                '';
+              // Self-chat: WhatsApp strips quoted body to "". Fall back to our sent message cache.
+              if (!quotedText && contextInfo.stanzaId) {
+                quotedText =
+                  this.sentMessageTexts.get(contextInfo.stanzaId) || '';
+              }
+              if (quotedText) {
+                const truncated =
+                  quotedText.length > 200
+                    ? quotedText.slice(0, 200) + '…'
+                    : quotedText;
+                const quotedSender =
+                  contextInfo.participant?.split('@')[0] || 'someone';
+                content = `[Replying to ${quotedSender}: "${truncated}"]\n${content}`;
+              }
             }
+
+            this.opts.onMessage(chatJid, {
+              id: msgId,
+              chat_jid: chatJid,
+              sender,
+              sender_name: senderName,
+              content,
+              timestamp,
+              // Always false here: bot echoes were already filtered by sentMessageIds above.
+              // WhatsApp's fromMe is true for ALL self-chat messages (protocol quirk),
+              // which would cause the DB query to drop real user messages.
+              is_from_me: false,
+            });
           }
-
-          this.opts.onMessage(chatJid, {
-            id: msgId,
-            chat_jid: chatJid,
-            sender,
-            sender_name: senderName,
-            content,
-            timestamp,
-            // Always false here: bot echoes were already filtered by sentMessageIds above.
-            // WhatsApp's fromMe is true for ALL self-chat messages (protocol quirk),
-            // which would cause the DB query to drop real user messages.
-            is_from_me: false,
-          });
+        } catch (err) {
+          logger.error(
+            { err, msgId: msg.key?.id },
+            'Error processing WhatsApp message',
+          );
         }
       }
     };
@@ -304,14 +412,23 @@ export class WhatsAppChannel implements Channel {
     this.sock.ev.on('messages.reaction', this.reactionHandler);
   }
 
-  async sendMessage(jid: string, text: string, replyToMessageId?: string): Promise<string | void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    replyToMessageId?: string,
+  ): Promise<string | void> {
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text });
-      logger.info({ jid, length: text.length, queueSize: this.outgoingQueue.length }, 'WA disconnected, message queued');
+      logger.info(
+        { jid, length: text.length, queueSize: this.outgoingQueue.length },
+        'WA disconnected, message queued',
+      );
       return;
     }
     try {
-      const cached = replyToMessageId ? this.messageCache.get(replyToMessageId) : undefined;
+      const cached = replyToMessageId
+        ? this.messageCache.get(replyToMessageId)
+        : undefined;
       const opts = cached ? { quoted: cached.msg } : undefined;
       const sent = await this.sock.sendMessage(jid, { text }, opts);
       const sentId = sent?.key?.id;
@@ -332,7 +449,10 @@ export class WhatsAppChannel implements Channel {
     } catch (err) {
       // If send fails, queue it for retry on reconnect
       this.outgoingQueue.push({ jid, text });
-      logger.warn({ jid, err, queueSize: this.outgoingQueue.length }, 'Failed to send, message queued');
+      logger.warn(
+        { jid, err, queueSize: this.outgoingQueue.length },
+        'Failed to send, message queued',
+      );
     }
   }
 
@@ -407,7 +527,10 @@ export class WhatsAppChannel implements Channel {
     // Check local cache first
     const cached = this.lidToPhoneMap[lidUser];
     if (cached) {
-      logger.debug({ lidJid: jid, phoneJid: cached }, 'Translated LID to phone JID (cached)');
+      logger.debug(
+        { lidJid: jid, phoneJid: cached },
+        'Translated LID to phone JID (cached)',
+      );
       return cached;
     }
 
@@ -417,7 +540,10 @@ export class WhatsAppChannel implements Channel {
       if (pn) {
         const phoneJid = `${pn.split('@')[0].split(':')[0]}@s.whatsapp.net`;
         this.lidToPhoneMap[lidUser] = phoneJid;
-        logger.info({ lidJid: jid, phoneJid }, 'Translated LID to phone JID (signalRepository)');
+        logger.info(
+          { lidJid: jid, phoneJid },
+          'Translated LID to phone JID (signalRepository)',
+        );
         return phoneJid;
       }
     } catch (err) {
@@ -431,10 +557,14 @@ export class WhatsAppChannel implements Channel {
     if (this.flushing || this.outgoingQueue.length === 0) return;
     this.flushing = true;
     try {
-      logger.info({ count: this.outgoingQueue.length }, 'Flushing outgoing message queue');
+      logger.info(
+        { count: this.outgoingQueue.length },
+        'Flushing outgoing message queue',
+      );
       while (this.outgoingQueue.length > 0) {
-        const item = this.outgoingQueue.shift()!;
+        const item = this.outgoingQueue[0];
         await this.sendMessage(item.jid, item.text);
+        this.outgoingQueue.shift();
       }
     } finally {
       this.flushing = false;
@@ -451,7 +581,9 @@ export class WhatsAppChannel implements Channel {
     }
     // Cap at max size — evict oldest
     if (this.messageCache.size > WhatsAppChannel.MESSAGE_CACHE_MAX) {
-      const entries = [...this.messageCache.entries()].sort((a, b) => a[1].ts - b[1].ts);
+      const entries = [...this.messageCache.entries()].sort(
+        (a, b) => a[1].ts - b[1].ts,
+      );
       const toRemove = entries.length - WhatsAppChannel.MESSAGE_CACHE_MAX;
       for (let i = 0; i < toRemove; i++) {
         this.messageCache.delete(entries[i][0]);

@@ -13,9 +13,11 @@ import type { RegisteredGroup } from './types.js';
  */
 export function findJidByFolder(
   registeredGroups: Record<string, RegisteredGroup>,
-  folder: string
+  folder: string,
 ): string | undefined {
-  return Object.entries(registeredGroups).find(([, g]) => g.folder === folder)?.[0];
+  return Object.entries(registeredGroups).find(
+    ([, g]) => g.folder === folder,
+  )?.[0];
 }
 
 /**
@@ -26,7 +28,7 @@ export function findJidByFolder(
  */
 export function findGroupByFolder(
   registeredGroups: Record<string, RegisteredGroup>,
-  folder: string
+  folder: string,
 ): [string, RegisteredGroup] | undefined {
   return Object.entries(registeredGroups).find(([, g]) => g.folder === folder);
 }
@@ -36,8 +38,12 @@ export function findGroupByFolder(
  * @param registeredGroups - Map of JID -> RegisteredGroup
  * @returns Main group JID if found, undefined otherwise
  */
-export function findMainGroupJid(registeredGroups: Record<string, RegisteredGroup>): string | undefined {
-  return Object.entries(registeredGroups).find(([, g]) => g.folder === 'main')?.[0];
+export function findMainGroupJid(
+  registeredGroups: Record<string, RegisteredGroup>,
+): string | undefined {
+  return Object.entries(registeredGroups).find(
+    ([, g]) => g.folder === 'main',
+  )?.[0];
 }
 
 /**
