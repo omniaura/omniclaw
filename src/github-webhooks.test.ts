@@ -12,7 +12,8 @@ const loadGitHubWatchesConfig = mock(() => ({
 
 const getWatchingAgentsForRepo = mock(
   (_config: unknown, owner: string, repo: string) => {
-    return owner.toLowerCase() === 'omniaura' && repo.toLowerCase() === 'omniclaw'
+    return owner.toLowerCase() === 'omniaura' &&
+      repo.toLowerCase() === 'omniclaw'
       ? ['agent-a']
       : [];
   },

@@ -47,7 +47,9 @@ describe('persistent-state', () => {
 
     expect(result).toBeUndefined();
     expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0][1]).toBe('Failed to parse persistent state JSON');
+    expect(warnSpy.mock.calls[0][1]).toBe(
+      'Failed to parse persistent state JSON',
+    );
 
     warnSpy.mockRestore();
   });
