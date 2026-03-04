@@ -260,8 +260,8 @@ describe('formatMessages', () => {
       }),
     ];
     const result = formatMessages(msgs);
-    // Should show only the latest name for the sender, not both names
-    expect(result).toContain('participants="Alice (AFK)"');
+    // Should show only the first name for the sender (first-name-wins dedup by sender ID)
+    expect(result).toContain('participants="Alice"');
     expect(result).not.toContain('Alice, Alice');
   });
 
