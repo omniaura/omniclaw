@@ -73,6 +73,7 @@ function updateUserRegistry(
           {
             op: 'senderIdentity',
             counter: 'user_registry_collision',
+            platform,
             key,
             existing_id: existing.id,
             new_id: id,
