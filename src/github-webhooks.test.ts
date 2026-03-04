@@ -1,9 +1,31 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import { createHmac } from 'crypto';
-import fs from 'fs';
-import path from 'path';
 
-import { DATA_DIR } from './config.js';
+const loadGitHubWatchesConfig = mock(() => ({
+  watches: [
+    {
+      agentId: 'agent-a',
+      repos: [{ owner: 'omniaura', repo: 'omniclaw' }],
+    },
+  ],
+}));
+
+const getWatchingAgentsForRepo = mock(
+  (_config: unknown, owner: string, repo: string) => {
+    return owner.toLowerCase() === 'omniaura' && repo.toLowerCase() === 'omniclaw'
+      ? ['agent-a']
+      : [];
+  },
+);
+
+const invalidateGitHubContextCacheForAgents = mock((_agentIds: string[]) => 0);
+
+mock.module('./github.js', () => ({
+  loadGitHubWatchesConfig,
+  getWatchingAgentsForRepo,
+  invalidateGitHubContextCacheForAgents,
+}));
+
 import {
   buildGitHubWebhookNotification,
   verifyGitHubWebhookSignature,
@@ -11,39 +33,6 @@ import {
 
 describe('github webhooks', () => {
   const secret = 'super-secret-key';
-  const configPath = path.join(DATA_DIR, 'github-watches.json');
-  let backupConfig: string | null = null;
-
-  beforeEach(() => {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    backupConfig = fs.existsSync(configPath)
-      ? fs.readFileSync(configPath, 'utf8')
-      : null;
-    fs.writeFileSync(
-      configPath,
-      JSON.stringify(
-        {
-          watches: [
-            {
-              agentId: 'agent-a',
-              repos: [{ owner: 'omniaura', repo: 'omniclaw' }],
-            },
-          ],
-        },
-        null,
-        2,
-      ),
-      'utf8',
-    );
-  });
-
-  afterEach(() => {
-    if (backupConfig !== null) {
-      fs.writeFileSync(configPath, backupConfig, 'utf8');
-    } else if (fs.existsSync(configPath)) {
-      fs.rmSync(configPath, { force: true });
-    }
-  });
 
   it('verifies valid webhook signature', () => {
     const body = JSON.stringify({ hello: 'world' });
@@ -96,6 +85,8 @@ describe('github webhooks', () => {
     expect(notification?.agentIds).toEqual(['agent-a']);
     expect(notification?.summary).toContain('PR #195');
     expect(notification?.summary).toContain('@reviewer');
+    expect(getWatchingAgentsForRepo).toHaveBeenCalledTimes(1);
+    expect(loadGitHubWatchesConfig).toHaveBeenCalledTimes(1);
   });
 
   it('ignores events for repos with no watchers', () => {
