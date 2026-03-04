@@ -4,7 +4,7 @@
 FROM oven/bun:slim
 
 # Install Node.js (agents expect node/npm/npx to be available alongside bun)
-# and essential system tools including Go
+# and essential system tools including Go and Rust (cargo/rustc)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     npm \
@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     ripgrep \
     build-essential \
+    cargo \
+    rustc \
     && rm -rf /var/lib/apt/lists/*
 
 # Install yq (YAML processor, like jq for YAML)
