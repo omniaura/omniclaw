@@ -656,12 +656,23 @@ export class DiscordChannel implements Channel {
     // Phase 0 instrumentation: detect sender identity anomalies
     if (!senderName) {
       logger.warn(
-        { op: 'senderIdentity', counter: 'sender_name_empty', platform: 'discord', sender },
+        {
+          op: 'senderIdentity',
+          counter: 'sender_name_empty',
+          platform: 'discord',
+          sender,
+        },
         'Discord message has empty sender_name',
       );
     } else if (senderName === sender) {
       logger.warn(
-        { op: 'senderIdentity', counter: 'sender_name_fallback_to_id', platform: 'discord', sender, sender_name: senderName },
+        {
+          op: 'senderIdentity',
+          counter: 'sender_name_fallback_to_id',
+          platform: 'discord',
+          sender,
+          sender_name: senderName,
+        },
         'Discord sender_name matches sender ID (fallback produced ID-as-name)',
       );
     }

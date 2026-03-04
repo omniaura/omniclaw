@@ -355,12 +355,26 @@ export class WhatsAppChannel implements Channel {
             // Phase 0 instrumentation: detect sender identity anomalies
             if (!senderName) {
               logger.warn(
-                { op: 'senderIdentity', counter: 'sender_name_empty', platform: 'whatsapp', sender },
+                {
+                  op: 'senderIdentity',
+                  counter: 'sender_name_empty',
+                  platform: 'whatsapp',
+                  sender,
+                },
                 'WhatsApp message has empty sender_name',
               );
-            } else if (senderName === sender || senderName === sender.split('@')[0]) {
+            } else if (
+              senderName === sender ||
+              senderName === sender.split('@')[0]
+            ) {
               logger.warn(
-                { op: 'senderIdentity', counter: 'sender_name_fallback_to_id', platform: 'whatsapp', sender, sender_name: senderName },
+                {
+                  op: 'senderIdentity',
+                  counter: 'sender_name_fallback_to_id',
+                  platform: 'whatsapp',
+                  sender,
+                  sender_name: senderName,
+                },
                 'WhatsApp sender_name matches sender ID (pushName absent, phone number used as name)',
               );
             }

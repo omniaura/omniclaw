@@ -319,12 +319,23 @@ export class SlackChannel implements Channel {
     // Phase 0 instrumentation: detect sender identity anomalies
     if (!senderName) {
       logger.warn(
-        { op: 'senderIdentity', counter: 'sender_name_empty', platform: 'slack', sender: senderUserId },
+        {
+          op: 'senderIdentity',
+          counter: 'sender_name_empty',
+          platform: 'slack',
+          sender: senderUserId,
+        },
         'Slack message has empty sender_name',
       );
     } else if (senderName === senderUserId) {
       logger.warn(
-        { op: 'senderIdentity', counter: 'sender_name_fallback_to_id', platform: 'slack', sender: senderUserId, sender_name: senderName },
+        {
+          op: 'senderIdentity',
+          counter: 'sender_name_fallback_to_id',
+          platform: 'slack',
+          sender: senderUserId,
+          sender_name: senderName,
+        },
         'Slack sender_name matches sender ID (API lookup failed, user ID used as name)',
       );
     }
