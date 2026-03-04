@@ -46,6 +46,7 @@ export const calculateNextRunEffect = (
         try: () => {
           const interval = CronExpressionParser.parse(scheduleValue, {
             tz: TIMEZONE,
+            currentDate: baseTime,
           });
           const iso = interval.next().toISOString();
           if (iso === null) {
