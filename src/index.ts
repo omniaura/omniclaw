@@ -100,7 +100,11 @@ import { logger } from './logger.js';
 import { createResumePositionStore } from './resume-position-store.js';
 import { assertPathWithin } from './path-security.js';
 import { redactSensitiveData } from './security/redaction.js';
-import { startWebServer, type WebServerHandle } from './web/index.js';
+import {
+  startWebServer,
+  startLogStream,
+  type WebServerHandle,
+} from './web/index.js';
 import { Effect } from 'effect';
 
 // Global error handlers to prevent crashes from unhandled rejections/exceptions
@@ -1802,6 +1806,7 @@ async function main(): Promise<void> {
 
   // --- Web UI (opt-in via WEB_UI_PORT env var) ---
   let webServer: WebServerHandle | undefined;
+  let stopLogStream: (() => void) | undefined;
   if (WEB_UI_PORT) {
     webServer = startWebServer(
       {
@@ -1828,6 +1833,7 @@ async function main(): Promise<void> {
         calculateNextRun: (type, value) => calculateNextRun(type, value),
       },
     );
+    stopLogStream = startLogStream(webServer);
   }
 
   // Graceful shutdown handlers
@@ -1837,6 +1843,7 @@ async function main(): Promise<void> {
       githubWebhookServer.stop();
       githubWebhookServer = null;
     }
+    if (stopLogStream) stopLogStream();
     if (webServer) await webServer.stop();
     await queue.shutdown(10000);
     await shutdownBackends();
