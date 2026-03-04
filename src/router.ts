@@ -1,4 +1,5 @@
 import { ASSISTANT_NAME } from './config.js';
+import { logger } from './logger.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 
 export function escapeXml(s: string): string {
@@ -29,6 +30,25 @@ export function formatMessages(messages: NewMessage[]): string {
     if (seen.has(key)) continue;
     seen.add(key);
     senders.push(m.sender_name);
+  }
+
+  // Phase 0 counter: detect roster inflation from mutable name dedup
+  const nameOnlyCount = new Set(
+    messages
+      .map((m) => m.sender_name)
+      .filter((name) => name && name !== 'System'),
+  ).size;
+  if (nameOnlyCount > senders.length) {
+    logger.info(
+      {
+        op: 'senderIdentity',
+        counter: 'participant_roster_inflation',
+        expected_count: senders.length,
+        actual_count: nameOnlyCount,
+        chat_jid: messages[0]?.chat_jid,
+      },
+      'Participant roster inflated: unique sender_name count exceeds unique sender count',
+    );
   }
 
   const header =

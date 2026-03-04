@@ -117,12 +117,14 @@ describe('formatMessages', () => {
     const msgs = [
       makeMsg({
         id: '1',
+        sender: 'user-alice',
         sender_name: 'Alice',
         content: 'hi',
         timestamp: 't1',
       }),
       makeMsg({
         id: '2',
+        sender: 'system',
         sender_name: 'System',
         content: 'notification',
         timestamp: 't2',
@@ -237,6 +239,74 @@ describe('formatMessages', () => {
   it('handles empty array', () => {
     const result = formatMessages([]);
     expect(result).toBe('<messages>\n\n</messages>');
+  });
+
+  it('deduplicates participants by immutable sender ID, not sender_name', () => {
+    // Same user (same sender ID) with different display names mid-conversation
+    const msgs = [
+      makeMsg({
+        id: '1',
+        sender: 'user-123',
+        sender_name: 'Alice',
+        content: 'hi',
+        timestamp: 't1',
+      }),
+      makeMsg({
+        id: '2',
+        sender: 'user-123',
+        sender_name: 'Alice (AFK)',
+        content: 'brb',
+        timestamp: 't2',
+      }),
+    ];
+    const result = formatMessages(msgs);
+    // Should show only the latest name for the sender, not both names
+    expect(result).toContain('participants="Alice (AFK)"');
+    expect(result).not.toContain('Alice, Alice');
+  });
+
+  it('shows distinct participants for different sender IDs', () => {
+    const msgs = [
+      makeMsg({
+        id: '1',
+        sender: 'user-1',
+        sender_name: 'Alice',
+        content: 'hi',
+        timestamp: 't1',
+      }),
+      makeMsg({
+        id: '2',
+        sender: 'user-2',
+        sender_name: 'Bob',
+        content: 'hey',
+        timestamp: 't2',
+      }),
+    ];
+    const result = formatMessages(msgs);
+    expect(result).toContain('participants="Alice, Bob"');
+  });
+
+  it('excludes system sender from participant roster', () => {
+    const msgs = [
+      makeMsg({
+        id: '1',
+        sender: 'user-1',
+        sender_name: 'Alice',
+        content: 'hi',
+        timestamp: 't1',
+      }),
+      makeMsg({
+        id: '2',
+        sender: 'system',
+        sender_name: 'System',
+        content: 'notification',
+        timestamp: 't2',
+      }),
+    ];
+    const result = formatMessages(msgs);
+    expect(result).toContain('participants="Alice"');
+    // System should not appear in participants attribute (still appears as message sender)
+    expect(result).not.toContain('participants="Alice, System"');
   });
 });
 

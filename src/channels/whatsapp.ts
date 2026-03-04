@@ -352,6 +352,19 @@ export class WhatsAppChannel implements Channel {
             const sender = msg.key.participant || msg.key.remoteJid || '';
             const senderName = msg.pushName || sender.split('@')[0];
 
+            // Phase 0 instrumentation: detect sender identity anomalies
+            if (!senderName) {
+              logger.warn(
+                { op: 'senderIdentity', counter: 'sender_name_empty', platform: 'whatsapp', sender },
+                'WhatsApp message has empty sender_name',
+              );
+            } else if (senderName === sender || senderName === sender.split('@')[0]) {
+              logger.warn(
+                { op: 'senderIdentity', counter: 'sender_name_fallback_to_id', platform: 'whatsapp', sender, sender_name: senderName },
+                'WhatsApp sender_name matches sender ID (pushName absent, phone number used as name)',
+              );
+            }
+
             // Prepend reply context so the agent knows what's being replied to
             const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
             if (contextInfo?.quotedMessage || contextInfo?.stanzaId) {

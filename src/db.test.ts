@@ -136,6 +136,30 @@ describe('storeMessage', () => {
   });
 });
 
+// --- storeMessage (sender_missing counter) ---
+
+describe('storeMessage sender_missing counter', () => {
+  it('stores message with empty sender without crashing (counter logs but does not reject)', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    // Should not throw — counter logs an error but still stores
+    storeMessage({
+      id: 'missing-sender-1',
+      chat_jid: 'group@g.us',
+      sender: '',
+      sender_name: 'Ghost',
+      content: 'no sender',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+    });
+
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z');
+    expect(messages).toHaveLength(1);
+    expect(messages[0].sender).toBe('');
+    expect(messages[0].content).toBe('no sender');
+  });
+});
+
 // --- storeMessage (sender_platform) ---
 
 describe('storeMessage with sender_platform', () => {
