@@ -310,10 +310,11 @@ export class SlackChannel implements Channel {
     const timestamp = new Date(parseFloat(event.ts) * 1000).toISOString();
 
     const senderUserId = 'user' in event ? event.user : 'unknown';
+    const sender = `slack:${senderUserId}`;
     const senderName = await resolveSlackUserName(
       this.client,
       senderUserId,
-      senderUserId,
+      `User ${senderUserId}`,
     );
 
     // Resolve <@USERID> mentions to display names
@@ -368,7 +369,7 @@ export class SlackChannel implements Channel {
     this.opts.onMessage(chatJid, {
       id: msgId,
       chat_jid: chatJid,
-      sender: senderUserId,
+      sender,
       sender_name: senderName,
       content,
       timestamp,
