@@ -81,6 +81,7 @@ import {
   registeredGroupToRoute,
 } from './types.js';
 import { findMainGroupJid } from './group-helpers.js';
+import { getGitHubContextForAgent } from './github.js';
 import { logger } from './logger.js';
 import { assertPathWithin } from './path-security.js';
 import { Effect } from 'effect';
@@ -1217,6 +1218,16 @@ async function runAgent(
     const currentChannelName =
       agentChannels?.find((ch) => ch.jid === chatJid)?.name ||
       availableGroups.find((g) => g.jid === chatJid)?.name;
+
+    // Fetch GitHub context for this agent (cached, non-blocking on failure)
+    let githubContext: string | undefined;
+    try {
+      githubContext =
+        (await getGitHubContextForAgent(agentId)) ?? undefined;
+    } catch (err) {
+      logger.warn({ err, agentId }, 'Failed to fetch GitHub context');
+    }
+
     const output = await backend.runAgent(
       group,
       {
@@ -1238,6 +1249,7 @@ async function runAgent(
         channelFolder: group.channelFolder,
         categoryFolder: group.categoryFolder,
         agentContextFolder: group.agentContextFolder,
+        githubContext,
       },
       (proc, containerName) =>
         queue.registerProcess(

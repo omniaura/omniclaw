@@ -94,6 +94,8 @@ export interface ContainerInput {
   channelFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant/spec'
   /** Category team workspace, mounted read-write at /workspace/category/ (shared across channels in same category) */
   categoryFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant'
+  /** Pre-fetched GitHub context markdown (open PRs, issues, review comments) for injection into system prompt. */
+  githubContext?: string;
 }
 
 export interface ContainerOutput {
