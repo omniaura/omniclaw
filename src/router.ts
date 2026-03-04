@@ -13,18 +13,22 @@ export function escapeXml(s: string): string {
 export function formatMessages(messages: NewMessage[]): string {
   const lines = messages.map(
     (m) =>
-      `<message id="${m.id}" sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
+      `<message id="${m.id}" sender="${escapeXml(m.sender_name)}" sender_id="${escapeXml(m.sender)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
   );
 
   // Build a participant roster so that conversation compaction/summarization
   // preserves correct sender attribution (see Issue #13).
-  const senders = Array.from(
-    new Set(
-      messages
-        .map((m) => m.sender_name)
-        .filter((name) => name && name !== 'System'),
-    ),
-  );
+  // Deduplicate by immutable sender ID to prevent roster inflation when
+  // a user changes their display name mid-conversation (R2 in Phase 0 audit).
+  const seen = new Set<string>();
+  const senders: string[] = [];
+  for (const m of messages) {
+    if (!m.sender_name || m.sender_name === 'System') continue;
+    const key = m.sender || m.sender_name;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    senders.push(m.sender_name);
+  }
 
   const header =
     senders.length > 0
