@@ -83,7 +83,9 @@ function getCacheKey(agentId: string): string {
   return `github:${agentId}`;
 }
 
-export function invalidateGitHubContextCacheForAgents(agentIds: string[]): number {
+export function invalidateGitHubContextCacheForAgents(
+  agentIds: string[],
+): number {
   let removed = 0;
   for (const agentId of agentIds) {
     if (cache.delete(getCacheKey(agentId))) removed++;
@@ -151,10 +153,7 @@ async function githubFetch<T>(urlPath: string): Promise<T | null> {
       },
     });
     if (!res.ok) {
-      logger.warn(
-        { status: res.status, url },
-        'GitHub API request failed',
-      );
+      logger.warn({ status: res.status, url }, 'GitHub API request failed');
       return null;
     }
     return (await res.json()) as T;
@@ -242,16 +241,19 @@ function formatPrMarkdown(
 ): string {
   const draft = pr.draft ? ' (DRAFT)' : '';
   const author = pr.user?.login || 'unknown';
-  const reviewState = reviews.length > 0
-    ? reviews
-        .filter((r) => r.state !== 'COMMENTED' && r.state !== 'PENDING')
-        .map((r) => `${r.user?.login}: ${r.state}`)
-        .join(', ') || 'pending review'
-    : 'pending review';
+  const reviewState =
+    reviews.length > 0
+      ? reviews
+          .filter((r) => r.state !== 'COMMENTED' && r.state !== 'PENDING')
+          .map((r) => `${r.user?.login}: ${r.state}`)
+          .join(', ') || 'pending review'
+      : 'pending review';
 
   const lines: string[] = [];
   lines.push(`### PR #${pr.number}: ${pr.title}${draft}`);
-  lines.push(`- Author: ${author} | Branch: \`${pr.head.ref}\` → \`${pr.base.ref}\``);
+  lines.push(
+    `- Author: ${author} | Branch: \`${pr.head.ref}\` → \`${pr.base.ref}\``,
+  );
   lines.push(`- CI: ${ciStatus} | Reviews: ${reviewState}`);
 
   if (pr.body) {
@@ -264,7 +266,9 @@ function formatPrMarkdown(
     for (const c of comments.slice(0, 5)) {
       const file = c.path ? ` on \`${c.path}\`` : '';
       const line = c.line ? `:${c.line}` : '';
-      lines.push(`  - ${c.user?.login || '?'}${file}${line}: ${truncate(c.body, 150)}`);
+      lines.push(
+        `  - ${c.user?.login || '?'}${file}${line}: ${truncate(c.body, 150)}`,
+      );
     }
     if (comments.length > 5) {
       lines.push(`  - ... and ${comments.length - 5} more comments`);
@@ -353,7 +357,10 @@ export async function fetchGitHubContext(
     cache.set(cacheKey, { markdown, fetchedAt: Date.now() });
     return markdown;
   } catch (err) {
-    logger.error({ err, agentId: agentWatch.agentId }, 'Failed to fetch GitHub context');
+    logger.error(
+      { err, agentId: agentWatch.agentId },
+      'Failed to fetch GitHub context',
+    );
     // Return stale cache if available
     if (cached) return cached.markdown;
     return null;

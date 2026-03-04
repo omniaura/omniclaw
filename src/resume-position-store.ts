@@ -75,7 +75,9 @@ export class PersistentResumePositionStore implements ResumePositionStore {
 
   private loadInitialState(): Record<string, string> {
     try {
-      const persisted = this.stateAdapter.read<unknown>(RESUME_POSITIONS_STATE_KEY);
+      const persisted = this.stateAdapter.read<unknown>(
+        RESUME_POSITIONS_STATE_KEY,
+      );
       return sanitizeResumePositions(persisted);
     } catch (err) {
       logger.warn({ err }, 'Failed to load persisted resume positions');
@@ -85,7 +87,10 @@ export class PersistentResumePositionStore implements ResumePositionStore {
 
   private persist(): void {
     try {
-      this.stateAdapter.write(RESUME_POSITIONS_STATE_KEY, this.memoryStore.getAll());
+      this.stateAdapter.write(
+        RESUME_POSITIONS_STATE_KEY,
+        this.memoryStore.getAll(),
+      );
     } catch (err) {
       logger.warn({ err }, 'Failed to persist resume positions');
     }

@@ -49,17 +49,17 @@ describe('github webhooks', () => {
     const body = JSON.stringify({ hello: 'world' });
     const digest = createHmac('sha256', secret).update(body).digest('hex');
 
-    const valid = verifyGitHubWebhookSignature(body, `sha256=${digest}`, secret);
+    const valid = verifyGitHubWebhookSignature(
+      body,
+      `sha256=${digest}`,
+      secret,
+    );
     expect(valid).toBe(true);
   });
 
   it('rejects invalid webhook signature', () => {
     const body = JSON.stringify({ hello: 'world' });
-    const valid = verifyGitHubWebhookSignature(
-      body,
-      'sha256=deadbeef',
-      secret,
-    );
+    const valid = verifyGitHubWebhookSignature(body, 'sha256=deadbeef', secret);
     expect(valid).toBe(false);
   });
 
@@ -82,7 +82,8 @@ describe('github webhooks', () => {
         },
         comment: {
           body: 'Please simplify this branch selection logic.',
-          html_url: 'https://github.com/omniaura/omniclaw/pull/195#discussion_r1',
+          html_url:
+            'https://github.com/omniaura/omniclaw/pull/195#discussion_r1',
           path: 'src/index.ts',
           line: 120,
         },

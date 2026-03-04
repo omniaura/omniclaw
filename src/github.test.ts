@@ -154,7 +154,9 @@ describe('github', () => {
         ],
       };
 
-      expect(getWatchingAgentsForRepo(config, 'omniaura', 'backend')).toEqual([]);
+      expect(getWatchingAgentsForRepo(config, 'omniaura', 'backend')).toEqual(
+        [],
+      );
     });
   });
 

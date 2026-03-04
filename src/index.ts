@@ -1231,8 +1231,7 @@ async function runAgent(
     // Fetch GitHub context for this agent (cached, non-blocking on failure)
     let githubContext: string | undefined;
     try {
-      githubContext =
-        (await getGitHubContextForAgent(agentId)) ?? undefined;
+      githubContext = (await getGitHubContextForAgent(agentId)) ?? undefined;
     } catch (err) {
       logger.warn({ err, agentId }, 'Failed to fetch GitHub context');
     }
@@ -1848,8 +1847,9 @@ async function main(): Promise<void> {
             notification.agentIds.includes(s.agentId),
           );
           return matches
-            .sort((a, b) =>
-              Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)),
+            .sort(
+              (a, b) =>
+                Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)),
             )
             .map((sub) => ({ chatJid, sub }));
         },

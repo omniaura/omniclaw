@@ -57,10 +57,11 @@ describe('resume position store', () => {
   it('drops corrupted persisted entries and keeps valid values', () => {
     const store = new PersistentResumePositionStore({
       stateAdapter: {
-        read: <T>() => ({
-          valid: 'cursor-valid',
-          invalid: 42,
-        }) as T,
+        read: <T>() =>
+          ({
+            valid: 'cursor-valid',
+            invalid: 42,
+          }) as T,
         write: () => {},
       },
     });

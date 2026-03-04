@@ -218,7 +218,8 @@ export function buildGitHubWebhookNotification(
   const agentIds = getWatchingAgentsForRepo(config, parsed.owner, parsed.repo);
   if (agentIds.length === 0) return null;
 
-  const cacheEntriesInvalidated = invalidateGitHubContextCacheForAgents(agentIds);
+  const cacheEntriesInvalidated =
+    invalidateGitHubContextCacheForAgents(agentIds);
 
   return {
     event: parsed.event,
@@ -240,9 +241,9 @@ export interface GitHubWebhookServerOptions {
   onNotification: (notification: GitHubWebhookNotification) => Promise<void>;
 }
 
-export function startGitHubWebhookServer(
-  options: GitHubWebhookServerOptions,
-): { stop: () => void } {
+export function startGitHubWebhookServer(options: GitHubWebhookServerOptions): {
+  stop: () => void;
+} {
   const pathname = options.path || DEFAULT_PATH;
   const server = Bun.serve({
     port: options.port,
@@ -252,7 +253,8 @@ export function startGitHubWebhookServer(
         return new Response('Not Found', { status: 404 });
       }
 
-      const deliveryId = req.headers.get('x-github-delivery') || 'unknown-delivery';
+      const deliveryId =
+        req.headers.get('x-github-delivery') || 'unknown-delivery';
       const event = req.headers.get('x-github-event') || '';
       const signature = req.headers.get('x-hub-signature-256');
       const rawBody = await req.text();
@@ -270,11 +272,18 @@ export function startGitHubWebhookServer(
       try {
         payload = JSON.parse(rawBody) as GitHubWebhookPayload;
       } catch (err) {
-        logger.warn({ err, deliveryId, event }, 'Invalid GitHub webhook JSON payload');
+        logger.warn(
+          { err, deliveryId, event },
+          'Invalid GitHub webhook JSON payload',
+        );
         return new Response('Bad payload', { status: 400 });
       }
 
-      const notification = buildGitHubWebhookNotification(event, deliveryId, payload);
+      const notification = buildGitHubWebhookNotification(
+        event,
+        deliveryId,
+        payload,
+      );
       if (!notification) {
         return new Response('Ignored', { status: 202 });
       }
@@ -282,7 +291,10 @@ export function startGitHubWebhookServer(
       try {
         await options.onNotification(notification);
       } catch (err) {
-        logger.error({ err, event, deliveryId }, 'Failed handling GitHub webhook notification');
+        logger.error(
+          { err, event, deliveryId },
+          'Failed handling GitHub webhook notification',
+        );
         return new Response('Handler error', { status: 500 });
       }
 
