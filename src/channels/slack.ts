@@ -314,7 +314,7 @@ export class SlackChannel implements Channel {
     const senderName = await resolveSlackUserName(
       this.client,
       senderUserId,
-      `User ${senderUserId}`,
+      'Unknown user',
     );
 
     // Resolve <@USERID> mentions to display names

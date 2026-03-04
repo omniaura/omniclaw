@@ -605,6 +605,7 @@ const ADAPTER_PLATFORMS = new Set(['discord', 'whatsapp', 'telegram', 'slack']);
 /** Infer platform from chat_jid for legacy messages missing sender_platform */
 function inferPlatformFromJid(chatJid: string): string | undefined {
   if (chatJid.startsWith('dc:')) return 'discord';
+  if (chatJid.startsWith('slack:')) return 'slack';
   if (chatJid.startsWith('tg:')) return 'telegram';
   if (chatJid.endsWith('@g.us') || chatJid.endsWith('@s.whatsapp.net'))
     return 'whatsapp';
@@ -627,12 +628,17 @@ function mapMessageRow(row: MessageRow): NewMessage {
   // messages already include the prefix (e.g. "discord:123456789").
   let sender = row.sender;
   if (sender && !sender.includes(':')) {
-    const adapterPlatform =
-      (validPlatform && ADAPTER_PLATFORMS.has(validPlatform)
-        ? validPlatform
-        : null) || inferPlatformFromJid(row.chat_jid);
-    if (adapterPlatform) {
-      sender = `${adapterPlatform}:${sender}`;
+    // Skip canonicalization for non-adapter platforms (system, ipc)
+    const isNonAdapterPlatform =
+      validPlatform && !ADAPTER_PLATFORMS.has(validPlatform);
+    if (!isNonAdapterPlatform) {
+      const adapterPlatform =
+        (validPlatform && ADAPTER_PLATFORMS.has(validPlatform)
+          ? validPlatform
+          : null) || inferPlatformFromJid(row.chat_jid);
+      if (adapterPlatform) {
+        sender = `${adapterPlatform}:${sender}`;
+      }
     }
   }
 

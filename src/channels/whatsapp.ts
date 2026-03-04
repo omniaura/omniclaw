@@ -351,7 +351,7 @@ export class WhatsAppChannel implements Channel {
 
             const rawSender = msg.key.participant || msg.key.remoteJid || '';
             const sender = rawSender ? `whatsapp:${rawSender}` : '';
-            const senderName = msg.pushName || 'WhatsApp User';
+            const senderName = msg.pushName?.trim() || '';
 
             // Prepend reply context so the agent knows what's being replied to
             const contextInfo = msg.message?.extendedTextMessage?.contextInfo;

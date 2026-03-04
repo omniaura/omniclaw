@@ -652,11 +652,11 @@ describe('mapMessageRow sender canonicalization', () => {
 
     const messages = getMessagesSince('dc:123', '2024-01-01T00:00:00.000Z');
     expect(messages).toHaveLength(1);
-    // 'system' contains no ':' but sender_platform is 'system' (not an adapter platform),
-    // and chat_jid 'dc:123' would infer 'discord'. However the sender_platform takes
-    // precedence and 'system' is not in ADAPTER_PLATFORMS, so it falls through to the
-    // JID inference. This is acceptable — 'discord:system' is harmless and won't collide
-    // with real user IDs. The important thing is system/ipc sender_platform doesn't cause issues.
+    // Non-adapter platforms (system, ipc) should NOT be canonicalized via JID inference
+    expect(messages[0].sender).toBe('system');
+    expect(messages[0].sender_platform).toBe('system');
+    expect(messages[0].sender_name).toBe('System');
+    expect(messages[0].content).toBe('system msg');
   });
 
   it('deduplicates old and new format senders in the same conversation window', () => {
