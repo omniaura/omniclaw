@@ -595,12 +595,22 @@ type MessageRow = NewMessage & {
   sender_platform: string | null;
 };
 
+const VALID_SENDER_PLATFORMS = new Set<
+  NonNullable<NewMessage['sender_platform']>
+>(['discord', 'whatsapp', 'telegram', 'slack', 'ipc', 'system']);
+
 /** Convert a raw DB message row to a NewMessage (parse mentions JSON, null→undefined) */
 function mapMessageRow(row: MessageRow): NewMessage {
+  const platform = row.sender_platform;
   return {
     ...row,
     sender_platform:
-      (row.sender_platform as NewMessage['sender_platform']) ?? undefined,
+      platform &&
+      VALID_SENDER_PLATFORMS.has(
+        platform as NonNullable<NewMessage['sender_platform']>,
+      )
+        ? (platform as NonNullable<NewMessage['sender_platform']>)
+        : undefined,
     sender_user_id: row.sender_user_id ?? undefined,
     mentions: row.mentions ? JSON.parse(row.mentions) : undefined,
   };
