@@ -9,6 +9,9 @@ import {
   DISPATCH_RUNTIME_SEP,
   DISCORD_BOTS,
   DISCORD_DEFAULT_BOT_ID,
+  GITHUB_WEBHOOK_PATH,
+  GITHUB_WEBHOOK_PORT,
+  GITHUB_WEBHOOK_SECRET,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
@@ -82,6 +85,8 @@ import {
 } from './types.js';
 import { findMainGroupJid } from './group-helpers.js';
 import { getGitHubContextForAgent } from './github.js';
+import { startGitHubWebhookServer } from './github-webhooks.js';
+import type { GitHubWebhookNotification } from './github-webhooks.js';
 import { logger } from './logger.js';
 import { assertPathWithin } from './path-security.js';
 import { Effect } from 'effect';
@@ -154,6 +159,7 @@ const MAX_CONSECUTIVE_ERRORS = 3;
 let whatsapp: WhatsAppChannel | null = null;
 let channels: Channel[] = [];
 const queue = new GroupQueue();
+let githubWebhookServer: { stop: () => void } | null = null;
 
 const MAX_CHANNEL_AGENT_FANOUT = parseInt(
   process.env.MAX_CHANNEL_AGENT_FANOUT || '3',
@@ -1809,6 +1815,10 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (githubWebhookServer) {
+      githubWebhookServer.stop();
+      githubWebhookServer = null;
+    }
     await queue.shutdown(10000);
     await shutdownBackends();
     for (const ch of channels) {
@@ -1824,6 +1834,60 @@ async function main(): Promise<void> {
 
   // --- Startup: initialize backends first, then start message loop, then connect channels ---
   const startupT0 = Date.now();
+
+  if (GITHUB_WEBHOOK_PORT > 0 && GITHUB_WEBHOOK_SECRET) {
+    const dispatchGitHubWebhook = async (
+      notification: GitHubWebhookNotification,
+    ): Promise<void> => {
+      const targets = Object.entries(channelSubscriptions).flatMap(
+        ([chatJid, subs]) => {
+          const matches = subs.filter((s) =>
+            notification.agentIds.includes(s.agentId),
+          );
+          return matches
+            .sort((a, b) =>
+              Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)),
+            )
+            .map((sub) => ({ chatJid, sub }));
+        },
+      );
+
+      // Route one notification per agent to avoid flooding multi-channel agents.
+      const delivered = new Set<string>();
+      for (const { chatJid, sub } of targets) {
+        if (delivered.has(sub.agentId)) continue;
+        const group = buildRegisteredGroupFromSubscription(chatJid, sub);
+        if (!group) continue;
+        const trigger = group.trigger || `@${ASSISTANT_NAME}`;
+        const withLink = notification.url
+          ? `${notification.summary}\n${notification.url}`
+          : notification.summary;
+        storeMessage({
+          id: `ghhook-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          chat_jid: chatJid,
+          sender: 'system',
+          sender_name: 'GitHub Webhook',
+          content: `${trigger} ${withLink}`,
+          timestamp: new Date().toISOString(),
+          is_from_me: false,
+        });
+        queue.enqueueMessageCheck(makeDispatchKey(chatJid, sub.agentId));
+        delivered.add(sub.agentId);
+      }
+    };
+
+    githubWebhookServer = startGitHubWebhookServer({
+      secret: GITHUB_WEBHOOK_SECRET,
+      port: GITHUB_WEBHOOK_PORT,
+      path: GITHUB_WEBHOOK_PATH,
+      onNotification: dispatchGitHubWebhook,
+    });
+  } else if (GITHUB_WEBHOOK_PORT > 0 && !GITHUB_WEBHOOK_SECRET) {
+    logger.warn(
+      { port: GITHUB_WEBHOOK_PORT },
+      'GITHUB_WEBHOOK_PORT set without GITHUB_WEBHOOK_SECRET; webhook server disabled',
+    );
+  }
 
   // Backends MUST be initialized before the message loop starts, because
   // processGroupMessages → runAgent → resolveBackend() needs them.

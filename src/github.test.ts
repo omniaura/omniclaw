@@ -122,6 +122,42 @@ describe('github', () => {
     });
   });
 
+  describe('repo watch matching helpers', () => {
+    it('matches watchers case-insensitively by owner/repo', () => {
+      const { getWatchingAgentsForRepo } = require('./github.js');
+      const config: GitHubWatchesConfig = {
+        watches: [
+          {
+            agentId: 'agent-a',
+            repos: [{ owner: 'OmniAura', repo: 'OmniClaw' }],
+          },
+          {
+            agentId: 'agent-b',
+            repos: [{ owner: 'other', repo: 'repo' }],
+          },
+        ],
+      };
+
+      expect(getWatchingAgentsForRepo(config, 'omniaura', 'omniclaw')).toEqual([
+        'agent-a',
+      ]);
+    });
+
+    it('returns no watchers when repo is not configured', () => {
+      const { getWatchingAgentsForRepo } = require('./github.js');
+      const config: GitHubWatchesConfig = {
+        watches: [
+          {
+            agentId: 'agent-a',
+            repos: [{ owner: 'omniaura', repo: 'omniclaw' }],
+          },
+        ],
+      };
+
+      expect(getWatchingAgentsForRepo(config, 'omniaura', 'backend')).toEqual([]);
+    });
+  });
+
   describe('fetchGitHubContext', () => {
     it('returns null when GITHUB_TOKEN is not set', async () => {
       const { getGitHubContextForAgent } = require('./github.js');

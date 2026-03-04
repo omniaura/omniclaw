@@ -83,6 +83,32 @@ function getCacheKey(agentId: string): string {
   return `github:${agentId}`;
 }
 
+export function invalidateGitHubContextCacheForAgents(agentIds: string[]): number {
+  let removed = 0;
+  for (const agentId of agentIds) {
+    if (cache.delete(getCacheKey(agentId))) removed++;
+  }
+  return removed;
+}
+
+export function getWatchingAgentsForRepo(
+  config: GitHubWatchesConfig,
+  owner: string,
+  repo: string,
+): string[] {
+  const ownerLc = owner.toLowerCase();
+  const repoLc = repo.toLowerCase();
+  return config.watches
+    .filter((watch) =>
+      watch.repos.some(
+        (watchedRepo) =>
+          watchedRepo.owner.toLowerCase() === ownerLc &&
+          watchedRepo.repo.toLowerCase() === repoLc,
+      ),
+    )
+    .map((watch) => watch.agentId);
+}
+
 // --- Config loading ---
 
 const CONFIG_FILENAME = 'github-watches.json';
