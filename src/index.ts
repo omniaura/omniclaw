@@ -14,6 +14,7 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
+  PERSISTENT_TASK_STATE,
   POLL_INTERVAL,
   SESSION_MAX_AGE,
   SLACK_APP_TOKEN,
@@ -68,6 +69,7 @@ import { createThreadStreamer } from './thread-streaming.js';
 import { Agent, BackendType, Channel, ChannelRoute, NewMessage, RegisteredGroup, registeredGroupToAgent, registeredGroupToRoute } from './types.js';
 import { findMainGroupJid } from './group-helpers.js';
 import { logger } from './logger.js';
+import { createResumePositionStore } from './resume-position-store.js';
 import { Effect } from 'effect';
 
 // Re-export for backwards compatibility during refactor
@@ -113,9 +115,10 @@ async function shutdown(): Promise<void> {
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
-// In-memory only: resume positions are an optimization to skip session replay.
-// On host restart, full replay occurs once per group (acceptable trade-off).
-let resumePositions: Record<string, string> = {};
+const resumePositionStore = createResumePositionStore({
+  persistentTaskState: PERSISTENT_TASK_STATE,
+  initialResumePositions: {},
+});
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let agents: Record<string, Agent> = {};
 let channelRoutes: Record<string, ChannelRoute> = {};
@@ -724,7 +727,7 @@ async function runAgent(
           setSession(group.folder, output.newSessionId);
         }
         if (output.resumeAt) {
-          resumePositions[group.folder] = output.resumeAt;
+          resumePositionStore.set(group.folder, output.resumeAt);
         }
         await onOutput(output);
       }
@@ -738,7 +741,7 @@ async function runAgent(
       {
         prompt,
         sessionId,
-        resumeAt: resumePositions[group.folder],
+        resumeAt: resumePositionStore.get(group.folder),
         groupFolder: group.folder,
         chatJid,
         isMain,
@@ -755,7 +758,7 @@ async function runAgent(
       setSession(group.folder, output.newSessionId);
     }
     if (output.resumeAt) {
-      resumePositions[group.folder] = output.resumeAt;
+      resumePositionStore.set(group.folder, output.resumeAt);
     }
 
     if (output.status === 'error') {
@@ -1296,7 +1299,7 @@ async function main(): Promise<void> {
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
-    getResumePositions: () => resumePositions,
+    resumePositionStore,
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder, lane) => queue.registerProcess(groupJid, proc, containerName, groupFolder, undefined, lane),
     sendMessage: async (jid, rawText) => {

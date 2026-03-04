@@ -25,12 +25,13 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
+import { ResumePositionStore } from './resume-position-store.js';
 import { Channel, ContainerProcess, RegisteredGroup, ScheduledTask } from './types.js';
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
-  getResumePositions: () => Record<string, string>;
+  resumePositionStore: ResumePositionStore;
   queue: GroupQueue;
   onProcess: (groupJid: string, proc: ContainerProcess, containerName: string, groupFolder: string, lane: 'task') => void;
   sendMessage: (jid: string, text: string) => Promise<string | void>;
@@ -227,7 +228,7 @@ async function runTask(
   // the full session history and resume from the last known position.
   const sessionId = undefined;
   const resumeAt = task.context_mode === 'group'
-    ? deps.getResumePositions()[task.group_folder]
+    ? deps.resumePositionStore.get(task.group_folder)
     : undefined;
 
   // Idle timer: writes _close sentinel after IDLE_TIMEOUT of no output,
