@@ -155,6 +155,72 @@ If an agent addresses itself by name, it consumes its own trigger → the messag
 
 ---
 
+## Channel context injection
+
+Every agent automatically receives a `## Channel Context` block in their system prompt when a container starts.
+
+**Multi-channel agents** see all subscribed channels:
+
+```
+## Channel Context
+You are subscribed to multiple channels:
+- **#omniclaw** (`dc:1475009887846010963`)
+- **#agent-debug** (`dc:1476469986024489081`) **(current)**
+- **#landing-page** (`dc:1475913343817748600`)
+```
+
+**Single-channel agents** see just their channel:
+
+```
+## Channel Context
+You are responding in **#omniclaw** (dc:1475009887846010963)
+```
+
+This is automatic — no configuration needed. The data comes from the agent's `channel_subscriptions` rows.
+
+---
+
+## Sender identity
+
+Messages now carry structured sender identity fields:
+
+| Field | Column | Example |
+|-------|--------|---------|
+| Platform | `sender_platform` | `discord`, `whatsapp`, `telegram`, `slack`, `ipc`, `system` |
+| Immutable ID | `sender_user_id` | `discord:123456789`, `whatsapp:15551234567` |
+| Display name | `sender_name` | `Peyton` (mutable, for display only) |
+
+Sender IDs are canonicalized to `<platform>:<immutable-id>` format across all adapters. The `sender_id` attribute is also exposed in the `<message>` XML that agents receive, alongside `sender` (display name).
+
+The participant roster in conversation context deduplicates by immutable sender ID rather than display name, preventing phantom participants when users change their display name.
+
+**Diagnostics:**
+
+```bash
+# Check recent sender identity data
+sqlite3 store/messages.db \
+  "SELECT sender, sender_platform, sender_user_id FROM messages ORDER BY rowid DESC LIMIT 10"
+
+# Check instrumentation counters in logs
+grep 'senderIdentity' logs/omniclaw.log | tail -20
+```
+
+---
+
+## GitHub context injection
+
+Agents can receive a `# GitHub Context` block in their system prompt showing open PRs, issues, and review comments for configured repos.
+
+Requires:
+- `GITHUB_TOKEN` in `.env`
+- `data/github-watches.json` with agent → repo mappings (see [advanced-setup.md](advanced-setup.md))
+
+The context block is fetched by the host process and passed into the container via the `githubContext` field. Cache TTL is 5 minutes by default.
+
+For real-time updates, configure GitHub webhooks (see [advanced-setup.md](advanced-setup.md)).
+
+---
+
 ## Full consistency check
 
 Run this to verify all the pieces align:
@@ -186,7 +252,7 @@ grep "DISCORD_BOT_IDS\|DISCORD_BOT_DEFAULT" .env 2>/dev/null
 - [ ] Row in `agents` with correct `agent_context_folder`
 - [ ] Row in `channel_subscriptions` for each channel it should join
 - [ ] `discord_bot_id` in that row matches a key in `DISCORD_BOT_IDS`
-- [ ] `channel_folder` and `category_folder` directories exist under `groups/`
+- [ ] `channel_folder` and `category_folder` set in `channel_subscriptions` and directories exist under `groups/`
 - [ ] `groups/<agent_context_folder>/CLAUDE.md` says `You are <AgentName>` and lists co-agents' triggers
 - [ ] All co-agents' identity files mention each other's triggers
 
@@ -222,11 +288,25 @@ grep "DISCORD_BOT_IDS\|DISCORD_BOT_DEFAULT" .env 2>/dev/null
 
    This creates the `agents` row and `channel_subscriptions` row.
 
-4. **Set `agent_context_folder`** (the register script may not set this automatically):
+4. **Set context layer folders** (the register script doesn't set these automatically yet):
 
    ```bash
+   # Agent identity folder
    sqlite3 store/messages.db \
      "UPDATE agents SET agent_context_folder = 'agents/<name>' WHERE id = '<agent-id>'"
+
+   # Channel and category context folders
+   sqlite3 store/messages.db \
+     "UPDATE channel_subscriptions
+      SET channel_folder = 'servers/<server>/<category>/<channel>',
+          category_folder = 'servers/<server>/<category>'
+      WHERE agent_id = '<agent-id>' AND channel_jid = 'dc:<CHANNEL_ID>'"
+   ```
+
+   Create the directories:
+   ```bash
+   mkdir -p groups/agents/<name>
+   mkdir -p groups/servers/<server>/<category>/<channel>
    ```
 
 5. **Update co-agents' identity files** to mention the new agent's trigger.

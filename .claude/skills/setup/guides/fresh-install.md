@@ -76,6 +76,31 @@ Ask: Do you want the agent to push branches and create pull requests?
 
 If yes: user needs a classic GitHub token with `repo` scope from https://github.com/settings/tokens. Once they provide it, use the Write tool to append to `.env` (never echo tokens via shell). Optionally collect `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`.
 
+### GitHub Context Injection (Optional)
+
+If the user wants agents to see open PRs, issues, and review comments in their system prompt, create `data/github-watches.json`:
+
+```json
+{
+  "cacheTtlMs": 300000,
+  "watches": [
+    {
+      "agentId": "<agent-folder-name>",
+      "repos": [
+        {
+          "owner": "<github-org>",
+          "repo": "<repo-name>",
+          "openPrs": { "limit": 10, "includeReviewComments": true },
+          "recentIssues": { "limit": 10 }
+        }
+      ]
+    }
+  ]
+}
+```
+
+Requires `GITHUB_TOKEN` in `.env`. Context is cached for 5 minutes by default. For real-time updates via webhooks, see [advanced-setup.md](advanced-setup.md).
+
 ## 5. WhatsApp Authentication
 
 If HAS_AUTH=true, confirm to keep or re-authenticate.
