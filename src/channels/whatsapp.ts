@@ -389,6 +389,7 @@ export class WhatsAppChannel implements Channel {
               // WhatsApp's fromMe is true for ALL self-chat messages (protocol quirk),
               // which would cause the DB query to drop real user messages.
               is_from_me: false,
+              sender_platform: 'whatsapp',
             });
           }
         } catch (err) {

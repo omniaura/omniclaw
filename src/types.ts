@@ -70,14 +70,44 @@ export interface RegisteredGroup {
   agentContextFolder?: string; // e.g., 'agents/peytonomi'
 }
 
+/**
+ * Inbound message envelope.
+ *
+ * Sender identity contract (see docs/nanoclaw-sender-identity-pipeline.md):
+ *
+ *   sender           — Immutable platform ID (e.g. Discord snowflake, WhatsApp JID).
+ *                       Used as the authoritative identity key for routing, filtering,
+ *                       and dedup.  NEVER derived from a display name.
+ *
+ *   sender_name      — Human-readable display label (mutable, user-changeable).
+ *                       Used ONLY for presentation (XML prompt, logs).
+ *                       Must NEVER be used for authorization or dedup.
+ *
+ *   sender_platform  — Origin platform tag.  Together with `sender`, forms the
+ *                       canonical sender key (`<platform>:<sender>`).  Populated by
+ *                       adapters; synthetic messages use 'system' or 'ipc'.
+ */
 export interface NewMessage {
   id: string;
   chat_jid: string;
+  /** Immutable platform-specific sender ID (authoritative key). */
   sender: string;
+  /** Human-readable display name (presentation only — do not use for auth or dedup). */
   sender_name: string;
   content: string;
   timestamp: string;
   is_from_me?: boolean;
+  /**
+   * Origin platform.  Set by the adapter that ingested the message.
+   * Synthetic messages use 'system'; IPC-relayed messages use 'ipc'.
+   */
+  sender_platform?:
+    | 'discord'
+    | 'whatsapp'
+    | 'telegram'
+    | 'slack'
+    | 'ipc'
+    | 'system';
   /** Platform-specific sender ID (e.g., Discord user ID, WhatsApp JID) */
   sender_user_id?: string;
   /** Array of mentioned users with their IDs and display names */

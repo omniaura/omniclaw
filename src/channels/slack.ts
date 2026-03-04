@@ -373,6 +373,7 @@ export class SlackChannel implements Channel {
       content,
       timestamp,
       is_from_me: false,
+      sender_platform: 'slack',
       sender_user_id: senderUserId,
       mentions: mentions.map((m) => ({ ...m, platform: 'slack' as const })),
     });

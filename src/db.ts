@@ -301,6 +301,7 @@ export function createSchema(database: Database): void {
   );
   addColumnIfNotExists(database, 'registered_groups', 'server_folder', 'TEXT');
   addColumnIfNotExists(database, 'messages', 'sender_user_id', 'TEXT');
+  addColumnIfNotExists(database, 'messages', 'sender_platform', 'TEXT');
   addColumnIfNotExists(database, 'messages', 'mentions', 'TEXT');
   addColumnIfNotExists(database, 'chats', 'discord_guild_id', 'TEXT');
   // Note: SQLite ALTER TABLE requires constant defaults; new sessions get datetime('now') via INSERT in setSession().
@@ -572,7 +573,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.query(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, sender_user_id, mentions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, sender_platform, sender_user_id, mentions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -581,6 +582,7 @@ export function storeMessage(msg: NewMessage): void {
     msg.content,
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
+    msg.sender_platform ?? null,
     msg.sender_user_id ?? null,
     msg.mentions ? JSON.stringify(msg.mentions) : null,
   );
@@ -590,12 +592,15 @@ export function storeMessage(msg: NewMessage): void {
 type MessageRow = NewMessage & {
   mentions: string | null;
   sender_user_id: string | null;
+  sender_platform: string | null;
 };
 
 /** Convert a raw DB message row to a NewMessage (parse mentions JSON, null→undefined) */
 function mapMessageRow(row: MessageRow): NewMessage {
   return {
     ...row,
+    sender_platform:
+      (row.sender_platform as NewMessage['sender_platform']) ?? undefined,
     sender_user_id: row.sender_user_id ?? undefined,
     mentions: row.mentions ? JSON.parse(row.mentions) : undefined,
   };
@@ -610,7 +615,7 @@ export function getNewMessages(
   const placeholders = jids.map(() => '?').join(',');
   // Filter out bot's own messages using is_from_me field
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, sender_user_id, mentions
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, sender_platform, sender_user_id, mentions
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND (is_from_me IS NULL OR is_from_me = 0)
     ORDER BY timestamp
@@ -634,7 +639,7 @@ export function getMessagesSince(
 ): NewMessage[] {
   // Filter out bot's own messages using is_from_me field
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, sender_user_id, mentions
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, sender_platform, sender_user_id, mentions
     FROM messages
     WHERE chat_jid = ? AND timestamp > ? AND (is_from_me IS NULL OR is_from_me = 0)
     ORDER BY timestamp

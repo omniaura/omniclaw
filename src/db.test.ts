@@ -136,6 +136,100 @@ describe('storeMessage', () => {
   });
 });
 
+// --- storeMessage (sender_platform) ---
+
+describe('storeMessage with sender_platform', () => {
+  it('persists and retrieves sender_platform', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'dc-plat-1',
+      chat_jid: 'group@g.us',
+      sender: '123456789012345678',
+      sender_name: 'Alice',
+      content: 'hello from discord',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+      sender_platform: 'discord',
+    });
+
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z');
+    expect(messages).toHaveLength(1);
+    expect(messages[0].sender_platform).toBe('discord');
+  });
+
+  it('returns undefined sender_platform for legacy messages without it', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'legacy-1',
+      chat_jid: 'group@g.us',
+      sender: '15551234567@s.whatsapp.net',
+      sender_name: 'Bob',
+      content: 'old message',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+    });
+
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z');
+    expect(messages).toHaveLength(1);
+    expect(messages[0].sender_platform).toBeUndefined();
+  });
+
+  it('persists all platform types correctly', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    const platforms = [
+      'discord',
+      'whatsapp',
+      'telegram',
+      'slack',
+      'ipc',
+      'system',
+    ] as const;
+    for (const [i, platform] of platforms.entries()) {
+      storeMessage({
+        id: `plat-${platform}`,
+        chat_jid: 'group@g.us',
+        sender: `sender-${i}`,
+        sender_name: `User ${i}`,
+        content: `from ${platform}`,
+        timestamp: `2024-01-01T00:00:0${i + 1}.000Z`,
+        is_from_me: false,
+        sender_platform: platform,
+      });
+    }
+
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z');
+    expect(messages).toHaveLength(platforms.length);
+    for (const [i, platform] of platforms.entries()) {
+      expect(messages[i].sender_platform).toBe(platform);
+    }
+  });
+
+  it('includes sender_platform in getNewMessages results', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'gnm-1',
+      chat_jid: 'group@g.us',
+      sender: '999',
+      sender_name: 'TgUser',
+      content: 'telegram msg',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+      sender_platform: 'telegram',
+    });
+
+    const { messages } = getNewMessages(
+      ['group@g.us'],
+      '2024-01-01T00:00:00.000Z',
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].sender_platform).toBe('telegram');
+  });
+});
+
 // --- storeMessage (sender_user_id + mentions) ---
 
 describe('storeMessage with sender_user_id and mentions', () => {
