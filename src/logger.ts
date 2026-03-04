@@ -27,6 +27,9 @@ interface LogFn {
   (fields: Record<string, unknown>, msg: string): void;
 }
 
+export type LogRecord = Record<string, unknown>;
+export type LogSubscriber = (record: LogRecord) => void;
+
 export interface Logger {
   level: string;
   trace: LogFn;
@@ -36,6 +39,8 @@ export interface Logger {
   error: LogFn;
   fatal: LogFn;
   child(fields: Record<string, unknown>): Logger;
+  /** Subscribe to log records. Returns an unsubscribe function. */
+  subscribe(fn: LogSubscriber): () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,13 +191,20 @@ function writePretty(level: LogLevel, record: Record<string, unknown>): void {
 // Logger factory
 // ---------------------------------------------------------------------------
 
+/** Root logger keeps a shared subscriber set for all children. */
+let rootSubscribers: Set<LogSubscriber> | null = null;
+
 function createLogger(
   defaults: Record<string, unknown> = {},
   levelOverride?: string,
+  parentSubscribers?: Set<LogSubscriber>,
 ): Logger {
   const effectiveLevel = levelOverride || process.env.LOG_LEVEL || 'debug';
   const minLevel =
     LEVEL_VALUES[effectiveLevel as LogLevel] ?? LEVEL_VALUES.info;
+
+  // All loggers in a tree share the root subscriber set
+  const subs = parentSubscribers ?? (rootSubscribers ??= new Set());
 
   function write(
     level: LogLevel,
@@ -229,6 +241,17 @@ function createLogger(
     } else {
       writeJSON(record);
     }
+
+    // Notify external subscribers (web UI log streaming, etc.)
+    if (subs.size > 0) {
+      for (const fn of subs) {
+        try {
+          fn(record);
+        } catch {
+          // Never let subscriber errors crash the logger
+        }
+      }
+    }
   }
 
   function makeLogFn(level: LogLevel): LogFn {
@@ -249,7 +272,13 @@ function createLogger(
     error: makeLogFn('error'),
     fatal: makeLogFn('fatal'),
     child(fields: Record<string, unknown>): Logger {
-      return createLogger({ ...defaults, ...fields }, effectiveLevel);
+      return createLogger({ ...defaults, ...fields }, effectiveLevel, subs);
+    },
+    subscribe(fn: LogSubscriber): () => void {
+      subs.add(fn);
+      return () => {
+        subs.delete(fn);
+      };
     },
   };
 
@@ -261,6 +290,14 @@ function createLogger(
 // ---------------------------------------------------------------------------
 
 export const logger = createLogger();
+
+/**
+ * Subscribe to log records on the default logger.
+ * Convenience alias for `logger.subscribe(fn)`.
+ */
+export function subscribeToLogs(fn: LogSubscriber): () => void {
+  return logger.subscribe(fn);
+}
 
 // Route uncaught errors through structured logger
 process.on('uncaughtException', (err) => {
