@@ -24,7 +24,8 @@ export function formatMessages(messages: NewMessage[]): string {
   const senders: string[] = [];
   for (const m of messages) {
     if (!m.sender_name || m.sender_name === 'System') continue;
-    const key = m.sender || m.sender_name;
+    const key = m.sender;
+    if (!key) continue; // skip messages with no immutable ID from roster
     if (seen.has(key)) continue;
     seen.add(key);
     senders.push(m.sender_name);

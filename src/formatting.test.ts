@@ -207,6 +207,33 @@ describe('formatMessages', () => {
     expect(result).toContain('sender_id="discord:456789"');
   });
 
+  it('excludes messages with no sender ID from participant roster', () => {
+    // Messages without an immutable sender ID should still render but
+    // not appear in the participant roster (indicates upstream bug).
+    const msgs = [
+      makeMsg({
+        id: '1',
+        sender: '',
+        sender_name: 'Ghost',
+        content: 'boo',
+        timestamp: 't1',
+      }),
+      makeMsg({
+        id: '2',
+        sender: 'discord:999',
+        sender_name: 'Valid',
+        content: 'hi',
+        timestamp: 't2',
+      }),
+    ];
+    const result = formatMessages(msgs);
+    // Only "Valid" should appear in participants (Ghost has no sender ID)
+    expect(result).toContain('participants="Valid"');
+    expect(result).not.toContain('participants="Ghost');
+    // But Ghost's message is still rendered in the XML body
+    expect(result).toContain('sender="Ghost"');
+  });
+
   it('handles empty array', () => {
     const result = formatMessages([]);
     expect(result).toBe('<messages>\n\n</messages>');
