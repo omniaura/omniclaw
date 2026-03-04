@@ -62,7 +62,7 @@ describe('formatMessages', () => {
     const result = formatMessages([makeMsg()]);
     expect(result).toBe(
       '<messages participants="Alice">\n' +
-        '<message id="1" sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
+        '<message id="1" sender="Alice" sender_id="123@s.whatsapp.net" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
         '</messages>',
     );
   });
@@ -71,11 +71,18 @@ describe('formatMessages', () => {
     const msgs = [
       makeMsg({
         id: '1',
+        sender: '111@s.whatsapp.net',
         sender_name: 'Alice',
         content: 'hi',
         timestamp: 't1',
       }),
-      makeMsg({ id: '2', sender_name: 'Bob', content: 'hey', timestamp: 't2' }),
+      makeMsg({
+        id: '2',
+        sender: '222@s.whatsapp.net',
+        sender_name: 'Bob',
+        content: 'hey',
+        timestamp: 't2',
+      }),
     ];
     const result = formatMessages(msgs);
     expect(result).toContain('participants="Alice, Bob"');
@@ -129,6 +136,7 @@ describe('formatMessages', () => {
   it('escapes special characters in sender names', () => {
     const result = formatMessages([makeMsg({ sender_name: 'A & B <Co>' })]);
     expect(result).toContain('sender="A &amp; B &lt;Co&gt;"');
+    expect(result).toContain('sender_id="123@s.whatsapp.net"');
     expect(result).toContain('participants="A &amp; B &lt;Co&gt;"');
   });
 
@@ -139,6 +147,91 @@ describe('formatMessages', () => {
     expect(result).toContain(
       '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;',
     );
+  });
+
+  it('deduplicates participants by immutable sender ID, not display name', () => {
+    // Same sender changes display name mid-conversation (R2 scenario)
+    const msgs = [
+      makeMsg({
+        id: '1',
+        sender: 'discord:123',
+        sender_name: 'Alice',
+        content: 'hi',
+        timestamp: 't1',
+      }),
+      makeMsg({
+        id: '2',
+        sender: 'discord:123',
+        sender_name: 'Alice (New Name)',
+        content: 'hey',
+        timestamp: 't2',
+      }),
+    ];
+    const result = formatMessages(msgs);
+    // Participants header should only show the first display name (deduped by sender ID)
+    const headerLine = result.split('\n')[0];
+    expect(headerLine).toContain('participants="Alice"');
+    expect(headerLine).not.toContain('Alice (New Name)');
+    // But both messages still show their respective sender names
+    expect(result).toContain('sender="Alice"');
+    expect(result).toContain('sender="Alice (New Name)"');
+  });
+
+  it('keeps distinct senders even with same display name', () => {
+    // Two different users happen to have the same display name
+    const msgs = [
+      makeMsg({
+        id: '1',
+        sender: 'discord:111',
+        sender_name: 'Alice',
+        content: 'hi',
+        timestamp: 't1',
+      }),
+      makeMsg({
+        id: '2',
+        sender: 'discord:222',
+        sender_name: 'Alice',
+        content: 'hey',
+        timestamp: 't2',
+      }),
+    ];
+    const result = formatMessages(msgs);
+    // Both appear in participants because they have different sender IDs
+    expect(result).toContain('participants="Alice, Alice"');
+  });
+
+  it('includes sender_id attribute with immutable ID', () => {
+    const result = formatMessages([
+      makeMsg({ sender: 'discord:456789', sender_name: 'Bob' }),
+    ]);
+    expect(result).toContain('sender_id="discord:456789"');
+  });
+
+  it('excludes messages with no sender ID from participant roster', () => {
+    // Messages without an immutable sender ID should still render but
+    // not appear in the participant roster (indicates upstream bug).
+    const msgs = [
+      makeMsg({
+        id: '1',
+        sender: '',
+        sender_name: 'Ghost',
+        content: 'boo',
+        timestamp: 't1',
+      }),
+      makeMsg({
+        id: '2',
+        sender: 'discord:999',
+        sender_name: 'Valid',
+        content: 'hi',
+        timestamp: 't2',
+      }),
+    ];
+    const result = formatMessages(msgs);
+    // Only "Valid" should appear in participants (Ghost has no sender ID)
+    expect(result).toContain('participants="Valid"');
+    expect(result).not.toContain('participants="Ghost');
+    // But Ghost's message is still rendered in the XML body
+    expect(result).toContain('sender="Ghost"');
   });
 
   it('handles empty array', () => {
