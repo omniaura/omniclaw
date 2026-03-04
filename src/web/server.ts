@@ -172,7 +172,10 @@ function checkBasicAuth(
   if (!header?.startsWith('Basic ')) return false;
   try {
     const decoded = atob(header.slice(6));
-    const [user, pass] = decoded.split(':');
+    const idx = decoded.indexOf(':');
+    if (idx === -1) return false;
+    const user = decoded.slice(0, idx);
+    const pass = decoded.slice(idx + 1);
     // Constant-time comparison for password (timing-safe)
     return (
       user === expected.username &&

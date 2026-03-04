@@ -24,7 +24,12 @@ export function handleRequest(
     return json({ error: 'Method not allowed' }, 405);
   }
   if (pathname.startsWith('/api/tasks/')) {
-    const taskId = decodeURIComponent(pathname.slice('/api/tasks/'.length));
+    let taskId: string;
+    try {
+      taskId = decodeURIComponent(pathname.slice('/api/tasks/'.length));
+    } catch {
+      return json({ error: 'Invalid task ID encoding' }, 400);
+    }
     if (!taskId) return json({ error: 'Missing task ID' }, 400);
     if (method === 'GET') return handleGetSingleTask(taskId, state);
     if (method === 'PATCH') return handleUpdateTask(taskId, req, state);
@@ -259,7 +264,13 @@ async function handleUpdateTask(
     const newValue = updates.schedule_value ?? existing.schedule_value;
     if (scheduleChanged || newType !== 'once') {
       const nextRun = state.calculateNextRun(newType, newValue);
-      if (nextRun !== null) updates.next_run = nextRun;
+      if (nextRun === null) {
+        return json(
+          { error: 'Invalid schedule: could not calculate next run time' },
+          400,
+        );
+      }
+      updates.next_run = nextRun;
     }
   }
 
@@ -303,14 +314,17 @@ function handleGetChats(state: WebStateProvider): Response {
 
 function handleGetMessages(url: URL, state: WebStateProvider): Response {
   // /api/messages/{chatJid}?since=...&limit=...
-  const chatJid = decodeURIComponent(
-    url.pathname.slice('/api/messages/'.length),
-  );
+  let chatJid: string;
+  try {
+    chatJid = decodeURIComponent(url.pathname.slice('/api/messages/'.length));
+  } catch {
+    return json({ error: 'Invalid chatJid encoding' }, 400);
+  }
   if (!chatJid) return json({ error: 'Missing chatJid' }, 400);
 
   const since = url.searchParams.get('since') || '1970-01-01T00:00:00.000Z';
   const limit = Math.min(
-    parseInt(url.searchParams.get('limit') || '100', 10) || 100,
+    Math.max(1, parseInt(url.searchParams.get('limit') || '100', 10) || 100),
     500,
   );
   const messages = state.getMessages(chatJid, since, limit);
@@ -321,11 +335,19 @@ function handleGetStats(state: WebStateProvider): Response {
   const stats = state.getQueueStats();
   const agents = state.getAgents();
   const tasks = state.getTasks();
+  let activeTasks = 0,
+    pausedTasks = 0,
+    completedTasks = 0;
+  for (const t of tasks) {
+    if (t.status === 'active') activeTasks++;
+    else if (t.status === 'paused') pausedTasks++;
+    else if (t.status === 'completed') completedTasks++;
+  }
   return json({
     agents: Object.keys(agents).length,
-    activeTasks: tasks.filter((t) => t.status === 'active').length,
-    pausedTasks: tasks.filter((t) => t.status === 'paused').length,
-    completedTasks: tasks.filter((t) => t.status === 'completed').length,
+    activeTasks,
+    pausedTasks,
+    completedTasks,
     ...stats,
   });
 }
