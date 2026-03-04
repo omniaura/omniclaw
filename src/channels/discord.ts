@@ -650,7 +650,8 @@ export class DiscordChannel implements Channel {
       message.member?.displayName ||
       message.author.displayName ||
       message.author.username;
-    const sender = message.author.id;
+    const senderUserId = message.author.id;
+    const sender = `discord:${senderUserId}`;
     const msgId = message.id;
 
     // Phase 0 instrumentation: detect sender identity anomalies
@@ -861,7 +862,7 @@ export class DiscordChannel implements Channel {
       timestamp,
       is_from_me: false,
       sender_platform: 'discord',
-      sender_user_id: sender, // Discord user ID
+      sender_user_id: senderUserId,
       mentions: mentions.length > 0 ? mentions : undefined,
     });
 

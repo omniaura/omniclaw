@@ -349,8 +349,9 @@ export class WhatsAppChannel implements Channel {
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
             if (!content) continue;
 
-            const sender = msg.key.participant || msg.key.remoteJid || '';
-            const senderName = msg.pushName || sender.split('@')[0];
+            const rawSender = msg.key.participant || msg.key.remoteJid || '';
+            const sender = rawSender ? `whatsapp:${rawSender}` : '';
+            const senderName = msg.pushName?.trim() || '';
 
             // Phase 0 instrumentation: detect sender identity anomalies
             if (!senderName) {

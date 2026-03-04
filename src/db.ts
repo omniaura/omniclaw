@@ -610,18 +610,53 @@ const VALID_SENDER_PLATFORMS = new Set<
   NonNullable<NewMessage['sender_platform']>
 >(['discord', 'whatsapp', 'telegram', 'slack', 'ipc', 'system']);
 
+/** Adapter platforms whose sender IDs should be canonicalized to `<platform>:<id>` */
+const ADAPTER_PLATFORMS = new Set(['discord', 'whatsapp', 'telegram', 'slack']);
+
+/** Infer platform from chat_jid for legacy messages missing sender_platform */
+function inferPlatformFromJid(chatJid: string): string | undefined {
+  if (chatJid.startsWith('dc:')) return 'discord';
+  if (chatJid.startsWith('slack:')) return 'slack';
+  if (chatJid.startsWith('tg:')) return 'telegram';
+  if (chatJid.endsWith('@g.us') || chatJid.endsWith('@s.whatsapp.net'))
+    return 'whatsapp';
+  return undefined;
+}
+
 /** Convert a raw DB message row to a NewMessage (parse mentions JSON, null→undefined) */
 function mapMessageRow(row: MessageRow): NewMessage {
   const platform = row.sender_platform;
+  const validPlatform =
+    platform &&
+    VALID_SENDER_PLATFORMS.has(
+      platform as NonNullable<NewMessage['sender_platform']>,
+    )
+      ? (platform as NonNullable<NewMessage['sender_platform']>)
+      : undefined;
+
+  // Normalize legacy raw sender IDs to canonical <platform>:<id> format.
+  // Pre-canonicalization messages have bare IDs (e.g. "123456789"); post-canonicalization
+  // messages already include the prefix (e.g. "discord:123456789").
+  let sender = row.sender;
+  if (sender && !sender.includes(':')) {
+    // Skip canonicalization for non-adapter platforms (system, ipc)
+    const isNonAdapterPlatform =
+      validPlatform && !ADAPTER_PLATFORMS.has(validPlatform);
+    if (!isNonAdapterPlatform) {
+      const adapterPlatform =
+        (validPlatform && ADAPTER_PLATFORMS.has(validPlatform)
+          ? validPlatform
+          : null) || inferPlatformFromJid(row.chat_jid);
+      if (adapterPlatform) {
+        sender = `${adapterPlatform}:${sender}`;
+      }
+    }
+  }
+
   return {
     ...row,
-    sender_platform:
-      platform &&
-      VALID_SENDER_PLATFORMS.has(
-        platform as NonNullable<NewMessage['sender_platform']>,
-      )
-        ? (platform as NonNullable<NewMessage['sender_platform']>)
-        : undefined,
+    sender,
+    sender_platform: validPlatform,
     sender_user_id: row.sender_user_id ?? undefined,
     mentions: row.mentions ? JSON.parse(row.mentions) : undefined,
   };

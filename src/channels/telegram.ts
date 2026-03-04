@@ -143,12 +143,10 @@ export class TelegramChannel implements Channel {
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const senderId = ctx.from?.id?.toString() || '';
+      const sender = senderId ? `telegram:${senderId}` : '';
       const senderName =
-        ctx.from?.first_name ||
-        ctx.from?.username ||
-        ctx.from?.id.toString() ||
-        'Unknown';
-      const sender = ctx.from?.id.toString() || '';
+        ctx.from?.first_name || ctx.from?.username || 'Unknown';
       const msgId = ctx.message.message_id.toString();
 
       // Phase 0 instrumentation: detect sender identity anomalies
@@ -251,18 +249,17 @@ export class TelegramChannel implements Channel {
       if (!group) return;
 
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const senderId = ctx.from?.id?.toString() || '';
+      const sender = senderId ? `telegram:${senderId}` : '';
       const senderName =
-        ctx.from?.first_name ||
-        ctx.from?.username ||
-        ctx.from?.id?.toString() ||
-        'Unknown';
+        ctx.from?.first_name || ctx.from?.username || 'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
 
       this.opts.onChatMetadata(chatJid, timestamp);
       this.opts.onMessage(chatJid, {
         id: ctx.message.message_id.toString(),
         chat_jid: chatJid,
-        sender: ctx.from?.id?.toString() || '',
+        sender,
         sender_name: senderName,
         content: `${placeholder}${caption}`,
         timestamp,
