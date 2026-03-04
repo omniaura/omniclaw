@@ -821,6 +821,7 @@ export class DiscordChannel implements Channel {
       content,
       timestamp,
       is_from_me: false,
+      sender_platform: 'discord',
       sender_user_id: sender, // Discord user ID
       mentions: mentions.length > 0 ? mentions : undefined,
     });

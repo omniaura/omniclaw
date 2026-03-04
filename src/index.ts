@@ -1739,6 +1739,7 @@ function handleShareRequestApproval(
     content: syntheticContent,
     timestamp: new Date().toISOString(),
     is_from_me: false,
+    sender_platform: 'system',
   });
 
   queue.enqueueMessageCheck(mainJid);
@@ -1788,6 +1789,7 @@ async function handleReactionNotification(
     content: reactionContent,
     timestamp: new Date().toISOString(),
     is_from_me: false,
+    sender_platform: 'system' as const,
   };
 
   const piped = await queue.sendMessage(
@@ -1873,6 +1875,7 @@ async function main(): Promise<void> {
           content: `${trigger} ${withLink}`,
           timestamp: new Date().toISOString(),
           is_from_me: false,
+          sender_platform: 'system',
         });
         queue.enqueueMessageCheck(makeDispatchKey(chatJid, sub.agentId));
         delivered.add(sub.agentId);
@@ -2183,6 +2186,7 @@ async function main(): Promise<void> {
         content: `${trigger} ${text}`,
         timestamp: new Date().toISOString(),
         is_from_me: false,
+        sender_platform: 'ipc',
       });
       queue.enqueueMessageCheck(jid);
     },

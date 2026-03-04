@@ -211,6 +211,7 @@ export class TelegramChannel implements Channel {
         content,
         timestamp,
         is_from_me: false,
+        sender_platform: 'telegram',
       });
 
       logger.info(
@@ -242,6 +243,7 @@ export class TelegramChannel implements Channel {
         content: `${placeholder}${caption}`,
         timestamp,
         is_from_me: false,
+        sender_platform: 'telegram',
       });
     };
 
