@@ -54,6 +54,8 @@ interface ContainerInput {
   currentChannelName?: string;
   channelFolder?: string;
   categoryFolder?: string;
+  /** Pre-fetched GitHub context markdown (open PRs, issues, review comments). */
+  githubContext?: string;
 }
 
 interface ContainerOutput {
@@ -775,6 +777,12 @@ async function runQuery(
       : `\`${containerInput.chatJid}\``;
     const channelBlock = `\n\n## Channel Context\nYou are responding in ${channelDisplay}.`;
     globalClaudeMd = globalClaudeMd ? globalClaudeMd + channelBlock : channelBlock.trim();
+  }
+
+  // Append GitHub context (pre-fetched open PRs, issues, review comments)
+  if (containerInput.githubContext) {
+    const githubBlock = `\n\n${containerInput.githubContext}`;
+    globalClaudeMd = globalClaudeMd ? globalClaudeMd + githubBlock : containerInput.githubContext;
   }
 
   // Discover additional directories for CLAUDE.md auto-loading:

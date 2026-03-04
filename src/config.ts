@@ -172,3 +172,11 @@ export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || undefined;
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+export const GITHUB_WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || '';
+export const GITHUB_WEBHOOK_PORT = parseInt(
+  process.env.GITHUB_WEBHOOK_PORT || '0',
+  10,
+);
+export const GITHUB_WEBHOOK_PATH =
+  process.env.GITHUB_WEBHOOK_PATH || '/webhooks/github';

@@ -248,6 +248,26 @@ export function registeredGroupToRoute(
   };
 }
 
+// --- GitHub Watch Config ---
+
+export interface GitHubRepoWatch {
+  owner: string;
+  repo: string;
+  openPrs?: { limit?: number; includeReviewComments?: boolean };
+  recentIssues?: { limit?: number };
+}
+
+export interface GitHubAgentWatch {
+  agentId: string;
+  repos: GitHubRepoWatch[];
+}
+
+export interface GitHubWatchesConfig {
+  watches: GitHubAgentWatch[];
+  /** Cache TTL in milliseconds. Default: 300000 (5 minutes) */
+  cacheTtlMs?: number;
+}
+
 // --- IPC Data Types ---
 
 /** IPC message payloads sent by agents to the orchestrator. */
