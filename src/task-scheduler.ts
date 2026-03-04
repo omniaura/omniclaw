@@ -24,6 +24,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
+import { ResumePositionStore } from './resume-position-store.js';
 import {
   Channel,
   ContainerProcess,
@@ -45,7 +46,7 @@ export interface SchedulerDependencies {
     agentFolder: string,
   ) => RegisteredGroup | undefined;
   getSessions: () => Record<string, string>;
-  getResumePositions: () => Record<string, string>;
+  resumePositionStore: ResumePositionStore;
   queue: GroupQueue;
   onProcess: (
     groupJid: string,
@@ -131,7 +132,7 @@ async function runTask(
   const sessionId = undefined;
   const resumeAt =
     task.context_mode === 'group'
-      ? deps.getResumePositions()[task.group_folder]
+      ? deps.resumePositionStore.get(task.group_folder)
       : undefined;
 
   // [Upstream PR #354] After the task produces a result, close the container

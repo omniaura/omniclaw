@@ -15,6 +15,7 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
+  PERSISTENT_TASK_STATE,
   POLL_INTERVAL,
   SESSION_MAX_AGE,
   SLACK_APP_TOKEN,
@@ -88,6 +89,7 @@ import { getGitHubContextForAgent } from './github.js';
 import { startGitHubWebhookServer } from './github-webhooks.js';
 import type { GitHubWebhookNotification } from './github-webhooks.js';
 import { logger } from './logger.js';
+import { createResumePositionStore } from './resume-position-store.js';
 import { assertPathWithin } from './path-security.js';
 import { Effect } from 'effect';
 
@@ -131,9 +133,10 @@ async function shutdown(): Promise<void> {
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
-// In-memory only: resume positions are an optimization to skip session replay.
-// On host restart, full replay occurs once per group (acceptable trade-off).
-let resumePositions: Record<string, string> = {};
+const resumePositionStore = createResumePositionStore({
+  persistentTaskState: PERSISTENT_TASK_STATE,
+  initialResumePositions: {},
+});
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let agents: Record<string, Agent> = {};
 let channelRoutes: Record<string, ChannelRoute> = {};
@@ -1210,7 +1213,7 @@ async function runAgent(
           setSession(runtimeGroupFolder, output.newSessionId);
         }
         if (output.resumeAt) {
-          resumePositions[runtimeGroupFolder] = output.resumeAt;
+          resumePositionStore.set(group.folder, output.resumeAt);
         }
         await onOutput(output);
       }
@@ -1228,8 +1231,7 @@ async function runAgent(
     // Fetch GitHub context for this agent (cached, non-blocking on failure)
     let githubContext: string | undefined;
     try {
-      githubContext =
-        (await getGitHubContextForAgent(agentId)) ?? undefined;
+      githubContext = (await getGitHubContextForAgent(agentId)) ?? undefined;
     } catch (err) {
       logger.warn({ err, agentId }, 'Failed to fetch GitHub context');
     }
@@ -1239,7 +1241,7 @@ async function runAgent(
       {
         prompt,
         sessionId,
-        resumeAt: resumePositions[runtimeGroupFolder],
+        resumeAt: resumePositionStore.get(group.folder),
         groupFolder: group.folder,
         runtimeFolder: runtimeGroupFolder,
         chatJid,
@@ -1274,7 +1276,7 @@ async function runAgent(
       setSession(runtimeGroupFolder, output.newSessionId);
     }
     if (output.resumeAt) {
-      resumePositions[runtimeGroupFolder] = output.resumeAt;
+      resumePositionStore.set(group.folder, output.resumeAt);
     }
 
     if (output.status === 'error') {
@@ -1845,8 +1847,9 @@ async function main(): Promise<void> {
             notification.agentIds.includes(s.agentId),
           );
           return matches
-            .sort((a, b) =>
-              Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)),
+            .sort(
+              (a, b) =>
+                Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)),
             )
             .map((sub) => ({ chatJid, sub }));
         },
@@ -2122,7 +2125,7 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getGroupForTask,
     getSessions: () => sessions,
-    getResumePositions: () => resumePositions,
+    resumePositionStore,
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder, lane) =>
       queue.registerProcess(

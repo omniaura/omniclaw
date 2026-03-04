@@ -82,6 +82,8 @@ export const POLL_INTERVAL = 2000;
 /** Separator used in runtime group folders to isolate multi-agent dispatch state. */
 export const DISPATCH_RUNTIME_SEP = '__dispatch__';
 export const SCHEDULER_POLL_INTERVAL = 60000;
+export const PERSISTENT_TASK_STATE =
+  process.env.PERSISTENT_TASK_STATE === 'true';
 
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
