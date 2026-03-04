@@ -66,6 +66,21 @@ function updateUserRegistry(
     const now = new Date().toISOString();
     for (const { id, name, platform } of mentions) {
       const key = name.toLowerCase().trim();
+      // Phase 0 instrumentation: detect display name key collisions
+      const existing = registry[key];
+      if (existing && existing.id !== id) {
+        logger.warn(
+          {
+            op: 'senderIdentity',
+            counter: 'user_registry_collision',
+            platform,
+            key,
+            existing_id: existing.id,
+            new_id: id,
+          },
+          'User registry collision: display name key maps to different user ID',
+        );
+      }
       registry[key] = { id, name, platform, lastSeen: now };
     }
 
@@ -637,6 +652,30 @@ export class DiscordChannel implements Channel {
       message.author.username;
     const sender = message.author.id;
     const msgId = message.id;
+
+    // Phase 0 instrumentation: detect sender identity anomalies
+    if (!senderName) {
+      logger.warn(
+        {
+          op: 'senderIdentity',
+          counter: 'sender_name_empty',
+          platform: 'discord',
+          sender,
+        },
+        'Discord message has empty sender_name',
+      );
+    } else if (senderName === sender) {
+      logger.warn(
+        {
+          op: 'senderIdentity',
+          counter: 'sender_name_fallback_to_id',
+          platform: 'discord',
+          sender,
+          sender_name: senderName,
+        },
+        'Discord sender_name matches sender ID (fallback produced ID-as-name)',
+      );
+    }
 
     // DMs always trigger — prepend trigger if not present
     if (isDM && !TRIGGER_PATTERN.test(content)) {

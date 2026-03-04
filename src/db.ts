@@ -572,6 +572,17 @@ export function setLastGroupSync(): void {
  * Only call this for registered groups where message history is needed.
  */
 export function storeMessage(msg: NewMessage): void {
+  if (!msg.sender) {
+    logger.error(
+      {
+        op: 'senderIdentity',
+        counter: 'sender_missing',
+        chat_jid: msg.chat_jid,
+        msg_id: msg.id,
+      },
+      'Message has empty/falsy sender ID',
+    );
+  }
   db.query(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, sender_platform, sender_user_id, mentions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(

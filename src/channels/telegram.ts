@@ -151,6 +151,30 @@ export class TelegramChannel implements Channel {
       const sender = ctx.from?.id.toString() || '';
       const msgId = ctx.message.message_id.toString();
 
+      // Phase 0 instrumentation: detect sender identity anomalies
+      if (!senderName || senderName === 'Unknown') {
+        logger.warn(
+          {
+            op: 'senderIdentity',
+            counter: 'sender_name_empty',
+            platform: 'telegram',
+            sender,
+          },
+          'Telegram message has empty/unknown sender_name',
+        );
+      } else if (senderName === sender) {
+        logger.warn(
+          {
+            op: 'senderIdentity',
+            counter: 'sender_name_fallback_to_id',
+            platform: 'telegram',
+            sender,
+            sender_name: senderName,
+          },
+          'Telegram sender_name matches sender ID (numeric ID used as name)',
+        );
+      }
+
       // Determine chat name
       const chatName =
         ctx.chat.type === 'private'
