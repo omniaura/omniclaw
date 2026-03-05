@@ -172,3 +172,15 @@ describe('TelegramChannel.ownsJid', () => {
     expect(ownsJid('main@g.us')).toBe(false);
   });
 });
+
+describe('TelegramChannel bot identity', () => {
+  it('derives botId from token prefix', () => {
+    const channel = new TelegramChannel('123456:abc-token', {
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    expect(channel.botId).toBe('123456');
+  });
+});

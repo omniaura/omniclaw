@@ -96,11 +96,13 @@ export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  onRouteIdentity?: (chatJid: string, botId: string) => void;
 }
 
 export class TelegramChannel implements Channel {
   name = 'telegram';
   prefixAssistantName = false; // Telegram bots already display their name
+  readonly botId: string;
 
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
@@ -109,6 +111,8 @@ export class TelegramChannel implements Channel {
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
     this.opts = opts;
+    const tokenParts = botToken.split(':');
+    this.botId = tokenParts[0] || botToken.slice(0, 12);
   }
 
   async connect(): Promise<void> {
@@ -141,6 +145,7 @@ export class TelegramChannel implements Channel {
       if (ctx.message.text.startsWith('/')) return;
 
       const chatJid = `tg:${ctx.chat.id}`;
+      this.opts.onRouteIdentity?.(chatJid, this.botId);
       let content = ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
       const senderId = ctx.from?.id?.toString() || '';
@@ -245,6 +250,7 @@ export class TelegramChannel implements Channel {
     // Handle non-text messages with placeholders so the agent knows something was sent
     const storeNonText = (ctx: any, placeholder: string) => {
       const chatJid = `tg:${ctx.chat.id}`;
+      this.opts.onRouteIdentity?.(chatJid, this.botId);
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
 

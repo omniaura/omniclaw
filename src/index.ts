@@ -20,7 +20,7 @@ import {
   SESSION_MAX_AGE,
   SLACK_APP_TOKEN,
   SLACK_BOT_TOKEN,
-  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_BOT_TOKENS,
   TRIGGER_PATTERN,
   WEB_UI_PORT,
   WEB_UI_USER,
@@ -166,6 +166,10 @@ let messageLoopRunning = false;
 // Consumed (cleared) when the follow-up message is routed.
 const attentiveAgents: Record<string, Set<string>> = {};
 
+// Tracks which Telegram bot most recently handled each chat JID.
+// This lets outbound routing choose the same Telegram client in multi-bot setups.
+const telegramBotByJid: Record<string, string> = {};
+
 // Track consecutive errors per group to prevent infinite error loops.
 // After MAX_CONSECUTIVE_ERRORS, the cursor advances past the failing batch
 // so the system doesn't re-trigger the same error on every poll.
@@ -272,10 +276,27 @@ function getDiscordBotIdForJid(jid: string): string | undefined {
   return DISCORD_DEFAULT_BOT_ID;
 }
 
+function getPreferredChannelBotId(
+  jid: string,
+  discordBotId?: string,
+): string | undefined {
+  if (jid.startsWith('dc:')) return discordBotId || getDiscordBotIdForJid(jid);
+  if (jid.startsWith('tg:')) return telegramBotByJid[jid];
+  return undefined;
+}
+
 function findChannelForJid(
   jid: string,
   preferredBotId?: string,
 ): Channel | undefined {
+  if (jid.startsWith('tg:') && preferredBotId) {
+    const preferredTelegram = channels.find(
+      (c) =>
+        c.name === 'telegram' && (c as { botId?: string }).botId === preferredBotId,
+    );
+    if (preferredTelegram) return preferredTelegram;
+  }
+
   if (!jid.startsWith('dc:')) return findChannel(channels, jid);
 
   const botId = preferredBotId || getDiscordBotIdForJid(jid);
@@ -800,7 +821,10 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  const channel = findChannelForJid(chatJid, group.discordBotId);
+  const channel = findChannelForJid(
+    chatJid,
+    getPreferredChannelBotId(chatJid, group.discordBotId),
+  );
 
   // Keep the typing indicator alive for the agent run. Discord's indicator
   // expires after ~10 seconds; 15s refresh is sufficient with some overlap.
@@ -936,7 +960,10 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
                 result.chatJid || chatJid,
               ).channelJid;
               const targetChannel =
-                findChannelForJid(targetJid, group.discordBotId) || channel;
+                findChannelForJid(
+                  targetJid,
+                  getPreferredChannelBotId(targetJid, group.discordBotId),
+                ) || channel;
               if (targetChannel) {
                 const formatted = formatOutbound(
                   targetChannel,
@@ -1463,7 +1490,10 @@ async function startMessageLoop(): Promise<void> {
               lastAgentTimestamp[chatJid] =
                 messagesToSend[messagesToSend.length - 1].timestamp;
               saveState();
-              const typingCh = findChannelForJid(chatJid, group.discordBotId);
+              const typingCh = findChannelForJid(
+                chatJid,
+                getPreferredChannelBotId(chatJid, group.discordBotId),
+              );
               if (typingCh?.setTyping)
                 typingCh
                   .setTyping(chatJid, true)
@@ -1506,7 +1536,10 @@ async function startMessageLoop(): Promise<void> {
               lastAgentTimestamp[dispatchJid] =
                 messagesToSend[messagesToSend.length - 1].timestamp;
               saveState();
-              const typingCh = findChannelForJid(chatJid, sub.discordBotId);
+              const typingCh = findChannelForJid(
+                chatJid,
+                getPreferredChannelBotId(chatJid, sub.discordBotId),
+              );
               if (typingCh?.setTyping)
                 typingCh
                   .setTyping(chatJid, true)
@@ -2017,26 +2050,43 @@ async function main(): Promise<void> {
         )
       : Effect.succeed([] as DiscordChannel[]);
 
-  const connectTelegram = TELEGRAM_BOT_TOKEN
-    ? Effect.gen(function* () {
-        const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, {
-          onMessage: (chatJid, msg) => storeMessage(msg),
-          onChatMetadata: (chatJid, timestamp, name) =>
-            storeChatMetadata(chatJid, timestamp, name),
-          registeredGroups: () => registeredGroups,
-        });
-        yield* Effect.tryPromise(() => telegram.connect());
-        return telegram as Channel;
-      }).pipe(
-        Effect.catchAll((err) => {
-          logger.error(
-            { err },
-            'Failed to connect Telegram bot (continuing without Telegram)',
-          );
-          return Effect.succeed(null);
-        }),
-      )
-    : Effect.succeed(null);
+  const connectTelegram =
+    TELEGRAM_BOT_TOKENS.length > 0
+      ? Effect.forEach(
+          TELEGRAM_BOT_TOKENS,
+          (token, idx) =>
+            Effect.gen(function* () {
+              const telegram = new TelegramChannel(token, {
+                onMessage: (chatJid, msg) => storeMessage(msg),
+                onChatMetadata: (chatJid, timestamp, name) =>
+                  storeChatMetadata(chatJid, timestamp, name),
+                registeredGroups: () => registeredGroups,
+                onRouteIdentity: (chatJid, botId) => {
+                  telegramBotByJid[chatJid] = botId;
+                },
+              });
+              yield* Effect.tryPromise(() => telegram.connect());
+              return telegram;
+            }).pipe(
+              Effect.catchAll((err) => {
+                logger.error(
+                  {
+                    err,
+                    index: idx + 1,
+                    total: TELEGRAM_BOT_TOKENS.length,
+                  },
+                  'Failed to connect Telegram bot token (continuing with remaining Telegram bots)',
+                );
+                return Effect.succeed(null);
+              }),
+            ),
+          { concurrency: 'unbounded' },
+        ).pipe(
+          Effect.map((connected) =>
+            connected.filter((ch): ch is TelegramChannel => ch !== null),
+          ),
+        )
+      : Effect.succeed([] as TelegramChannel[]);
 
   // Start message loop BEFORE connecting channels — the loop polls the DB
   // and spawns containers, which only needs backends (initialized above).
@@ -2053,7 +2103,7 @@ async function main(): Promise<void> {
   // Channels are only needed for sending responses and typing indicators;
   // the message loop reads from the DB and works without them.
   const connectChannels = async () => {
-    const [wa, discordChannels, telegram] = await Effect.runPromise(
+    const [wa, discordChannels, telegramChannels] = await Effect.runPromise(
       Effect.all([connectWhatsApp, connectDiscord, connectTelegram], {
         concurrency: 'unbounded',
       }),
@@ -2069,7 +2119,7 @@ async function main(): Promise<void> {
           : undefined) || discordChannels[0];
       await backfillDiscordGuildIds(defaultDiscord);
     }
-    if (telegram) channels.push(telegram);
+    channels.push(...telegramChannels);
 
     // Conditionally connect Slack (requires both bot token and app-level socket-mode token)
     if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
@@ -2146,7 +2196,10 @@ async function main(): Promise<void> {
         lane,
       ),
     sendMessage: async (jid, rawText, discordBotId) => {
-      const ch = findChannelForJid(jid, discordBotId);
+      const ch = findChannelForJid(
+        jid,
+        getPreferredChannelBotId(jid, discordBotId),
+      );
       if (!ch) {
         logger.warn({ jid }, 'No channel found for scheduled message');
         return;
@@ -2162,11 +2215,15 @@ async function main(): Promise<void> {
         return msgId ? String(msgId) : undefined;
       }
     },
-    findChannel: (jid, discordBotId) => findChannelForJid(jid, discordBotId),
+    findChannel: (jid, discordBotId) =>
+      findChannelForJid(jid, getPreferredChannelBotId(jid, discordBotId)),
   });
   startIpcWatcher({
     sendMessage: async (jid, rawText, discordBotId) => {
-      const ch = findChannelForJid(jid, discordBotId);
+      const ch = findChannelForJid(
+        jid,
+        getPreferredChannelBotId(jid, discordBotId),
+      );
       if (!ch) {
         logger.warn({ jid }, 'No channel found for IPC message');
         return;
@@ -2207,7 +2264,8 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
-    findChannel: (jid) => findChannelForJid(jid),
+    findChannel: (jid) =>
+      findChannelForJid(jid, getPreferredChannelBotId(jid)),
     writeTasksSnapshot: (groupFolder, isMainGroup) => {
       writeTasksSnapshot(
         groupFolder,

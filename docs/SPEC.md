@@ -240,9 +240,9 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 | `DISCORD_BOT_<ID>_TOKEN` | Discord | Token for a specific Discord bot ID |
 | `DISCORD_BOT_<ID>_RUNTIME` | Discord | Default runtime for that bot ID (`claude-agent-sdk` or `opencode`) |
 | `DISCORD_BOT_DEFAULT` | Discord | Default bot ID for unassigned Discord channels |
-| `TELEGRAM_BOT_TOKEN` | Telegram | Bot token |
+| `TELEGRAM_BOT_TOKENS` | Telegram | Comma/newline-separated bot tokens for multi-bot mode |
+| `TELEGRAM_BOT_TOKEN` | Telegram | Legacy single bot token (backward compatible) |
 | `TELEGRAM_ONLY` | Telegram | Run Telegram-only mode (no WhatsApp) |
-| `TELEGRAM_BOT_POOL` | Telegram | Comma-separated tokens for multi-bot |
 | `SLACK_BOT_TOKEN` | Slack | Bot token (xoxb-...) |
 | `SLACK_APP_TOKEN` | Slack | App-level token for Socket Mode (xapp-...) |
 
@@ -258,6 +258,16 @@ DISCORD_BOT_CLAUDE_TOKEN=discord_token_a
 DISCORD_BOT_OPENCODE_TOKEN=discord_token_b
 DISCORD_BOT_OPENCODE_RUNTIME=opencode
 DISCORD_BOT_DEFAULT=CLAUDE
+```
+
+Telegram multi-bot examples:
+
+```bash
+# Single token (existing behavior)
+TELEGRAM_BOT_TOKEN=telegram_token_a
+
+# Multi-token mode (recommended)
+TELEGRAM_BOT_TOKENS=telegram_token_a,telegram_token_b
 ```
 
 ### Backend Credentials
