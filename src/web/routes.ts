@@ -1,5 +1,6 @@
 import type { ScheduledTask } from '../types.js';
 import type { WebStateProvider } from './types.js';
+import { renderConversations } from './conversations.js';
 import { renderDashboard } from './dashboard.js';
 
 /**
@@ -45,6 +46,12 @@ export function handleRequest(
   // --- Dashboard ---
   if (pathname === '/' || pathname === '/index.html')
     return new Response(renderDashboard(state), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+
+  // --- Conversations viewer ---
+  if (pathname === '/conversations')
+    return new Response(renderConversations(state), {
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
 

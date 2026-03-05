@@ -312,6 +312,10 @@ export function renderDashboard(state: WebStateProvider): string {
 <body>
 <header>
   <h1>OmniClaw</h1>
+  <nav style="display:flex;gap:0.5rem;margin-left:1rem">
+    <a href="/" style="color:var(--accent);text-decoration:none;font-size:0.8rem;padding:0.25rem 0.5rem;border-radius:4px;background:var(--surface)">Dashboard</a>
+    <a href="/conversations" style="color:var(--text-dim);text-decoration:none;font-size:0.8rem;padding:0.25rem 0.5rem;border-radius:4px" onmouseover="this.style.color='var(--text)';this.style.background='var(--surface)'" onmouseout="this.style.color='var(--text-dim)';this.style.background='transparent'">Conversations</a>
+  </nav>
   <span id="ws-status" class="ws-status disconnected">disconnected</span>
 </header>
 <main>
