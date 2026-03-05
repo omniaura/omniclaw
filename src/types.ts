@@ -145,6 +145,8 @@ export interface TaskRunLog {
 
 export interface Channel {
   name: string;
+  /** Optional channel/bot identity key for multi-bot routing (Discord/Telegram). */
+  botId?: string;
   connect(): Promise<void>;
   sendMessage(
     jid: string,

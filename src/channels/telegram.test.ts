@@ -183,4 +183,14 @@ describe('TelegramChannel bot identity', () => {
 
     expect(channel.botId).toBe('123456');
   });
+
+  it('uses non-secret fallback for unexpected token format', () => {
+    const channel = new TelegramChannel('not-a-standard-token', {
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    expect(channel.botId).toBe('telegram-bot');
+  });
 });

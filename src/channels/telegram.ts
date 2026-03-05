@@ -111,8 +111,8 @@ export class TelegramChannel implements Channel {
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
     this.opts = opts;
-    const tokenParts = botToken.split(':');
-    this.botId = tokenParts[0] || botToken.slice(0, 12);
+    const tokenPrefix = botToken.split(':', 1)[0] || '';
+    this.botId = /^\d+$/.test(tokenPrefix) ? tokenPrefix : 'telegram-bot';
   }
 
   async connect(): Promise<void> {

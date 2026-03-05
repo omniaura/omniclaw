@@ -291,8 +291,7 @@ function findChannelForJid(
 ): Channel | undefined {
   if (jid.startsWith('tg:') && preferredBotId) {
     const preferredTelegram = channels.find(
-      (c) =>
-        c.name === 'telegram' && (c as { botId?: string }).botId === preferredBotId,
+      (c) => c.name === 'telegram' && c.botId === preferredBotId,
     );
     if (preferredTelegram) return preferredTelegram;
   }
@@ -2264,8 +2263,7 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
-    findChannel: (jid) =>
-      findChannelForJid(jid, getPreferredChannelBotId(jid)),
+    findChannel: (jid) => findChannelForJid(jid, getPreferredChannelBotId(jid)),
     writeTasksSnapshot: (groupFolder, isMainGroup) => {
       writeTasksSnapshot(
         groupFolder,

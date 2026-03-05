@@ -67,7 +67,9 @@ export function buildDiscordBotConfigFromEnv(env: NodeJS.ProcessEnv): {
   };
 }
 
-export function buildTelegramBotTokensFromEnv(env: NodeJS.ProcessEnv): string[] {
+export function buildTelegramBotTokensFromEnv(
+  env: NodeJS.ProcessEnv,
+): string[] {
   const configured = parseEnvList(env.TELEGRAM_BOT_TOKENS).filter(
     (token) => token.length > 0,
   );
