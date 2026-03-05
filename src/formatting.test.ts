@@ -58,13 +58,21 @@ describe('escapeXml', () => {
 // --- formatMessages ---
 
 describe('formatMessages', () => {
-  it('formats a single message as XML with participants attribute', () => {
+  it('formats a single message as XML with participant attributes', () => {
     const result = formatMessages([makeMsg()]);
     expect(result).toBe(
-      '<messages participants="Alice">\n' +
+      '<messages excerpt_participants="Alice" participants="Alice">\n' +
         '<message id="1" sender="Alice" sender_id="123@s.whatsapp.net" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
         '</messages>',
     );
+  });
+
+  it('includes channel_roster when provided', () => {
+    const result = formatMessages([makeMsg()], {
+      channelRosterNames: ['Alice', 'BotOne', 'Alice'],
+    });
+    expect(result).toContain('channel_roster="Alice, BotOne"');
+    expect(result).toContain('excerpt_participants="Alice"');
   });
 
   it('formats multiple messages with participants roster', () => {
