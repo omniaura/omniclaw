@@ -11,7 +11,6 @@ import { calculateNextRun } from './schedule-utils.js';
 import { resolveBackend } from './backends/index.js';
 import type { ContainerOutput } from './backends/types.js';
 import { writeTasksSnapshot } from './ipc-snapshots.js';
-import { createThreadStreamer } from './thread-streaming.js';
 import {
   advanceTaskNextRun,
   createTask,
@@ -149,37 +148,6 @@ async function runTask(
     }, TASK_CLOSE_DELAY_MS);
   };
 
-  const channel = deps.findChannel(task.chat_jid, group.discordBotId);
-  let parentMessageId: string | null = null;
-
-  if (group.streamIntermediates && channel?.createThread) {
-    const preview = prompt.slice(0, 80).replace(/\n/g, ' ');
-    try {
-      const msgId = await deps.sendMessage(
-        task.chat_jid,
-        `Running scheduled task: ${preview}...`,
-        group.discordBotId,
-      );
-      parentMessageId = msgId ? String(msgId) : null;
-    } catch {
-      // Announcement failed — continue without thread
-    }
-  }
-
-  const threadLabel = prompt.slice(0, 50);
-  const streamer = createThreadStreamer(
-    {
-      channel,
-      chatJid: task.chat_jid,
-      streamIntermediates: !!group.streamIntermediates,
-      groupName: group.name,
-      groupFolder: task.group_folder,
-      label: threadLabel,
-    },
-    parentMessageId,
-    `Task: ${prompt.slice(0, 60).replace(/\n/g, ' ')}`,
-  );
-
   try {
     const backend = resolveBackend(group);
     const output = await backend.runAgent(
@@ -211,12 +179,7 @@ async function runTask(
           'task',
         ),
       async (streamedOutput: ContainerOutput) => {
-        if (streamedOutput.intermediate && streamedOutput.result) {
-          const raw =
-            typeof streamedOutput.result === 'string'
-              ? streamedOutput.result
-              : JSON.stringify(streamedOutput.result);
-          await streamer.handleIntermediate(raw);
+        if (streamedOutput.intermediate) {
           return;
         }
 
@@ -252,8 +215,6 @@ async function runTask(
     error = err instanceof Error ? err.message : String(err);
     log.error({ err: error }, 'Task failed');
   }
-
-  streamer.writeThoughtLog();
 
   const durationMs = Date.now() - startTime;
 
