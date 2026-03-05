@@ -20,7 +20,7 @@ export function renderDashboard(state: WebStateProvider): string {
       return `<tr>
         <td>${escapeHtml(a.id)}</td>
         <td>${escapeHtml(a.name)}</td>
-        <td><span class="badge badge-${a.backend}">${escapeHtml(a.backend)}</span></td>
+        <td><span class="badge ${a.backend === 'apple-container' ? 'badge-apple-container' : a.backend === 'docker' ? 'badge-docker' : ''}">${escapeHtml(a.backend)}</span></td>
         <td>${escapeHtml(a.agentRuntime)}</td>
         <td>${a.isAdmin ? '<span class="badge badge-admin">admin</span>' : ''}</td>
         <td class="channels">${channels.join('<br>') || '—'}</td>
@@ -485,8 +485,12 @@ export function renderDashboard(state: WebStateProvider): string {
         if (evt.type === 'agent_status') {
           var s = evt.data;
           var el = function(id) { return document.getElementById(id); };
-          if (s.activeContainers != null) el('stat-active').textContent = (s.activeContainers - s.idleContainers) + '/' + s.maxActive;
-          if (s.idleContainers != null) el('stat-idle').textContent = s.idleContainers + '/' + s.maxIdle;
+          if (s.activeContainers != null && s.idleContainers != null && s.maxActive != null) {
+            el('stat-active').textContent = (s.activeContainers - s.idleContainers) + '/' + s.maxActive;
+          }
+          if (s.idleContainers != null && s.maxIdle != null) {
+            el('stat-idle').textContent = s.idleContainers + '/' + s.maxIdle;
+          }
         }
       } catch(ex) {}
     };

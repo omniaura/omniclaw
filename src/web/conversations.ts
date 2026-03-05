@@ -292,8 +292,12 @@ export function renderConversations(state: WebStateProvider): string {
 
   function loadMessages(jid) {
     fetch('/api/messages/' + encodeURIComponent(jid) + '?limit=' + PAGE_SIZE)
-      .then(function(res) { return res.json(); })
+      .then(function(res) {
+        if (!res.ok) throw new Error('Failed to load messages');
+        return res.json();
+      })
       .then(function(messages) {
+        if (!Array.isArray(messages)) throw new Error('Invalid messages payload');
         if (currentJid !== jid) return; // stale response
         messageCache[jid] = messages;
         renderMessages(jid, messages);
@@ -361,8 +365,12 @@ export function renderConversations(state: WebStateProvider): string {
         // Use since=epoch and limit to get all, then filter client-side
         // (The API uses "since" as a floor, so we pass epoch to get everything up to oldest)
         fetch('/api/messages/' + encodeURIComponent(jid) + '?limit=500')
-          .then(function(res) { return res.json(); })
+          .then(function(res) {
+            if (!res.ok) throw new Error('Failed to load older messages');
+            return res.json();
+          })
           .then(function(allMsgs) {
+            if (!Array.isArray(allMsgs)) throw new Error('Invalid messages payload');
             if (currentJid !== jid) return;
             messageCache[jid] = allMsgs;
             renderMessages(jid, allMsgs);

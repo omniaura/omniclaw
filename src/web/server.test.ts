@@ -882,13 +882,15 @@ describe('server shutdown', () => {
     await handle.stop();
     handle = null; // Prevent double-stop in afterEach
 
-    // After stop, connection should fail
+    // After stop, server should no longer serve successful responses
+    let stopped = false;
     try {
-      await fetch(`http://localhost:${port}/`);
-      // Some environments may resolve with an error; that's fine
+      const resAfterStop = await fetch(`http://localhost:${port}/`);
+      stopped = !resAfterStop.ok;
     } catch {
-      // Expected: connection refused
+      stopped = true; // connection refused/reset is expected
     }
+    expect(stopped).toBe(true);
   });
 });
 

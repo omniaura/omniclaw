@@ -191,9 +191,6 @@ function writePretty(level: LogLevel, record: Record<string, unknown>): void {
 // Logger factory
 // ---------------------------------------------------------------------------
 
-/** Root logger keeps a shared subscriber set for all children. */
-let rootSubscribers: Set<LogSubscriber> | null = null;
-
 function createLogger(
   defaults: Record<string, unknown> = {},
   levelOverride?: string,
@@ -203,8 +200,8 @@ function createLogger(
   const minLevel =
     LEVEL_VALUES[effectiveLevel as LogLevel] ?? LEVEL_VALUES.info;
 
-  // All loggers in a tree share the root subscriber set
-  const subs = parentSubscribers ?? (rootSubscribers ??= new Set());
+  // All loggers in a tree share one subscriber set; independent roots stay isolated.
+  const subs = parentSubscribers ?? new Set<LogSubscriber>();
 
   function write(
     level: LogLevel,

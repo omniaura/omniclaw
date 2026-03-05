@@ -263,22 +263,35 @@ async function handleUpdateTask(
   const beingResumed =
     updates.status === 'active' && existing.status !== 'active';
 
-  if (effectiveStatus === 'active' && (scheduleChanged || beingResumed)) {
-    const newType = (updates.schedule_type ?? existing.schedule_type) as
-      | 'cron'
-      | 'interval'
-      | 'once';
-    const newValue = updates.schedule_value ?? existing.schedule_value;
-    if (scheduleChanged || newType !== 'once') {
-      const nextRun = state.calculateNextRun(newType, newValue);
-      if (nextRun === null) {
-        return json(
-          { error: 'Invalid schedule: could not calculate next run time' },
-          400,
-        );
-      }
-      updates.next_run = nextRun;
+  const newType = (updates.schedule_type ?? existing.schedule_type) as
+    | 'cron'
+    | 'interval'
+    | 'once';
+  const newValue = updates.schedule_value ?? existing.schedule_value;
+
+  if (scheduleChanged) {
+    // Always validate when schedule fields change, even if paused
+    const validated = state.calculateNextRun(newType, newValue);
+    if (validated === null) {
+      return json(
+        { error: 'Invalid schedule: could not calculate next run time' },
+        400,
+      );
     }
+    if (effectiveStatus === 'active') updates.next_run = validated;
+  } else if (
+    effectiveStatus === 'active' &&
+    beingResumed &&
+    newType !== 'once'
+  ) {
+    const nextRun = state.calculateNextRun(newType, newValue);
+    if (nextRun === null) {
+      return json(
+        { error: 'Invalid schedule: could not calculate next run time' },
+        400,
+      );
+    }
+    updates.next_run = nextRun;
   }
 
   try {
@@ -294,7 +307,10 @@ async function handleUpdateTask(
 
   // Return updated task
   const updated = state.getTaskById(taskId);
-  return json(updated ?? { id: taskId, ...updates });
+  if (!updated) {
+    return json({ error: 'Task updated but could not be reloaded' }, 500);
+  }
+  return json(updated);
 }
 
 function handleDeleteTask(taskId: string, state: WebStateProvider): Response {
