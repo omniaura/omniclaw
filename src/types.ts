@@ -209,7 +209,7 @@ export interface Agent {
  * Multiple channels can route to the same agent.
  */
 export interface ChannelRoute {
-  channelJid: string; // "dc:123", "tg:-100...", "123@g.us"
+  channelJid: string; // "dc:123", "tg:<botId>:-100...", "123@g.us"
   agentId: string; // FK to Agent.id
   trigger: string;
   requiresTrigger: boolean;

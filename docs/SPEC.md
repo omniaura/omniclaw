@@ -340,7 +340,7 @@ interface Channel {
 |---------|---------|------------|----------|
 | WhatsApp | baileys | `123@s.whatsapp.net`, `123@g.us` | Messages, reactions, typing, groups |
 | Discord | discord.js | `dc:channel_id` | Messages, reactions, typing, threads, guild context |
-| Telegram | grammy | `tg:chat_id` | Messages, reactions, typing, groups, DMs |
+| Telegram | grammy | `tg:bot_id:chat_id` (legacy `tg:chat_id` compat) | Messages, reactions, typing, groups, DMs |
 | Slack | @slack/bolt | `slack:channel_id` | Messages, typing, Socket Mode, threads |
 
 ### Trigger Behavior

@@ -166,10 +166,6 @@ let messageLoopRunning = false;
 // Consumed (cleared) when the follow-up message is routed.
 const attentiveAgents: Record<string, Set<string>> = {};
 
-// Tracks which Telegram bot most recently handled each chat JID.
-// This lets outbound routing choose the same Telegram client in multi-bot setups.
-const telegramBotByJid: Record<string, string> = {};
-
 // Track consecutive errors per group to prevent infinite error loops.
 // After MAX_CONSECUTIVE_ERRORS, the cursor advances past the failing batch
 // so the system doesn't re-trigger the same error on every poll.
@@ -276,12 +272,34 @@ function getDiscordBotIdForJid(jid: string): string | undefined {
   return DISCORD_DEFAULT_BOT_ID;
 }
 
+function parseScopedTelegramJid(
+  jid: string,
+): { botId: string; chatId: string } | null {
+  const m = /^tg:([^:]+):(-?\d+)$/.exec(jid);
+  if (!m) return null;
+  return { botId: m[1], chatId: m[2] };
+}
+
+function toLegacyTelegramJid(jid: string): string | undefined {
+  const parsed = parseScopedTelegramJid(jid);
+  return parsed ? `tg:${parsed.chatId}` : undefined;
+}
+
+function getRegisteredGroupForJid(jid: string): RegisteredGroup | undefined {
+  const exact = registeredGroups[jid];
+  if (exact) return exact;
+  const legacyTelegramJid = toLegacyTelegramJid(jid);
+  if (legacyTelegramJid) return registeredGroups[legacyTelegramJid];
+  return undefined;
+}
+
 function getPreferredChannelBotId(
   jid: string,
   discordBotId?: string,
 ): string | undefined {
   if (jid.startsWith('dc:')) return discordBotId || getDiscordBotIdForJid(jid);
-  if (jid.startsWith('tg:')) return telegramBotByJid[jid];
+  const scopedTelegram = parseScopedTelegramJid(jid);
+  if (scopedTelegram) return scopedTelegram.botId;
   return undefined;
 }
 
@@ -730,7 +748,8 @@ export function getAvailableGroups(): import('./ipc-snapshots.js').AvailableGrou
       jid: c.jid,
       name: c.name,
       lastActivity: c.last_message_time,
-      isRegistered: registeredJids.has(c.jid),
+      isRegistered:
+        registeredJids.has(c.jid) || getRegisteredGroupForJid(c.jid) != null,
     }));
 }
 
@@ -754,7 +773,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
     : undefined;
   const group = sub
     ? buildRegisteredGroupFromSubscription(chatJid, sub)
-    : registeredGroups[chatJid];
+    : getRegisteredGroupForJid(chatJid);
   if (!group) return true;
 
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
@@ -1120,7 +1139,7 @@ function buildChannelsForAgent(agentId: string): ChannelInfo[] | undefined {
   const chatNames = new Map(getAllChats().map((c) => [c.jid, c.name]));
 
   return jids.map((jid, i) => {
-    const group = registeredGroups[jid];
+    const group = getRegisteredGroupForJid(jid);
     // Prefer chat metadata name (e.g. "MarketReaders") over registered group name
     // (which is the agent name, e.g. "LocalPeyton")
     const channelFolderName = group?.channelFolder
@@ -1459,7 +1478,7 @@ async function startMessageLoop(): Promise<void> {
 
           // Legacy fallback: one-to-one registered group handling
           if (selectedSubs.length === 0) {
-            const group = registeredGroups[chatJid];
+            const group = getRegisteredGroupForJid(chatJid);
             if (!group) continue;
 
             const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
@@ -1755,7 +1774,7 @@ async function handleReactionNotification(
   // received the reaction rather than blindly using the primary registered group.
   // Without this, a reaction on OCPeyton's message routes to Ditto (the primary).
   let dispatchJid = chatJid;
-  let group = registeredGroups[chatJid];
+  let group = getRegisteredGroupForJid(chatJid);
   const subs = getSubscriptionsForChannelInMemory(chatJid);
   if (discordBotId && subs.length > 0) {
     const matchingSub = subs.find((s) => s.discordBotId === discordBotId);
@@ -2060,9 +2079,7 @@ async function main(): Promise<void> {
                 onChatMetadata: (chatJid, timestamp, name) =>
                   storeChatMetadata(chatJid, timestamp, name),
                 registeredGroups: () => registeredGroups,
-                onRouteIdentity: (chatJid, botId) => {
-                  telegramBotByJid[chatJid] = botId;
-                },
+                allowLegacyJidRouting: TELEGRAM_BOT_TOKENS.length <= 1,
               });
               yield* Effect.tryPromise(() => telegram.connect());
               return telegram;
@@ -2203,7 +2220,7 @@ async function main(): Promise<void> {
         logger.warn({ jid }, 'No channel found for scheduled message');
         return;
       }
-      const group = registeredGroups[jid];
+      const group = getRegisteredGroupForJid(jid);
       const text = formatOutbound(
         ch,
         rawText,
@@ -2227,7 +2244,7 @@ async function main(): Promise<void> {
         logger.warn({ jid }, 'No channel found for IPC message');
         return;
       }
-      const group = registeredGroups[jid];
+      const group = getRegisteredGroupForJid(jid);
       const text = formatOutbound(
         ch,
         rawText,
@@ -2237,7 +2254,7 @@ async function main(): Promise<void> {
     },
     notifyGroup: (jid, text, sourceFolder?) => {
       // Prefix with the group's trigger so it passes requiresTrigger filter
-      const group = registeredGroups[jid];
+      const group = getRegisteredGroupForJid(jid);
       const trigger = group?.trigger || `@${ASSISTANT_NAME}`;
       storeMessage({
         id: `notify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
