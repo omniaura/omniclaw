@@ -17,6 +17,7 @@ import {
   MAIN_GROUP_FOLDER,
   PERSISTENT_TASK_STATE,
   POLL_INTERVAL,
+  ROSTER_REFRESH_INTERVAL,
   SESSION_MAX_AGE,
   SLACK_APP_TOKEN,
   SLACK_BOT_TOKEN,
@@ -686,9 +687,6 @@ async function backfillDiscordGuildIds(discord: DiscordChannel): Promise<void> {
     );
   }
 }
-
-/** Roster refresh interval: 15 minutes. */
-const ROSTER_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 
 /**
  * Refresh Discord guild rosters by fetching members from all known guilds.
@@ -2154,7 +2152,7 @@ async function main(): Promise<void> {
         refreshGuildRosters(discordChannels).catch((err) => {
           logger.warn({ err }, 'Periodic guild roster refresh failed');
         });
-      }, ROSTER_REFRESH_INTERVAL_MS);
+      }, ROSTER_REFRESH_INTERVAL);
     }
     if (telegram) channels.push(telegram);
 
