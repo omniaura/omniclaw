@@ -181,6 +181,7 @@ export class DiscordChannel implements Channel {
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.GuildMembers,
       ],
       partials: [Partials.Channel, Partials.Message, Partials.Reaction],
     });
@@ -331,6 +332,79 @@ export class DiscordChannel implements Channel {
       logger.debug({ guildId, err }, 'Failed to resolve guild name');
     }
     return undefined;
+  }
+
+  /**
+   * Fetch all members of a Discord guild, separated into humans and bots.
+   * Requires GatewayIntentBits.GuildMembers intent.
+   */
+  async fetchGuildRoster(guildId: string): Promise<{
+    humans: Array<{
+      id: string;
+      username: string;
+      displayName: string;
+      roles: string[];
+    }>;
+    bots: Array<{
+      id: string;
+      username: string;
+      displayName: string;
+      roles: string[];
+    }>;
+    guildName: string;
+    ownerId: string | null;
+  } | null> {
+    try {
+      const guild = await this.client.guilds.fetch(guildId);
+      if (!guild) return null;
+
+      const members = await guild.members.fetch();
+
+      const humans: Array<{
+        id: string;
+        username: string;
+        displayName: string;
+        roles: string[];
+      }> = [];
+      const bots: Array<{
+        id: string;
+        username: string;
+        displayName: string;
+        roles: string[];
+      }> = [];
+
+      for (const [, member] of members) {
+        const entry = {
+          id: member.id,
+          username: member.user.username,
+          displayName:
+            member.displayName ||
+            member.user.displayName ||
+            member.user.username,
+          roles: member.roles.cache
+            .filter((r) => r.name !== '@everyone')
+            .map((r) => r.name),
+        };
+        if (member.user.bot) {
+          bots.push(entry);
+        } else {
+          humans.push(entry);
+        }
+      }
+
+      humans.sort((a, b) => a.displayName.localeCompare(b.displayName));
+      bots.sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+      return {
+        humans,
+        bots,
+        guildName: guild.name,
+        ownerId: guild.ownerId,
+      };
+    } catch (err) {
+      logger.warn({ guildId, err }, 'Failed to fetch guild roster');
+      return null;
+    }
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
