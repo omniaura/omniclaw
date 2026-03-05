@@ -316,6 +316,21 @@ export class GroupQueue {
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
     const folderKey = this.resolveFolder(groupJid);
+
+    // Guard against duplicate idle notifications from the same container.
+    // The IPC stream can emit multiple 'success' statuses during a container's
+    // lifetime (idle → woken → idle again), each calling notifyIdle. Without
+    // this guard, idleCount drifts up because _clearIdleState only decrements
+    // once (gated on the boolean flag), causing negative "active containers"
+    // in the dashboard.
+    if (state.idleWaiting) {
+      logger.debug(
+        { groupJid, folderKey },
+        'notifyIdle: already idle, skipping duplicate',
+      );
+      return;
+    }
+
     state.idleWaiting = true;
     this.idleCount++;
     if (!this.idleGroups.includes(folderKey)) {
@@ -486,7 +501,7 @@ export class GroupQueue {
   ): Promise<void> {
     const state = this.getGroup(groupJid);
     state.messageActive = true;
-    state.idleWaiting = false;
+    this._clearIdleState(groupJid);
     // Remove this JID from pending (it's being processed now)
     state.pendingMessageJids = state.pendingMessageJids.filter(
       (j) => j !== groupJid,
