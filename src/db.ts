@@ -256,6 +256,26 @@ export function createSchema(database: Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
 
+    CREATE TABLE IF NOT EXISTS guild_rosters (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      username TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      is_bot INTEGER NOT NULL DEFAULT 0,
+      roles TEXT,
+      last_synced TEXT NOT NULL,
+      PRIMARY KEY (guild_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_roster_guild ON guild_rosters(guild_id);
+
+    CREATE TABLE IF NOT EXISTS guilds (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      owner_id TEXT,
+      member_count INTEGER,
+      last_synced TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
       group_folder TEXT NOT NULL,
@@ -559,6 +579,145 @@ export function getChatGuildId(chatJid: string): string | undefined {
     .prepare('SELECT discord_guild_id FROM chats WHERE jid = ?')
     .get(chatJid) as { discord_guild_id: string | null } | undefined;
   return row?.discord_guild_id || undefined;
+}
+
+// --- Guild Roster Helpers ---
+
+export interface GuildRosterMember {
+  userId: string;
+  username: string;
+  displayName: string;
+  isBot: boolean;
+  roles: string[];
+}
+
+export interface GuildInfo {
+  id: string;
+  name: string;
+  ownerId: string | null;
+  memberCount: number;
+  lastSynced: string;
+}
+
+/**
+ * Store or update a guild's roster in the database.
+ * Uses INSERT OR REPLACE for upsert semantics.
+ */
+export function storeGuildRoster(
+  guildId: string,
+  guildName: string,
+  ownerId: string | null,
+  members: GuildRosterMember[],
+): void {
+  const now = new Date().toISOString();
+
+  // Upsert guild metadata
+  db.query(
+    `INSERT INTO guilds (id, name, owner_id, member_count, last_synced) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET name = excluded.name, owner_id = excluded.owner_id,
+     member_count = excluded.member_count, last_synced = excluded.last_synced`,
+  ).run(guildId, guildName, ownerId, members.length, now);
+
+  // Clear old roster for this guild, then insert fresh
+  db.query('DELETE FROM guild_rosters WHERE guild_id = ?').run(guildId);
+
+  const insert = db.prepare(
+    `INSERT INTO guild_rosters (guild_id, user_id, username, display_name, is_bot, roles, last_synced)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+
+  for (const m of members) {
+    insert.run(
+      guildId,
+      m.userId,
+      m.username,
+      m.displayName,
+      m.isBot ? 1 : 0,
+      JSON.stringify(m.roles),
+      now,
+    );
+  }
+}
+
+/**
+ * Get all members for a guild from the roster cache.
+ */
+export function getGuildRoster(guildId: string): GuildRosterMember[] {
+  const rows = db
+    .prepare(
+      'SELECT user_id, username, display_name, is_bot, roles FROM guild_rosters WHERE guild_id = ?',
+    )
+    .all(guildId) as Array<{
+    user_id: string;
+    username: string;
+    display_name: string;
+    is_bot: number;
+    roles: string;
+  }>;
+
+  return rows.map((r) => ({
+    userId: r.user_id,
+    username: r.username,
+    displayName: r.display_name,
+    isBot: r.is_bot === 1,
+    roles: JSON.parse(r.roles || '[]'),
+  }));
+}
+
+/**
+ * Get guild metadata including last sync time.
+ */
+export function getGuildInfo(guildId: string): GuildInfo | undefined {
+  const row = db
+    .prepare(
+      'SELECT id, name, owner_id, member_count, last_synced FROM guilds WHERE id = ?',
+    )
+    .get(guildId) as
+    | {
+        id: string;
+        name: string;
+        owner_id: string | null;
+        member_count: number;
+        last_synced: string;
+      }
+    | undefined;
+  if (!row) return undefined;
+  return {
+    id: row.id,
+    name: row.name,
+    ownerId: row.owner_id,
+    memberCount: row.member_count,
+    lastSynced: row.last_synced,
+  };
+}
+
+/**
+ * Get all guilds with their rosters.
+ */
+export function getAllGuildRosters(): Array<{
+  guild: GuildInfo;
+  members: GuildRosterMember[];
+}> {
+  const guilds = db
+    .prepare('SELECT id, name, owner_id, member_count, last_synced FROM guilds')
+    .all() as Array<{
+    id: string;
+    name: string;
+    owner_id: string | null;
+    member_count: number;
+    last_synced: string;
+  }>;
+
+  return guilds.map((g) => ({
+    guild: {
+      id: g.id,
+      name: g.name,
+      ownerId: g.owner_id,
+      memberCount: g.member_count,
+      lastSynced: g.last_synced,
+    },
+    members: getGuildRoster(g.id),
+  }));
 }
 
 /**

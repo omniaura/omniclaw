@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR } from './config.js';
+import type { GuildRosterMember, GuildInfo } from './db.js';
 import { assertPathWithin } from './path-security.js';
 import type { ScheduledTask } from './types.js';
 
@@ -84,6 +85,38 @@ export function writeGroupsSnapshot(
     JSON.stringify(
       {
         groups: visibleGroups,
+        lastSync: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+export interface GuildRosterSnapshot {
+  guild: GuildInfo;
+  members: GuildRosterMember[];
+}
+
+/**
+ * Write guild rosters snapshot to an agent's IPC directory.
+ * Agents can read this to discover all humans and bots in their Discord guilds.
+ */
+export function writeRostersSnapshot(
+  groupFolder: string,
+  rosters: GuildRosterSnapshot[],
+): void {
+  const ipcBase = path.join(DATA_DIR, 'ipc');
+  const groupIpcDir = path.join(ipcBase, groupFolder);
+  assertPathWithin(groupIpcDir, ipcBase, 'writeRostersSnapshot');
+  fs.mkdirSync(groupIpcDir, { recursive: true });
+
+  const rostersFile = path.join(groupIpcDir, 'guild_rosters.json');
+  fs.writeFileSync(
+    rostersFile,
+    JSON.stringify(
+      {
+        rosters,
         lastSync: new Date().toISOString(),
       },
       null,

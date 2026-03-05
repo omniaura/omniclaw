@@ -39,6 +39,7 @@ import type { ChannelInfo, ContainerOutput } from './backends/types.js';
 import {
   mapTasksForSnapshot,
   writeGroupsSnapshot,
+  writeRostersSnapshot,
   writeTasksSnapshot,
 } from './ipc-snapshots.js';
 import {
@@ -50,8 +51,10 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  getAllGuildRosters,
   getChatGuildId,
   getMessagesSince,
+  storeGuildRoster,
   getNewMessages,
   getRouterState,
   getTaskById,
@@ -680,6 +683,80 @@ async function backfillDiscordGuildIds(discord: DiscordChannel): Promise<void> {
     logger.info(
       { jid, name: group.name, guildId, serverFolder },
       'Backfilled Discord guild ID and server folder',
+    );
+  }
+}
+
+/** Roster refresh interval: 15 minutes. */
+const ROSTER_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+
+/**
+ * Refresh Discord guild rosters by fetching members from all known guilds.
+ * Stores results in SQLite and writes IPC snapshots for containers.
+ */
+async function refreshGuildRosters(
+  discordChannels: DiscordChannel[],
+): Promise<void> {
+  if (discordChannels.length === 0) return;
+
+  // Collect unique guild IDs from registered groups and channel subscriptions
+  const guildIds = new Set<string>();
+  for (const group of Object.values(registeredGroups)) {
+    if (group.discordGuildId) guildIds.add(group.discordGuildId);
+  }
+  for (const subs of Object.values(channelSubscriptions)) {
+    for (const sub of subs) {
+      if (sub.discordGuildId) guildIds.add(sub.discordGuildId);
+    }
+  }
+
+  if (guildIds.size === 0) return;
+
+  const discord = discordChannels[0];
+  let refreshed = 0;
+
+  for (const guildId of guildIds) {
+    const roster = await discord.fetchGuildRoster(guildId);
+    if (!roster) continue;
+
+    const members = [
+      ...roster.humans.map((h) => ({
+        userId: h.id,
+        username: h.username,
+        displayName: h.displayName,
+        isBot: false,
+        roles: h.roles,
+      })),
+      ...roster.bots.map((b) => ({
+        userId: b.id,
+        username: b.username,
+        displayName: b.displayName,
+        isBot: true,
+        roles: b.roles,
+      })),
+    ];
+
+    storeGuildRoster(guildId, roster.guildName, roster.ownerId, members);
+    refreshed++;
+  }
+
+  if (refreshed > 0) {
+    // Write roster snapshots to all agent IPC dirs
+    const rosters = getAllGuildRosters();
+    const ipcBase = path.join(DATA_DIR, 'ipc');
+    if (fs.existsSync(ipcBase)) {
+      for (const entry of fs.readdirSync(ipcBase, { withFileTypes: true })) {
+        if (!entry.isDirectory() || entry.name === 'errors') continue;
+        writeRostersSnapshot(entry.name, rosters);
+      }
+    }
+
+    logger.info(
+      {
+        guilds: refreshed,
+        totalMembers: rosters.reduce((n, r) => n + r.members.length, 0),
+      },
+      'Refreshed guild rosters',
     );
   }
 }
@@ -2068,6 +2145,16 @@ async function main(): Promise<void> {
           ? discordChannels.find((ch) => ch.botId === DISCORD_DEFAULT_BOT_ID)
           : undefined) || discordChannels[0];
       await backfillDiscordGuildIds(defaultDiscord);
+
+      // Fetch guild rosters on startup and schedule periodic refresh
+      refreshGuildRosters(discordChannels).catch((err) => {
+        logger.warn({ err }, 'Initial guild roster refresh failed');
+      });
+      setInterval(() => {
+        refreshGuildRosters(discordChannels).catch((err) => {
+          logger.warn({ err }, 'Periodic guild roster refresh failed');
+        });
+      }, ROSTER_REFRESH_INTERVAL_MS);
     }
     if (telegram) channels.push(telegram);
 
