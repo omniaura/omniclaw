@@ -276,10 +276,17 @@ export class DiscordChannel implements Channel {
         }
         lastMessageId = sent.id;
       }
-      logger.info(
-        { jid, length: normalizedText.length },
-        'Discord message sent',
-      );
+      if (lastMessageId) {
+        logger.info(
+          { jid, length: normalizedText.length, messageId: lastMessageId },
+          'Discord message sent',
+        );
+      } else {
+        logger.warn(
+          { jid, length: normalizedText.length },
+          'Discord sendMessage: no chunks were sent',
+        );
+      }
       this.ownedJids.add(jid);
       return lastMessageId;
     } catch (err) {
