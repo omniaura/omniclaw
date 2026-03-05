@@ -16,7 +16,7 @@ cd "$PROJECT_ROOT"
 # Build TypeScript
 log "Building TypeScript"
 BUILD="failed"
-if npm run build >> "$LOG_FILE" 2>&1; then
+if bun run build >> "$LOG_FILE" 2>&1; then
   BUILD="success"
   log "Build succeeded"
 else

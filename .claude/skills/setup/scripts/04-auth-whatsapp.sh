@@ -114,7 +114,7 @@ case "$METHOD" in
     clean_stale_state
 
     # Start auth in background
-    npm run auth >> "$LOG_FILE" 2>&1 &
+    bun run auth >> "$LOG_FILE" 2>&1 &
     AUTH_PID=$!
     log "Auth process started (PID $AUTH_PID)"
 
