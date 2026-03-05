@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect, beforeEach, spyOn } from 'bun:test';
 
 import {
   trackShareRequest,
@@ -39,6 +39,11 @@ describe('share request tracking', () => {
     consumeShareRequest('once-only');
     consumeShareRequest('tracked');
     consumeShareRequest('nonexistent');
+    consumeShareRequest('boundary');
+    consumeShareRequest('trigger-cleanup');
+    for (let i = 0; i <= 1000; i++) {
+      consumeShareRequest(`cap-${i}`);
+    }
   });
 
   // --- Basic track/consume ---
@@ -133,6 +138,42 @@ describe('share request tracking', () => {
     // The recent entry should still be present
     const recent = consumeShareRequest('msg-1');
     expect(recent).toBeDefined();
+  });
+
+  it('keeps entries exactly at the TTL boundary', () => {
+    const nowSpy = spyOn(Date, 'now').mockReturnValue(1_000_000_000);
+    try {
+      trackShareRequest(
+        'boundary',
+        makeMeta({
+          timestamp: 1_000_000_000 - 24 * 60 * 60 * 1000,
+        }),
+      );
+
+      trackShareRequest(
+        'trigger-cleanup',
+        makeMeta({ timestamp: 1_000_000_000 }),
+      );
+
+      expect(consumeShareRequest('boundary')).toBeDefined();
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('evicts oldest tracked request when cap is exceeded', () => {
+    const base = Date.now();
+
+    for (let i = 0; i < 1001; i++) {
+      trackShareRequest(
+        `cap-${i}`,
+        makeMeta({ timestamp: base + i, description: `req-${i}` }),
+      );
+    }
+
+    expect(consumeShareRequest('cap-0')).toBeUndefined();
+    expect(consumeShareRequest('cap-1')?.description).toBe('req-1');
+    expect(consumeShareRequest('cap-1000')?.description).toBe('req-1000');
   });
 
   // --- serverFolder tracking ---
