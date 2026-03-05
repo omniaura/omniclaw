@@ -792,4 +792,43 @@ describe('GroupQueue', () => {
 
     expect(taskRunCount).toBe(1);
   });
+
+  describe('notifyIdle', () => {
+    it('should never let active - idle go negative after container exits', async () => {
+      let processResolve: (() => void) | null = null;
+      queue.setProcessMessagesFn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            processResolve = () => resolve(true);
+          }),
+      );
+
+      queue.enqueueMessageCheck('group1@g.us');
+      await Bun.sleep(5);
+
+      expect(queue.getStats().activeContainers).toBe(1);
+
+      // Simulate multiple idle notifications from the same container
+      // (the IPC stream can emit multiple 'success' statuses).
+      // With MAX_IDLE_CONTAINERS=0, each notifyIdle triggers immediate preemption,
+      // but without the duplicate guard the idleCount could drift.
+      queue.notifyIdle('group1@g.us');
+      queue.notifyIdle('group1@g.us');
+      queue.notifyIdle('group1@g.us');
+
+      // Invariant: active - idle must never be negative
+      const stats = queue.getStats();
+      expect(
+        stats.activeContainers - stats.idleContainers,
+      ).toBeGreaterThanOrEqual(0);
+
+      processResolve!();
+      await Bun.sleep(5);
+
+      // After container exits, counts should be balanced
+      const final = queue.getStats();
+      expect(final.activeContainers).toBe(0);
+      expect(final.idleContainers).toBe(0);
+    });
+  });
 });

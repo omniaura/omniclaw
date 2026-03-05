@@ -321,7 +321,7 @@ export function renderDashboard(state: WebStateProvider): string {
 <main>
   <div class="stats-grid">
     <div class="stat-card"><div class="label">Agents</div><div class="value" id="stat-agents">${agents.length}</div></div>
-    <div class="stat-card"><div class="label">Active Containers</div><div class="value" id="stat-active">${stats.activeContainers - stats.idleContainers}/${stats.maxActive}</div></div>
+    <div class="stat-card"><div class="label">Active Containers</div><div class="value" id="stat-active">${Math.max(0, stats.activeContainers - stats.idleContainers)}/${stats.maxActive}</div></div>
     <div class="stat-card"><div class="label">Idle Containers</div><div class="value" id="stat-idle">${stats.idleContainers}/${stats.maxIdle}</div></div>
     <div class="stat-card"><div class="label">Active Tasks</div><div class="value" id="stat-tasks">${tasks.filter((t) => t.status === 'active').length}</div></div>
   </div>
@@ -486,7 +486,7 @@ export function renderDashboard(state: WebStateProvider): string {
           var s = evt.data;
           var el = function(id) { return document.getElementById(id); };
           if (s.activeContainers != null && s.idleContainers != null && s.maxActive != null) {
-            el('stat-active').textContent = (s.activeContainers - s.idleContainers) + '/' + s.maxActive;
+            el('stat-active').textContent = Math.max(0, s.activeContainers - s.idleContainers) + '/' + s.maxActive;
           }
           if (s.idleContainers != null && s.maxIdle != null) {
             el('stat-idle').textContent = s.idleContainers + '/' + s.maxIdle;
