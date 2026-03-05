@@ -109,7 +109,7 @@ AskUserQuestion: QR code in browser (recommended) vs pairing code vs QR code in 
 
 - **QR browser:** `./.claude/skills/setup/scripts/04-auth-whatsapp.sh --method qr-browser` (timeout: 150000ms)
 - **Pairing code:** Ask for phone number first (country code, no + or spaces). `./.claude/skills/setup/scripts/04-auth-whatsapp.sh --method pairing-code --phone NUMBER` (timeout: 150000ms). Display PAIRING_CODE.
-- **QR terminal:** Run script, tell user to run `cd PROJECT_PATH && npm run auth` in another terminal.
+- **QR terminal:** Run script, tell user to run `cd PROJECT_PATH && bun run auth` in another terminal.
 
 If AUTH_STATUS=already_authenticated → skip ahead.
 
