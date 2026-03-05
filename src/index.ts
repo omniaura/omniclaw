@@ -1938,20 +1938,31 @@ async function main(): Promise<void> {
     }, delayMs);
   };
 
-  const connectWhatsApp = Effect.gen(function* () {
-    const wa = createWhatsAppChannel();
-    yield* Effect.tryPromise(() => wa.connect());
-    return wa;
-  }).pipe(
-    Effect.catchAll((err) => {
-      logger.error(
-        { err },
-        'Failed to connect WhatsApp (continuing without WhatsApp)',
-      );
-      scheduleWhatsAppRetry();
-      return Effect.succeed(null);
-    }),
+  // Skip WhatsApp entirely if no auth store exists (Discord/Telegram-only setup)
+  const hasWhatsAppAuth = fs.existsSync(
+    path.join(process.cwd(), 'store', 'auth', 'creds.json'),
   );
+  const connectWhatsApp = hasWhatsAppAuth
+    ? Effect.gen(function* () {
+        const wa = createWhatsAppChannel();
+        yield* Effect.tryPromise(() => wa.connect());
+        return wa;
+      }).pipe(
+        Effect.catchAll((err) => {
+          logger.error(
+            { err },
+            'Failed to connect WhatsApp (continuing without WhatsApp)',
+          );
+          scheduleWhatsAppRetry();
+          return Effect.succeed(null);
+        }),
+      )
+    : Effect.sync(() => {
+        logger.info(
+          'WhatsApp auth not found — skipping WhatsApp connection (Discord/Telegram-only mode)',
+        );
+        return null;
+      });
 
   const connectDiscord =
     DISCORD_BOTS.length > 0
