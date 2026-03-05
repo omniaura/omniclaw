@@ -34,14 +34,86 @@ if [ -n "$GITHUB_TOKEN" ]; then
   fi
 fi
 
-# SSH key setup: use workspace-persisted key or generate a new one
+# SSH key setup: deterministic from SSH_KEY_SEED, workspace-persisted, or random
 mkdir -p ~/.ssh
-if [ -f /workspace/group/.ssh/id_ed25519 ]; then
+AGENT_FOLDER=$(basename /workspace/group)
+
+generate_deterministic_key() {
+  # Derive a deterministic ed25519 key from SSH_KEY_SEED + agent folder name.
+  # HMAC-SHA256(seed, folder) → 32-byte seed → ed25519 keypair.
+  # Same seed + folder always produces the same key across rebuilds.
+  node -e "
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+
+const seed = crypto.createHmac('sha256', process.env.SSH_KEY_SEED)
+  .update('$AGENT_FOLDER')
+  .digest();
+
+// Create ed25519 key from deterministic seed
+const key = crypto.createPrivateKey({
+  key: Buffer.concat([
+    // PKCS#8 DER prefix for ed25519 (16 bytes) + 34 bytes (04 20 + 32-byte seed)
+    Buffer.from('302e020100300506032b657004220420', 'hex'),
+    seed
+  ]),
+  format: 'der',
+  type: 'pkcs8',
+});
+
+const privPem = key.export({ type: 'pkcs8', format: 'pem' });
+const pubKey = crypto.createPublicKey(key);
+const pubSsh = pubKey.export({ type: 'spki', format: 'der' });
+
+// Convert public key to OpenSSH format
+const keyType = Buffer.from('ssh-ed25519');
+const rawPub = pubSsh.subarray(-32); // last 32 bytes = raw ed25519 public key
+const typeLen = Buffer.alloc(4); typeLen.writeUInt32BE(keyType.length);
+const pubLen = Buffer.alloc(4); pubLen.writeUInt32BE(rawPub.length);
+const sshPub = 'ssh-ed25519 ' + Buffer.concat([typeLen, keyType, pubLen, rawPub]).toString('base64') + ' omniclaw-$AGENT_FOLDER';
+
+// Write OpenSSH private key format
+const home = process.env.HOME || '/home/bun';
+
+// Use ssh-keygen to convert PKCS#8 PEM to OpenSSH format
+fs.writeFileSync(home + '/.ssh/id_ed25519.pem', privPem, { mode: 0o600 });
+fs.writeFileSync(home + '/.ssh/id_ed25519.pub', sshPub + '\n', { mode: 0o644 });
+" && ssh-keygen -p -N "" -m pem -f ~/.ssh/id_ed25519.pem -q 2>/dev/null && mv ~/.ssh/id_ed25519.pem ~/.ssh/id_ed25519 || {
+    # Fallback: ssh-keygen conversion failed, try direct approach
+    rm -f ~/.ssh/id_ed25519.pem
+    return 1
+  }
+  chmod 600 ~/.ssh/id_ed25519
+}
+
+if [ -n "$SSH_KEY_SEED" ]; then
+  if generate_deterministic_key; then
+    # Persist to workspace
+    mkdir -p /workspace/group/.ssh
+    cp ~/.ssh/id_ed25519 /workspace/group/.ssh/id_ed25519
+    cp ~/.ssh/id_ed25519.pub /workspace/group/.ssh/id_ed25519.pub
+    chmod 600 /workspace/group/.ssh/id_ed25519
+  elif [ -f /workspace/group/.ssh/id_ed25519 ]; then
+    # Deterministic generation failed, fall back to persisted key
+    cp /workspace/group/.ssh/id_ed25519 ~/.ssh/id_ed25519
+    chmod 600 ~/.ssh/id_ed25519
+  else
+    # Last resort: random key
+    ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 -q
+    mkdir -p /workspace/group/.ssh
+    cp ~/.ssh/id_ed25519 /workspace/group/.ssh/id_ed25519
+    cp ~/.ssh/id_ed25519.pub /workspace/group/.ssh/id_ed25519.pub
+    chmod 600 /workspace/group/.ssh/id_ed25519
+    PUBKEY=$(cat ~/.ssh/id_ed25519.pub)
+    echo "{\"type\":\"ssh_pubkey\",\"pubkey\":\"$PUBKEY\"}" > /workspace/ipc/messages/ssh_pubkey_$(date +%s%N).json
+  fi
+elif [ -f /workspace/group/.ssh/id_ed25519 ]; then
   # Persistent key from previous container run
   cp /workspace/group/.ssh/id_ed25519 ~/.ssh/id_ed25519
   chmod 600 ~/.ssh/id_ed25519
 else
-  # Generate a new key for this agent
+  # Generate a new random key for this agent
   ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 -q
   # Persist to workspace so it survives container restarts
   mkdir -p /workspace/group/.ssh
