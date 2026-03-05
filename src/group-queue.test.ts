@@ -818,7 +818,9 @@ describe('GroupQueue', () => {
 
       // Invariant: active - idle must never be negative
       const stats = queue.getStats();
-      expect(stats.activeContainers - stats.idleContainers).toBeGreaterThanOrEqual(0);
+      expect(
+        stats.activeContainers - stats.idleContainers,
+      ).toBeGreaterThanOrEqual(0);
 
       processResolve!();
       await Bun.sleep(5);
