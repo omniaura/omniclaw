@@ -114,8 +114,13 @@ COPY container/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Set ownership to bun user (non-root) for writable directories
+# Pre-create /home/bun/.local so Docker bind mounts (e.g. opencode data at
+# /home/bun/.local/share/opencode) don't create it as root, which blocks
+# OpenCode from writing to /home/bun/.local/state/.
 # Make /etc/passwd group-writable so --user can add a dynamic entry at runtime
 RUN chown -R bun:bun /workspace && chmod 777 /home/bun \
+    && mkdir -p /home/bun/.local/state /home/bun/.local/share \
+    && chown -R bun:bun /home/bun/.local \
     && chmod 664 /etc/passwd
 
 # Pre-warm tsgo (native TypeScript checker) so `npx tsgo` / `bunx tsgo` works.
