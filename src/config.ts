@@ -182,3 +182,11 @@ export const GITHUB_WEBHOOK_PORT = parseInt(
 );
 export const GITHUB_WEBHOOK_PATH =
   process.env.GITHUB_WEBHOOK_PATH || '/webhooks/github';
+
+// --- Web UI ---
+// Set WEB_UI_PORT to enable the web dashboard. Unset = disabled.
+export const WEB_UI_PORT = process.env.WEB_UI_PORT
+  ? parseInt(process.env.WEB_UI_PORT, 10)
+  : undefined;
+export const WEB_UI_USER = process.env.WEB_UI_USER || undefined;
+export const WEB_UI_PASS = process.env.WEB_UI_PASS || undefined;
