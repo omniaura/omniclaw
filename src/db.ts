@@ -218,9 +218,9 @@ function dropColumnIfExists(
   column: string,
 ): void {
   try {
-    const rows = database
-      .query(`PRAGMA table_info(${table})`)
-      .all() as Array<{ name: string }>;
+    const rows = database.query(`PRAGMA table_info(${table})`).all() as Array<{
+      name: string;
+    }>;
     if (!rows.some((row) => row.name === column)) return;
     database.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
   } catch (err) {
