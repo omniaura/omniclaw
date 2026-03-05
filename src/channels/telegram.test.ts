@@ -158,17 +158,62 @@ describe('VALID_TELEGRAM_REACTIONS', () => {
 // --- TelegramChannel.ownsJid ---
 
 describe('TelegramChannel.ownsJid', () => {
-  const ownsJid = (jid: string) =>
-    TelegramChannel.prototype.ownsJid.call({} as TelegramChannel, jid);
+  const makeChannel = (token = '123456:token', allowLegacyJidRouting = true) =>
+    new TelegramChannel(token, {
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+      allowLegacyJidRouting,
+    });
 
-  it('matches tg: prefixed JIDs', () => {
-    expect(ownsJid('tg:12345')).toBe(true);
-    expect(ownsJid('tg:-100123456789')).toBe(true);
+  it('matches scoped tg:<botId>:<chatId> JIDs for the same bot', () => {
+    const channel = makeChannel('123456:token');
+    expect(channel.ownsJid('tg:123456:12345')).toBe(true);
+    expect(channel.ownsJid('tg:123456:-100123456789')).toBe(true);
+  });
+
+  it('does not match scoped JIDs for other bots', () => {
+    const channel = makeChannel('123456:token');
+    expect(channel.ownsJid('tg:999999:12345')).toBe(false);
+  });
+
+  it('supports legacy tg:<chatId> JIDs when legacy routing is enabled', () => {
+    const channel = makeChannel('123456:token', true);
+    expect(channel.ownsJid('tg:12345')).toBe(true);
+    expect(channel.ownsJid('tg:-100123456789')).toBe(true);
+  });
+
+  it('rejects legacy tg:<chatId> JIDs when legacy routing is disabled', () => {
+    const channel = makeChannel('123456:token', false);
+    expect(channel.ownsJid('tg:12345')).toBe(false);
   });
 
   it('does not match non-Telegram JIDs', () => {
-    expect(ownsJid('dc:123')).toBe(false);
-    expect(ownsJid('slack:C123')).toBe(false);
-    expect(ownsJid('main@g.us')).toBe(false);
+    const channel = makeChannel('123456:token');
+    expect(channel.ownsJid('dc:123')).toBe(false);
+    expect(channel.ownsJid('slack:C123')).toBe(false);
+    expect(channel.ownsJid('main@g.us')).toBe(false);
+  });
+});
+
+describe('TelegramChannel bot identity', () => {
+  it('derives botId from token prefix', () => {
+    const channel = new TelegramChannel('123456:abc-token', {
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    expect(channel.botId).toBe('123456');
+  });
+
+  it('uses non-secret fallback for unexpected token format', () => {
+    const channel = new TelegramChannel('not-a-standard-token', {
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    expect(channel.botId).toBe('telegram-bot');
   });
 });

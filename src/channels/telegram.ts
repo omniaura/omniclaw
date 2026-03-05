@@ -96,19 +96,25 @@ export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  allowLegacyJidRouting?: boolean;
 }
 
 export class TelegramChannel implements Channel {
   name = 'telegram';
   prefixAssistantName = false; // Telegram bots already display their name
+  readonly botId: string;
 
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
+  private allowLegacyJidRouting: boolean;
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
     this.opts = opts;
+    const tokenPrefix = botToken.split(':', 1)[0] || '';
+    this.botId = /^\d+$/.test(tokenPrefix) ? tokenPrefix : 'telegram-bot';
+    this.allowLegacyJidRouting = opts.allowLegacyJidRouting !== false;
   }
 
   async connect(): Promise<void> {
@@ -117,6 +123,8 @@ export class TelegramChannel implements Channel {
     // Command to get chat ID (useful for registration)
     this.bot.command('chatid', (ctx) => {
       const chatId = ctx.chat.id;
+      const scopedChatId = `tg:${this.botId}:${chatId}`;
+      const legacyChatId = `tg:${chatId}`;
       const chatType = ctx.chat.type;
       const chatName =
         chatType === 'private'
@@ -126,7 +134,7 @@ export class TelegramChannel implements Channel {
             : 'Unknown';
 
       ctx.reply(
-        `Chat ID: \`tg:${chatId}\`\nName: ${chatName}\nType: ${chatType}`,
+        `Chat ID: \`${scopedChatId}\`\nLegacy ID: \`${legacyChatId}\`\nName: ${chatName}\nType: ${chatType}`,
         { parse_mode: 'Markdown' },
       );
     });
@@ -140,7 +148,9 @@ export class TelegramChannel implements Channel {
       // Skip commands
       if (ctx.message.text.startsWith('/')) return;
 
-      const chatJid = `tg:${ctx.chat.id}`;
+      const chatId = ctx.chat.id;
+      const chatJid = `tg:${this.botId}:${chatId}`;
+      const legacyChatJid = `tg:${chatId}`;
       let content = ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
       const senderId = ctx.from?.id?.toString() || '';
@@ -213,12 +223,14 @@ export class TelegramChannel implements Channel {
 
       // Store chat metadata for discovery
       this.opts.onChatMetadata(chatJid, timestamp, chatName);
+      this.opts.onChatMetadata(legacyChatJid, timestamp, chatName);
 
       // Only deliver full message for registered groups
-      const group = this.opts.registeredGroups()[chatJid];
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid] || groups[legacyChatJid];
       if (!group) {
         logger.debug(
-          { chatJid, chatName },
+          { chatJid, legacyChatJid, chatName },
           'Message from unregistered Telegram chat',
         );
         return;
@@ -244,8 +256,11 @@ export class TelegramChannel implements Channel {
 
     // Handle non-text messages with placeholders so the agent knows something was sent
     const storeNonText = (ctx: any, placeholder: string) => {
-      const chatJid = `tg:${ctx.chat.id}`;
-      const group = this.opts.registeredGroups()[chatJid];
+      const chatId = ctx.chat.id;
+      const chatJid = `tg:${this.botId}:${chatId}`;
+      const legacyChatJid = `tg:${chatId}`;
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid] || groups[legacyChatJid];
       if (!group) return;
 
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
@@ -256,6 +271,7 @@ export class TelegramChannel implements Channel {
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
 
       this.opts.onChatMetadata(chatJid, timestamp);
+      this.opts.onChatMetadata(legacyChatJid, timestamp);
       this.opts.onMessage(chatJid, {
         id: ctx.message.message_id.toString(),
         chat_jid: chatJid,
@@ -317,7 +333,14 @@ export class TelegramChannel implements Channel {
     }
 
     try {
-      const numericId = jid.replace(/^tg:/, '');
+      const numericId = this.extractNumericChatId(jid);
+      if (!numericId) {
+        logger.warn(
+          { jid, botId: this.botId },
+          'Unsupported Telegram JID format',
+        );
+        return;
+      }
       const parsedReplyId = replyToMessageId
         ? parseInt(replyToMessageId, 10)
         : NaN;
@@ -403,7 +426,9 @@ export class TelegramChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    return jid.startsWith('tg:');
+    const scoped = this.parseScopedJid(jid);
+    if (scoped) return scoped.botId === this.botId;
+    return this.allowLegacyJidRouting && /^tg:-?\d+$/.test(jid);
   }
 
   async disconnect(): Promise<void> {
@@ -417,10 +442,31 @@ export class TelegramChannel implements Channel {
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.bot || !isTyping) return;
     try {
-      const numericId = jid.replace(/^tg:/, '');
+      const numericId = this.extractNumericChatId(jid);
+      if (!numericId) return;
       await this.bot.api.sendChatAction(numericId, 'typing');
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
     }
+  }
+
+  private parseScopedJid(
+    jid: string,
+  ): { botId: string; chatId: string } | null {
+    const m = /^tg:([^:]+):(-?\d+)$/.exec(jid);
+    if (!m) return null;
+    return { botId: m[1], chatId: m[2] };
+  }
+
+  private extractNumericChatId(jid: string): string | null {
+    const scoped = this.parseScopedJid(jid);
+    if (scoped) {
+      if (scoped.botId !== this.botId) return null;
+      return scoped.chatId;
+    }
+    if (this.allowLegacyJidRouting && /^tg:-?\d+$/.test(jid)) {
+      return jid.replace(/^tg:/, '');
+    }
+    return null;
   }
 }

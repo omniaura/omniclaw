@@ -3,6 +3,7 @@ import { describe, it, expect } from 'bun:test';
 import {
   ASSISTANT_NAME,
   buildDiscordBotConfigFromEnv,
+  buildTelegramBotTokensFromEnv,
   escapeRegex,
   buildTriggerPattern,
   parseEnvList,
@@ -131,6 +132,41 @@ describe('buildDiscordBotConfigFromEnv', () => {
       { id: 'PRIMARY', token: 'legacy-token', runtime: undefined },
     ]);
     expect(parsed.defaultBotId).toBe('PRIMARY');
+  });
+});
+
+describe('buildTelegramBotTokensFromEnv', () => {
+  it('parses TELEGRAM_BOT_TOKENS as a comma-separated list', () => {
+    const tokens = buildTelegramBotTokensFromEnv({
+      TELEGRAM_BOT_TOKENS: 'token-a,token-b',
+    });
+
+    expect(tokens).toEqual(['token-a', 'token-b']);
+  });
+
+  it('parses TELEGRAM_BOT_TOKENS as a newline-separated list', () => {
+    const tokens = buildTelegramBotTokensFromEnv({
+      TELEGRAM_BOT_TOKENS: 'token-a\ntoken-b',
+    });
+
+    expect(tokens).toEqual(['token-a', 'token-b']);
+  });
+
+  it('falls back to legacy TELEGRAM_BOT_TOKEN when multi-token var is unset', () => {
+    const tokens = buildTelegramBotTokensFromEnv({
+      TELEGRAM_BOT_TOKEN: 'legacy-token',
+    });
+
+    expect(tokens).toEqual(['legacy-token']);
+  });
+
+  it('prefers TELEGRAM_BOT_TOKENS over TELEGRAM_BOT_TOKEN', () => {
+    const tokens = buildTelegramBotTokensFromEnv({
+      TELEGRAM_BOT_TOKENS: 'token-a,token-b',
+      TELEGRAM_BOT_TOKEN: 'legacy-token',
+    });
+
+    expect(tokens).toEqual(['token-a', 'token-b']);
   });
 });
 

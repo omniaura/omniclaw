@@ -67,13 +67,26 @@ export function buildDiscordBotConfigFromEnv(env: NodeJS.ProcessEnv): {
   };
 }
 
+export function buildTelegramBotTokensFromEnv(
+  env: NodeJS.ProcessEnv,
+): string[] {
+  const configured = parseEnvList(env.TELEGRAM_BOT_TOKENS).filter(
+    (token) => token.length > 0,
+  );
+  if (configured.length > 0) return configured;
+
+  const legacyToken = (env.TELEGRAM_BOT_TOKEN || '').trim();
+  return legacyToken ? [legacyToken] : [];
+}
+
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Omni';
 const discordEnv = buildDiscordBotConfigFromEnv(process.env);
 export const DISCORD_BOTS = discordEnv.bots;
 export const DISCORD_DEFAULT_BOT_ID = discordEnv.defaultBotId;
 export const DISCORD_BOT_IDS = DISCORD_BOTS.map((b) => b.id);
 export const DISCORD_BOT_TOKEN = DISCORD_BOTS[0]?.token || '';
-export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+export const TELEGRAM_BOT_TOKENS = buildTelegramBotTokensFromEnv(process.env);
+export const TELEGRAM_BOT_TOKEN = TELEGRAM_BOT_TOKENS[0] || '';
 // Slack: bot token (xoxb-...) + app-level token for Socket Mode (xapp-...)
 export const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
 export const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN || '';
