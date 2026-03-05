@@ -33,17 +33,39 @@ sqlite3 store/messages.db "SELECT folder, name FROM registered_groups"
 launchctl list | grep omniclaw          # macOS
 systemctl --user status omniclaw        # Linux
 
-# 3. Recent activity per agent
+# 3. Check for running agent containers
+launchctl list | grep 'container-runtime-linux.omniclaw'   # macOS
+# Each line = an active agent container processing a task or message
+
+# 4. Recent activity per agent
 for folder in $(sqlite3 store/messages.db "SELECT folder FROM registered_groups"); do
   LATEST=$(ls -t "groups/$folder/logs/" 2>/dev/null | head -1)
   [ -n "$LATEST" ] && echo "$folder: $(echo "$LATEST" | sed 's/container-//;s/\.log//')" || echo "$folder: no activity"
 done
 
-# 4. Recent errors
+# 5. Recent errors
 tail -20 logs/omniclaw.log
 ```
 
 Present agent status to user and ask which to reboot (all vs specific). Use **AskUserQuestion**.
+
+### Drain active containers before restarting
+
+**IMPORTANT:** If any agent containers are running (step 3 above), you MUST wait for them to finish before restarting. Killing the orchestrator while containers are active destroys in-progress agent work.
+
+**Wait for containers to drain:**
+```bash
+# Poll until no omniclaw containers remain (check every 10s, timeout after 10min)
+echo "Waiting for active containers to finish..."
+for i in $(seq 1 60); do
+  ACTIVE=$(launchctl list 2>/dev/null | grep -c 'container-runtime-linux.omniclaw' || true)
+  [ "$ACTIVE" -eq 0 ] && echo "All containers finished." && break
+  echo "  $ACTIVE container(s) still running... (${i}0s elapsed)"
+  sleep 10
+done
+```
+
+If the user explicitly says to restart immediately (e.g. "force restart", "restart now"), skip the drain wait. Otherwise always drain first.
 
 **Reboot all — macOS:**
 ```bash
