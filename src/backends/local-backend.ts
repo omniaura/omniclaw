@@ -225,13 +225,12 @@ function buildVolumeMounts(
     if (srvFolder) {
       const serverDir = path.join(GROUPS_DIR, srvFolder);
       assertPathWithin(serverDir, GROUPS_DIR, 'server folder');
-      if (fs.existsSync(serverDir)) {
-        mounts.push({
-          hostPath: serverDir,
-          containerPath: '/workspace/server',
-          readonly: false,
-        });
-      }
+      fs.mkdirSync(serverDir, { recursive: true });
+      mounts.push({
+        hostPath: serverDir,
+        containerPath: '/workspace/server',
+        readonly: false,
+      });
     }
   }
 

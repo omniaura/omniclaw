@@ -74,6 +74,7 @@ import {
   storeMessage,
 } from './db.js';
 import { buildAgentToChannelsMapFromSubscriptions } from './channel-routes.js';
+import { resolveContextLayers } from './context-layers.js';
 import { GroupQueue } from './group-queue.js';
 import { consumeShareRequest, startIpcWatcher } from './ipc.js';
 import {
@@ -241,6 +242,14 @@ function buildRegisteredGroupFromSubscription(
 
   const resolvedBotId = sub.discordBotId || fallback?.discordBotId;
   const runtimeDefault = getDiscordRuntimeDefault(resolvedBotId);
+  const discordGuildId = sub.discordGuildId || fallback?.discordGuildId;
+  const layers = resolveContextLayers({
+    channelJid,
+    discordGuildId,
+    serverFolder: agent?.serverFolder || fallback?.serverFolder,
+    categoryFolder: sub.categoryFolder || undefined,
+    channelFolder: sub.channelFolder || undefined,
+  });
   return {
     name: agent?.name || fallback?.name || sub.agentId,
     folder: agent?.folder || fallback?.folder || sub.agentId,
@@ -249,16 +258,16 @@ function buildRegisteredGroupFromSubscription(
     containerConfig: agent?.containerConfig || fallback?.containerConfig,
     requiresTrigger: sub.requiresTrigger,
     discordBotId: resolvedBotId,
-    discordGuildId: sub.discordGuildId || fallback?.discordGuildId,
-    serverFolder: agent?.serverFolder || fallback?.serverFolder,
+    discordGuildId,
+    serverFolder: layers.serverFolder,
     backend: agent?.backend || fallback?.backend || 'apple-container',
     agentRuntime:
       agent?.agentRuntime || fallback?.agentRuntime || runtimeDefault,
     description: agent?.description || fallback?.description,
     autoRespondToQuestions: fallback?.autoRespondToQuestions,
     autoRespondKeywords: fallback?.autoRespondKeywords,
-    channelFolder: sub.channelFolder || undefined,
-    categoryFolder: sub.categoryFolder || undefined,
+    channelFolder: layers.channelFolder,
+    categoryFolder: layers.categoryFolder,
     agentContextFolder: agent?.agentContextFolder || undefined,
   };
 }
@@ -426,6 +435,17 @@ function refreshRegisteredGroupsFromCanonicalState(): {
     const discordBotId =
       preferredSub?.discordBotId || route?.discordBotId || legacy?.discordBotId;
     const runtimeDefault = getDiscordRuntimeDefault(discordBotId);
+    const discordGuildId =
+      preferredSub?.discordGuildId ||
+      route?.discordGuildId ||
+      legacy?.discordGuildId;
+    const layers = resolveContextLayers({
+      channelJid: jid,
+      discordGuildId,
+      serverFolder: agent?.serverFolder || legacy?.serverFolder,
+      categoryFolder: preferredSub?.categoryFolder,
+      channelFolder: preferredSub?.channelFolder,
+    });
     nextGroups[jid] = {
       name: agent?.name || legacy?.name || agentId || jid,
       folder: agent?.folder || legacy?.folder || agentId || jid,
@@ -446,11 +466,8 @@ function refreshRegisteredGroupsFromCanonicalState(): {
         legacy?.requiresTrigger ??
         true,
       discordBotId,
-      discordGuildId:
-        preferredSub?.discordGuildId ||
-        route?.discordGuildId ||
-        legacy?.discordGuildId,
-      serverFolder: agent?.serverFolder || legacy?.serverFolder,
+      discordGuildId,
+      serverFolder: layers.serverFolder,
       backend: (agent?.backend ||
         legacy?.backend ||
         'apple-container') as BackendType,
@@ -459,8 +476,8 @@ function refreshRegisteredGroupsFromCanonicalState(): {
       description: agent?.description || legacy?.description,
       autoRespondToQuestions: legacy?.autoRespondToQuestions,
       autoRespondKeywords: legacy?.autoRespondKeywords,
-      channelFolder: preferredSub?.channelFolder,
-      categoryFolder: preferredSub?.categoryFolder,
+      channelFolder: layers.channelFolder,
+      categoryFolder: layers.categoryFolder,
       agentContextFolder: agent?.agentContextFolder,
     };
     synthesized++;
