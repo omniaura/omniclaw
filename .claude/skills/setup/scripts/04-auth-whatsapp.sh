@@ -249,7 +249,7 @@ EOF
     clean_stale_state
 
     # Start auth with pairing code in background
-    npx tsx src/whatsapp-auth.ts --pairing-code --phone "$PHONE" >> "$LOG_FILE" 2>&1 &
+    bunx tsx src/whatsapp-auth.ts --pairing-code --phone "$PHONE" >> "$LOG_FILE" 2>&1 &
     AUTH_PID=$!
     log "Auth process started (PID $AUTH_PID)"
 

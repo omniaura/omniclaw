@@ -28,7 +28,7 @@ WhatsApp may use LID (Linked Identity) JIDs. Check logs for LID translation. Ver
 ## WhatsApp disconnected
 
 ```bash
-npm run auth   # re-authenticate
+bun run auth   # re-authenticate
 bun run build && launchctl kickstart -k gui/$(id -u)/com.omniclaw
 ```
 

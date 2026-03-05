@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# 02-install-deps.sh — Run npm install and verify key packages
+# 02-install-deps.sh — Run bun install and verify key packages
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
@@ -13,17 +13,17 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [install-deps] $*" >> "$LOG_FILE"; 
 
 cd "$PROJECT_ROOT"
 
-log "Running npm install"
+log "Running bun install"
 
-if npm install >> "$LOG_FILE" 2>&1; then
-  log "npm install succeeded"
+if bun install >> "$LOG_FILE" 2>&1; then
+  log "bun install succeeded"
 else
-  log "npm install failed"
+  log "bun install failed"
   cat <<EOF
 === OMNICLAW SETUP: INSTALL_DEPS ===
 PACKAGES: failed
 STATUS: failed
-ERROR: npm_install_failed
+ERROR: bun_install_failed
 LOG: logs/setup.log
 === END ===
 EOF
