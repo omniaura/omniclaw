@@ -39,7 +39,7 @@ log "Setting up service: platform=$PLATFORM node=$NODE_PATH project=$PROJECT_PAT
 
 # Build first
 log "Building TypeScript"
-if ! npm run build >> "$LOG_FILE" 2>&1; then
+if ! bun run build >> "$LOG_FILE" 2>&1; then
   log "Build failed"
   cat <<EOF
 === OMNICLAW SETUP: SETUP_SERVICE ===
