@@ -123,6 +123,10 @@ export const SESSION_MAX_AGE = parseInt(
   process.env.SESSION_MAX_AGE || '14400000',
   10,
 ); // 4 hours — rotate sessions to prevent unbounded context growth
+export const ROSTER_REFRESH_INTERVAL = parseInt(
+  process.env.ROSTER_REFRESH_INTERVAL || '900000',
+  10,
+); // 15min default — how often to refresh Discord guild rosters
 /** Max containers actively processing messages or tasks. */
 export const MAX_ACTIVE_CONTAINERS = Math.max(
   1,
