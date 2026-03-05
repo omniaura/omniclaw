@@ -6,6 +6,7 @@ import {
   loadGitHubWatchesConfig,
 } from './github.js';
 import { logger } from './logger.js';
+import type { GitHubWatchesConfig } from './types.js';
 
 const DEFAULT_PATH = '/webhooks/github';
 const DELIVERY_TTL_MS = 10 * 60_000;
@@ -208,11 +209,12 @@ export function buildGitHubWebhookNotification(
   event: string,
   deliveryId: string,
   payload: GitHubWebhookPayload,
+  configOverride?: GitHubWatchesConfig | null,
 ): GitHubWebhookNotification | null {
   const parsed = parseWebhookPayload(event, payload);
   if (!parsed) return null;
 
-  const config = loadGitHubWatchesConfig();
+  const config = configOverride ?? loadGitHubWatchesConfig();
   if (!config) return null;
 
   const agentIds = getWatchingAgentsForRepo(config, parsed.owner, parsed.repo);

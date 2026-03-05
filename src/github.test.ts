@@ -1,7 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+import { describe, it, expect } from 'bun:test';
 
 import type { GitHubAgentWatch, GitHubWatchesConfig } from './types.js';
 
@@ -9,18 +6,6 @@ import type { GitHubAgentWatch, GitHubWatchesConfig } from './types.js';
 
 describe('github', () => {
   describe('config loading', () => {
-    let tmpDir: string;
-    let originalDataDir: string;
-
-    beforeEach(async () => {
-      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-gh-test-'));
-      // We'll test loadGitHubWatchesConfig by writing a config file to DATA_DIR
-    });
-
-    afterEach(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    });
-
     it('parses a valid config', () => {
       const config: GitHubWatchesConfig = {
         watches: [
@@ -157,6 +142,20 @@ describe('github', () => {
       expect(getWatchingAgentsForRepo(config, 'omniaura', 'backend')).toEqual(
         [],
       );
+    });
+  });
+
+  describe('normalizeLimit', () => {
+    it('uses fallback when value is undefined or invalid', () => {
+      const { normalizeLimit } = require('./github.js');
+      expect(normalizeLimit(undefined, 10)).toBe(10);
+      expect(normalizeLimit(0, 10)).toBe(10);
+      expect(normalizeLimit(-2, 10)).toBe(10);
+    });
+
+    it('clamps excessive values to max list limit', () => {
+      const { normalizeLimit } = require('./github.js');
+      expect(normalizeLimit(500, 10)).toBe(50);
     });
   });
 
