@@ -51,11 +51,15 @@ export async function initializeBackends(
 ): Promise<void> {
   // Determine which backend types are needed
   const neededTypes = new Set<BackendType>();
-  neededTypes.add(DEFAULT_BACKEND); // Always initialize the default
 
   for (const entity of Object.values(entities)) {
     const type = getBackendType(entity);
     neededTypes.add(type);
+  }
+
+  // Only add the default backend if no entities specified a backend
+  if (neededTypes.size === 0) {
+    neededTypes.add(DEFAULT_BACKEND);
   }
 
   logger.info({ backends: [...neededTypes] }, 'Initializing backends');
