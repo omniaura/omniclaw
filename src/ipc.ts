@@ -20,7 +20,6 @@ import {
   setRegisteredGroup,
   updateTask,
 } from './db.js';
-import { transferFiles } from './file-transfer.js';
 import { rejectTraversalSegments } from './path-security.js';
 import {
   findGroupByFolder,
@@ -856,9 +855,10 @@ export async function processTaskIpc(
       let sharedFiles: string[] = [];
       let requestedFiles: string[] = [];
 
-      // If files are specified with a target_agent, do the file transfer
-      if (data.target_agent && data.files && data.files.length > 0) {
-        // Validate all file paths before transfer (defense-in-depth)
+      // Validate file-share paths for display and approval context.
+      // IMPORTANT: Do not transfer files here. Transfers before approval can
+      // leak data cross-agent if the request is denied.
+      if (data.files && data.files.length > 0) {
         const validFiles: string[] = [];
         for (const file of data.files) {
           try {
@@ -871,38 +871,12 @@ export async function processTaskIpc(
             );
           }
         }
-
-        const targetGroupEntry = findGroupByFolder(
-          registeredGroups,
-          data.target_agent!,
-        );
-        if (targetGroupEntry && sourceGroupEntry && validFiles.length > 0) {
-          const result = await transferFiles({
-            sourceGroup: sourceGroupEntry[1],
-            targetGroup: targetGroupEntry[1],
-            files: validFiles,
-            direction: 'push',
-          });
-          logger.info(
-            {
-              sourceGroup,
-              targetAgent: data.target_agent,
-              transferred: result.transferred,
-              errors: result.errors,
-            },
-            'Share request file transfer completed',
-          );
-        }
         sharedFiles = validFiles;
       }
 
-      // If request_files are specified, pull files from target to source
-      if (
-        data.target_agent &&
-        data.request_files &&
-        data.request_files.length > 0
-      ) {
-        // Validate all requested file paths (defense-in-depth)
+      // Validate requested file paths for display and approval context.
+      // IMPORTANT: Do not pull files here for the same pre-approval reason.
+      if (data.request_files && data.request_files.length > 0) {
         const validRequestFiles: string[] = [];
         for (const file of data.request_files) {
           try {
@@ -914,31 +888,6 @@ export async function processTaskIpc(
               'Rejected share_request request_files path',
             );
           }
-        }
-
-        const targetGroupEntry = findGroupByFolder(
-          registeredGroups,
-          data.target_agent!,
-        );
-        if (
-          targetGroupEntry &&
-          sourceGroupEntry &&
-          validRequestFiles.length > 0
-        ) {
-          const result = await transferFiles({
-            sourceGroup: targetGroupEntry[1],
-            targetGroup: sourceGroupEntry[1],
-            files: validRequestFiles,
-            direction: 'push',
-          });
-          logger.info(
-            {
-              sourceGroup,
-              targetAgent: data.target_agent,
-              transferred: result.transferred,
-            },
-            'Share request file pull completed',
-          );
         }
         requestedFiles = validRequestFiles;
       }
