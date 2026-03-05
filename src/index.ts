@@ -91,6 +91,7 @@ import type { GitHubWebhookNotification } from './github-webhooks.js';
 import { logger } from './logger.js';
 import { createResumePositionStore } from './resume-position-store.js';
 import { assertPathWithin } from './path-security.js';
+import { redactSensitiveData } from './security/redaction.js';
 import { Effect } from 'effect';
 
 // Global error handlers to prevent crashes from unhandled rejections/exceptions
@@ -834,32 +835,6 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
     /Invalid (?:API key|bearer token)/,
     /rate_limit_error/,
   ];
-
-  // Redact sensitive data from error messages before logging
-  function redactSensitiveData(text: string): string {
-    return (
-      text
-        // Redact bearer tokens
-        .replace(/Bearer\s+[A-Za-z0-9_\-\.]{20,}/gi, 'Bearer [REDACTED]')
-        // Redact API keys (common patterns: sk-..., key_..., etc.)
-        .replace(
-          /\b(?:sk|key|api)[_-][A-Za-z0-9_\-]{16,}/gi,
-          '[API_KEY_REDACTED]',
-        )
-        // Redact long hex strings (likely tokens/secrets)
-        .replace(/\b[a-f0-9]{32,}\b/gi, '[HEX_TOKEN_REDACTED]')
-        // Redact JWT tokens
-        .replace(
-          /eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/g,
-          '[JWT_REDACTED]',
-        )
-        // Redact common password/secret field values in JSON
-        .replace(
-          /"(?:password|secret|token|apikey)":\s*"[^"]+"/gi,
-          '"$1":"[REDACTED]"',
-        )
-    );
-  }
 
   // Thread streaming via shared helper
   // Synthetic IDs (synth-*, react-*, notify-*) aren't real channel message IDs
