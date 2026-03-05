@@ -53,6 +53,7 @@ import {
   getAllTasks,
   getAllGuildRosters,
   getChatGuildId,
+  getGuildRoster,
   getMessagesSince,
   storeGuildRoster,
   getNewMessages,
@@ -761,6 +762,28 @@ async function refreshGuildRosters(
   }
 }
 
+function getChannelRosterNames(
+  chatJid: string,
+  explicitGuildId?: string,
+): string[] {
+  const guildId = explicitGuildId || getChatGuildId(chatJid);
+  if (!guildId) return [];
+
+  const members = getGuildRoster(guildId);
+  if (members.length === 0) return [];
+
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const member of members) {
+    if (seen.has(member.userId)) continue;
+    seen.add(member.userId);
+    const display = (member.displayName || member.username || '').trim();
+    if (!display) continue;
+    names.push(display);
+  }
+  return names;
+}
+
 /**
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
@@ -848,7 +871,9 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
     messageCount: missedMessages.length,
   });
 
-  let prompt = formatMessages(missedMessages);
+  let prompt = formatMessages(missedMessages, {
+    channelRosterNames: getChannelRosterNames(chatJid, group.discordGuildId),
+  });
 
   // Inject context about active background tasks
   const activeTask = queue.getActiveTaskInfo(dispatchJid);
@@ -1530,7 +1555,12 @@ async function startMessageLoop(): Promise<void> {
             );
             if (allPending.length === 0) continue;
             const messagesToSend = allPending;
-            const formatted = formatMessages(messagesToSend);
+            const formatted = formatMessages(messagesToSend, {
+              channelRosterNames: getChannelRosterNames(
+                chatJid,
+                group.discordGuildId,
+              ),
+            });
 
             if (await queue.sendMessage(chatJid, formatted)) {
               logger.info(
@@ -1573,7 +1603,12 @@ async function startMessageLoop(): Promise<void> {
             );
             if (filteredPending.length === 0) continue;
             const messagesToSend = filteredPending;
-            const formatted = formatMessages(messagesToSend);
+            const formatted = formatMessages(messagesToSend, {
+              channelRosterNames: getChannelRosterNames(
+                chatJid,
+                sub.discordGuildId,
+              ),
+            });
 
             if (await queue.sendMessage(dispatchJid, formatted)) {
               logger.info(

@@ -11,7 +11,14 @@ export function escapeXml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export function formatMessages(messages: NewMessage[]): string {
+export interface FormatMessagesOptions {
+  channelRosterNames?: string[];
+}
+
+export function formatMessages(
+  messages: NewMessage[],
+  options: FormatMessagesOptions = {},
+): string {
   const lines = messages.map(
     (m) =>
       `<message id="${m.id}" sender="${escapeXml(m.sender_name)}" sender_id="${escapeXml(m.sender)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
@@ -51,10 +58,25 @@ export function formatMessages(messages: NewMessage[]): string {
     );
   }
 
+  const attrs: string[] = [];
+  if (senders.length > 0) {
+    const roster = senders.map(escapeXml).join(', ');
+    attrs.push(`excerpt_participants="${roster}"`);
+    // Backward-compatible alias for existing prompts/parsers.
+    attrs.push(`participants="${roster}"`);
+  }
+
+  const uniqueRosterNames = Array.from(
+    new Set((options.channelRosterNames || []).filter(Boolean)),
+  );
+  if (uniqueRosterNames.length > 0) {
+    attrs.push(
+      `channel_roster="${uniqueRosterNames.map(escapeXml).join(', ')}"`,
+    );
+  }
+
   const header =
-    senders.length > 0
-      ? `<messages participants="${senders.map(escapeXml).join(', ')}">`
-      : '<messages>';
+    attrs.length > 0 ? `<messages ${attrs.join(' ')}>` : '<messages>';
 
   return `${header}\n${lines.join('\n')}\n</messages>`;
 }
