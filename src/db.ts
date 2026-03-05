@@ -8,6 +8,7 @@ import { TrustStore } from './discovery/trust-store.js';
 import { logger } from './logger.js';
 import {
   Agent,
+  AgentHealth,
   ChannelRoute,
   ChannelSubscription,
   NewMessage,
@@ -54,6 +55,14 @@ interface AgentRow {
   roster_role_filters: string | null;
   avatar_url: string | null;
   avatar_source: string | null;
+}
+
+interface AgentHealthRow {
+  agent_id: string;
+  is_online: number;
+  last_heartbeat_at: string | null;
+  updated_at: string;
+  capabilities: string | null;
 }
 
 /** Row type for channel_routes table SELECT * queries */
@@ -172,6 +181,20 @@ function mapRowToAgent(row: AgentRow): Agent {
     rosterRoleFilters,
     avatarUrl: row.avatar_url || undefined,
     avatarSource: (row.avatar_source as Agent['avatarSource']) || undefined,
+  };
+}
+
+function mapRowToAgentHealth(row: AgentHealthRow): AgentHealth {
+  return {
+    agentId: row.agent_id,
+    isOnline: row.is_online === 1,
+    lastHeartbeatAt: row.last_heartbeat_at || row.updated_at,
+    updatedAt: row.updated_at,
+    capabilities: safeJsonParse<string[]>(
+      row.capabilities,
+      { agentId: row.agent_id },
+      'agent health capabilities',
+    ) || [],
   };
 }
 
@@ -444,6 +467,16 @@ export function createSchema(database: Database): void {
       ON channel_subscriptions(channel_jid, priority, created_at);
     CREATE INDEX IF NOT EXISTS idx_channel_subscriptions_agent
       ON channel_subscriptions(agent_id);
+
+    CREATE TABLE IF NOT EXISTS agent_health (
+      agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+      is_online INTEGER NOT NULL DEFAULT 0,
+      last_heartbeat_at TEXT,
+      updated_at TEXT NOT NULL,
+      capabilities TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_health_updated_at
+      ON agent_health(updated_at);
   `);
 
   addColumnIfNotExists(database, 'channel_routes', 'discord_bot_id', 'TEXT');
@@ -1460,6 +1493,39 @@ export function updateAgentAvatar(
   db.query(
     'UPDATE agents SET avatar_url = ?, avatar_source = ? WHERE id = ?',
   ).run(avatarUrl, avatarSource, agentId);
+}
+
+export function getAgentHealth(agentId: string): AgentHealth | undefined {
+  const row = db
+    .prepare('SELECT * FROM agent_health WHERE agent_id = ?')
+    .get(agentId) as AgentHealthRow | undefined;
+  if (!row) return undefined;
+  return mapRowToAgentHealth(row);
+}
+
+export function getAllAgentHealth(): Record<string, AgentHealth> {
+  const rows = db.prepare('SELECT * FROM agent_health').all() as AgentHealthRow[];
+  const result: Record<string, AgentHealth> = {};
+  for (const row of rows) {
+    const mapped = mapRowToAgentHealth(row);
+    result[mapped.agentId] = mapped;
+  }
+  return result;
+}
+
+export function setAgentHealth(health: AgentHealth): void {
+  db.query(
+    `
+    INSERT OR REPLACE INTO agent_health (agent_id, is_online, last_heartbeat_at, updated_at, capabilities)
+    VALUES (?, ?, ?, ?, ?)
+  `,
+  ).run(
+    health.agentId,
+    health.isOnline ? 1 : 0,
+    health.lastHeartbeatAt,
+    health.updatedAt,
+    JSON.stringify(health.capabilities),
+  );
 }
 
 /** Look up a channel route by JID, returning undefined if not found. */

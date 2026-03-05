@@ -5,18 +5,22 @@ import {
   createTask,
   deleteTask,
   getAllAgents,
+  getAgentHealth,
+  getAllAgentHealth,
   getAllChats,
   getDeltaCursorFromDb,
   getMessagesSince,
   getNewMessages,
   getTaskById,
-  setAgent,
   loadAllDeltaCursors,
+  setAgent,
   setDeltaCursorInDb,
+  setAgentHealth,
   storeChatMetadata,
   storeMessage,
   updateTask,
 } from './db.js';
+import type { Agent } from './types.js';
 
 beforeEach(() => {
   _initTestDatabase();
@@ -784,5 +788,37 @@ describe('delta cursor persistence', () => {
     const deltaKeys = [...cursors.keys()].filter((k) => k.startsWith('dc:'));
     // Fresh DB should have no delta cursors
     expect(deltaKeys.length).toBe(0);
+  });
+});
+
+describe('agent health persistence', () => {
+  it('stores and loads agent health rows', () => {
+    const agent: Agent = {
+      id: 'main',
+      name: 'Main',
+      folder: 'main',
+      backend: 'apple-container',
+      agentRuntime: 'claude-agent-sdk',
+      isAdmin: true,
+      createdAt: '2026-03-05T00:00:00.000Z',
+    };
+    setAgent(agent);
+
+    setAgentHealth({
+      agentId: 'main',
+      isOnline: true,
+      lastHeartbeatAt: '2026-03-05T12:00:00.000Z',
+      updatedAt: '2026-03-05T12:00:00.000Z',
+      capabilities: ['backend:apple-container', 'runtime:claude-agent-sdk'],
+    });
+
+    const health = getAgentHealth('main');
+    expect(health).toBeDefined();
+    expect(health!.isOnline).toBe(true);
+    expect(health!.capabilities).toContain('backend:apple-container');
+
+    const all = getAllAgentHealth();
+    expect(all.main).toBeDefined();
+    expect(all.main.lastHeartbeatAt).toBe('2026-03-05T12:00:00.000Z');
   });
 });

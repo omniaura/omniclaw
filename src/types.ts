@@ -216,6 +216,15 @@ export interface Agent {
   avatarSource?: 'discord' | 'telegram' | 'slack' | 'custom';
 }
 
+/** Volatile, sanitized runtime state for discovery/roster views. */
+export interface AgentHealth {
+  agentId: string;
+  isOnline: boolean;
+  lastHeartbeatAt: string;
+  updatedAt: string;
+  capabilities: string[];
+}
+
 /**
  * Maps a channel JID to an agent.
  * Multiple channels can route to the same agent.
@@ -341,6 +350,7 @@ export interface IpcMessagePayload {
 export interface IpcTaskPayload {
   type: string;
   taskId?: string;
+  requestId?: string;
   prompt?: string;
   schedule_type?: string;
   schedule_value?: string;
