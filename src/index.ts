@@ -78,7 +78,6 @@ import {
   getAgentName,
 } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { createThreadStreamer } from './thread-streaming.js';
 import {
   Agent,
   AgentRuntime,
@@ -253,7 +252,6 @@ function buildRegisteredGroupFromSubscription(
     description: agent?.description || fallback?.description,
     autoRespondToQuestions: fallback?.autoRespondToQuestions,
     autoRespondKeywords: fallback?.autoRespondKeywords,
-    streamIntermediates: fallback?.streamIntermediates,
     channelFolder: sub.channelFolder || undefined,
     categoryFolder: sub.categoryFolder || undefined,
     agentContextFolder: agent?.agentContextFolder || undefined,
@@ -418,7 +416,6 @@ function refreshRegisteredGroupsFromCanonicalState(): {
       description: agent?.description || legacy?.description,
       autoRespondToQuestions: legacy?.autoRespondToQuestions,
       autoRespondKeywords: legacy?.autoRespondKeywords,
-      streamIntermediates: legacy?.streamIntermediates,
       channelFolder: preferredSub?.channelFolder,
       categoryFolder: preferredSub?.categoryFolder,
       agentContextFolder: agent?.agentContextFolder,
@@ -895,23 +892,6 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   // Subsequent outputs should not keep replying to the original trigger.
   let replyAnchorMessageId: string | null = triggeringMessageId;
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
-  const threadName =
-    lastContent.replace(TRIGGER_PATTERN, '').trim().slice(0, 80) ||
-    'Agent working...';
-
-  const streamer = createThreadStreamer(
-    {
-      channel,
-      chatJid,
-      streamIntermediates: !!group.streamIntermediates,
-      groupName: group.name,
-      groupFolder: group.folder,
-      label: lastContent.replace(TRIGGER_PATTERN, '').trim(),
-    },
-    triggeringMessageId,
-    threadName,
-  );
-
   let output: 'success' | 'error';
   try {
     output = await runAgent(
@@ -923,12 +903,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
         // Wrap in try/catch to prevent unhandled rejections
         // Adopted from [Upstream PR #243] - Critical stability fix
         try {
-          if (result.intermediate && result.result) {
-            const raw =
-              typeof result.result === 'string'
-                ? result.result
-                : JSON.stringify(result.result);
-            await streamer.handleIntermediate(raw);
+          if (result.intermediate) {
             return;
           }
 
@@ -1024,8 +999,6 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
       });
     if (idleTimer) clearTimeout(idleTimer);
   }
-
-  streamer.writeThoughtLog();
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —

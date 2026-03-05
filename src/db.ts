@@ -34,7 +34,6 @@ interface RegisteredGroupRow {
   description: string | null;
   auto_respond_to_questions: number | null;
   auto_respond_keywords: string | null;
-  stream_intermediates: number | null;
 }
 
 /** Row type for agents table SELECT * queries */
@@ -133,7 +132,6 @@ function mapRowToRegisteredGroup(
       { jid: row.jid },
       'auto_respond_keywords',
     ),
-    streamIntermediates: row.stream_intermediates === 1 || undefined,
   };
 }
 
@@ -211,6 +209,29 @@ function addColumnIfNotExists(
       return;
     }
     throw err;
+  }
+}
+
+function dropColumnIfExists(
+  database: Database,
+  table: string,
+  column: string,
+): void {
+  try {
+    const rows = database.query(`PRAGMA table_info(${table})`).all() as Array<{
+      name: string;
+    }>;
+    if (!rows.some((row) => row.name === column)) return;
+    database.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+  } catch (err) {
+    logger.warn(
+      {
+        table,
+        column,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      'Failed to drop legacy column',
+    );
   }
 }
 
@@ -327,13 +348,7 @@ export function createSchema(database: Database): void {
     'auto_respond_keywords',
     'TEXT',
   );
-  addColumnIfNotExists(
-    database,
-    'registered_groups',
-    'stream_intermediates',
-    'INTEGER',
-    '0',
-  );
+  dropColumnIfExists(database, 'registered_groups', 'stream_intermediates');
 
   // Heartbeat feature removed — clear any existing heartbeat config so it doesn't
   // get re-created on startup (reconcileHeartbeats is also removed).
@@ -945,8 +960,8 @@ export function getRegisteredGroup(
 /** Insert or replace a registered group entry. */
 export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   db.query(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, discord_bot_id, discord_guild_id, server_folder, backend, description, auto_respond_to_questions, auto_respond_keywords, stream_intermediates)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, discord_bot_id, discord_guild_id, server_folder, backend, description, auto_respond_to_questions, auto_respond_keywords)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -964,7 +979,6 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.autoRespondKeywords
       ? JSON.stringify(group.autoRespondKeywords)
       : null,
-    group.streamIntermediates ? 1 : 0,
   );
 }
 

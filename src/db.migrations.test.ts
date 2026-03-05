@@ -127,6 +127,9 @@ describe('db migrations (bun:sqlite)', () => {
     expect(getTableColumns(db, 'registered_groups')).toContain(
       'discord_bot_id',
     );
+    expect(getTableColumns(db, 'registered_groups')).not.toContain(
+      'stream_intermediates',
+    );
     expect(getTableColumns(db, 'channel_routes')).toContain('discord_bot_id');
     expect(getTableColumns(db, 'channel_subscriptions')).toContain(
       'channel_jid',
@@ -153,6 +156,9 @@ describe('db migrations (bun:sqlite)', () => {
     expect(columns).toContain('agent_runtime');
     expect(getTableColumns(db, 'registered_groups')).toContain(
       'discord_bot_id',
+    );
+    expect(getTableColumns(db, 'registered_groups')).not.toContain(
+      'stream_intermediates',
     );
     expect(getTableColumns(db, 'channel_routes')).toContain('discord_bot_id');
     expect(getTableColumns(db, 'channel_subscriptions')).toContain(

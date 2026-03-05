@@ -61,7 +61,6 @@ export interface RegisteredGroup {
   backend?: BackendType; // Which container backend runs this group's agent (default: apple-container)
   agentRuntime?: AgentRuntime; // Which agent runtime runs inside the container (default: claude-agent-sdk)
   description?: string; // What this agent does (for agent registry)
-  streamIntermediates?: boolean; // Stream intermediate output (thinking, tool calls) to channel threads. Default: false
   /** Channel workspace folder. Mounted at /workspace/group/. Falls back to agent folder if unset. */
   channelFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant/spec'
   /** Category team workspace. Mounted read-write at /workspace/category/. */
