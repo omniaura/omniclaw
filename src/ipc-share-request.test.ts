@@ -150,7 +150,10 @@ describe('share request tracking', () => {
         }),
       );
 
-      trackShareRequest('trigger-cleanup', makeMeta({ timestamp: 1_000_000_000 }));
+      trackShareRequest(
+        'trigger-cleanup',
+        makeMeta({ timestamp: 1_000_000_000 }),
+      );
 
       expect(consumeShareRequest('boundary')).toBeDefined();
     } finally {
