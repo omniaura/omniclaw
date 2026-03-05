@@ -309,6 +309,15 @@ export interface GitHubWatchesConfig {
   watches: GitHubAgentWatch[];
   /** Cache TTL in milliseconds. Default: 300000 (5 minutes) */
   cacheTtlMs?: number;
+  /** Per-channel watched repos for delta context injection. */
+  channelWatches?: GitHubChannelWatch[];
+  /** Feature flag: enable delta context injection. Default: false */
+  githubDeltaContextEnabled?: boolean;
+}
+
+export interface GitHubChannelWatch {
+  channelJid: string;
+  repos: GitHubRepoWatch[];
 }
 
 // --- IPC Data Types ---

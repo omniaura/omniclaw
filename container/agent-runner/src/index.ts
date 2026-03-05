@@ -62,6 +62,8 @@ interface ContainerInput {
   categoryFolder?: string;
   /** Pre-fetched GitHub context markdown (open PRs, issues, review comments). */
   githubContext?: string;
+  /** GitHub activity delta digest (events since last user message in this channel). */
+  githubActivityDelta?: string;
 }
 
 interface ContainerOutput {
@@ -868,6 +870,12 @@ async function runQuery(
     globalClaudeMd = globalClaudeMd
       ? globalClaudeMd + githubBlock
       : containerInput.githubContext;
+  }
+
+  // Append GitHub activity delta (events since last user message)
+  if (containerInput.githubActivityDelta) {
+    const deltaBlock = `\n\n${containerInput.githubActivityDelta}`;
+    globalClaudeMd = globalClaudeMd ? globalClaudeMd + deltaBlock : containerInput.githubActivityDelta;
   }
 
   // Discover additional directories for CLAUDE.md auto-loading:

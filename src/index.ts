@@ -113,6 +113,7 @@ import {
   registeredGroupToRoute,
 } from './types.js';
 import { getGitHubContextForAgent } from './github.js';
+import { fetchGitHubDelta } from './github-delta.js';
 import { startGitHubWebhookServer } from './github-webhooks.js';
 import type { GitHubWebhookNotification } from './github-webhooks.js';
 import { calculateNextRun } from './schedule-utils.js';
@@ -1601,8 +1602,23 @@ async function runAgent(
 
     // Fetch GitHub context for this agent (cached, non-blocking on failure)
     let githubContext: string | undefined;
+    let githubActivityDelta: string | undefined;
     try {
-      githubContext = (await getGitHubContextForAgent(agentId)) ?? undefined;
+      // Fetch snapshot context and activity delta in parallel
+      const [snapshotResult, deltaResult] = await Promise.allSettled([
+        getGitHubContextForAgent(agentId),
+        fetchGitHubDelta(chatJid, new Date().toISOString()),
+      ]);
+      if (snapshotResult.status === 'fulfilled') {
+        githubContext = snapshotResult.value ?? undefined;
+      } else {
+        logger.warn({ err: snapshotResult.reason, agentId }, 'Failed to fetch GitHub context');
+      }
+      if (deltaResult.status === 'fulfilled') {
+        githubActivityDelta = deltaResult.value ?? undefined;
+      } else {
+        logger.warn({ err: deltaResult.reason, chatJid }, 'Failed to fetch GitHub delta context');
+      }
     } catch (err) {
       logger.warn({ err, agentId }, 'Failed to fetch GitHub context');
     }
@@ -1629,6 +1645,7 @@ async function runAgent(
         categoryFolder: group.categoryFolder,
         agentContextFolder: group.agentContextFolder,
         githubContext,
+        githubActivityDelta,
       },
       (proc, containerName) =>
         queue.registerProcess(

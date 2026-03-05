@@ -18,5 +18,22 @@
       ]
     }
   ],
-  "cacheTtlMs": 300000
+  "cacheTtlMs": 300000,
+
+  "githubDeltaContextEnabled": false,
+  "channelWatches": [
+    {
+      "channelJid": "dc:1475009887846010963",
+      "repos": [
+        { "owner": "omniaura", "repo": "omniclaw" }
+      ]
+    },
+    {
+      "channelJid": "dc:1475018575054897152",
+      "repos": [
+        { "owner": "ditto-assistant", "repo": "ditto-app" },
+        { "owner": "ditto-assistant", "repo": "backend" }
+      ]
+    }
+  ]
 }
