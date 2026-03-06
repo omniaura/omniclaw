@@ -26,7 +26,7 @@ interface ChannelInfo {
   name: string;
 }
 
-type AgentRuntime = 'claude-agent-sdk' | 'opencode';
+type AgentRuntime = 'claude-agent-sdk' | 'opencode' | 'codex';
 
 interface ContainerInput {
   prompt: string;
@@ -1050,11 +1050,16 @@ async function main(): Promise<void> {
     await runOpenCodeRuntime(containerInput);
     process.exit(0);
   }
+  if (runtime === 'codex') {
+    const { runCodexRuntime } = await import('./codex-runtime.js');
+    await runCodexRuntime(containerInput);
+    process.exit(0);
+  }
   if (runtime !== 'claude-agent-sdk') {
     writeOutput({
       status: 'error',
       result: null,
-      error: `Agent runtime '${runtime}' is not yet implemented. Supported: 'claude-agent-sdk', 'opencode'.`,
+      error: `Agent runtime '${runtime}' is not yet implemented. Supported: 'claude-agent-sdk', 'opencode', 'codex'.`,
     });
     process.exit(1);
   }

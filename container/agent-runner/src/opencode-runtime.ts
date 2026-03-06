@@ -30,7 +30,7 @@ interface ChannelInfo {
   name: string;
 }
 
-type AgentRuntime = 'claude-agent-sdk' | 'opencode';
+type AgentRuntime = 'claude-agent-sdk' | 'opencode' | 'codex';
 
 interface ContainerInput {
   prompt: string;
