@@ -49,6 +49,7 @@ interface AgentRow {
   server_folder: string | null;
   created_at: string;
   agent_context_folder: string | null;
+  roster_role_filters: string | null;
 }
 
 /** Row type for channel_routes table SELECT * queries */
@@ -137,6 +138,16 @@ function mapRowToRegisteredGroup(
 
 /** Map a database row to an Agent object */
 function mapRowToAgent(row: AgentRow): Agent {
+  const rosterRoleFilters =
+    row.roster_role_filters === null
+      ? undefined
+      : row.roster_role_filters === ''
+        ? []
+        : row.roster_role_filters
+            .split(',')
+            .map((r) => r.trim())
+            .filter(Boolean);
+
   return {
     id: row.id,
     name: row.name,
@@ -153,6 +164,7 @@ function mapRowToAgent(row: AgentRow): Agent {
     serverFolder: row.server_folder || undefined,
     createdAt: row.created_at,
     agentContextFolder: row.agent_context_folder || undefined,
+    rosterRoleFilters,
   };
 }
 
@@ -440,6 +452,7 @@ export function createSchema(database: Database): void {
 
   // New context layer columns (agent/server/category/channel architecture)
   addColumnIfNotExists(database, 'agents', 'agent_context_folder', 'TEXT');
+  addColumnIfNotExists(database, 'agents', 'roster_role_filters', 'TEXT');
   addColumnIfNotExists(
     database,
     'channel_subscriptions',
@@ -1341,8 +1354,8 @@ export function getAllAgents(): Record<string, Agent> {
 export function setAgent(agent: Agent): void {
   db.query(
     `
-    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at, agent_context_folder)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at, agent_context_folder, roster_role_filters)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     agent.id,
@@ -1356,6 +1369,9 @@ export function setAgent(agent: Agent): void {
     agent.serverFolder || null,
     agent.createdAt,
     agent.agentContextFolder || null,
+    agent.rosterRoleFilters === undefined
+      ? null
+      : agent.rosterRoleFilters.join(','),
   );
 }
 

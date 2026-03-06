@@ -202,6 +202,8 @@ export interface Agent {
   createdAt: string;
   /** Agent identity + global notes folder, mounted read-write at /workspace/agent/. */
   agentContextFolder?: string; // e.g., 'agents/peytonomi'
+  /** Roles required to appear in this agent's channel roster context. Empty = no filter. */
+  rosterRoleFilters?: string[];
 }
 
 /**
