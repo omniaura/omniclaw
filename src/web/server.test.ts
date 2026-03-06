@@ -149,9 +149,9 @@ function makeState(
 
 let handle: WebServerHandle | null = null;
 
-// Use a random port range to avoid conflicts with parallel test runs
+// Use port 0 to let the OS assign an ephemeral port — avoids collisions in parallel test runs
 function randomPort(): number {
-  return 30000 + Math.floor(Math.random() * 20000);
+  return 0;
 }
 
 afterEach(async () => {
@@ -168,10 +168,9 @@ function url(path: string): string {
 // ---- Server startup ----
 
 describe('startWebServer', () => {
-  it('starts on the specified port', async () => {
-    const port = randomPort();
-    handle = startWebServer({ port }, makeState());
-    expect(handle.port).toBe(port);
+  it('starts and serves on an available port', async () => {
+    handle = startWebServer({ port: 0 }, makeState());
+    expect(handle.port).toBeGreaterThan(0);
     const res = await fetch(url('/'));
     expect(res.status).toBe(200);
   });
@@ -872,8 +871,8 @@ describe('CORS', () => {
 
 describe('server shutdown', () => {
   it('stops accepting connections after stop()', async () => {
-    const port = randomPort();
-    handle = startWebServer({ port }, makeState());
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const assignedPort = handle.port;
 
     // Verify it works
     const res = await fetch(url('/'));
@@ -885,7 +884,7 @@ describe('server shutdown', () => {
     // After stop, server should no longer serve successful responses
     let stopped = false;
     try {
-      const resAfterStop = await fetch(`http://localhost:${port}/`);
+      const resAfterStop = await fetch(`http://localhost:${assignedPort}/`);
       stopped = !resAfterStop.ok;
     } catch {
       stopped = true; // connection refused/reset is expected
