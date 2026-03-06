@@ -2519,6 +2519,39 @@ async function main(): Promise<void> {
       }));
     },
   });
+
+  // Check for restart marker from a previous restart_host IPC request
+  const restartMarkerPath = path.join(DATA_DIR, 'restart-marker.json');
+  if (fs.existsSync(restartMarkerPath)) {
+    try {
+      const marker = JSON.parse(fs.readFileSync(restartMarkerPath, 'utf-8'));
+      fs.unlinkSync(restartMarkerPath);
+      // Find main group JID to deliver notification
+      const mainJid = Object.entries(registeredGroups).find(
+        ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+      )?.[0];
+      if (mainJid) {
+        const group = registeredGroups[mainJid];
+        const trigger = group?.trigger || `@${ASSISTANT_NAME}`;
+        const reasonClause = marker.reason ? ` Reason: ${marker.reason}.` : '';
+        storeMessage({
+          id: `restart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          chat_jid: mainJid,
+          sender: 'system',
+          sender_name: 'System',
+          content: `${trigger} Host restart completed successfully at ${new Date().toISOString()} (requested at ${marker.requested_at} by ${marker.requested_by || 'unknown'}).${reasonClause} You should confirm the restart to the user and check your memory for any pending context from before the restart.`,
+          timestamp: new Date().toISOString(),
+          is_from_me: false,
+          sender_platform: 'system',
+        });
+        queue.enqueueMessageCheck(mainJid);
+        logger.info({ requestedAt: marker.requested_at }, 'Post-restart notification sent to main agent');
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to process restart marker');
+      try { fs.unlinkSync(restartMarkerPath); } catch {}
+    }
+  }
 }
 
 // Guard: only run when executed directly, not when imported by tests

@@ -585,6 +585,34 @@ This is useful when you need to send messages to specific agents or request cont
   },
 );
 
+// Restart host — main only
+server.tool(
+  'restart_host',
+  'Restart the OmniClaw host process. Main agent only. Use when the host needs a fresh restart (e.g., after config changes). The host will shut down gracefully and launchd will restart it automatically.',
+  {
+    reason: { type: 'string', description: 'Optional reason for the restart (e.g., "code update", "config change"). Stored in the restart marker so the agent can reference it after reboot.' },
+  },
+  async ({ reason }: { reason?: string }) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main agent can restart the host.' }],
+        isError: true,
+      };
+    }
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'restart_host',
+      groupFolder,
+      reason: reason || undefined,
+      timestamp: new Date().toISOString(),
+    });
+
+    return {
+      content: [{ type: 'text' as const, text: 'Host restart requested. The process will shut down gracefully and launchd will restart it automatically. You will receive a confirmation message after restart.' }],
+    };
+  },
+);
+
 // Reaction tool — Discord and Telegram
 if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
   const isTelegram = chatJid.startsWith('tg:');

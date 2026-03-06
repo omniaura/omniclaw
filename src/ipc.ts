@@ -792,6 +792,26 @@ export async function processTaskIpc(
       break;
     }
 
+    case 'restart_host': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized restart_host attempt blocked',
+        );
+        break;
+      }
+      logger.info({ sourceGroup }, 'Host restart requested via IPC — sending SIGTERM');
+      // Write restart marker so the next boot can notify the agent
+      const markerPath = path.join(DATA_DIR, 'restart-marker.json');
+      fs.writeFileSync(markerPath, JSON.stringify({
+        requested_at: new Date().toISOString(),
+        requested_by: sourceGroup,
+        reason: data.reason || undefined,
+      }));
+      process.kill(process.pid, 'SIGTERM');
+      break;
+    }
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
   }

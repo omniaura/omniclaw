@@ -318,7 +318,12 @@ export interface IpcMessagePayload {
   discord_bot_id?: string;
 }
 
-/** IPC task payloads sent by agents to the orchestrator. */
+/**
+ * IPC task payloads sent by agents to the orchestrator.
+ *
+ * Valid types: schedule_task, edit_task, cancel_task, refresh_groups,
+ * register_group, subscribe_channel, unsubscribe_channel, restart_host
+ */
 export interface IpcTaskPayload {
   type: string;
   taskId?: string;
@@ -347,4 +352,6 @@ export interface IpcTaskPayload {
   group_description?: string;
   // For edit_task
   status?: string;
+  // For restart_host
+  reason?: string;
 }
