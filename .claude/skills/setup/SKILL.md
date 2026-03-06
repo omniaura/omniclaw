@@ -16,6 +16,7 @@ description: Run initial OmniClaw setup. Use when user wants to install dependen
 | update, upgrade, pulled latest, auto-update | → read [guides/upgrade.md](guides/upgrade.md) |
 | install, fresh setup, first time, configure | → read [guides/fresh-install.md](guides/fresh-install.md) |
 | github, discord bot/agent, webhooks, github watches | → read [guides/advanced-setup.md](guides/advanced-setup.md) |
+| add agent to channel, subscribe agent, register agent in chat, new channel for agent | → read [guides/agents-and-context.md](guides/agents-and-context.md) (see "Adding an existing agent to a new channel" or "Adding a new agent to an existing channel") |
 | agent identity, context, workspace mounts, agent-to-agent routing, triggers, wrong identity, sender identity, channel context | → read [guides/agents-and-context.md](guides/agents-and-context.md) |
 | broken, not working, error, troubleshoot | → read [guides/troubleshooting.md](guides/troubleshooting.md) |
 
