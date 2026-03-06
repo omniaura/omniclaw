@@ -1480,7 +1480,7 @@ async function runAgent(
           setSession(runtimeGroupFolder, output.newSessionId);
         }
         if (output.resumeAt) {
-          resumePositionStore.set(group.folder, output.resumeAt);
+          resumePositionStore.set(runtimeGroupFolder, output.resumeAt);
         }
         await onOutput(output);
       }
@@ -1508,7 +1508,7 @@ async function runAgent(
       {
         prompt,
         sessionId,
-        resumeAt: resumePositionStore.get(group.folder),
+        resumeAt: resumePositionStore.get(runtimeGroupFolder),
         groupFolder: group.folder,
         runtimeFolder: runtimeGroupFolder,
         chatJid,
@@ -1543,7 +1543,7 @@ async function runAgent(
       setSession(runtimeGroupFolder, output.newSessionId);
     }
     if (output.resumeAt) {
-      resumePositionStore.set(group.folder, output.resumeAt);
+      resumePositionStore.set(runtimeGroupFolder, output.resumeAt);
     }
 
     if (output.status === 'error') {
