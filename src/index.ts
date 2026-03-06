@@ -62,6 +62,7 @@ import {
   storeGuildRoster,
   getNewMessages,
   getRouterState,
+  getAgent,
   getTaskById,
   createTask as dbCreateTask,
   updateTask as dbUpdateTask,
@@ -201,6 +202,8 @@ interface ChannelRosterOptions {
   scope?: 'channel' | 'guild';
   roleFilters?: string[];
   discordBotId?: string;
+  /** Agent folder (= agent ID) — used to load per-agent roster_role_filters from DB. */
+  agentFolder?: string;
 }
 
 const channelRosterCache = new Map<
@@ -843,10 +846,16 @@ async function getChannelRosterNames(
 ): Promise<string[]> {
   const guildId = explicitGuildId || getChatGuildId(chatJid);
   const scope = options.scope || CHANNEL_ROSTER_SCOPE;
+  const agentRoleFilters =
+    options.agentFolder
+      ? (getAgent(options.agentFolder)?.rosterRoleFilters ?? [])
+      : [];
   const roleFilters =
     options.roleFilters && options.roleFilters.length > 0
       ? options.roleFilters
-      : CHANNEL_ROSTER_ROLE_FILTERS;
+      : agentRoleFilters.length > 0
+        ? agentRoleFilters
+        : CHANNEL_ROSTER_ROLE_FILTERS;
   const normalizedRoleFilters = roleFilters
     .map((r) => r.trim().toLowerCase())
     .filter(Boolean);
@@ -952,7 +961,10 @@ async function getChannelRosterNames(
     expiresAt: Date.now() + CHANNEL_ROSTER_CACHE_TTL_MS,
   });
 
-  return filtered.map((m) => m.displayName);
+  return filtered.map((m) => {
+    if (m.roles.length > 0) return `${m.displayName} [${m.roles.join(', ')}]`;
+    return m.displayName;
+  });
 }
 
 /**
@@ -1049,9 +1061,10 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
       group.discordGuildId,
       {
         discordBotId: group.discordBotId,
+        agentFolder: group.folder,
       },
     ),
-    channelRosterHasRoleLabels: false,
+    channelRosterHasRoleLabels: true,
   });
 
   // Inject context about active background tasks
@@ -1746,9 +1759,10 @@ async function startMessageLoop(): Promise<void> {
                 group.discordGuildId,
                 {
                   discordBotId: group.discordBotId,
+                  agentFolder: group.folder,
                 },
               ),
-              channelRosterHasRoleLabels: false,
+              channelRosterHasRoleLabels: true,
             });
 
             if (await queue.sendMessage(chatJid, formatted)) {
@@ -1801,9 +1815,10 @@ async function startMessageLoop(): Promise<void> {
                 sub.discordGuildId,
                 {
                   discordBotId: sub.discordBotId,
+                  agentFolder: sub.agentId,
                 },
               ),
-              channelRosterHasRoleLabels: false,
+              channelRosterHasRoleLabels: true,
             });
 
             if (await queue.sendMessage(dispatchJid, formatted)) {
