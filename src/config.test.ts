@@ -168,6 +168,14 @@ describe('buildTelegramBotTokensFromEnv', () => {
 
     expect(tokens).toEqual(['token-a', 'token-b']);
   });
+
+  it('deduplicates identical tokens', () => {
+    const tokens = buildTelegramBotTokensFromEnv({
+      TELEGRAM_BOT_TOKENS: 'token-a,token-b,token-a',
+    });
+
+    expect(tokens).toEqual(['token-a', 'token-b']);
+  });
 });
 
 // --- buildTriggerPattern ---

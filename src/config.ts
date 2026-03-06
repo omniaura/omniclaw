@@ -73,7 +73,7 @@ export function buildTelegramBotTokensFromEnv(
   const configured = parseEnvList(env.TELEGRAM_BOT_TOKENS).filter(
     (token) => token.length > 0,
   );
-  if (configured.length > 0) return configured;
+  if (configured.length > 0) return [...new Set(configured)];
 
   const legacyToken = (env.TELEGRAM_BOT_TOKEN || '').trim();
   return legacyToken ? [legacyToken] : [];

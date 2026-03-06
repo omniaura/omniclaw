@@ -4,6 +4,7 @@ import {
   isTelegramReactionEmoji,
   VALID_TELEGRAM_REACTIONS,
   TelegramChannel,
+  safeErrorMessage,
 } from './telegram.js';
 
 // --- isTelegramReactionEmoji ---
@@ -215,5 +216,42 @@ describe('TelegramChannel bot identity', () => {
     });
 
     expect(channel.botId).toBe('telegram-bot');
+  });
+});
+
+// --- safeErrorMessage (token redaction) ---
+
+describe('safeErrorMessage', () => {
+  it('redacts Telegram bot API URLs from Error messages', () => {
+    const err = new Error(
+      'Request failed: https://api.telegram.org/bot123456:ABCdefGHIjklMNOpqrSTUvwxYZ/sendMessage 403 Forbidden',
+    );
+    const msg = safeErrorMessage(err);
+    expect(msg).not.toContain('123456:ABCdefGHIjklMNOpqrSTUvwxYZ');
+    expect(msg).toContain('https://api.telegram.org/bot[REDACTED]');
+    expect(msg).toContain('403 Forbidden');
+  });
+
+  it('redacts multiple bot URLs in a single message', () => {
+    const err = new Error(
+      'Tried https://api.telegram.org/bot111:aaa/getMe then https://api.telegram.org/bot222:bbb/sendMessage',
+    );
+    const msg = safeErrorMessage(err);
+    expect(msg).not.toContain('111:aaa');
+    expect(msg).not.toContain('222:bbb');
+    expect(msg).toContain('https://api.telegram.org/bot[REDACTED]');
+  });
+
+  it('handles non-Error values (strings)', () => {
+    const msg = safeErrorMessage(
+      'network error at https://api.telegram.org/bot999:xyz/getUpdates',
+    );
+    expect(msg).not.toContain('999:xyz');
+    expect(msg).toContain('https://api.telegram.org/bot[REDACTED]');
+  });
+
+  it('passes through safe messages unchanged', () => {
+    const err = new Error('Connection timed out');
+    expect(safeErrorMessage(err)).toBe('Connection timed out');
   });
 });
