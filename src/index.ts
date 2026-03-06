@@ -206,6 +206,15 @@ interface ChannelRosterOptions {
   agentFolder?: string;
 }
 
+function formatChannelRosterNames(members: ChannelRosterMemberView[]): string[] {
+  return members.map((member) => {
+    if (member.roles.length > 0) {
+      return `${member.displayName} [${member.roles.join(', ')}]`;
+    }
+    return member.displayName;
+  });
+}
+
 const channelRosterCache = new Map<
   string,
   {
@@ -847,13 +856,13 @@ async function getChannelRosterNames(
   const guildId = explicitGuildId || getChatGuildId(chatJid);
   const scope = options.scope || CHANNEL_ROSTER_SCOPE;
   const agentRoleFilters =
-    options.agentFolder
-      ? (getAgent(options.agentFolder)?.rosterRoleFilters ?? [])
-      : [];
+    options.agentFolder !== undefined
+      ? getAgent(options.agentFolder)?.rosterRoleFilters
+      : undefined;
   const roleFilters =
-    options.roleFilters && options.roleFilters.length > 0
+    options.roleFilters !== undefined
       ? options.roleFilters
-      : agentRoleFilters.length > 0
+      : agentRoleFilters !== undefined
         ? agentRoleFilters
         : CHANNEL_ROSTER_ROLE_FILTERS;
   const normalizedRoleFilters = roleFilters
@@ -870,7 +879,7 @@ async function getChannelRosterNames(
   ].join('::');
   const cached = channelRosterCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
-    return cached.members.map((m) => m.displayName);
+    return formatChannelRosterNames(cached.members);
   }
 
   let members: ChannelRosterMemberView[] = [];
@@ -961,10 +970,7 @@ async function getChannelRosterNames(
     expiresAt: Date.now() + CHANNEL_ROSTER_CACHE_TTL_MS,
   });
 
-  return filtered.map((m) => {
-    if (m.roles.length > 0) return `${m.displayName} [${m.roles.join(', ')}]`;
-    return m.displayName;
-  });
+  return formatChannelRosterNames(filtered);
 }
 
 /**

@@ -138,6 +138,16 @@ function mapRowToRegisteredGroup(
 
 /** Map a database row to an Agent object */
 function mapRowToAgent(row: AgentRow): Agent {
+  const rosterRoleFilters =
+    row.roster_role_filters === null
+      ? undefined
+      : row.roster_role_filters === ''
+        ? []
+        : row.roster_role_filters
+            .split(',')
+            .map((r) => r.trim())
+            .filter(Boolean);
+
   return {
     id: row.id,
     name: row.name,
@@ -154,9 +164,7 @@ function mapRowToAgent(row: AgentRow): Agent {
     serverFolder: row.server_folder || undefined,
     createdAt: row.created_at,
     agentContextFolder: row.agent_context_folder || undefined,
-    rosterRoleFilters: row.roster_role_filters
-      ? row.roster_role_filters.split(',').map((r) => r.trim()).filter(Boolean)
-      : undefined,
+    rosterRoleFilters,
   };
 }
 
@@ -1361,7 +1369,9 @@ export function setAgent(agent: Agent): void {
     agent.serverFolder || null,
     agent.createdAt,
     agent.agentContextFolder || null,
-    agent.rosterRoleFilters?.join(',') || null,
+    agent.rosterRoleFilters === undefined
+      ? null
+      : agent.rosterRoleFilters.join(','),
   );
 }
 
