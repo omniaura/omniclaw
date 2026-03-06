@@ -117,28 +117,11 @@ sqlite3 /workspace/project/store/messages.db "
 "
 ```
 
-### Registered Groups Config
+### Registered Groups Source of Truth
 
-Groups are registered in `/workspace/project/data/registered_groups.json`:
+Registered groups are stored in SQLite (`/workspace/project/store/messages.db`, table `registered_groups`).
 
-```json
-{
-  "1234567890-1234567890@g.us": {
-    "name": "Family Chat",
-    "folder": "family-chat",
-    "trigger": "@Omni",
-    "added_at": "2024-01-31T12:00:00.000Z"
-  }
-}
-```
-
-Fields:
-- **Key**: The WhatsApp JID (unique identifier for the chat)
-- **name**: Display name for the group
-- **folder**: Folder name under `groups/` for this group's files and memory
-- **trigger**: The trigger word (usually same as global, but could differ)
-- **requiresTrigger**: Whether `@trigger` prefix is needed (default: `true`). Set to `false` for solo/personal chats where all messages should be processed
-- **added_at**: ISO timestamp when registered
+Do not edit legacy JSON files such as `data/registered_groups.json` directly.
 
 ### Trigger Behavior
 
@@ -148,12 +131,26 @@ Fields:
 
 ### Adding a Group
 
-1. Query the database to find the group's JID
-2. Read `/workspace/project/data/registered_groups.json`
-3. Add the new group entry with `containerConfig` if needed
-4. Write the updated JSON back
-5. Create the group folder: `/workspace/project/groups/{folder-name}/`
-6. Optionally create an initial `CLAUDE.md` for the group
+Use `register_group` instead of manual DB/file edits. Required fields:
+
+- `jid`
+- `name`
+- `folder`
+- `trigger`
+
+For Discord channels, also include `discord_guild_id`.
+
+Example:
+
+```json
+{
+  "jid": "dc:123456789012345678",
+  "name": "Build Ops",
+  "folder": "build-ops",
+  "trigger": "@Omni",
+  "discord_guild_id": "987654321098765432"
+}
+```
 
 Example folder name conventions:
 - "Family Chat" → `family-chat`
@@ -186,16 +183,19 @@ Groups can have extra directories mounted. Add `containerConfig` to their entry:
 
 The directory will appear at `/workspace/extra/webapp` in that group's container.
 
-### Removing a Group
-
-1. Read `/workspace/project/data/registered_groups.json`
-2. Remove the entry for that group
-3. Write the updated JSON back
-4. The group folder and its files remain (don't delete them)
-
 ### Listing Groups
 
-Read `/workspace/project/data/registered_groups.json` and format it nicely.
+Use `/workspace/ipc/available_groups.json` first (includes `isRegistered`).
+
+If you need full registration details, query SQLite directly:
+
+```bash
+sqlite3 /workspace/project/store/messages.db "
+  SELECT jid, name, folder, trigger_pattern, requires_trigger, added_at
+  FROM registered_groups
+  ORDER BY added_at DESC;
+"
+```
 
 ---
 
@@ -207,7 +207,7 @@ You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts
 
 ## Scheduling for Other Groups
 
-When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `registered_groups.json`:
+When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `available_groups.json` (or `registered_groups` in SQLite):
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
