@@ -46,6 +46,21 @@ build-all:
     just build
     just build-container
 
+# Update everything: rebuild JS + container, then restart
+update:
+    just build-all
+    just restart
+
+# Update JS only: rebuild host, then restart (no container rebuild)
+update-js:
+    just build
+    just restart
+
+# Update container only: rebuild container image, then restart
+update-container:
+    just build-container
+    just restart
+
 # Tail OmniClaw logs (pretty-printed)
 tail:
     tail -f logs/omniclaw.log | ./scripts/log-fmt.sh
