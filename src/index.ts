@@ -79,7 +79,7 @@ import {
 import { buildAgentToChannelsMapFromSubscriptions } from './channel-routes.js';
 import { resolveContextLayers } from './context-layers.js';
 import { GroupQueue } from './group-queue.js';
-import { consumeShareRequest, startIpcWatcher } from './ipc.js';
+import { startIpcWatcher } from './ipc.js';
 import {
   findChannel,
   formatMessages,
@@ -99,7 +99,6 @@ import {
   registeredGroupToAgent,
   registeredGroupToRoute,
 } from './types.js';
-import { findMainGroupJid } from './group-helpers.js';
 import { getGitHubContextForAgent } from './github.js';
 import { startGitHubWebhookServer } from './github-webhooks.js';
 import type { GitHubWebhookNotification } from './github-webhooks.js';
@@ -609,14 +608,13 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 This group communicates via Discord, a secondary channel.
 You can freely answer questions and have conversations here.
 For significant actions (file changes, scheduled tasks, sending messages to other groups),
-check with the admin on WhatsApp first via the send_message tool to the main group.
-Over time, the admin will tell you which actions are always okay.
+confirm intent with the current user in this chat before proceeding.
 
 ## Getting Context You Don't Have
 When you need project context, repo access, credentials, or information that hasn't been shared with you:
-- **Use \`share_request\` immediately** — do NOT ask the user directly for info the admin should provide.
-- \`share_request\` sends your request to the admin on WhatsApp. They will share context and notify you when it's ready.
-- Be specific in your request: describe exactly what you need and why.
+- Ask in the current chat for anything missing.
+- Be specific: describe exactly what you need and why.
+- Check local docs and repo files first before asking.
 
 ## Working with Repos
 You have \`git\` and \`GITHUB_TOKEN\` available in your environment.
@@ -700,8 +698,8 @@ Use it for team-level context: members, projects, repos, conventions.
 Channel-specific notes should go in the channel's own CLAUDE.md.
 
 ## Getting Context You Don't Have
-If you need project info, repo URLs, or credentials not listed here, use \`share_request\` to ask the admin.
-Don't ask users in Discord for info the admin should provide — use the tool and it will be routed to WhatsApp.
+If you need project info, repo URLs, or credentials not listed here, ask directly in the current chat.
+Be explicit about what you need and why.
 
 ## Working with Repos
 You have \`git\` and \`GITHUB_TOKEN\` available. When given a repo URL, clone it:
@@ -1969,58 +1967,6 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
 }
 
 /**
- * Handle share-request approval via reaction emoji.
- * Returns true if the reaction was consumed (was a tracked share request).
- */
-function handleShareRequestApproval(
-  messageId: string,
-  emoji: string,
-  channelName: string,
-): boolean {
-  const request = consumeShareRequest(messageId);
-  if (!request) return false;
-
-  const mainJid = findMainGroupJid(registeredGroups);
-  if (!mainJid) return false;
-
-  logger.info(
-    {
-      messageId,
-      emoji,
-      sourceGroup: request.sourceGroup,
-      sourceName: request.sourceName,
-    },
-    `Share request approved via ${channelName} reaction`,
-  );
-
-  const writePaths = request.serverFolder
-    ? `groups/${request.sourceGroup}/CLAUDE.md and/or groups/${request.serverFolder}/CLAUDE.md`
-    : `groups/${request.sourceGroup}/CLAUDE.md`;
-  const syntheticContent = [
-    `Share request APPROVED from ${request.sourceName} (${request.sourceJid}):`,
-    '',
-    `${request.description}`,
-    '',
-    `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
-    `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
-  ].join('\n');
-
-  storeMessage({
-    id: `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    chat_jid: mainJid,
-    sender: 'system',
-    sender_name: 'System',
-    content: syntheticContent,
-    timestamp: new Date().toISOString(),
-    is_from_me: false,
-    sender_platform: 'system',
-  });
-
-  queue.enqueueMessageCheck(mainJid);
-  return true;
-}
-
-/**
  * Handle a reaction notification on a bot message (non-approval reactions).
  * Pipes to the active container or stores in DB and enqueues.
  */
@@ -2217,10 +2163,7 @@ async function main(): Promise<void> {
       onChatMetadata: (chatJid, timestamp) =>
         storeChatMetadata(chatJid, timestamp),
       registeredGroups: () => registeredGroups,
-      onReaction: (chatJid, messageId, emoji) => {
-        if (!emoji.startsWith('👍') && emoji !== '❤️' && emoji !== '✅') return;
-        handleShareRequestApproval(messageId, emoji, 'WhatsApp');
-      },
+      onReaction: () => {},
     });
 
   /** Retry WhatsApp connection in the background with backoff */
@@ -2288,14 +2231,6 @@ async function main(): Promise<void> {
                 token: bot.token,
                 multiBotMode: DISCORD_BOTS.length > 1,
                 onReaction: async (chatJid, messageId, emoji, userName) => {
-                  if (
-                    emoji.startsWith('👍') ||
-                    emoji === '❤️' ||
-                    emoji === '✅'
-                  ) {
-                    if (handleShareRequestApproval(messageId, emoji, 'Discord'))
-                      return;
-                  }
                   await handleReactionNotification(
                     chatJid,
                     messageId,
@@ -2420,14 +2355,6 @@ async function main(): Promise<void> {
             storeChatMetadata(chatJid, timestamp, name),
           registeredGroups: () => registeredGroups,
           onReaction: async (chatJid, messageId, emoji, userName) => {
-            if (
-              emoji === ':thumbsup:' ||
-              emoji === ':+1:' ||
-              emoji === ':heart:' ||
-              emoji === ':white_check_mark:'
-            ) {
-              if (handleShareRequestApproval(messageId, emoji, 'Slack')) return;
-            }
             await handleReactionNotification(
               chatJid,
               messageId,

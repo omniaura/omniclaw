@@ -605,11 +605,7 @@ The `omniclaw` MCP server runs inside each container via stdio, providing 16 too
 
 | Tool | Purpose |
 |------|---------|
-| `share_request` | Request/share context or files with another agent |
-| `delegate_task` | Delegate a task to the local (admin) agent |
-| `request_context` | Request shared context topics |
-| `read_context` | Read a shared context topic |
-| `list_context_topics` | List available shared context topics |
+| `send_message` (cross-agent) | Send a direct message to another agent/JID |
 | `list_agents` | List all registered agents |
 
 ---
@@ -621,9 +617,8 @@ OmniClaw supports multi-agent topologies where agents communicate and coordinate
 ### Communication Patterns
 
 1. **Direct Messaging** — Send messages to specific agents via `send_message` with agent JID
-2. **Context Sharing** — `share_request` to push/pull files and context between agents
-3. **Task Delegation** — `delegate_task` to request the local agent perform local-only tasks
-4. **Shared Context Storage** — Topics stored at `/workspace/ipc/context/`, readable by all agents
+2. **Self-service context** — Agents clone repos and inspect files directly in their workspace
+3. **Ask in chat** — If context is missing, ask the user in the active conversation
 
 ### Agent Registry
 
