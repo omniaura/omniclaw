@@ -1,6 +1,6 @@
 # OmniClaw Roadmap
 
-Last updated: 2026-02-25
+Last updated: 2026-03-06
 
 ## Guiding Principles
 
@@ -48,33 +48,29 @@ Last updated: 2026-02-25
 
 ### Near-term (Active / Next Up)
 
-#### Effect.ts Migration (#18 — Top Priority)
-Migrate the codebase from ad-hoc async/error handling to Effect.ts for structured concurrency, typed errors, and dependency injection. Currently at ~12% coverage (7/57 source files).
+#### Web UI for OmniClaw (#157 — High Priority)
+Web UI is now an active product direction (not a non-goal). Build and harden the dashboard/API for day-to-day operations (agent management, logs, task control).
 
-**Completed modules:** logger-layer, message-queue, user-registry, partial adoption in `index.ts` and `group-queue.ts`. Reference patterns in `src/effect/`.
+- Base skeleton shipped in #169
+- Continue UX, auth, and operational controls as follow-on work
 
-**Approach:**
-- Module-by-module, leaf modules first (pure logic, no channel I/O)
-- 1–2 modules per PR to keep reviews manageable
-- Target: 100% adoption across all source files
+#### Scheduler Reliability & Cohesion (#162, #186 — High Priority)
+Improve crash recovery and unify scheduled task behavior with chat context.
 
-#### Security Fixes (#104)
-- ~~**#78**: S3 key construction lacks agentId validation~~ — Resolved: S3 code removed in PR #89
-- ~~**#76**: S3 credentials in Hetzner cloud-init~~ — Resolved: S3 code removed in PR #89
-- ~~**#77**: context-topic path traversal~~ — Closed
-- **#104**: Discord attachment filename allows path traversal write outside media directory (closed)
+- #162: recover stale in-progress/orphaned tasks safely
+- #186: shared progress with isolated execution
 
-#### Health Checks (#83)
-No liveness probe for the long-running orchestrator process. Add a health check endpoint or mechanism for service managers to detect hangs.
+#### Test Reliability (#200 — High Priority)
+Stabilize flaky full-suite behavior in GitHub webhook tests and document root cause once fixed.
 
-#### IPC Error Feedback (#74)
-IPC reactions are fire-and-forget — agents get no error feedback on failure. Surface errors back to the agent so it can retry or inform the user.
+#### Share Request Security Follow-through (#237, #240)
+Recent hardening landed in #236. Remaining work is to complete approval-path cleanup and remove obsolete admin-approval flow paths.
 
-#### Versioned DB Migrations (#4)
-SQLite schema changes are currently handled ad-hoc. Need a proper migration framework so schema updates are versioned, reversible, and safe to apply.
+#### Effect.ts Adoption Strategy (#136 — Ongoing)
+Effect.ts is used selectively where it clearly improves reliability/composability. There is no 100% migration target.
 
-#### Docker Runtime Auto-detection (#3)
-Auto-detect whether Apple Container or Docker is available, so the same codebase works on macOS and Linux without manual config.
+- Prefer focused adoption in modules that benefit from Effect primitives
+- Do not migrate files for coverage percentage alone
 
 ### Medium-term
 
@@ -132,6 +128,13 @@ Structured logs exist but there's no dashboard or alerting. Consider:
 
 ## Completed Recently
 
+### Mar 2026
+- Web UI skeleton landed (#169)
+- Scheduler cohesion delivered (#186)
+- Discord roster context shipped in phases (#230, #234, #239, #242)
+- Multi-token Telegram support shipped (#233)
+- Share-request transfer gating hardened (#236)
+
 ### Feb 25, 2026
 - Graceful shutdown: SIGTERM/SIGINT handlers (#82 — closed)
 - Documentation fixes: removed stale `SIMPLIFICATION_SUMMARY.md` (#81), fixed SPEC.md `src/shared/` references (#80), fixed SECURITY.md 'node' vs 'bun' user (#79) — all closed
@@ -183,7 +186,6 @@ Major hardening push — 30+ PRs merged in 48 hours:
 
 Things we deliberately avoid:
 - **Multi-user SaaS** — this is personal software, not a platform
-- **Web dashboard** — Claude is the interface
 - **Complex deployment** — single process, launchd/systemd, done
 - **Every possible integration** — add what you need via skills
 - **Backwards compatibility guarantees** — fork and modify
