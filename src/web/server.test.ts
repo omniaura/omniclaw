@@ -141,6 +141,8 @@ function makeState(
       if (type === 'once') return value; // trust the ISO string
       return null;
     },
+    readContextFile: () => null,
+    writeContextFile: () => {},
     ...overrides,
   };
 }
