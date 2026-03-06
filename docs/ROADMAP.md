@@ -35,7 +35,7 @@ Last updated: 2026-02-25
 | Scheduled tasks | Stable | Cron, interval, one-time; heartbeat support |
 | Persistent memory | Stable | CLAUDE.md hierarchy, per-group files |
 | Session management | Stable | Auto-rotation after 4 hours |
-| Inter-agent communication | Stable | share_request, delegate_task, context sharing |
+| Inter-agent communication | Stable | send_message + list_agents |
 | Browser automation | Stable | agent-browser + Chromium in container |
 | Mount security | Stable | Allowlist, path traversal protection, read-only project root |
 | Structured logging | Stable | Pino JSON output, migrated from console.log |
@@ -61,7 +61,7 @@ Migrate the codebase from ad-hoc async/error handling to Effect.ts for structure
 #### Security Fixes (#104)
 - ~~**#78**: S3 key construction lacks agentId validation~~ — Resolved: S3 code removed in PR #89
 - ~~**#76**: S3 credentials in Hetzner cloud-init~~ — Resolved: S3 code removed in PR #89
-- ~~**#77**: `read_context` path traversal~~ — Closed
+- ~~**#77**: context-topic path traversal~~ — Closed
 - **#104**: Discord attachment filename allows path traversal write outside media directory (closed)
 
 #### Health Checks (#83)
@@ -91,7 +91,7 @@ Run OmniClaw across multiple machines (e.g., Mac Mini as main orchestrator + Mac
 - "Remote local" backend that proxies `AgentBackend` over SSH/Tailscale
 - Route agents to specific machines by hardware capability
 - Keep the main orchestrator as single source of truth
-- Leverage existing `share_request` for cross-machine context, not a dedicated file bus
+- Cross-machine context should use direct git access and normal chat coordination
 
 #### Multi-Token Channel Support (#100, #101, #102)
 Support multiple bot/app token pairs per channel type within a single OmniClaw process:

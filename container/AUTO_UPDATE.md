@@ -87,7 +87,7 @@ OmniClaw agents can trigger updates by running:
 ssh host-machine "/path/to/omniclaw/container/auto-update.sh"
 ```
 
-Or using the `delegate_task` MCP tool to request updates from the local agent.
+Or ask in chat for the update to be run from the host environment.
 
 ## Environment Variables
 

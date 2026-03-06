@@ -337,23 +337,12 @@ export interface IpcTaskPayload {
   containerConfig?: ContainerConfig;
   discord_bot_id?: string;
   discord_guild_id?: string;
-  // For share_request
   description?: string;
-  sourceGroup?: string;
-  scope?: string;
-  serverFolder?: string;
-  discordGuildId?: string;
   target_agent?: string;
-  files?: string[];
-  request_files?: string[];
   // For register_group: backend config
   backend?: BackendType;
   agent_runtime?: AgentRuntime;
   group_description?: string;
-  // For delegate_task
-  callbackAgentId?: string;
-  // For context_request
-  requestedTopics?: string[];
   // For edit_task
   status?: string;
 }

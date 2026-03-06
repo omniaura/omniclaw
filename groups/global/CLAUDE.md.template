@@ -36,7 +36,7 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 ## Requesting Context
 
-If you need information from outside your workspace (files from another project, context from another group, credentials, etc.), use `mcp__omniclaw__share_request`. This sends a request to the admin, who can review and share the relevant context with you. Don't guess — ask.
+If you need information from outside your workspace (files from another project, context from another group, credentials, etc.), ask directly in the current chat with exactly what you need and why.
 
 ## Your Workspace
 
