@@ -5,6 +5,9 @@ import { createHash } from 'crypto';
 import {
   ASSISTANT_NAME,
   buildTriggerPattern,
+  CHANNEL_ROSTER_CACHE_TTL_MS,
+  CHANNEL_ROSTER_ROLE_FILTERS,
+  CHANNEL_ROSTER_SCOPE,
   DATA_DIR,
   DISPATCH_RUNTIME_SEP,
   DISCORD_BOTS,
@@ -188,6 +191,26 @@ const MAX_CHANNEL_AGENT_FANOUT = parseInt(
   10,
 );
 const DISPATCH_KEY_SEP = '::agent::';
+
+interface ChannelRosterMemberView {
+  userId: string;
+  displayName: string;
+  roles: string[];
+}
+
+interface ChannelRosterOptions {
+  scope?: 'channel' | 'guild';
+  roleFilters?: string[];
+  discordBotId?: string;
+}
+
+const channelRosterCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    members: ChannelRosterMemberView[];
+  }
+>();
 
 function makeDispatchKey(channelJid: string, agentId: string): string {
   return `${channelJid}${DISPATCH_KEY_SEP}${agentId}`;
@@ -815,26 +838,123 @@ async function refreshGuildRosters(
   }
 }
 
-function getChannelRosterNames(
+async function getChannelRosterNames(
   chatJid: string,
   explicitGuildId?: string,
-): string[] {
+  options: ChannelRosterOptions = {},
+): Promise<string[]> {
   const guildId = explicitGuildId || getChatGuildId(chatJid);
-  if (!guildId) return [];
+  const scope = options.scope || CHANNEL_ROSTER_SCOPE;
+  const roleFilters =
+    options.roleFilters && options.roleFilters.length > 0
+      ? options.roleFilters
+      : CHANNEL_ROSTER_ROLE_FILTERS;
+  const normalizedRoleFilters = roleFilters
+    .map((r) => r.trim().toLowerCase())
+    .filter(Boolean);
+  const preferredBotId = getPreferredChannelBotId(chatJid, options.discordBotId);
 
-  const members = getGuildRoster(guildId);
-  if (members.length === 0) return [];
+  const cacheKey = [
+    guildId || '__no_guild__',
+    chatJid,
+    scope,
+    preferredBotId || '',
+    normalizedRoleFilters.join(','),
+  ].join('::');
+  const cached = channelRosterCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.members.map((m) => m.displayName);
+  }
 
+  let members: ChannelRosterMemberView[] = [];
+
+  if (!guildId) {
+    const discord = findChannelForJid(chatJid, preferredBotId);
+    if (discord instanceof DiscordChannel) {
+      const visibleMembers = await discord.fetchChannelRoster(chatJid);
+      if (visibleMembers && visibleMembers.length > 0) {
+        members = visibleMembers.map((m) => ({
+          userId: m.id,
+          displayName: (m.displayName || m.username || '').trim(),
+          roles: m.roles || [],
+        }));
+      }
+    }
+  }
+
+  if (guildId && scope === 'channel' && chatJid.startsWith('dc:')) {
+    const discord = findChannelForJid(
+      chatJid,
+      preferredBotId,
+    );
+    if (discord instanceof DiscordChannel) {
+      const visibleMembers = await discord.fetchChannelRoster(chatJid);
+      if (visibleMembers && visibleMembers.length > 0) {
+        members = visibleMembers.map((m) => ({
+          userId: m.id,
+          displayName: (m.displayName || m.username || '').trim(),
+          roles: m.roles || [],
+        }));
+      }
+    }
+  }
+
+  if (guildId && members.length === 0) {
+    const preferredDiscord = findChannelForJid(chatJid, preferredBotId);
+    if (preferredDiscord instanceof DiscordChannel) {
+      const preferredRoster = await preferredDiscord.fetchGuildRoster(guildId);
+      if (preferredRoster) {
+        const preferredMembers = [
+          ...preferredRoster.humans,
+          ...preferredRoster.bots,
+        ].map((member) => ({
+          userId: member.id,
+          displayName: (member.displayName || member.username || '').trim(),
+          roles: member.roles || [],
+        }));
+        if (preferredMembers.length > 0) {
+          members = preferredMembers;
+        }
+      }
+    }
+  }
+
+  if (guildId && members.length === 0) {
+    members = getGuildRoster(guildId).map((member) => ({
+      userId: member.userId,
+      displayName: (member.displayName || member.username || '').trim(),
+      roles: member.roles || [],
+    }));
+  }
+
+  const roleFilterSet = new Set(normalizedRoleFilters);
   const seen = new Set<string>();
-  const names: string[] = [];
+  const filtered: ChannelRosterMemberView[] = [];
+
   for (const member of members) {
+    if (!member.displayName) continue;
     if (seen.has(member.userId)) continue;
     seen.add(member.userId);
-    const display = (member.displayName || member.username || '').trim();
-    if (!display) continue;
-    names.push(display);
+
+    if (roleFilterSet.size > 0) {
+      const normalizedMemberRoles = (member.roles || []).map((r) =>
+        r.toLowerCase(),
+      );
+      const hasMatchingRole = normalizedMemberRoles.some((role) =>
+        roleFilterSet.has(role),
+      );
+      if (!hasMatchingRole) continue;
+    }
+
+    filtered.push(member);
   }
-  return names;
+
+  channelRosterCache.set(cacheKey, {
+    members: filtered,
+    expiresAt: Date.now() + CHANNEL_ROSTER_CACHE_TTL_MS,
+  });
+
+  return filtered.map((m) => m.displayName);
 }
 
 /**
@@ -926,7 +1046,14 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   });
 
   let prompt = formatMessages(missedMessages, {
-    channelRosterNames: getChannelRosterNames(chatJid, group.discordGuildId),
+    channelRosterNames: await getChannelRosterNames(
+      chatJid,
+      group.discordGuildId,
+      {
+        discordBotId: group.discordBotId,
+      },
+    ),
+    channelRosterHasRoleLabels: false,
   });
 
   // Inject context about active background tasks
@@ -1616,10 +1743,14 @@ async function startMessageLoop(): Promise<void> {
             if (allPending.length === 0) continue;
             const messagesToSend = allPending;
             const formatted = formatMessages(messagesToSend, {
-              channelRosterNames: getChannelRosterNames(
+              channelRosterNames: await getChannelRosterNames(
                 chatJid,
                 group.discordGuildId,
+                {
+                  discordBotId: group.discordBotId,
+                },
               ),
+              channelRosterHasRoleLabels: false,
             });
 
             if (await queue.sendMessage(chatJid, formatted)) {
@@ -1667,10 +1798,14 @@ async function startMessageLoop(): Promise<void> {
             if (filteredPending.length === 0) continue;
             const messagesToSend = filteredPending;
             const formatted = formatMessages(messagesToSend, {
-              channelRosterNames: getChannelRosterNames(
+              channelRosterNames: await getChannelRosterNames(
                 chatJid,
                 sub.discordGuildId,
+                {
+                  discordBotId: sub.discordBotId,
+                },
               ),
+              channelRosterHasRoleLabels: false,
             });
 
             if (await queue.sendMessage(dispatchJid, formatted)) {
