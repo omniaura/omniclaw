@@ -92,10 +92,17 @@ describe('triggerTaskNow', () => {
     });
 
     const enqueueTask = mock((..._args: unknown[]) => {});
+    const resumePositionStore: SchedulerDependencies['resumePositionStore'] = {
+      get: () => undefined,
+      set: () => {},
+      getAll: () => ({}),
+      clear: () => {},
+    };
     const deps: SchedulerDependencies = {
       registeredGroups: () => ({}),
+      getGroupForTask: () => undefined,
       getSessions: () => ({}),
-      getResumePositions: () => ({}),
+      resumePositionStore,
       queue: { enqueueTask } as unknown as SchedulerDependencies['queue'],
       onProcess: () => {},
       sendMessage: async () => undefined,
@@ -129,10 +136,17 @@ describe('triggerTaskNow', () => {
     });
 
     const enqueueTask = mock((..._args: unknown[]) => {});
+    const resumePositionStore: SchedulerDependencies['resumePositionStore'] = {
+      get: () => undefined,
+      set: () => {},
+      getAll: () => ({}),
+      clear: () => {},
+    };
     const deps: SchedulerDependencies = {
       registeredGroups: () => ({}),
+      getGroupForTask: () => undefined,
       getSessions: () => ({}),
-      getResumePositions: () => ({}),
+      resumePositionStore,
       queue: { enqueueTask } as unknown as SchedulerDependencies['queue'],
       onProcess: () => {},
       sendMessage: async () => undefined,
