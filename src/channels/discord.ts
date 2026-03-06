@@ -12,6 +12,7 @@ import {
   DMChannel,
   ChannelType,
   ThreadAutoArchiveDuration,
+  PermissionFlagsBits,
   type ThreadChannel,
 } from 'discord.js';
 import { RESTEvents } from '@discordjs/rest';
@@ -410,6 +411,67 @@ export class DiscordChannel implements Channel {
       };
     } catch (err) {
       logger.warn({ guildId, err }, 'Failed to fetch guild roster');
+      return null;
+    }
+  }
+
+  /**
+   * Fetch members who can view a specific Discord channel.
+   * Used to keep model-side channel roster context scoped to the active channel.
+   */
+  async fetchChannelRoster(jid: string): Promise<
+    Array<{
+      id: string;
+      username: string;
+      displayName: string;
+      roles: string[];
+      isBot: boolean;
+    }> | null
+  > {
+    const channelId = jidToChannelId(jid);
+    if (!channelId) return null;
+
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel || !('guild' in channel) || !('permissionsFor' in channel)) {
+        return null;
+      }
+
+      const guild = channel.guild;
+      const members = await guild.members.fetch();
+
+      const visible: Array<{
+        id: string;
+        username: string;
+        displayName: string;
+        roles: string[];
+        isBot: boolean;
+      }> = [];
+
+      for (const [, member] of members) {
+        const canView = channel
+          .permissionsFor(member)
+          ?.has(PermissionFlagsBits.ViewChannel);
+        if (!canView) continue;
+
+        visible.push({
+          id: member.id,
+          username: member.user.username,
+          displayName:
+            member.displayName ||
+            member.user.displayName ||
+            member.user.username,
+          roles: member.roles.cache
+            .filter((r) => r.name !== '@everyone')
+            .map((r) => r.name),
+          isBot: member.user.bot,
+        });
+      }
+
+      visible.sort((a, b) => a.displayName.localeCompare(b.displayName));
+      return visible;
+    } catch (err) {
+      logger.warn({ jid, err }, 'Failed to fetch Discord channel roster');
       return null;
     }
   }

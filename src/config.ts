@@ -140,6 +140,22 @@ export const ROSTER_REFRESH_INTERVAL = parseInt(
   process.env.ROSTER_REFRESH_INTERVAL || '900000',
   10,
 ); // 15min default — how often to refresh Discord guild rosters
+
+export type ChannelRosterScope = 'channel' | 'guild';
+
+function parseChannelRosterScope(
+  value: string | undefined,
+): ChannelRosterScope {
+  return value?.toLowerCase() === 'guild' ? 'guild' : 'channel';
+}
+
+export const CHANNEL_ROSTER_SCOPE = parseChannelRosterScope(
+  process.env.CHANNEL_ROSTER_SCOPE,
+);
+
+export const CHANNEL_ROSTER_ROLE_FILTERS = parseEnvList(
+  process.env.CHANNEL_ROSTER_ROLE_FILTERS,
+).map((role) => role.toLowerCase());
 /** Max containers actively processing messages or tasks. */
 export const MAX_ACTIVE_CONTAINERS = Math.max(
   1,

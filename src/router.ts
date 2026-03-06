@@ -13,6 +13,7 @@ export function escapeXml(s: string): string {
 
 export interface FormatMessagesOptions {
   channelRosterNames?: string[];
+  channelRosterHasRoleLabels?: boolean;
 }
 
 export function formatMessages(
@@ -73,6 +74,9 @@ export function formatMessages(
     attrs.push(
       `channel_roster="${uniqueRosterNames.map(escapeXml).join(', ')}"`,
     );
+    if (options.channelRosterHasRoleLabels === false) {
+      attrs.push('channel_roster_roles="unavailable"');
+    }
   }
 
   const header =

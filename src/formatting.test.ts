@@ -75,6 +75,14 @@ describe('formatMessages', () => {
     expect(result).toContain('excerpt_participants="Alice"');
   });
 
+  it('marks channel roster role labels as unavailable when requested', () => {
+    const result = formatMessages([makeMsg()], {
+      channelRosterNames: ['Alice', 'BotOne'],
+      channelRosterHasRoleLabels: false,
+    });
+    expect(result).toContain('channel_roster_roles="unavailable"');
+  });
+
   it('formats multiple messages with participants roster', () => {
     const msgs = [
       makeMsg({
