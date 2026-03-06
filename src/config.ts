@@ -156,6 +156,10 @@ export const CHANNEL_ROSTER_SCOPE = parseChannelRosterScope(
 export const CHANNEL_ROSTER_ROLE_FILTERS = parseEnvList(
   process.env.CHANNEL_ROSTER_ROLE_FILTERS,
 ).map((role) => role.toLowerCase());
+export const CHANNEL_ROSTER_CACHE_TTL_MS = parseInt(
+  process.env.CHANNEL_ROSTER_CACHE_TTL_MS || '300000',
+  10,
+);
 /** Max containers actively processing messages or tasks. */
 export const MAX_ACTIVE_CONTAINERS = Math.max(
   1,

@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import {
   ASSISTANT_NAME,
   buildTriggerPattern,
+  CHANNEL_ROSTER_CACHE_TTL_MS,
   CHANNEL_ROSTER_ROLE_FILTERS,
   CHANNEL_ROSTER_SCOPE,
   DATA_DIR,
@@ -190,7 +191,6 @@ const MAX_CHANNEL_AGENT_FANOUT = parseInt(
   10,
 );
 const DISPATCH_KEY_SEP = '::agent::';
-const CHANNEL_ROSTER_CACHE_TTL_MS = 5 * 60 * 1000;
 
 interface ChannelRosterMemberView {
   userId: string;
@@ -844,8 +844,6 @@ async function getChannelRosterNames(
   options: ChannelRosterOptions = {},
 ): Promise<string[]> {
   const guildId = explicitGuildId || getChatGuildId(chatJid);
-  if (!guildId) return [];
-
   const scope = options.scope || CHANNEL_ROSTER_SCOPE;
   const roleFilters =
     options.roleFilters && options.roleFilters.length > 0
@@ -854,12 +852,13 @@ async function getChannelRosterNames(
   const normalizedRoleFilters = roleFilters
     .map((r) => r.trim().toLowerCase())
     .filter(Boolean);
+  const preferredBotId = getPreferredChannelBotId(chatJid, options.discordBotId);
 
   const cacheKey = [
-    guildId,
+    guildId || '__no_guild__',
     chatJid,
     scope,
-    options.discordBotId || '',
+    preferredBotId || '',
     normalizedRoleFilters.join(','),
   ].join('::');
   const cached = channelRosterCache.get(cacheKey);
@@ -869,10 +868,24 @@ async function getChannelRosterNames(
 
   let members: ChannelRosterMemberView[] = [];
 
-  if (scope === 'channel' && chatJid.startsWith('dc:')) {
+  if (!guildId) {
+    const discord = findChannelForJid(chatJid, preferredBotId);
+    if (discord instanceof DiscordChannel) {
+      const visibleMembers = await discord.fetchChannelRoster(chatJid);
+      if (visibleMembers && visibleMembers.length > 0) {
+        members = visibleMembers.map((m) => ({
+          userId: m.id,
+          displayName: (m.displayName || m.username || '').trim(),
+          roles: m.roles || [],
+        }));
+      }
+    }
+  }
+
+  if (guildId && scope === 'channel' && chatJid.startsWith('dc:')) {
     const discord = findChannelForJid(
       chatJid,
-      getPreferredChannelBotId(chatJid, options.discordBotId),
+      preferredBotId,
     );
     if (discord instanceof DiscordChannel) {
       const visibleMembers = await discord.fetchChannelRoster(chatJid);
@@ -886,7 +899,27 @@ async function getChannelRosterNames(
     }
   }
 
-  if (members.length === 0) {
+  if (guildId && members.length === 0) {
+    const preferredDiscord = findChannelForJid(chatJid, preferredBotId);
+    if (preferredDiscord instanceof DiscordChannel) {
+      const preferredRoster = await preferredDiscord.fetchGuildRoster(guildId);
+      if (preferredRoster) {
+        const preferredMembers = [
+          ...preferredRoster.humans,
+          ...preferredRoster.bots,
+        ].map((member) => ({
+          userId: member.id,
+          displayName: (member.displayName || member.username || '').trim(),
+          roles: member.roles || [],
+        }));
+        if (preferredMembers.length > 0) {
+          members = preferredMembers;
+        }
+      }
+    }
+  }
+
+  if (guildId && members.length === 0) {
     members = getGuildRoster(guildId).map((member) => ({
       userId: member.userId,
       displayName: (member.displayName || member.username || '').trim(),
