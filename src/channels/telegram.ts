@@ -11,6 +11,23 @@ import {
 } from '../types.js';
 import { splitMessage } from './utils.js';
 
+// Grammy HTTP errors can contain the full bot API URL (https://api.telegram.org/bot<TOKEN>/...)
+// which leaks the bot token into structured logs. Extract only the safe message.
+const TELEGRAM_BOT_URL_RE = /https?:\/\/api\.telegram\.org\/bot[^\s/]+/gi;
+
+export function safeErrorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message.replace(
+      TELEGRAM_BOT_URL_RE,
+      'https://api.telegram.org/bot[REDACTED]',
+    );
+  }
+  return String(err).replace(
+    TELEGRAM_BOT_URL_RE,
+    'https://api.telegram.org/bot[REDACTED]',
+  );
+}
+
 type TelegramReactionEmoji =
   import('@grammyjs/types').ReactionTypeEmoji['emoji'];
 export const VALID_TELEGRAM_REACTIONS: readonly TelegramReactionEmoji[] = [
@@ -367,7 +384,10 @@ export class TelegramChannel implements Channel {
       }
       logger.info({ jid, length: text.length }, 'Telegram message sent');
     } catch (err) {
-      logger.error({ jid, err }, 'Failed to send Telegram message');
+      logger.error(
+        { jid, err: safeErrorMessage(err) },
+        'Failed to send Telegram message',
+      );
     }
   }
 
@@ -377,7 +397,8 @@ export class TelegramChannel implements Channel {
     emoji: string,
   ): Promise<void> {
     if (!this.bot) return;
-    const numericChatId = jid.replace(/^tg:/, '');
+    const numericChatId = this.extractNumericChatId(jid);
+    if (!numericChatId) return;
     const numericMsgId = parseInt(messageId, 10);
     if (isNaN(numericMsgId)) return;
     if (!isTelegramReactionEmoji(emoji)) {
@@ -393,7 +414,7 @@ export class TelegramChannel implements Channel {
       ]);
     } catch (err) {
       logger.warn(
-        { jid, messageId, emoji, err },
+        { jid, messageId, emoji, err: safeErrorMessage(err) },
         'Failed to add Telegram reaction',
       );
     }
@@ -408,14 +429,15 @@ export class TelegramChannel implements Channel {
     _emoji: string,
   ): Promise<void> {
     if (!this.bot) return;
-    const numericChatId = jid.replace(/^tg:/, '');
+    const numericChatId = this.extractNumericChatId(jid);
+    if (!numericChatId) return;
     const numericMsgId = parseInt(messageId, 10);
     if (isNaN(numericMsgId)) return;
     try {
       await this.bot.api.setMessageReaction(numericChatId, numericMsgId, []);
     } catch (err) {
       logger.warn(
-        { jid, messageId, err },
+        { jid, messageId, err: safeErrorMessage(err) },
         'Failed to remove Telegram reaction',
       );
     }
@@ -446,7 +468,10 @@ export class TelegramChannel implements Channel {
       if (!numericId) return;
       await this.bot.api.sendChatAction(numericId, 'typing');
     } catch (err) {
-      logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
+      logger.debug(
+        { jid, err: safeErrorMessage(err) },
+        'Failed to send Telegram typing indicator',
+      );
     }
   }
 
