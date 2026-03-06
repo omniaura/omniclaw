@@ -67,7 +67,6 @@ function updateUserRegistry(
     const now = new Date().toISOString();
     for (const { id, name, platform } of mentions) {
       const key = name.toLowerCase().trim();
-      // Phase 0 instrumentation: detect display name key collisions
       const existing = registry[key];
       if (existing && existing.id !== id) {
         logger.warn(
@@ -419,15 +418,13 @@ export class DiscordChannel implements Channel {
    * Fetch members who can view a specific Discord channel.
    * Used to keep model-side channel roster context scoped to the active channel.
    */
-  async fetchChannelRoster(jid: string): Promise<
-    Array<{
-      id: string;
-      username: string;
-      displayName: string;
-      roles: string[];
-      isBot: boolean;
-    }> | null
-  > {
+  async fetchChannelRoster(jid: string): Promise<Array<{
+    id: string;
+    username: string;
+    displayName: string;
+    roles: string[];
+    isBot: boolean;
+  }> | null> {
     const channelId = jidToChannelId(jid);
     if (!channelId) return null;
 
@@ -797,7 +794,6 @@ export class DiscordChannel implements Channel {
     const sender = `discord:${senderUserId}`;
     const msgId = message.id;
 
-    // Phase 0 instrumentation: detect sender identity anomalies
     if (!senderName) {
       logger.warn(
         {
@@ -807,17 +803,6 @@ export class DiscordChannel implements Channel {
           sender,
         },
         'Discord message has empty sender_name',
-      );
-    } else if (senderName === sender) {
-      logger.warn(
-        {
-          op: 'senderIdentity',
-          counter: 'sender_name_fallback_to_id',
-          platform: 'discord',
-          sender,
-          sender_name: senderName,
-        },
-        'Discord sender_name matches sender ID (fallback produced ID-as-name)',
       );
     }
 

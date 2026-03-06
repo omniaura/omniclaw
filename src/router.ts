@@ -28,7 +28,7 @@ export function formatMessages(
   // Build a participant roster so that conversation compaction/summarization
   // preserves correct sender attribution (see Issue #13).
   // Deduplicate by immutable sender ID to prevent roster inflation when
-  // a user changes their display name mid-conversation (R2 in Phase 0 audit).
+  // a user changes their display name mid-conversation.
   const seen = new Set<string>();
   const senders: string[] = [];
   for (const m of messages) {
@@ -38,25 +38,6 @@ export function formatMessages(
     if (seen.has(key)) continue;
     seen.add(key);
     senders.push(m.sender_name);
-  }
-
-  // Phase 0 counter: detect roster inflation from mutable name dedup
-  const nameOnlyCount = new Set(
-    messages
-      .map((m) => m.sender_name)
-      .filter((name) => name && name !== 'System'),
-  ).size;
-  if (nameOnlyCount > senders.length) {
-    logger.info(
-      {
-        op: 'senderIdentity',
-        counter: 'participant_roster_inflation',
-        expected_count: senders.length,
-        actual_count: nameOnlyCount,
-        chat_jid: messages[0]?.chat_jid,
-      },
-      'Participant roster inflated: unique sender_name count exceeds unique sender count',
-    );
   }
 
   const attrs: string[] = [];
