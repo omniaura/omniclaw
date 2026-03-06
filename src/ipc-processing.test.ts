@@ -229,6 +229,49 @@ describe('processTaskIpc: share_request', () => {
 
     expect(sentMessages[0].text).toContain('← requested');
   });
+
+  it('includes shared and requested file lists for approval', async () => {
+    await processTaskIpc(
+      {
+        type: 'share_request',
+        description: 'Need files from teammate',
+        target_agent: 'third-group',
+        files: ['notes/context.md'],
+        request_files: ['data/snapshot.json'],
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0].text).toContain('Files shared');
+    expect(sentMessages[0].text).toContain('notes/context.md');
+    expect(sentMessages[0].text).toContain('Files requested');
+    expect(sentMessages[0].text).toContain('data/snapshot.json');
+    expect(sentMessages[0].text).toContain('React 👍 to approve');
+  });
+
+  it('drops traversal paths from share_request file lists', async () => {
+    await processTaskIpc(
+      {
+        type: 'share_request',
+        description: 'Need files',
+        target_agent: 'third-group',
+        files: ['safe.md', '../secrets.env'],
+        request_files: ['logs/out.txt', '../../etc/passwd'],
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0].text).toContain('safe.md');
+    expect(sentMessages[0].text).toContain('logs/out.txt');
+    expect(sentMessages[0].text).not.toContain('../secrets.env');
+    expect(sentMessages[0].text).not.toContain('../../etc/passwd');
+  });
 });
 
 // =============================================================================
