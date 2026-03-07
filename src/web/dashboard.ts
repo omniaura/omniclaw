@@ -288,6 +288,14 @@ export function renderDashboard(state: WebStateProvider): string {
   .toast.success { border-color: var(--green); color: var(--green); }
   .toast.error { border-color: var(--red); color: var(--red); }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @media (max-width: 900px) {
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .tables-grid { grid-template-columns: 1fr; max-height: none; }
+    main { overflow-y: auto; }
+  }
+  @media (max-width: 500px) {
+    .stats-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
