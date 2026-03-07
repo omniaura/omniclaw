@@ -38,6 +38,12 @@ import { assertPathWithin } from '../path-security.js';
 import { Channel, RegisteredGroup } from '../types.js';
 import { splitMessage } from './utils.js';
 
+export function getAttachmentWorkspaceFolder(
+  group: Pick<RegisteredGroup, 'folder' | 'channelFolder'>,
+): string {
+  return group.channelFolder || group.folder;
+}
+
 /**
  * Merge Discord user mention data into the shared user registry JSON.
  * Keyed by lowercase display name so the format_mention MCP tool can look users up.
@@ -630,6 +636,9 @@ export class DiscordChannel implements Channel {
       discordBotId: preferredSub.discordBotId,
       discordGuildId: preferredSub.discordGuildId,
       serverFolder: agent.serverFolder,
+      channelFolder: preferredSub.channelFolder,
+      categoryFolder: preferredSub.categoryFolder,
+      agentContextFolder: agent.agentContextFolder,
       backend: agent.backend,
       agentRuntime: agent.agentRuntime,
       description: agent.description,
@@ -840,7 +849,8 @@ export class DiscordChannel implements Channel {
       for (const [, a] of message.attachments) {
         if (a.contentType?.startsWith('image/')) {
           try {
-            const mediaDir = path.join(GROUPS_DIR, group.folder, 'media');
+            const workspaceFolder = getAttachmentWorkspaceFolder(group);
+            const mediaDir = path.join(GROUPS_DIR, workspaceFolder, 'media');
             fs.mkdirSync(mediaDir, { recursive: true });
             // Layer 1: Strip directory components to prevent path traversal
             // (e.g. "../../etc/cron.d/evil.png" → "evil.png")
@@ -975,7 +985,7 @@ export class DiscordChannel implements Channel {
     }
 
     // Clean up media files older than 24 hours
-    this.cleanupOldMedia(group.folder);
+    this.cleanupOldMedia(getAttachmentWorkspaceFolder(group));
 
     // Mark this JID as owned by this bot only after we accept/process the message.
     this.ownedJids.add(chatJid);
