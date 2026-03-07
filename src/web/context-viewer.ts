@@ -226,9 +226,9 @@ function buildPage(sidebarHtml: string): string {
     '</div></div>' +
     '<div class="layer-tabs" id="layer-tabs">' +
     '<div class="layer-tab active" data-layer="channel" onclick="switchLayer(\'channel\')"><span class="dot" id="dot-channel"></span>Channel</div>' +
-    '<div class="layer-tab" data-layer="agent" onclick="switchLayer(\'agent\')"><span class="dot" id="dot-agent"></span>Agent</div>' +
     '<div class="layer-tab" data-layer="category" onclick="switchLayer(\'category\')"><span class="dot" id="dot-category"></span>Category</div>' +
     '<div class="layer-tab" data-layer="server" onclick="switchLayer(\'server\')"><span class="dot" id="dot-server"></span>Server</div>' +
+    '<div class="layer-tab" data-layer="agent" onclick="switchLayer(\'agent\')"><span class="dot" id="dot-agent"></span>Agent</div>' +
     '</div>' +
     '<div class="path-display" id="path-display"></div>' +
     '<div class="editor-area">' +
@@ -287,6 +287,16 @@ function clientScript(): string {
     '  monacoReady=true;',
     '});',
 
+    // Update URL with all state params
+    'function updateUrl(agent,channel){',
+    '  var p=new URLSearchParams(location.search);',
+    '  if(agent!==undefined)p.set("agent",agent);',
+    '  if(channel!==undefined)p.set("channel",channel);',
+    '  if(currentLayer&&currentLayer!=="channel")p.set("layer",currentLayer);else p.delete("layer");',
+    '  if(currentView&&currentView!=="split")p.set("view",currentView);else p.delete("view");',
+    '  history.replaceState(null,"","/context?"+p.toString());',
+    '}',
+
     // Toggle agent group
     'window.toggleAgent=function(el){',
     '  el.querySelector(".chevron").classList.toggle("open");',
@@ -304,7 +314,7 @@ function clientScript(): string {
     '  document.getElementById("ctx-subtitle").textContent=agentId+" — "+jid;',
     '  document.getElementById("empty-state").style.display="none";',
     '  document.getElementById("editor-view").style.display="flex";',
-    '  history.replaceState(null,"","/context?agent="+encodeURIComponent(agentId)+"&channel="+encodeURIComponent(jid));',
+    '  updateUrl(agentId,jid);',
     '  var qs="agent_id="+encodeURIComponent(agentId)',
     '    +"&jid="+encodeURIComponent(jid)',
     '    +"&folder="+encodeURIComponent(el.getAttribute("data-folder"))',
@@ -318,7 +328,6 @@ function clientScript(): string {
     '      var dot=document.getElementById("dot-"+l);',
     '      dot.className=layerData[l]&&layerData[l].exists?"dot exists":"dot missing";',
     '    });',
-    '    currentLayer="channel";',
     '    document.querySelectorAll(".layer-tab").forEach(function(t){',
     '      t.classList.toggle("active",t.getAttribute("data-layer")===currentLayer);',
     '    });',
@@ -334,7 +343,7 @@ function clientScript(): string {
     '  document.querySelectorAll(".layer-tab").forEach(function(t){',
     '    t.classList.toggle("active",t.getAttribute("data-layer")===layer);',
     '  });',
-    '  loadLayerContent(layer);',
+    '  loadLayerContent(layer);updateUrl();',
     '};',
 
     // Load layer content into editor
@@ -362,6 +371,7 @@ function clientScript(): string {
     '  ep.classList.toggle("hidden",view==="preview");',
     '  pp.classList.toggle("hidden",view==="editor");',
     '  if(editor)editor.layout();',
+    '  updateUrl();',
     '};',
 
     // Markdown preview using marked.js
@@ -411,6 +421,9 @@ function clientScript(): string {
     // Restore selection from URL params on load
     'var params=new URLSearchParams(location.search);',
     'var initAgent=params.get("agent"),initChannel=params.get("channel");',
+    'var initLayer=params.get("layer"),initView=params.get("view");',
+    'if(initLayer&&["channel","category","server","agent"].indexOf(initLayer)!==-1)currentLayer=initLayer;',
+    'if(initView&&["split","editor","preview"].indexOf(initView)!==-1){currentView=initView;setView(initView);}',
     'if(initAgent&&initChannel){',
     '  var agentGroup=document.querySelector(".agent-group[data-agent-id=\\""+CSS.escape(initAgent)+"\\"]");',
     '  if(agentGroup){',
