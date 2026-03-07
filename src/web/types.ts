@@ -1,4 +1,6 @@
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
+import type { GroupQueueDetail } from '../group-queue.js';
+import type { IpcEvent } from './ipc-events.js';
 
 /**
  * State provider interface — the web server reads orchestrator state
@@ -28,6 +30,10 @@ export interface WebStateProvider {
   }>;
   /** Live queue stats from GroupQueue. */
   getQueueStats(): QueueStats;
+  /** Per-group queue details for the IPC inspector. */
+  getQueueDetails(): GroupQueueDetail[];
+  /** Recent IPC events from the event buffer. */
+  getIpcEvents(count?: number): IpcEvent[];
 
   // ---- Task mutations ----
   createTask(task: Omit<ScheduledTask, 'last_run' | 'last_result'>): void;
@@ -67,7 +73,7 @@ export interface WsData {
   subscriptions: Set<string>;
 }
 
-export type WsEventType = 'agent_status' | 'task_update' | 'log';
+export type WsEventType = 'agent_status' | 'task_update' | 'log' | 'ipc_event';
 
 export interface WsEvent {
   type: WsEventType;

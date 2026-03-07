@@ -111,6 +111,7 @@ import { redactSensitiveData } from './security/redaction.js';
 import {
   startWebServer,
   startLogStream,
+  IpcEventBuffer,
   type WebServerHandle,
 } from './web/index.js';
 import { Effect } from 'effect';
@@ -184,6 +185,7 @@ const MAX_CONSECUTIVE_ERRORS = 3;
 let whatsapp: WhatsAppChannel | null = null;
 let channels: Channel[] = [];
 const queue = new GroupQueue();
+const ipcEvents = new IpcEventBuffer();
 let githubWebhookServer: { stop: () => void } | null = null;
 
 const MAX_CHANNEL_AGENT_FANOUT = parseInt(
@@ -206,7 +208,9 @@ interface ChannelRosterOptions {
   agentFolder?: string;
 }
 
-function formatChannelRosterNames(members: ChannelRosterMemberView[]): string[] {
+function formatChannelRosterNames(
+  members: ChannelRosterMemberView[],
+): string[] {
   return members.map((member) => {
     if (member.roles.length > 0) {
       return `${member.displayName} [${member.roles.join(', ')}]`;
@@ -868,7 +872,10 @@ async function getChannelRosterNames(
   const normalizedRoleFilters = roleFilters
     .map((r) => r.trim().toLowerCase())
     .filter(Boolean);
-  const preferredBotId = getPreferredChannelBotId(chatJid, options.discordBotId);
+  const preferredBotId = getPreferredChannelBotId(
+    chatJid,
+    options.discordBotId,
+  );
 
   const cacheKey = [
     guildId || '__no_guild__',
@@ -899,10 +906,7 @@ async function getChannelRosterNames(
   }
 
   if (guildId && scope === 'channel' && chatJid.startsWith('dc:')) {
-    const discord = findChannelForJid(
-      chatJid,
-      preferredBotId,
-    );
+    const discord = findChannelForJid(chatJid, preferredBotId);
     if (discord instanceof DiscordChannel) {
       const visibleMembers = await discord.fetchChannelRoster(chatJid);
       if (visibleMembers && visibleMembers.length > 0) {
@@ -2080,6 +2084,8 @@ async function main(): Promise<void> {
         },
         getChats: () => getAllChats(),
         getQueueStats: () => queue.getStats(),
+        getQueueDetails: () => queue.getDetailedStats(),
+        getIpcEvents: (count) => ipcEvents.recent(count),
         createTask: (task) => dbCreateTask(task),
         updateTask: (id, updates) => dbUpdateTask(id, updates),
         deleteTask: (id) => dbDeleteTask(id),
@@ -2517,6 +2523,19 @@ async function main(): Promise<void> {
         agentId: s.agentId,
         agentFolder: agents[s.agentId]?.folder ?? s.agentId,
       }));
+    },
+    onIpcEvent: (kind, sourceGroup, summary, details) => {
+      const event = ipcEvents.push(
+        kind as Parameters<typeof ipcEvents.push>[0],
+        sourceGroup,
+        summary,
+        details,
+      );
+      webServer?.broadcast({
+        type: 'ipc_event',
+        data: event,
+        timestamp: event.timestamp,
+      });
     },
   });
 }

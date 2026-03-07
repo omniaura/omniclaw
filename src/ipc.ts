@@ -20,9 +20,7 @@ import {
   setRegisteredGroup,
   updateTask,
 } from './db.js';
-import {
-  findGroupByFolder,
-} from './group-helpers.js';
+import { findGroupByFolder } from './group-helpers.js';
 import {
   listIpcJsonFiles,
   quarantineIpcFile,
@@ -70,6 +68,13 @@ export interface IpcDeps {
   getSubscriptions?: (
     jid: string,
   ) => Array<{ agentId: string; agentFolder: string }>;
+  /** Called when an IPC event occurs (for the web UI inspector). */
+  onIpcEvent?: (
+    kind: string,
+    sourceGroup: string,
+    summary: string,
+    details?: Record<string, unknown>,
+  ) => void;
 }
 
 /**
@@ -246,6 +251,12 @@ export async function processMessageIpc(
         { chatJid: data.chatJid, sourceGroup },
         'IPC message suppressed (internal-only)',
       );
+      deps.onIpcEvent?.(
+        'message_suppressed',
+        sourceGroup,
+        'Message suppressed (internal-only)',
+        { chatJid: data.chatJid },
+      );
       return { action: 'suppressed', reason: 'internal-only' };
     }
     // Authorization: any registered agent can message any other registered agent
@@ -267,11 +278,23 @@ export async function processMessageIpc(
         deps.notifyGroup(msgChatJid, msgText, sourceGroup);
       }
       logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
+      deps.onIpcEvent?.(
+        'message_sent',
+        sourceGroup,
+        `Message sent to ${msgChatJid}`,
+        { chatJid: msgChatJid },
+      );
       return { action: 'handled' };
     } else {
       logger.warn(
         { chatJid: data.chatJid, sourceGroup },
         'Unauthorized IPC message attempt blocked (target not registered)',
+      );
+      deps.onIpcEvent?.(
+        'message_blocked',
+        sourceGroup,
+        `Blocked: target ${msgChatJid} not registered`,
+        { chatJid: msgChatJid },
       );
       return { action: 'blocked', reason: 'target not registered' };
     }
@@ -495,6 +518,12 @@ export async function processTaskIpc(
     if (isMainGroup || task.group_folder === srcGroup) {
       deleteTask(taskId);
       logger.info({ taskId, sourceGroup: srcGroup }, 'Task cancelled via IPC');
+      deps.onIpcEvent?.(
+        'task_cancelled',
+        srcGroup,
+        `Task ${taskId} cancelled`,
+        { taskId },
+      );
       refreshTasksSnapshot();
     } else {
       logger.warn(
@@ -566,6 +595,12 @@ export async function processTaskIpc(
         logger.info(
           { taskId, sourceGroup, targetFolder, contextMode },
           'Task created via IPC',
+        );
+        deps.onIpcEvent?.(
+          'task_created',
+          sourceGroup,
+          `Task ${taskId} created for ${targetFolder}`,
+          { taskId, targetFolder },
         );
         refreshTasksSnapshot();
       }
@@ -645,6 +680,12 @@ export async function processTaskIpc(
         { taskId: data.taskId, sourceGroup, updates: Object.keys(updates) },
         'Task edited via IPC',
       );
+      deps.onIpcEvent?.(
+        'task_edited',
+        sourceGroup,
+        `Task ${data.taskId} updated: ${Object.keys(updates).join(', ')}`,
+        { taskId: data.taskId, fields: Object.keys(updates) },
+      );
       refreshTasksSnapshot();
       break;
     }
@@ -717,6 +758,12 @@ export async function processTaskIpc(
         }
 
         deps.registerGroup(data.jid, groupToRegister);
+        deps.onIpcEvent?.(
+          'group_registered',
+          sourceGroup,
+          `Group registered: ${data.name} (${data.folder})`,
+          { jid: data.jid, name: data.name, folder: data.folder },
+        );
       } else {
         logger.warn(
           { data },
