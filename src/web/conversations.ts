@@ -1,9 +1,11 @@
 import type { WebStateProvider } from './types.js';
+import { BASE_CSS, renderNav, escapeHtml } from './shared.js';
 
 /**
  * Render a self-contained conversations viewer page.
  * Chat list in left sidebar, message thread on the right.
  * Messages are fetched client-side via /api/messages/:jid for pagination.
+ * Selected chat is persisted in the URL query string (?chat=<jid>).
  */
 export function renderConversations(state: WebStateProvider): string {
   const chats = state.getChats();
@@ -28,53 +30,13 @@ export function renderConversations(state: WebStateProvider): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OmniClaw — Conversations</title>
 <style>
-  :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --border: #2a2d3a;
-    --text: #e1e4ed;
-    --text-dim: #8b8fa3;
-    --accent: #6366f1;
-    --green: #22c55e;
-    --yellow: #eab308;
-    --red: #ef4444;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.5;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-  }
-  header {
-    padding: 0.75rem 1.5rem;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    flex-shrink: 0;
-  }
-  header h1 { font-size: 1.25rem; font-weight: 600; }
-  header nav { display: flex; gap: 0.5rem; margin-left: 1rem; }
-  header nav a {
-    color: var(--text-dim);
-    text-decoration: none;
-    font-size: 0.8rem;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    transition: color 0.15s, background 0.15s;
-  }
-  header nav a:hover { color: var(--text); background: var(--surface); }
-  header nav a.active { color: var(--accent); background: var(--surface); }
+  ${BASE_CSS}
+  body { height: 100vh; display: flex; flex-direction: column; }
   .layout {
     display: flex;
     flex: 1;
     min-height: 0;
   }
-  /* Sidebar — chat list */
   .sidebar {
     width: 280px;
     flex-shrink: 0;
@@ -97,10 +59,7 @@ export function renderConversations(state: WebStateProvider): string {
     font-size: 0.8rem;
   }
   .sidebar-header input:focus { outline: none; border-color: var(--accent); }
-  .chat-list {
-    flex: 1;
-    overflow-y: auto;
-  }
+  .chat-list { flex: 1; overflow-y: auto; }
   .chat-item {
     padding: 0.6rem 0.75rem;
     cursor: pointer;
@@ -118,13 +77,7 @@ export function renderConversations(state: WebStateProvider): string {
     padding: 0.5rem 0.75rem;
     border-bottom: 1px solid var(--border);
   }
-  /* Main content — messages */
-  .content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
+  .content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .content-empty {
     flex: 1;
     display: flex;
@@ -153,11 +106,7 @@ export function renderConversations(state: WebStateProvider): string {
     flex-direction: column;
     gap: 0.25rem;
   }
-  .msg-row {
-    display: flex;
-    gap: 0.5rem;
-    max-width: 85%;
-  }
+  .msg-row { display: flex; gap: 0.5rem; max-width: 85%; }
   .msg-row.from-me { align-self: flex-end; flex-direction: row-reverse; }
   .msg-bubble {
     background: var(--surface);
@@ -171,29 +120,12 @@ export function renderConversations(state: WebStateProvider): string {
     background: rgba(99, 102, 241, 0.15);
     border-color: rgba(99, 102, 241, 0.3);
   }
-  .msg-sender {
-    font-size: 0.7rem;
-    font-weight: 600;
-    color: var(--accent);
-    margin-bottom: 0.15rem;
-  }
+  .msg-sender { font-size: 0.7rem; font-weight: 600; color: var(--accent); margin-bottom: 0.15rem; }
   .msg-row.from-me .msg-sender { color: #a5b4fc; text-align: right; }
-  .msg-text {
-    font-size: 0.8rem;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .msg-time {
-    font-size: 0.6rem;
-    color: var(--text-dim);
-    margin-top: 0.25rem;
-  }
+  .msg-text { font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; }
+  .msg-time { font-size: 0.6rem; color: var(--text-dim); margin-top: 0.25rem; }
   .msg-row.from-me .msg-time { text-align: right; }
-  .load-more-bar {
-    text-align: center;
-    padding: 0.5rem;
-    flex-shrink: 0;
-  }
+  .load-more-bar { text-align: center; padding: 0.5rem; flex-shrink: 0; }
   .load-more-bar button {
     padding: 0.3rem 0.75rem;
     border: 1px solid var(--border);
@@ -205,24 +137,11 @@ export function renderConversations(state: WebStateProvider): string {
   }
   .load-more-bar button:hover { border-color: var(--accent); color: var(--text); }
   .load-more-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .loading {
-    text-align: center;
-    padding: 2rem;
-    color: var(--text-dim);
-    font-size: 0.85rem;
-  }
+  .loading { text-align: center; padding: 2rem; color: var(--text-dim); font-size: 0.85rem; }
 </style>
 </head>
 <body>
-<header>
-  <h1>OmniClaw</h1>
-  <nav>
-    <a href="/">Dashboard</a>
-    <a href="/conversations" class="active">Conversations</a>
-    <a href="/context">Context</a>
-    <a href="/ipc">IPC</a>
-  </nav>
-</header>
+${renderNav('/conversations')}
 <div class="layout">
   <aside class="sidebar">
     <div class="sidebar-header">
@@ -248,6 +167,16 @@ export function renderConversations(state: WebStateProvider): string {
   var currentJid = null;
   var messageCache = {};
   var PAGE_SIZE = 100;
+
+  // ---- URL state: restore selected chat from query param ----
+  var params = new URLSearchParams(location.search);
+  var initialChat = params.get('chat');
+  if (initialChat) {
+    var initialItem = chatList.querySelector('[data-jid="' + CSS.escape(initialChat) + '"]');
+    if (initialItem) {
+      setTimeout(function() { selectChat(initialChat); }, 0);
+    }
+  }
 
   // ---- Chat search/filter ----
   searchInput.addEventListener('input', function() {
@@ -281,14 +210,15 @@ export function renderConversations(state: WebStateProvider): string {
     if (jid === currentJid) return;
     currentJid = jid;
 
+    // Update URL without reload
+    history.replaceState(null, '', '/conversations?chat=' + encodeURIComponent(jid));
+
     // Highlight active chat
     chatList.querySelectorAll('.chat-item').forEach(function(el) {
       el.classList.toggle('selected', el.getAttribute('data-jid') === jid);
     });
 
-    // Show loading state
     content.innerHTML = '<div class="loading">Loading messages…</div>';
-
     loadMessages(jid);
   }
 
@@ -300,7 +230,7 @@ export function renderConversations(state: WebStateProvider): string {
       })
       .then(function(messages) {
         if (!Array.isArray(messages)) throw new Error('Invalid messages payload');
-        if (currentJid !== jid) return; // stale response
+        if (currentJid !== jid) return;
         messageCache[jid] = messages;
         renderMessages(jid, messages);
       })
@@ -311,7 +241,6 @@ export function renderConversations(state: WebStateProvider): string {
   }
 
   function renderMessages(jid, messages) {
-    // Find chat name from the sidebar
     var chatItem = chatList.querySelector('[data-jid="' + CSS.escape(jid) + '"]');
     var chatName = chatItem ? chatItem.querySelector('.chat-name').textContent : jid;
 
@@ -336,7 +265,6 @@ export function renderConversations(state: WebStateProvider): string {
         var time = new Date(m.timestamp).toLocaleString();
         var senderDisplay = m.sender_name || m.sender || 'Unknown';
         var text = m.content || '';
-        // Truncate very long messages in the view
         var displayText = text.length > 2000 ? text.slice(0, 2000) + '… [truncated]' : text;
 
         msgsHtml += '<div class="' + rowClass + '">'
@@ -351,11 +279,9 @@ export function renderConversations(state: WebStateProvider): string {
 
     content.innerHTML = headerHtml + loadMoreHtml + msgsHtml;
 
-    // Scroll to bottom (most recent messages)
     var container = document.getElementById('messages-container');
     if (container) container.scrollTop = container.scrollHeight;
 
-    // Load more handler
     var loadMoreBtn = document.getElementById('btn-load-more');
     if (loadMoreBtn) {
       loadMoreBtn.addEventListener('click', function() {
@@ -363,9 +289,6 @@ export function renderConversations(state: WebStateProvider): string {
         if (!oldest) return;
         loadMoreBtn.disabled = true;
         loadMoreBtn.textContent = 'Loading…';
-        // Fetch messages older than the oldest we have
-        // Use since=epoch and limit to get all, then filter client-side
-        // (The API uses "since" as a floor, so we pass epoch to get everything up to oldest)
         fetch('/api/messages/' + encodeURIComponent(jid) + '?limit=500')
           .then(function(res) {
             if (!res.ok) throw new Error('Failed to load older messages');
@@ -395,12 +318,4 @@ export function renderConversations(state: WebStateProvider): string {
 </script>
 </body>
 </html>`;
-}
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }

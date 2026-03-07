@@ -1,9 +1,11 @@
 import type { WebStateProvider } from './types.js';
+import { BASE_CSS, renderNav, escapeHtml } from './shared.js';
 
 /**
  * Render a self-contained HTML dashboard page.
  * Uses inline CSS and vanilla JS — no build step, no external dependencies.
  * Data is bootstrapped server-side; live updates come via WebSocket.
+ * Stats are polled every 10s for semi-live numbers.
  */
 export function renderDashboard(state: WebStateProvider): string {
   const stats = state.getQueueStats();
@@ -79,94 +81,70 @@ export function renderDashboard(state: WebStateProvider): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OmniClaw Dashboard</title>
 <style>
-  :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --border: #2a2d3a;
-    --text: #e1e4ed;
-    --text-dim: #8b8fa3;
-    --accent: #6366f1;
-    --green: #22c55e;
-    --yellow: #eab308;
-    --red: #ef4444;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.5;
-  }
-  header {
-    padding: 1rem 2rem;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-  header h1 { font-size: 1.25rem; font-weight: 600; }
-  header .ws-status {
-    margin-left: auto;
-    font-size: 0.75rem;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    background: var(--surface);
-  }
-  header .ws-status.connected { color: var(--green); }
-  header .ws-status.disconnected { color: var(--red); }
-  main { padding: 1.5rem 2rem; }
+  ${BASE_CSS}
+  body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  main { flex: 1; display: flex; flex-direction: column; padding: 0.75rem 1.5rem; gap: 0.75rem; overflow: hidden; }
   .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 1rem;
-    margin-bottom: 2rem;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    flex-shrink: 0;
   }
   .stat-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1rem;
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
   }
-  .stat-card .label { font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
-  .stat-card .value { font-size: 1.5rem; font-weight: 700; margin-top: 0.25rem; }
-  section { margin-bottom: 2rem; }
-  section h2 { font-size: 1rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
-  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
+  .stat-card .label { font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat-card .value { font-size: 1.25rem; font-weight: 700; margin-top: 0.1rem; }
+  .tables-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    flex-shrink: 0;
+    max-height: 40vh;
+    overflow: hidden;
+  }
+  .table-section { display: flex; flex-direction: column; overflow: hidden; }
+  .table-section h2 { font-size: 0.75rem; font-weight: 600; margin-bottom: 0.35rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem; }
   .section-header h2 { margin-bottom: 0; }
+  .table-wrap { overflow: auto; flex: 1; border-radius: 6px; border: 1px solid var(--border); }
   table {
     width: 100%;
     border-collapse: collapse;
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-    font-size: 0.85rem;
+    font-size: 0.75rem;
   }
   th {
     text-align: left;
-    padding: 0.5rem 0.75rem;
+    padding: 0.35rem 0.5rem;
     background: var(--border);
     font-weight: 600;
-    font-size: 0.75rem;
+    font-size: 0.65rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--text-dim);
+    position: sticky;
+    top: 0;
+    z-index: 1;
   }
   td {
-    padding: 0.5rem 0.75rem;
+    padding: 0.3rem 0.5rem;
     border-top: 1px solid var(--border);
-    max-width: 300px;
+    max-width: 200px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  td.channels { white-space: normal; font-size: 0.75rem; color: var(--text-dim); }
+  td.channels { white-space: normal; font-size: 0.65rem; color: var(--text-dim); }
   td.actions { white-space: nowrap; }
   .badge {
     display: inline-block;
-    padding: 0.125rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.7rem;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.6rem;
     font-weight: 600;
     text-transform: uppercase;
   }
@@ -177,13 +155,13 @@ export function renderDashboard(state: WebStateProvider): string {
   .status-paused { background: #422006; color: var(--yellow); }
   .status-completed { background: #1e1e1e; color: var(--text-dim); }
   .btn {
-    padding: 0.375rem 0.75rem;
+    padding: 0.3rem 0.6rem;
     border: 1px solid var(--border);
     border-radius: 4px;
     background: var(--surface);
     color: var(--text);
     cursor: pointer;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     font-weight: 500;
     transition: background 0.15s, border-color 0.15s;
   }
@@ -191,21 +169,24 @@ export function renderDashboard(state: WebStateProvider): string {
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn-primary:hover { background: #4f46e5; }
-  .btn-sm { padding: 0.2rem 0.5rem; font-size: 0.7rem; }
+  .btn-sm { padding: 0.15rem 0.35rem; font-size: 0.6rem; }
   .btn-danger { color: var(--red); border-color: #5c1818; }
   .btn-danger:hover { background: #2a0f0f; border-color: var(--red); }
   .btn-toggle { color: var(--yellow); border-color: #5c4a08; }
   .btn-toggle:hover { background: #2a2208; border-color: var(--yellow); }
+  .log-section { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .log-section h2 { font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; }
   .log-toolbar {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    gap: 0.35rem;
+    margin-bottom: 0.35rem;
     flex-wrap: wrap;
+    flex-shrink: 0;
   }
   .log-toolbar .filter-btn {
-    padding: 0.2rem 0.5rem;
-    font-size: 0.7rem;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.65rem;
     border: 1px solid var(--border);
     border-radius: 4px;
     background: var(--surface);
@@ -216,21 +197,21 @@ export function renderDashboard(state: WebStateProvider): string {
   .log-toolbar .filter-btn.active { border-color: var(--accent); color: var(--text); background: #1e2030; }
   .log-toolbar .filter-btn:hover { border-color: var(--accent); }
   .log-toolbar .spacer { flex: 1; }
-  .log-toolbar .log-count { font-size: 0.7rem; color: var(--text-dim); }
+  .log-toolbar .log-count { font-size: 0.65rem; color: var(--text-dim); }
   #log-container {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 0.75rem;
-    max-height: 500px;
+    border-radius: 6px;
+    padding: 0.5rem;
+    flex: 1;
     overflow-y: auto;
     font-family: 'SF Mono', 'Cascadia Code', monospace;
-    font-size: 0.75rem;
-    line-height: 1.6;
+    font-size: 0.7rem;
+    line-height: 1.5;
   }
-  .log-line { color: var(--text-dim); display: flex; gap: 0.5rem; }
+  .log-line { color: var(--text-dim); display: flex; gap: 0.35rem; }
   .log-line .ts { color: var(--text-dim); flex-shrink: 0; }
-  .log-line .level-badge { flex-shrink: 0; font-weight: 600; font-size: 0.65rem; text-transform: uppercase; padding: 0 0.25rem; border-radius: 2px; }
+  .log-line .level-badge { flex-shrink: 0; font-weight: 600; font-size: 0.6rem; text-transform: uppercase; padding: 0 0.2rem; border-radius: 2px; }
   .log-line .level-badge.info { color: var(--green); }
   .log-line .level-badge.debug { color: var(--text-dim); }
   .log-line .level-badge.warn { color: var(--yellow); }
@@ -307,19 +288,18 @@ export function renderDashboard(state: WebStateProvider): string {
   .toast.success { border-color: var(--green); color: var(--green); }
   .toast.error { border-color: var(--red); color: var(--red); }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @media (max-width: 900px) {
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .tables-grid { grid-template-columns: 1fr; max-height: none; }
+    main { overflow-y: auto; }
+  }
+  @media (max-width: 500px) {
+    .stats-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>OmniClaw</h1>
-  <nav style="display:flex;gap:0.5rem;margin-left:1rem">
-    <a href="/" style="color:var(--accent);text-decoration:none;font-size:0.8rem;padding:0.25rem 0.5rem;border-radius:4px;background:var(--surface)">Dashboard</a>
-    <a href="/conversations" style="color:var(--text-dim);text-decoration:none;font-size:0.8rem;padding:0.25rem 0.5rem;border-radius:4px" onmouseover="this.style.color='var(--text)';this.style.background='var(--surface)'" onmouseout="this.style.color='var(--text-dim)';this.style.background='transparent'">Conversations</a>
-    <a href="/context" style="color:var(--text-dim);text-decoration:none;font-size:0.8rem;padding:0.25rem 0.5rem;border-radius:4px" onmouseover="this.style.color='var(--text)';this.style.background='var(--surface)'" onmouseout="this.style.color='var(--text-dim)';this.style.background='transparent'">Context</a>
-    <a href="/ipc" style="color:var(--text-dim);text-decoration:none;font-size:0.8rem;padding:0.25rem 0.5rem;border-radius:4px" onmouseover="this.style.color='var(--text)';this.style.background='var(--surface)'" onmouseout="this.style.color='var(--text-dim)';this.style.background='transparent'">IPC</a>
-  </nav>
-  <span id="ws-status" class="ws-status disconnected">disconnected</span>
-</header>
+${renderNav('/')}
 <main>
   <div class="stats-grid">
     <div class="stat-card"><div class="label">Agents</div><div class="value" id="stat-agents">${agents.length}</div></div>
@@ -328,26 +308,32 @@ export function renderDashboard(state: WebStateProvider): string {
     <div class="stat-card"><div class="label">Active Tasks</div><div class="value" id="stat-tasks">${tasks.filter((t) => t.status === 'active').length}</div></div>
   </div>
 
-  <section>
-    <h2>Agents</h2>
-    <table>
-      <thead><tr><th>ID</th><th>Name</th><th>Backend</th><th>Runtime</th><th>Role</th><th>Channels</th></tr></thead>
-      <tbody id="agents-tbody">${agentRows}</tbody>
-    </table>
-  </section>
-
-  <section>
-    <div class="section-header">
-      <h2>Scheduled Tasks</h2>
-      <button class="btn btn-primary" id="btn-create-task">+ New Task</button>
+  <div class="tables-grid">
+    <div class="table-section">
+      <h2>Agents</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Name</th><th>Backend</th><th>Runtime</th><th>Role</th><th>Channels</th></tr></thead>
+          <tbody id="agents-tbody">${agentRows}</tbody>
+        </table>
+      </div>
     </div>
-    <table>
-      <thead><tr><th>ID</th><th>Agent</th><th>Status</th><th>Schedule</th><th>Prompt</th><th>Next Run</th><th>Last Run</th><th>Actions</th></tr></thead>
-      <tbody id="tasks-tbody">${taskRows}</tbody>
-    </table>
-  </section>
 
-  <section>
+    <div class="table-section">
+      <div class="section-header">
+        <h2>Scheduled Tasks</h2>
+        <button class="btn btn-primary btn-sm" id="btn-create-task">+ New</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Agent</th><th>Status</th><th>Schedule</th><th>Prompt</th><th>Next Run</th><th>Last Run</th><th>Actions</th></tr></thead>
+          <tbody id="tasks-tbody">${taskRows}</tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="log-section">
     <h2>Live Logs</h2>
     <div class="log-toolbar">
       <button class="filter-btn active" data-level="all">All</button>
@@ -361,7 +347,7 @@ export function renderDashboard(state: WebStateProvider): string {
       <button class="filter-btn" id="btn-clear-logs">Clear</button>
     </div>
     <div id="log-container"><div class="log-line"><span class="msg">Waiting for WebSocket connection…</span></div></div>
-  </section>
+  </div>
 </main>
 
 <!-- Create Task Modal -->
@@ -455,23 +441,23 @@ export function renderDashboard(state: WebStateProvider): string {
 
           var ts = new Date(d.ts).toLocaleTimeString();
           var parts = '<span class="ts">' + ts + '</span>';
-          parts += '<span class="level-badge ' + escapeHtml(lvl) + '">' + escapeHtml(lvl) + '</span>';
+          parts += '<span class="level-badge ' + escapeHtmlJs(lvl) + '">' + escapeHtmlJs(lvl) + '</span>';
 
           // Context: container/group name
           var ctx = d.container || d.group;
-          if (ctx) parts += '<span class="context">' + escapeHtml(String(ctx)) + '</span>';
+          if (ctx) parts += '<span class="context">' + escapeHtmlJs(String(ctx)) + '</span>';
 
           // Operation tag
-          if (d.op) parts += '<span class="op">[' + escapeHtml(String(d.op)) + ']</span>';
+          if (d.op) parts += '<span class="op">[' + escapeHtmlJs(String(d.op)) + ']</span>';
 
           // Message
           var msg = d.msg || '';
           if (d.durationMs != null) msg += ' (' + d.durationMs + 'ms)';
           if (d.costUsd != null) msg += ' $' + d.costUsd;
-          parts += '<span class="msg">' + escapeHtml(msg) + '</span>';
+          parts += '<span class="msg">' + escapeHtmlJs(msg) + '</span>';
 
           // Error detail
-          if (d.err) parts += '<span class="err-detail">' + escapeHtml(String(d.err)) + '</span>';
+          if (d.err) parts += '<span class="err-detail">' + escapeHtmlJs(String(d.err)) + '</span>';
 
           line.innerHTML = parts;
           logContainer.appendChild(line);
@@ -498,13 +484,26 @@ export function renderDashboard(state: WebStateProvider): string {
     };
   }
 
-  function escapeHtml(s) {
+  function escapeHtmlJs(s) {
     var d = document.createElement('div');
     d.textContent = s;
     return d.innerHTML;
   }
 
   connect();
+
+  // ---- Stats polling (semi-live) ----
+  setInterval(function() {
+    fetch('/api/stats')
+      .then(function(r) { return r.json(); })
+      .then(function(s) {
+        document.getElementById('stat-agents').textContent = String(s.agents || 0);
+        document.getElementById('stat-active').textContent = Math.max(0, (s.activeContainers || 0) - (s.idleContainers || 0)) + '/' + (s.maxActive || 0);
+        document.getElementById('stat-idle').textContent = (s.idleContainers || 0) + '/' + (s.maxIdle || 0);
+        document.getElementById('stat-tasks').textContent = String(s.activeTasks || 0);
+      })
+      .catch(function() {});
+  }, 10000);
 
   // ---- Log toolbar: level filters ----
   document.querySelectorAll('.log-toolbar .filter-btn[data-level]').forEach(function(btn) {
@@ -662,12 +661,4 @@ export function renderDashboard(state: WebStateProvider): string {
 </script>
 </body>
 </html>`;
-}
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }

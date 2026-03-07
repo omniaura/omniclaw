@@ -1,12 +1,5 @@
 import type { WebStateProvider } from './types.js';
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
+import { BASE_CSS, renderNav, escapeHtml } from './shared.js';
 
 /**
  * Render the IPC Inspector page.
@@ -72,54 +65,8 @@ export function renderIpcInspector(state: WebStateProvider): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OmniClaw — IPC Inspector</title>
 <style>
-  :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --border: #2a2d3a;
-    --text: #e1e4ed;
-    --text-dim: #8b8fa3;
-    --accent: #6366f1;
-    --green: #22c55e;
-    --yellow: #eab308;
-    --red: #ef4444;
-    --blue: #60a5fa;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.5;
-  }
-  header {
-    padding: 1rem 2rem;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-  header h1 { font-size: 1.25rem; font-weight: 600; }
-  header nav { display: flex; gap: 0.5rem; margin-left: 1rem; }
-  header nav a {
-    color: var(--text-dim);
-    text-decoration: none;
-    font-size: 0.8rem;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    transition: all 0.15s;
-  }
-  header nav a:hover { color: var(--text); background: var(--surface); }
-  header nav a.active { color: var(--accent); background: var(--surface); }
-  header .ws-status {
-    margin-left: auto;
-    font-size: 0.75rem;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    background: var(--surface);
-  }
-  header .ws-status.connected { color: var(--green); }
-  header .ws-status.disconnected { color: var(--red); }
-  main { padding: 1.5rem 2rem; }
+  ${BASE_CSS}
+  main { padding: 1rem 1.5rem; }
 
   /* Stats grid */
   .stats-grid {
@@ -212,15 +159,7 @@ export function renderIpcInspector(state: WebStateProvider): string {
 </style>
 </head>
 <body>
-<header>
-  <h1>OmniClaw</h1>
-  <nav>
-    <a href="/">Dashboard</a>
-    <a href="/conversations">Conversations</a>
-    <a href="/ipc" class="active">IPC</a>
-  </nav>
-  <span id="ws-status" class="ws-status disconnected">disconnected</span>
-</header>
+${renderNav('/ipc')}
 <main>
   <div class="stats-grid">
     <div class="stat-card"><div class="label">Processing</div><div class="value" id="stat-processing">${Math.max(0, stats.activeContainers - stats.idleContainers)}/${stats.maxActive}</div></div>

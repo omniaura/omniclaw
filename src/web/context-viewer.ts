@@ -1,18 +1,42 @@
 import type { WebStateProvider } from './types.js';
+import { BASE_CSS, renderNav } from './shared.js';
 
 /**
  * Render the 4-layer context viewer page.
  * Shows agent->channel hierarchy with editable CLAUDE.md files per context layer.
  * Uses Monaco editor (CDN) for editing with live markdown preview via marked.js.
+ * Sidebar shows human-readable channel names derived from chat names or folder paths.
+ * Selected agent/channel is persisted in the URL (?agent=<id>&channel=<jid>).
  */
 export function renderContextViewer(state: WebStateProvider): string {
   const agents = Object.values(state.getAgents());
   const subs = state.getChannelSubscriptions();
+  const chats = state.getChats();
+
+  // Build JID -> human-readable name map from chat data
+  const chatNameMap: Record<string, string> = {};
+  for (const c of chats) {
+    if (c.name) chatNameMap[c.jid] = c.name;
+  }
+
+  // Derive a display name for a channel JID
+  function channelDisplayName(jid: string, channelFolder?: string): string {
+    // Prefer chat name from message history
+    if (chatNameMap[jid]) return chatNameMap[jid];
+    // Fall back to last segment of channelFolder (e.g. "servers/omni-aura/ditto/spec" -> "#spec")
+    if (channelFolder) {
+      const lastSeg = channelFolder.split('/').pop();
+      if (lastSeg) return '#' + lastSeg;
+    }
+    // Fall back to JID itself
+    return jid;
+  }
 
   // Build agent->channels map for the sidebar
   const agentData = agents.map((a) => {
     const channels: Array<{
       jid: string;
+      displayName: string;
       channelFolder?: string;
       categoryFolder?: string;
     }> = [];
@@ -21,6 +45,7 @@ export function renderContextViewer(state: WebStateProvider): string {
       if (sub) {
         channels.push({
           jid,
+          displayName: channelDisplayName(jid, sub.channelFolder),
           channelFolder: sub.channelFolder,
           categoryFolder: sub.categoryFolder,
         });
@@ -79,7 +104,12 @@ export function renderContextViewer(state: WebStateProvider): string {
               esc(ch.categoryFolder || '') +
               '"' +
               ' onclick="selectChannel(this)">' +
+              '<span class="ch-name">' +
+              esc(ch.displayName) +
+              '</span>' +
+              '<span class="ch-jid">' +
               esc(ch.jid) +
+              '</span>' +
               '</div>',
           )
           .join('') +
@@ -94,15 +124,8 @@ export function renderContextViewer(state: WebStateProvider): string {
 
 function buildPage(sidebarHtml: string): string {
   const css = [
-    ':root{--bg:#0f1117;--surface:#1a1d27;--border:#2a2d3a;--text:#e1e4ed;--text-dim:#8b8fa3;--accent:#6366f1;--green:#22c55e;--yellow:#eab308;--red:#ef4444}',
-    '*{margin:0;padding:0;box-sizing:border-box}',
-    'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;background:var(--bg);color:var(--text);line-height:1.5;height:100vh;overflow:hidden}',
-    'header{padding:.75rem 1.5rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:1rem;flex-shrink:0}',
-    'header h1{font-size:1.25rem;font-weight:600}',
-    'nav{display:flex;gap:.5rem;margin-left:1rem}',
-    'nav a{color:var(--text-dim);text-decoration:none;font-size:.8rem;padding:.25rem .5rem;border-radius:4px;transition:all .15s}',
-    'nav a:hover{color:var(--text);background:var(--surface)}',
-    'nav a.active{color:var(--accent);background:var(--surface)}',
+    BASE_CSS,
+    'body{height:100vh;overflow:hidden;display:flex;flex-direction:column}',
     '.layout{display:flex;height:calc(100vh - 49px);overflow:hidden}',
     '.sidebar{width:280px;min-width:280px;border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}',
     '.sidebar-title{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);padding:.75rem 1rem .25rem;font-weight:600}',
@@ -114,7 +137,9 @@ function buildPage(sidebarHtml: string): string {
     '.agent-header .agent-name{font-size:.85rem;font-weight:500}',
     '.agent-header .channel-count{margin-left:auto;font-size:.65rem;color:var(--text-dim);background:var(--border);padding:0 .35rem;border-radius:8px}',
     '.channel-list{display:none}.channel-list.open{display:block}',
-    '.channel-item{padding:.35rem 1rem .35rem 2rem;font-size:.75rem;color:var(--text-dim);cursor:pointer;transition:all .15s;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.channel-item{padding:.35rem 1rem .35rem 2rem;font-size:.75rem;color:var(--text-dim);cursor:pointer;transition:all .15s;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;flex-direction:column;gap:0}',
+    '.ch-name{font-weight:500;color:var(--text)}',
+    '.ch-jid{font-size:.6rem;color:var(--text-dim);opacity:.7}',
     '.channel-item:hover{color:var(--text);background:rgba(99,102,241,.08)}',
     '.channel-item.active{color:var(--accent);background:rgba(99,102,241,.12)}',
     '.content{flex:1;display:flex;flex-direction:column;overflow:hidden}',
@@ -182,11 +207,7 @@ function buildPage(sidebarHtml: string): string {
     '<style>' +
     css +
     '</style></head><body>' +
-    '<header><h1>OmniClaw</h1><nav>' +
-    '<a href="/">Dashboard</a>' +
-    '<a href="/conversations">Conversations</a>' +
-    '<a href="/context" class="active">Context</a>' +
-    '</nav></header>' +
+    renderNav('/context', { wsStatus: false }) +
     '<div class="layout">' +
     '<aside class="sidebar">' +
     '<div class="sidebar-title">Agents &amp; Channels</div>' +
@@ -205,9 +226,9 @@ function buildPage(sidebarHtml: string): string {
     '</div></div>' +
     '<div class="layer-tabs" id="layer-tabs">' +
     '<div class="layer-tab active" data-layer="channel" onclick="switchLayer(\'channel\')"><span class="dot" id="dot-channel"></span>Channel</div>' +
-    '<div class="layer-tab" data-layer="agent" onclick="switchLayer(\'agent\')"><span class="dot" id="dot-agent"></span>Agent</div>' +
     '<div class="layer-tab" data-layer="category" onclick="switchLayer(\'category\')"><span class="dot" id="dot-category"></span>Category</div>' +
     '<div class="layer-tab" data-layer="server" onclick="switchLayer(\'server\')"><span class="dot" id="dot-server"></span>Server</div>' +
+    '<div class="layer-tab" data-layer="agent" onclick="switchLayer(\'agent\')"><span class="dot" id="dot-agent"></span>Agent</div>' +
     '</div>' +
     '<div class="path-display" id="path-display"></div>' +
     '<div class="editor-area">' +
@@ -266,6 +287,16 @@ function clientScript(): string {
     '  monacoReady=true;',
     '});',
 
+    // Update URL with all state params
+    'function updateUrl(agent,channel){',
+    '  var p=new URLSearchParams(location.search);',
+    '  if(agent!==undefined)p.set("agent",agent);',
+    '  if(channel!==undefined)p.set("channel",channel);',
+    '  if(currentLayer&&currentLayer!=="channel")p.set("layer",currentLayer);else p.delete("layer");',
+    '  if(currentView&&currentView!=="split")p.set("view",currentView);else p.delete("view");',
+    '  history.replaceState(null,"","/context?"+p.toString());',
+    '}',
+
     // Toggle agent group
     'window.toggleAgent=function(el){',
     '  el.querySelector(".chevron").classList.toggle("open");',
@@ -278,10 +309,12 @@ function clientScript(): string {
     '  el.classList.add("active");',
     '  var jid=el.getAttribute("data-jid");',
     '  var agentId=el.getAttribute("data-agent-id");',
-    '  document.getElementById("ctx-title").textContent=agentId;',
-    '  document.getElementById("ctx-subtitle").textContent=jid;',
+    '  var chName=el.querySelector(".ch-name");',
+    '  document.getElementById("ctx-title").textContent=chName?chName.textContent:agentId;',
+    '  document.getElementById("ctx-subtitle").textContent=agentId+" — "+jid;',
     '  document.getElementById("empty-state").style.display="none";',
     '  document.getElementById("editor-view").style.display="flex";',
+    '  updateUrl(agentId,jid);',
     '  var qs="agent_id="+encodeURIComponent(agentId)',
     '    +"&jid="+encodeURIComponent(jid)',
     '    +"&folder="+encodeURIComponent(el.getAttribute("data-folder"))',
@@ -295,7 +328,6 @@ function clientScript(): string {
     '      var dot=document.getElementById("dot-"+l);',
     '      dot.className=layerData[l]&&layerData[l].exists?"dot exists":"dot missing";',
     '    });',
-    '    currentLayer="channel";',
     '    document.querySelectorAll(".layer-tab").forEach(function(t){',
     '      t.classList.toggle("active",t.getAttribute("data-layer")===currentLayer);',
     '    });',
@@ -311,7 +343,7 @@ function clientScript(): string {
     '  document.querySelectorAll(".layer-tab").forEach(function(t){',
     '    t.classList.toggle("active",t.getAttribute("data-layer")===layer);',
     '  });',
-    '  loadLayerContent(layer);',
+    '  loadLayerContent(layer);updateUrl();',
     '};',
 
     // Load layer content into editor
@@ -339,6 +371,7 @@ function clientScript(): string {
     '  ep.classList.toggle("hidden",view==="preview");',
     '  pp.classList.toggle("hidden",view==="editor");',
     '  if(editor)editor.layout();',
+    '  updateUrl();',
     '};',
 
     // Markdown preview using marked.js
@@ -385,14 +418,30 @@ function clientScript(): string {
     '  dirty=false;updateSaveBar();updatePreview(originalContent);',
     '};',
 
+    // Restore selection from URL params on load
+    'var params=new URLSearchParams(location.search);',
+    'var initAgent=params.get("agent"),initChannel=params.get("channel");',
+    'var initLayer=params.get("layer"),initView=params.get("view");',
+    'if(initLayer&&["channel","category","server","agent"].indexOf(initLayer)!==-1)currentLayer=initLayer;',
+    'if(initView&&["split","editor","preview"].indexOf(initView)!==-1){currentView=initView;setView(initView);}',
+    'if(initAgent&&initChannel){',
+    '  var agentGroup=document.querySelector(".agent-group[data-agent-id=\\""+CSS.escape(initAgent)+"\\"]");',
+    '  if(agentGroup){',
+    '    agentGroup.querySelector(".chevron").classList.add("open");',
+    '    agentGroup.querySelector(".channel-list").classList.add("open");',
+    '    var chItem=agentGroup.querySelector(".channel-item[data-jid=\\""+CSS.escape(initChannel)+"\\"]");',
+    '    if(chItem)setTimeout(function(){selectChannel(chItem);},0);',
+    '  }',
+    '}',
+
     '})();',
   ].join('\n');
 }
 
-function esc(str: string): string {
-  return str
+// esc is a local alias for the shared escapeHtml
+const esc = (str: string): string =>
+  str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
-}
