@@ -169,6 +169,32 @@ function url(path: string): string {
   return `http://localhost:${handle!.port}${path}`;
 }
 
+async function readUntilContains(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  needle: string,
+  timeoutMs = 2000,
+): Promise<string> {
+  const decoder = new TextDecoder();
+  const deadline = Date.now() + timeoutMs;
+  let output = '';
+
+  while (Date.now() < deadline) {
+    const remainingMs = Math.max(1, deadline - Date.now());
+    const chunk = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Timed out reading stream')), remainingMs);
+      }),
+    ]);
+
+    if (chunk.done) break;
+    output += decoder.decode(chunk.value, { stream: true });
+    if (output.includes(needle)) return output;
+  }
+
+  throw new Error(`Did not find expected token in stream: ${needle}`);
+}
+
 // ---- Server startup ----
 
 describe('startWebServer', () => {
@@ -668,6 +694,16 @@ describe('method not allowed', () => {
     });
     expect(res.status).toBe(405);
   });
+
+  it('returns 405 for POST on /api/events', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/events'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(405);
+  });
 });
 
 // ---- API: /api/chats ----
@@ -845,6 +881,69 @@ describe('WebSocket', () => {
   });
 });
 
+// ---- SSE ----
+
+describe('SSE', () => {
+  it('connects and receives broadcast events', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+
+    const res = await fetch(url('/api/events?channels=logs'), {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/event-stream');
+    expect(res.body).toBeTruthy();
+
+    const reader = res.body!.getReader();
+    handle.broadcast({
+      type: 'log',
+      data: { level: 'info', msg: 'sse log', ts: Date.now() },
+      timestamp: new Date().toISOString(),
+    });
+
+    const payload = await readUntilContains(reader, '"type":"log"');
+    expect(payload).toContain('sse log');
+    reader.releaseLock();
+  });
+
+  it('only sends events matching subscribed channels', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+
+    const res = await fetch(url('/api/events?channels=stats'), {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toBeTruthy();
+
+    const reader = res.body!.getReader();
+
+    handle.broadcast({
+      type: 'log',
+      data: { level: 'info', msg: 'should not arrive', ts: Date.now() },
+      timestamp: new Date().toISOString(),
+    });
+    handle.broadcast({
+      type: 'agent_status',
+      data: { activeContainers: 2, idleContainers: 1, maxActive: 8, maxIdle: 4 },
+      timestamp: new Date().toISOString(),
+    });
+
+    const payload = await readUntilContains(reader, '"type":"agent_status"');
+    expect(payload).not.toContain('should not arrive');
+    reader.releaseLock();
+  });
+
+  it('rejects SSE when auth is configured and no credentials given', async () => {
+    handle = startWebServer(
+      { port: randomPort(), auth: { username: 'admin', password: 'secret' } },
+      makeState(),
+    );
+
+    const res = await fetch(url('/api/events'));
+    expect(res.status).toBe(401);
+  });
+});
+
 // ---- CORS ----
 
 describe('CORS', () => {
@@ -922,5 +1021,12 @@ describe('dashboard', () => {
     const html = await res.text();
     expect(html).toContain('create-task-modal');
     expect(html).toContain('create-task-form');
+  });
+
+  it('includes SSE fallback endpoint in dashboard script', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/'));
+    const html = await res.text();
+    expect(html).toContain('/api/events?channels=logs,stats');
   });
 });
