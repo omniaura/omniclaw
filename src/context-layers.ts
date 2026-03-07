@@ -43,6 +43,16 @@ export function resolveContextLayers(
     return { serverFolder, categoryFolder, channelFolder };
   }
 
+  const slack = parseScopedSlackJid(input.channelJid);
+  if (slack) {
+    const serverFolder = input.serverFolder || `servers/slack-${slack.botId}`;
+    const categoryFolder = input.categoryFolder || `${serverFolder}/channels`;
+    const channelSegment = slack.channelId.replace(/[^a-zA-Z0-9_-]/g, '-');
+    const channelFolder =
+      input.channelFolder || `${categoryFolder}/${channelSegment}`;
+    return { serverFolder, categoryFolder, channelFolder };
+  }
+
   return {
     serverFolder: input.serverFolder,
     categoryFolder: input.categoryFolder,
@@ -62,4 +72,12 @@ function parseScopedTelegramJid(
   const m = /^tg:([^:]+):(-?\d+)$/.exec(jid);
   if (!m) return null;
   return { botId: m[1], chatId: m[2] };
+}
+
+function parseScopedSlackJid(
+  jid: string,
+): { botId: string; channelId: string } | null {
+  const m = /^slack:([^:]+):([^\s]+)$/.exec(jid);
+  if (!m) return null;
+  return { botId: m[1], channelId: m[2] };
 }

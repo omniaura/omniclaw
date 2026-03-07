@@ -13,13 +13,25 @@ import { splitMessage as splitMessageShared } from './utils.js';
 
 // JID format: "slack:{channelId}" for channels/DMs
 // e.g. "slack:C12345678" for a channel, "slack:D12345678" for a DM
+// Multi-bot format: "slack:{botId}:{channelId}"
+
+export function parseScopedSlackJid(
+  jid: string,
+): { botId: string; channelId: string } | null {
+  const m = /^slack:([^:]+):([^\s]+)$/.exec(jid);
+  if (!m) return null;
+  return { botId: m[1], channelId: m[2] };
+}
 
 export function jidToChannelId(jid: string): string | null {
+  const scoped = parseScopedSlackJid(jid);
+  if (scoped) return scoped.channelId;
   if (!jid.startsWith('slack:')) return null;
   return jid.slice('slack:'.length);
 }
 
-export function channelIdToJid(channelId: string): string {
+export function channelIdToJid(channelId: string, botId?: string): string {
+  if (botId) return `slack:${botId}:${channelId}`;
   return `slack:${channelId}`;
 }
 
@@ -70,8 +82,11 @@ async function resolveMentions(
 }
 
 export interface SlackChannelOpts {
+  botId: string;
   token: string; // Bot token (xoxb-...)
   appToken: string; // App-level token for Socket Mode (xapp-...)
+  multiBotMode?: boolean;
+  allowLegacyJidRouting?: boolean;
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -86,15 +101,21 @@ export interface SlackChannelOpts {
 export class SlackChannel implements Channel {
   name = 'slack';
   prefixAssistantName = true;
+  readonly botId: string;
 
   private app: App;
   private client: WebClient;
   private botUserId: string | null = null;
   private connected = false;
+  private multiBotMode: boolean;
+  private allowLegacyJidRouting: boolean;
   private opts: SlackChannelOpts;
 
   constructor(opts: SlackChannelOpts) {
     this.opts = opts;
+    this.botId = opts.botId;
+    this.multiBotMode = opts.multiBotMode === true;
+    this.allowLegacyJidRouting = opts.allowLegacyJidRouting !== false;
 
     this.app = new App({
       token: opts.token,
@@ -121,7 +142,10 @@ export class SlackChannel implements Channel {
         event.item.type === 'message' ? event.item.channel : null;
       if (!channelId) return;
 
-      const chatJid = channelIdToJid(channelId);
+      const chatJid = channelIdToJid(
+        channelId,
+        this.multiBotMode ? this.botId : undefined,
+      );
       const messageId = event.item.type === 'message' ? event.item.ts : null;
       if (!messageId) return;
 
@@ -160,7 +184,7 @@ export class SlackChannel implements Channel {
     text: string,
     replyToMessageId?: string,
   ): Promise<string | void> {
-    const channelId = jidToChannelId(jid);
+    const channelId = this.extractChannelId(jid);
     if (!channelId) {
       logger.warn({ jid }, 'Invalid Slack JID — cannot send message');
       return;
@@ -211,7 +235,9 @@ export class SlackChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    return jid.startsWith('slack:');
+    const scoped = parseScopedSlackJid(jid);
+    if (scoped) return scoped.botId === this.botId;
+    return this.allowLegacyJidRouting && /^slack:[^:]+$/.test(jid);
   }
 
   async disconnect(): Promise<void> {
@@ -225,7 +251,7 @@ export class SlackChannel implements Channel {
     messageId: string,
     emoji: string,
   ): Promise<void> {
-    const channelId = jidToChannelId(jid);
+    const channelId = this.extractChannelId(jid);
     if (!channelId) return;
     // Strip surrounding colons if passed as :emoji:
     const name = emoji.replace(/^:|:$/g, '');
@@ -248,7 +274,7 @@ export class SlackChannel implements Channel {
     messageId: string,
     emoji: string,
   ): Promise<void> {
-    const channelId = jidToChannelId(jid);
+    const channelId = this.extractChannelId(jid);
     if (!channelId) return;
     const name = emoji.replace(/^:|:$/g, '');
     try {
@@ -274,7 +300,7 @@ export class SlackChannel implements Channel {
     messageId: string,
     _name: string,
   ): Promise<{ channelId: string; ts: string } | null> {
-    const channelId = jidToChannelId(jid);
+    const channelId = this.extractChannelId(jid);
     if (!channelId) return null;
     // In Slack, a thread is created implicitly on first reply — just return the anchor info
     return { channelId, ts: messageId };
@@ -317,7 +343,11 @@ export class SlackChannel implements Channel {
     if (!('text' in event) || !event.text) return;
 
     const channelId = event.channel;
-    const chatJid = channelIdToJid(channelId);
+    const chatJid = channelIdToJid(
+      channelId,
+      this.multiBotMode ? this.botId : undefined,
+    );
+    const legacyChatJid = channelIdToJid(channelId);
     // Slack ts is the unique message timestamp, doubles as message ID
     const msgId = event.ts;
     const timestamp = new Date(parseFloat(event.ts) * 1000).toISOString();
@@ -380,12 +410,18 @@ export class SlackChannel implements Channel {
       // Fall back to channel ID
     }
     this.opts.onChatMetadata(chatJid, timestamp, channelName);
+    if (this.allowLegacyJidRouting) {
+      this.opts.onChatMetadata(legacyChatJid, timestamp, channelName);
+    }
 
     // Only process registered groups
-    const group = this.opts.registeredGroups()[chatJid];
+    const groups = this.opts.registeredGroups();
+    const group =
+      groups[chatJid] ||
+      (this.allowLegacyJidRouting ? groups[legacyChatJid] : undefined);
     if (!group) {
       logger.debug(
-        { chatJid, channelName },
+        { chatJid, legacyChatJid, channelName },
         'Message from unregistered Slack channel — ignoring',
       );
       return;
@@ -408,5 +444,17 @@ export class SlackChannel implements Channel {
       { chatJid, channelName, sender: senderName },
       'Slack message stored',
     );
+  }
+
+  private extractChannelId(jid: string): string | null {
+    const scoped = parseScopedSlackJid(jid);
+    if (scoped) {
+      if (scoped.botId !== this.botId) return null;
+      return scoped.channelId;
+    }
+    if (this.allowLegacyJidRouting && /^slack:[^:]+$/.test(jid)) {
+      return jidToChannelId(jid);
+    }
+    return null;
   }
 }

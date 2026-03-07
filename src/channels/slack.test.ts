@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'bun:test';
 
-import { jidToChannelId, channelIdToJid, SlackChannel } from './slack.js';
+import {
+  jidToChannelId,
+  channelIdToJid,
+  parseScopedSlackJid,
+  SlackChannel,
+} from './slack.js';
 
 // --- jidToChannelId ---
 
@@ -11,6 +16,10 @@ describe('Slack jidToChannelId', () => {
 
   it('extracts DM channel ID from slack: JID', () => {
     expect(jidToChannelId('slack:D98765432')).toBe('D98765432');
+  });
+
+  it('extracts channel ID from scoped slack JID', () => {
+    expect(jidToChannelId('slack:OPS:C12345678')).toBe('C12345678');
   });
 
   it('returns null for non-Slack JIDs', () => {
@@ -46,6 +55,27 @@ describe('Slack channelIdToJid', () => {
   it('handles empty channel ID', () => {
     expect(channelIdToJid('')).toBe('slack:');
   });
+
+  it('creates a scoped slack JID when bot ID is provided', () => {
+    expect(channelIdToJid('C12345678', 'OPS')).toBe('slack:OPS:C12345678');
+  });
+});
+
+describe('parseScopedSlackJid', () => {
+  it('parses scoped Slack JIDs', () => {
+    expect(parseScopedSlackJid('slack:OPS:C12345678')).toEqual({
+      botId: 'OPS',
+      channelId: 'C12345678',
+    });
+  });
+
+  it('returns null for legacy Slack JIDs', () => {
+    expect(parseScopedSlackJid('slack:C12345678')).toBeNull();
+  });
+
+  it('returns null for non-Slack JIDs', () => {
+    expect(parseScopedSlackJid('dc:123')).toBeNull();
+  });
 });
 
 // --- Roundtrip ---
@@ -72,12 +102,27 @@ describe('Slack JID roundtrip', () => {
 // --- SlackChannel.ownsJid ---
 
 describe('SlackChannel.ownsJid', () => {
-  const ownsJid = (jid: string) =>
-    SlackChannel.prototype.ownsJid.call({} as SlackChannel, jid);
+  const ownsJid = (jid: string, botId = 'OPS', allowLegacy = true) =>
+    SlackChannel.prototype.ownsJid.call(
+      { botId, allowLegacyJidRouting: allowLegacy } as SlackChannel,
+      jid,
+    );
 
   it('matches slack: prefixed JIDs', () => {
     expect(ownsJid('slack:C123')).toBe(true);
     expect(ownsJid('slack:D456')).toBe(true);
+  });
+
+  it('matches scoped JIDs for the same bot', () => {
+    expect(ownsJid('slack:OPS:C123', 'OPS')).toBe(true);
+  });
+
+  it('does not match scoped JIDs for a different bot', () => {
+    expect(ownsJid('slack:SUPPORT:C123', 'OPS')).toBe(false);
+  });
+
+  it('can disable legacy JID ownership in multi-bot mode', () => {
+    expect(ownsJid('slack:C123', 'OPS', false)).toBe(false);
   });
 
   it('does not match non-Slack JIDs', () => {

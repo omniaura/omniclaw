@@ -3,6 +3,7 @@ import { describe, it, expect } from 'bun:test';
 import {
   ASSISTANT_NAME,
   buildDiscordBotConfigFromEnv,
+  buildSlackBotConfigFromEnv,
   buildTelegramBotTokensFromEnv,
   escapeRegex,
   buildTriggerPattern,
@@ -187,6 +188,53 @@ describe('buildTelegramBotTokensFromEnv', () => {
     });
 
     expect(tokens).toEqual(['token-a', 'token-b']);
+  });
+});
+
+describe('buildSlackBotConfigFromEnv', () => {
+  it('parses prefixed Slack bot config with default ID', () => {
+    const parsed = buildSlackBotConfigFromEnv({
+      SLACK_BOT_IDS: 'OPS,SUPPORT',
+      SLACK_BOT_OPS_TOKEN: 'xoxb-ops',
+      SLACK_BOT_OPS_APP_TOKEN: 'xapp-ops',
+      SLACK_BOT_SUPPORT_TOKEN: 'xoxb-support',
+      SLACK_BOT_SUPPORT_APP_TOKEN: 'xapp-support',
+      SLACK_BOT_DEFAULT: 'SUPPORT',
+    });
+
+    expect(parsed.bots).toEqual([
+      { id: 'OPS', token: 'xoxb-ops', appToken: 'xapp-ops' },
+      {
+        id: 'SUPPORT',
+        token: 'xoxb-support',
+        appToken: 'xapp-support',
+      },
+    ]);
+    expect(parsed.defaultBotId).toBe('SUPPORT');
+  });
+
+  it('falls back default ID to first configured Slack bot', () => {
+    const parsed = buildSlackBotConfigFromEnv({
+      SLACK_BOT_IDS: 'OPS,SUPPORT',
+      SLACK_BOT_OPS_TOKEN: 'xoxb-ops',
+      SLACK_BOT_OPS_APP_TOKEN: 'xapp-ops',
+      SLACK_BOT_SUPPORT_TOKEN: 'xoxb-support',
+      SLACK_BOT_SUPPORT_APP_TOKEN: 'xapp-support',
+    });
+
+    expect(parsed.defaultBotId).toBe('OPS');
+  });
+
+  it('supports legacy SLACK_BOT_TOKEN + SLACK_APP_TOKEN', () => {
+    const parsed = buildSlackBotConfigFromEnv({
+      SLACK_BOT_TOKEN: 'xoxb-legacy',
+      SLACK_APP_TOKEN: 'xapp-legacy',
+    });
+
+    expect(parsed.bots).toEqual([
+      { id: 'PRIMARY', token: 'xoxb-legacy', appToken: 'xapp-legacy' },
+    ]);
+    expect(parsed.defaultBotId).toBe('PRIMARY');
   });
 });
 

@@ -24,8 +24,7 @@ import {
   POLL_INTERVAL,
   ROSTER_REFRESH_INTERVAL,
   SESSION_MAX_AGE,
-  SLACK_APP_TOKEN,
-  SLACK_BOT_TOKEN,
+  SLACK_BOTS,
   TELEGRAM_BOT_TOKENS,
   TRIGGER_PATTERN,
   WEB_UI_PORT,
@@ -355,9 +354,22 @@ function parseScopedTelegramJid(
   return { botId: m[1], chatId: m[2] };
 }
 
+function parseScopedSlackJid(
+  jid: string,
+): { botId: string; channelId: string } | null {
+  const m = /^slack:([^:]+):([^\s]+)$/.exec(jid);
+  if (!m) return null;
+  return { botId: m[1], channelId: m[2] };
+}
+
 function toLegacyTelegramJid(jid: string): string | undefined {
   const parsed = parseScopedTelegramJid(jid);
   return parsed ? `tg:${parsed.chatId}` : undefined;
+}
+
+function toLegacySlackJid(jid: string): string | undefined {
+  const parsed = parseScopedSlackJid(jid);
+  return parsed ? `slack:${parsed.channelId}` : undefined;
 }
 
 function getRegisteredGroupForJid(jid: string): RegisteredGroup | undefined {
@@ -365,6 +377,8 @@ function getRegisteredGroupForJid(jid: string): RegisteredGroup | undefined {
   if (exact) return exact;
   const legacyTelegramJid = toLegacyTelegramJid(jid);
   if (legacyTelegramJid) return registeredGroups[legacyTelegramJid];
+  const legacySlackJid = toLegacySlackJid(jid);
+  if (legacySlackJid) return registeredGroups[legacySlackJid];
   return undefined;
 }
 
@@ -375,6 +389,8 @@ function getPreferredChannelBotId(
   if (jid.startsWith('dc:')) return discordBotId || getDiscordBotIdForJid(jid);
   const scopedTelegram = parseScopedTelegramJid(jid);
   if (scopedTelegram) return scopedTelegram.botId;
+  const scopedSlack = parseScopedSlackJid(jid);
+  if (scopedSlack) return scopedSlack.botId;
   return undefined;
 }
 
@@ -387,6 +403,13 @@ function findChannelForJid(
       (c) => c.name === 'telegram' && c.botId === preferredBotId,
     );
     if (preferredTelegram) return preferredTelegram;
+  }
+
+  if (jid.startsWith('slack:') && preferredBotId) {
+    const preferredSlack = channels.find(
+      (c) => c.name === 'slack' && c.botId === preferredBotId,
+    );
+    if (preferredSlack) return preferredSlack;
   }
 
   if (!jid.startsWith('dc:')) return findChannel(channels, jid);
@@ -2607,6 +2630,56 @@ async function main(): Promise<void> {
         )
       : Effect.succeed([] as TelegramChannel[]);
 
+  const connectSlack =
+    SLACK_BOTS.length > 0
+      ? Effect.forEach(
+          SLACK_BOTS,
+          (bot, idx) =>
+            Effect.gen(function* () {
+              const slack = new SlackChannel({
+                botId: bot.id,
+                token: bot.token,
+                appToken: bot.appToken,
+                multiBotMode: SLACK_BOTS.length > 1,
+                allowLegacyJidRouting: SLACK_BOTS.length <= 1,
+                onMessage: (chatJid, msg) => storeMessage(msg),
+                onChatMetadata: (chatJid, timestamp, name) =>
+                  storeChatMetadata(chatJid, timestamp, name),
+                registeredGroups: () => registeredGroups,
+                onReaction: async (chatJid, messageId, emoji, userName) => {
+                  await handleReactionNotification(
+                    chatJid,
+                    messageId,
+                    emoji,
+                    userName,
+                    'Slack',
+                  );
+                },
+              });
+              yield* Effect.tryPromise(() => slack.connect());
+              return slack;
+            }).pipe(
+              Effect.catchAll((err) => {
+                logger.error(
+                  {
+                    err,
+                    index: idx + 1,
+                    total: SLACK_BOTS.length,
+                    botId: bot.id,
+                  },
+                  'Failed to connect Slack bot (continuing with remaining Slack bots)',
+                );
+                return Effect.succeed(null);
+              }),
+            ),
+          { concurrency: 'unbounded' },
+        ).pipe(
+          Effect.map((connected) =>
+            connected.filter((ch): ch is SlackChannel => ch !== null),
+          ),
+        )
+      : Effect.succeed([] as SlackChannel[]);
+
   // Start message loop BEFORE connecting channels — the loop polls the DB
   // and spawns containers, which only needs backends (initialized above).
   // Channel connections can take 30s+ (WhatsApp TLS handshake, Discord gateway)
@@ -2622,11 +2695,15 @@ async function main(): Promise<void> {
   // Channels are only needed for sending responses and typing indicators;
   // the message loop reads from the DB and works without them.
   const connectChannels = async () => {
-    const [wa, discordChannels, telegramChannels] = await Effect.runPromise(
-      Effect.all([connectWhatsApp, connectDiscord, connectTelegram], {
-        concurrency: 'unbounded',
-      }),
-    );
+    const [wa, discordChannels, telegramChannels, slackChannels] =
+      await Effect.runPromise(
+        Effect.all(
+          [connectWhatsApp, connectDiscord, connectTelegram, connectSlack],
+          {
+            concurrency: 'unbounded',
+          },
+        ),
+      );
 
     whatsapp = wa;
     if (whatsapp) channels.push(whatsapp);
@@ -2649,36 +2726,7 @@ async function main(): Promise<void> {
       }, ROSTER_REFRESH_INTERVAL);
     }
     channels.push(...telegramChannels);
-
-    // Conditionally connect Slack (requires both bot token and app-level socket-mode token)
-    if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
-      try {
-        const slack = new SlackChannel({
-          token: SLACK_BOT_TOKEN,
-          appToken: SLACK_APP_TOKEN,
-          onMessage: (chatJid, msg) => storeMessage(msg),
-          onChatMetadata: (chatJid, timestamp, name) =>
-            storeChatMetadata(chatJid, timestamp, name),
-          registeredGroups: () => registeredGroups,
-          onReaction: async (chatJid, messageId, emoji, userName) => {
-            await handleReactionNotification(
-              chatJid,
-              messageId,
-              emoji,
-              userName,
-              'Slack',
-            );
-          },
-        });
-        await slack.connect();
-        channels.push(slack);
-      } catch (err) {
-        logger.error(
-          { err },
-          'Failed to connect Slack bot (continuing without Slack)',
-        );
-      }
-    }
+    channels.push(...slackChannels);
 
     logger.info(
       {
