@@ -962,7 +962,7 @@ describe('dashboard', () => {
     const res = await fetch(url('/'));
     const html = await res.text();
     expect(html).toContain('btn-create-task');
-    expect(html).toContain('+ New');
+    expect(html).toContain('+ new');
   });
 
   it('includes task action buttons', async () => {
@@ -985,7 +985,7 @@ describe('dashboard', () => {
     handle = startWebServer({ port: randomPort() }, makeState());
     const res = await fetch(url('/'));
     const html = await res.text();
-    expect(html).toContain('/api/events?channels=logs,stats,tasks,agents');
+    expect(html).toContain('/api/events?channels=logs,stats,agents,tasks');
     expect(html).toContain('bundles/datastar.js');
   });
 });

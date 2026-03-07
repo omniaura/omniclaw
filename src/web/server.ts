@@ -3,8 +3,12 @@ import { ServerSentEventGenerator } from '@starfederation/datastar-sdk/web';
 import { logger } from '../logger.js';
 import { handleRequest } from './routes.js';
 import type { ScheduledTask } from '../types.js';
-import { escapeHtml } from './shared.js';
+import { escapeHtml, renderNavLinks } from './shared.js';
 import type { WebServerConfig, WebStateProvider, WsEvent } from './types.js';
+import { renderDashboardContent } from './dashboard.js';
+import { renderConversationsContent } from './conversations.js';
+import { renderContextViewerContent } from './context-viewer.js';
+import { renderIpcInspectorContent } from './ipc-inspector.js';
 
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
@@ -127,6 +131,68 @@ export function startWebServer(
             onAbort: cleanup,
             responseInit,
           },
+        );
+      }
+
+      // --- SPA page navigation via SSE ---
+      if (url.pathname.startsWith('/api/page/')) {
+        const pageName = url.pathname.slice('/api/page/'.length);
+        const pageRenderers: Record<
+          string,
+          { path: string; title: string; render: () => string }
+        > = {
+          dashboard: {
+            path: '/',
+            title: 'Dashboard',
+            render: () => renderDashboardContent(state),
+          },
+          conversations: {
+            path: '/conversations',
+            title: 'Conversations',
+            render: () => renderConversationsContent(state),
+          },
+          context: {
+            path: '/context',
+            title: 'Context',
+            render: () => renderContextViewerContent(state),
+          },
+          ipc: {
+            path: '/ipc',
+            title: 'IPC Inspector',
+            render: () => renderIpcInspectorContent(state),
+          },
+        };
+
+        const page = pageRenderers[pageName];
+        if (!page) {
+          return new Response(JSON.stringify({ error: 'Unknown page' }), {
+            status: 404,
+            headers: {
+              'Content-Type': 'application/json',
+              ...corsHeaders(),
+            },
+          });
+        }
+
+        const sseInit = {
+          headers: {
+            ...corsHeaders(),
+            'Cache-Control': 'no-cache, no-transform',
+          },
+        };
+
+        return ServerSentEventGenerator.stream(
+          (stream) => {
+            stream.patchElements(page.render(), {
+              selector: '#content',
+              mode: 'inner',
+            });
+            stream.patchElements(renderNavLinks(page.path), {
+              selector: '#nav-links',
+              mode: 'inner',
+            });
+          },
+          { keepalive: false, responseInit: sseInit },
         );
       }
 
