@@ -52,6 +52,12 @@ export interface WebStateProvider {
     scheduleType: 'cron' | 'interval' | 'once',
     scheduleValue: string,
   ): string | null;
+
+  // ---- Context file operations ----
+  /** Read a context file (CLAUDE.md) for a given layer path. Returns null if not found. */
+  readContextFile(layerPath: string): string | null;
+  /** Write a context file (CLAUDE.md) for a given layer path. Creates directories as needed. */
+  writeContextFile(layerPath: string, content: string): void;
 }
 
 export interface QueueStats {

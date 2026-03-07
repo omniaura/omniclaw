@@ -1,6 +1,7 @@
 import type { ScheduledTask } from '../types.js';
 import type { WebStateProvider } from './types.js';
 import { renderConversations } from './conversations.js';
+import { renderContextViewer } from './context-viewer.js';
 import { renderDashboard } from './dashboard.js';
 import { renderIpcInspector } from './ipc-inspector.js';
 
@@ -39,6 +40,14 @@ export function handleRequest(
     return json({ error: 'Method not allowed' }, 405);
   }
 
+  // Context file operations
+  if (pathname === '/api/context/layers')
+    return handleGetContextLayers(url, state);
+  if (pathname === '/api/context/file') {
+    if (method === 'PUT') return handleWriteContextFile(req, state);
+    return json({ error: 'Method not allowed' }, 405);
+  }
+
   if (pathname === '/api/chats') return handleGetChats(state);
   if (pathname.startsWith('/api/messages/'))
     return handleGetMessages(url, state);
@@ -57,6 +66,12 @@ export function handleRequest(
   // --- Conversations viewer ---
   if (pathname === '/conversations')
     return new Response(renderConversations(state), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+
+  // --- Context viewer ---
+  if (pathname === '/context')
+    return new Response(renderContextViewer(state), {
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
 
@@ -384,6 +399,93 @@ function handleGetStats(state: WebStateProvider): Response {
     completedTasks,
     ...stats,
   });
+}
+
+// ---- Context handlers ----
+
+function handleGetContextLayers(url: URL, state: WebStateProvider): Response {
+  const folder = url.searchParams.get('folder') || '';
+  const serverFolder = url.searchParams.get('server_folder') || '';
+  const agentContextFolder = url.searchParams.get('agent_context_folder') || '';
+  const channelFolder = url.searchParams.get('channel_folder') || '';
+  const categoryFolder = url.searchParams.get('category_folder') || '';
+
+  // Resolve the 4 layer paths (relative to GROUPS_DIR)
+  const channelPath = channelFolder || folder;
+  const agentPath = agentContextFolder || null;
+  const categoryPath = categoryFolder || null;
+  const serverPath = serverFolder || null;
+
+  const layers: Record<
+    string,
+    { path: string | null; content: string | null; exists: boolean }
+  > = {
+    channel: {
+      path: channelPath || null,
+      content: channelPath ? state.readContextFile(channelPath) : null,
+      exists: channelPath ? state.readContextFile(channelPath) !== null : false,
+    },
+    agent: {
+      path: agentPath,
+      content: agentPath ? state.readContextFile(agentPath) : null,
+      exists: agentPath ? state.readContextFile(agentPath) !== null : false,
+    },
+    category: {
+      path: categoryPath,
+      content: categoryPath ? state.readContextFile(categoryPath) : null,
+      exists: categoryPath
+        ? state.readContextFile(categoryPath) !== null
+        : false,
+    },
+    server: {
+      path: serverPath,
+      content: serverPath ? state.readContextFile(serverPath) : null,
+      exists: serverPath ? state.readContextFile(serverPath) !== null : false,
+    },
+  };
+
+  return json(layers);
+}
+
+async function handleWriteContextFile(
+  req: Request,
+  state: WebStateProvider,
+): Promise<Response> {
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { path: layerPath, content } = body;
+  if (!layerPath || typeof layerPath !== 'string') {
+    return json({ error: 'Missing or invalid "path" (string required)' }, 400);
+  }
+  if (typeof content !== 'string') {
+    return json(
+      { error: 'Missing or invalid "content" (string required)' },
+      400,
+    );
+  }
+
+  // Reject path traversal
+  if (layerPath.includes('..') || layerPath.startsWith('/')) {
+    return json({ error: 'Invalid path: must be relative, no ".."' }, 400);
+  }
+
+  try {
+    state.writeContextFile(layerPath, content);
+  } catch (err) {
+    return json(
+      {
+        error: `Failed to write: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      500,
+    );
+  }
+
+  return json({ ok: true });
 }
 
 function handleGetQueueDetails(state: WebStateProvider): Response {

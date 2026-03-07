@@ -2091,6 +2091,24 @@ async function main(): Promise<void> {
         updateTask: (id, updates) => dbUpdateTask(id, updates),
         deleteTask: (id) => dbDeleteTask(id),
         calculateNextRun: (type, value) => calculateNextRun(type, value),
+        readContextFile: (layerPath) => {
+          const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
+          const resolved = path.resolve(filePath);
+          try {
+            assertPathWithin(resolved, GROUPS_DIR, 'readContextFile');
+            return fs.readFileSync(resolved, 'utf-8');
+          } catch {
+            return null;
+          }
+        },
+        writeContextFile: (layerPath, content) => {
+          const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
+          const resolved = path.resolve(filePath);
+          assertPathWithin(resolved, GROUPS_DIR, 'writeContextFile');
+          const dir = path.dirname(resolved);
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(resolved, content, 'utf-8');
+        },
       },
     );
     stopLogStream = startLogStream(webServer);
