@@ -297,9 +297,9 @@ export function renderDashboard(state: WebStateProvider): string {
     .stats-grid { grid-template-columns: 1fr; }
   }
 </style>
-<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/[email protected]/bundles/datastar.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"></script>
 </head>
-<body data-on:load="@get('/api/events?channels=logs,stats,tasks,agents')">
+<body data-init="@get('/api/events?channels=logs,stats,tasks,agents')">
 ${renderNav('/')}
 <main>
   <div class="stats-grid">
