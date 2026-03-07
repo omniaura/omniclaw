@@ -263,7 +263,10 @@ DISCORD_BOT_DEFAULT=CLAUDE
 DISCORD_BOT_IDS=CODEX
 DISCORD_BOT_CODEX_TOKEN=discord_token_c
 DISCORD_BOT_CODEX_RUNTIME=codex
-CODEX_API_KEY=your_openai_api_key
+
+# Either host Codex CLI login OR API-key auth works
+OPENAI_API_KEY=your_openai_api_key
+# CODEX_API_KEY also supported as an alias
 CODEX_MODEL=gpt-5.3-codex
 ```
 
@@ -296,14 +299,26 @@ CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
 ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-Only auth variables are extracted to `data/env/env` and mounted into containers at `/workspace/env-dir/env`. Other `.env` variables are not exposed to agents.
+Only auth and selected runtime variables are extracted to `data/env/env` and mounted into containers at `/workspace/env-dir/env`. Other `.env` variables are not exposed to agents.
 
 ### Codex CLI Authentication
 
 For agents using the `codex` runtime:
 
+**Option 1: Sign in with ChatGPT on the host (recommended for Plus/Pro subscription use)**
+
+Run `codex login` on the host once. OmniClaw copies `~/.codex/auth.json`
+into an isolated per-runtime Codex home and mounts it at `/home/bun/.codex`
+inside the container. The container keeps its own session/sqlite state there,
+so host `~/.codex` is not bind-mounted directly.
+
+**Option 2: API key**
+
 ```bash
-# Codex API key (required for codex runtime)
+# Preferred API key env var
+OPENAI_API_KEY=your_openai_api_key
+
+# Backward-compatible alias
 CODEX_API_KEY=your_openai_api_key
 
 # Optional: Override the default model

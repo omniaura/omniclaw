@@ -8,7 +8,8 @@
  * Follows the same IPC protocol (stdin JSON → stdout markers → IPC polling).
  *
  * Codex CLI manages its own tool execution (bash, file ops, etc.) natively.
- * Auth: Uses CODEX_API_KEY env var (injected via container secrets).
+ * Auth: Supports host-copied Codex login state (~/.codex/auth.json) and
+ * OPENAI_API_KEY / CODEX_API_KEY env vars.
  */
 
 import fs from 'fs';
@@ -190,7 +191,37 @@ interface CodexJsonEvent {
   type: string;
   message?: { content?: string; role?: string };
   content?: string;
+  item?: {
+    type?: string;
+    text?: string;
+    content?: unknown;
+  };
   [key: string]: unknown;
+}
+
+function extractTextFromCodexContent(content: unknown): string | null {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return null;
+  }
+
+  const textParts = content
+    .map((part) => {
+      if (!part || typeof part !== 'object') return null;
+      const typedPart = part as { type?: string; text?: string };
+      if (
+        (typedPart.type === 'output_text' || typedPart.type === 'text') &&
+        typeof typedPart.text === 'string'
+      ) {
+        return typedPart.text;
+      }
+      return null;
+    })
+    .filter((part): part is string => Boolean(part));
+
+  return textParts.length > 0 ? textParts.join('\n') : null;
 }
 
 /**
@@ -215,6 +246,18 @@ export function extractLastJsonEventText(jsonlOutput: string): string | null {
         lastText = event.message.content;
       } else if (event.content && typeof event.content === 'string') {
         lastText = event.content;
+      } else if (
+        event.item?.type &&
+        ['message', 'assistant_message', 'agent_message'].includes(
+          event.item.type,
+        )
+      ) {
+        if (typeof event.item.text === 'string' && event.item.text.trim()) {
+          lastText = event.item.text;
+        } else {
+          const itemText = extractTextFromCodexContent(event.item.content);
+          if (itemText) lastText = itemText;
+        }
       }
     } catch {
       // Not JSON — ignore (could be progress text)
@@ -230,9 +273,9 @@ export function extractLastJsonEventText(jsonlOutput: string): string | null {
 /**
  * Build environment for Codex subprocess.
  * Strips secrets that Codex shouldn't leak to bash subprocesses, but preserves
- * CODEX_API_KEY which Codex needs for authentication.
+ * the Codex auth env vars when present.
  */
-function buildCodexEnv(
+export function buildCodexEnv(
   containerInput: ContainerInput,
 ): Record<string, string | undefined> {
   const SECRET_PREFIXES = [
@@ -252,16 +295,58 @@ function buildCodexEnv(
     }
   }
 
-  // Inject CODEX_API_KEY from container secrets if provided
+  // Inject auth from container secrets if provided
   const secrets = containerInput.secrets || {};
   if (secrets.CODEX_API_KEY) {
     env.CODEX_API_KEY = secrets.CODEX_API_KEY;
-  } else if (secrets.OPENAI_API_KEY) {
-    // Fallback: Codex CLI also reads OPENAI_API_KEY
-    env.CODEX_API_KEY = secrets.OPENAI_API_KEY;
+  }
+  if (secrets.OPENAI_API_KEY) {
+    env.OPENAI_API_KEY = secrets.OPENAI_API_KEY;
+  }
+
+  const apiKey = env.OPENAI_API_KEY || env.CODEX_API_KEY;
+  if (apiKey) {
+    if (!env.OPENAI_API_KEY) env.OPENAI_API_KEY = apiKey;
+    if (!env.CODEX_API_KEY) env.CODEX_API_KEY = apiKey;
   }
 
   return env;
+}
+
+export function buildCodexArgs(
+  prompt: string,
+  opts: {
+    resume: boolean;
+    model?: string;
+    outputPath: string;
+  },
+): string[] {
+  const args: string[] = [
+    'exec',
+    '--skip-git-repo-check',
+    '--sandbox',
+    'workspace-write',
+    '--ask-for-approval',
+    'never',
+    '--output-last-message',
+    opts.outputPath,
+    '--json',
+  ];
+
+  if (opts.model) {
+    args.push('--model', opts.model);
+  }
+
+  if (opts.resume) {
+    args.push('resume', '--last');
+  }
+
+  args.push(prompt);
+  return args;
+}
+
+function hasCodexStoredAuth(codexHome = '/home/bun/.codex'): boolean {
+  return fs.existsSync(path.join(codexHome, 'auth.json'));
 }
 
 /**
@@ -279,29 +364,7 @@ async function runCodexExec(
     outputPath: string;
   },
 ): Promise<{ text: string | null; timedOut: boolean }> {
-  const args: string[] = ['exec'];
-
-  if (opts.resume) {
-    args.push('resume', '--last');
-  }
-
-  args.push(
-    '--skip-git-repo-check',
-    '--sandbox',
-    'workspace-write',
-    '--ask-for-approval',
-    'never',
-    '--output-last-message',
-    opts.outputPath,
-    '--json',
-  );
-
-  if (opts.model) {
-    args.push('--model', opts.model);
-  }
-
-  // Prompt goes last
-  args.push(prompt);
+  const args = buildCodexArgs(prompt, opts);
 
   log(`Spawning: codex ${args.slice(0, 5).join(' ')}... (${prompt.length} chars)`);
 
@@ -463,9 +526,14 @@ export async function runCodexRuntime(
   // Build env for Codex subprocess
   const codexEnv = buildCodexEnv(containerInput);
 
-  // Check for CODEX_API_KEY
-  if (!codexEnv.CODEX_API_KEY) {
-    log('Warning: No CODEX_API_KEY found — Codex may use saved CLI auth');
+  const hasApiKey = Boolean(codexEnv.CODEX_API_KEY || codexEnv.OPENAI_API_KEY);
+  const hasStoredAuth = hasCodexStoredAuth();
+  if (!hasApiKey && !hasStoredAuth) {
+    log(
+      'Warning: No Codex auth found — set OPENAI_API_KEY/CODEX_API_KEY or mount /home/bun/.codex/auth.json',
+    );
+  } else if (!hasApiKey && hasStoredAuth) {
+    log('Using saved Codex CLI login from /home/bun/.codex/auth.json');
   }
 
   // Model override

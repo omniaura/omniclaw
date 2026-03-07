@@ -91,10 +91,18 @@ Only these environment variables are exposed to containers:
 const allowedVars = [
   'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_API_KEY',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_MODEL',
   'GITHUB_TOKEN',
   'GIT_AUTHOR_NAME',
   'GIT_AUTHOR_EMAIL',
   'CLAUDE_MODEL',
+  'OPENCODE_MODEL',
+  'OPENCODE_PROVIDER',
+  'OPENCODE_MODEL_ID',
+  'OPENAI_API_KEY',
+  'CODEX_API_KEY',
+  'CODEX_MODEL',
 ];
 ```
 

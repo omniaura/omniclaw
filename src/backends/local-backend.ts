@@ -30,10 +30,12 @@ import { StreamParser } from './stream-parser.js';
 import {
   AgentBackend,
   AgentOrGroup,
+  type AgentRuntime,
   ChannelInfo,
   ContainerInput,
   ContainerOutput,
   VolumeMount,
+  getAgentRuntime,
   getContainerConfig,
   getFolder,
   getName,
@@ -121,11 +123,32 @@ function syncAgentRunnerSource(
   return true;
 }
 
-function buildVolumeMounts(
+function syncOptionalFiles(
+  sourceDir: string,
+  targetDir: string,
+  filenames: readonly string[],
+): void {
+  for (const filename of filenames) {
+    const sourcePath = path.join(sourceDir, filename);
+    const targetPath = path.join(targetDir, filename);
+    if (fs.existsSync(sourcePath)) {
+      fs.copyFileSync(sourcePath, targetPath);
+    } else {
+      try {
+        fs.unlinkSync(targetPath);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+export function buildVolumeMounts(
   group: AgentOrGroup,
   isMain: boolean,
   isScheduledTask: boolean = false,
   runtimeFolder?: string,
+  agentRuntime?: AgentRuntime,
   contextFolders?: {
     channelFolder?: string;
     categoryFolder?: string;
@@ -295,15 +318,36 @@ function buildVolumeMounts(
       'opencode-data directory',
     );
     fs.mkdirSync(containerOcDir, { recursive: true });
-    for (const authFile of ['auth.json', 'mcp-auth.json']) {
-      const src = path.join(hostOpenCodeDir, authFile);
-      if (fs.existsSync(src)) {
-        fs.copyFileSync(src, path.join(containerOcDir, authFile));
-      }
-    }
+    syncOptionalFiles(hostOpenCodeDir, containerOcDir, [
+      'auth.json',
+      'mcp-auth.json',
+    ]);
     mounts.push({
       hostPath: containerOcDir,
       containerPath: '/home/bun/.local/share/opencode',
+      readonly: false,
+    });
+  }
+
+  if (agentRuntime === 'codex') {
+    // Optional shared Codex login seed from the host.
+    // We copy auth/config into a per-group isolated ~/.codex directory so the
+    // container can inherit ChatGPT/API-key login without sharing host session
+    // databases, history, or worktrees across agents.
+    const hostCodexDir = path.join(homeDir, '.codex');
+    const codexDataBase = path.join(DATA_DIR, 'codex-data');
+    const containerCodexDir = path.join(codexDataBase, runtimeFolderName);
+    assertPathWithin(containerCodexDir, codexDataBase, 'codex-data directory');
+    fs.mkdirSync(containerCodexDir, { recursive: true });
+    if (fs.existsSync(hostCodexDir)) {
+      syncOptionalFiles(hostCodexDir, containerCodexDir, [
+        'auth.json',
+        'config.toml',
+      ]);
+    }
+    mounts.push({
+      hostPath: containerCodexDir,
+      containerPath: '/home/bun/.codex',
       readonly: false,
     });
   }
@@ -345,6 +389,9 @@ function buildVolumeMounts(
       'OPENCODE_MODEL',
       'OPENCODE_PROVIDER',
       'OPENCODE_MODEL_ID',
+      'OPENAI_API_KEY',
+      'CODEX_API_KEY',
+      'CODEX_MODEL',
     ];
     const filteredLines = envContent.split('\n').filter((line) => {
       const trimmed = line.trim();
@@ -509,6 +556,7 @@ export class LocalBackend implements AgentBackend {
       input.isMain,
       input.isScheduledTask,
       runtimeFolder,
+      input.agentRuntime || getAgentRuntime(group),
       {
         channelFolder: input.channelFolder,
         categoryFolder: input.categoryFolder,

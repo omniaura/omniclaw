@@ -1,8 +1,8 @@
 import { describe, it, expect, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { LocalBackend } from './local-backend.js';
-import { DATA_DIR } from '../config.js';
+import { buildVolumeMounts, LocalBackend } from './local-backend.js';
+import { DATA_DIR, GROUPS_DIR } from '../config.js';
 
 /**
  * Tests for LocalBackend's public API surface.
@@ -18,6 +18,12 @@ import { DATA_DIR } from '../config.js';
  */
 
 describe('LocalBackend', () => {
+  const originalHome = process.env.HOME;
+
+  afterAll(() => {
+    process.env.HOME = originalHome;
+  });
+
   describe('name property', () => {
     it('is a string', () => {
       const backend = new LocalBackend();
@@ -101,6 +107,69 @@ describe('LocalBackend', () => {
         'nonexistent.txt',
       );
       expect(result).toBeNull();
+    });
+  });
+
+  describe('buildVolumeMounts', () => {
+    const runtimeFolder = '__test_codex_mount_runtime__';
+    const groupFolder = '__test_codex_mount_group__';
+    const tempHome = path.join(DATA_DIR, 'tmp-home-codex-mount');
+    const hostCodexDir = path.join(tempHome, '.codex');
+    const codexDataDir = path.join(DATA_DIR, 'codex-data', runtimeFolder);
+    const groupDir = path.join(GROUPS_DIR, groupFolder);
+
+    afterAll(() => {
+      process.env.HOME = originalHome;
+      fs.rmSync(tempHome, { recursive: true, force: true });
+      fs.rmSync(codexDataDir, { recursive: true, force: true });
+      fs.rmSync(groupDir, { recursive: true, force: true });
+    });
+
+    it('creates an isolated codex state mount seeded from host auth files', () => {
+      fs.mkdirSync(hostCodexDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(hostCodexDir, 'auth.json'),
+        '{"auth_mode":"chatgpt"}\n',
+      );
+      fs.writeFileSync(path.join(hostCodexDir, 'config.toml'), 'model = "gpt-5"\n');
+      fs.writeFileSync(path.join(hostCodexDir, 'history.jsonl'), 'sensitive\n');
+      process.env.HOME = tempHome;
+
+      const mounts = buildVolumeMounts(
+        { folder: groupFolder, name: 'Codex Test' } as any,
+        false,
+        false,
+        runtimeFolder,
+        'codex',
+      );
+
+      expect(
+        mounts.some(
+          (mount) =>
+            mount.containerPath === '/home/bun/.codex' && !mount.readonly,
+        ),
+      ).toBe(true);
+      expect(fs.existsSync(path.join(codexDataDir, 'auth.json'))).toBe(true);
+      expect(fs.existsSync(path.join(codexDataDir, 'config.toml'))).toBe(true);
+      expect(fs.existsSync(path.join(codexDataDir, 'history.jsonl'))).toBe(
+        false,
+      );
+    });
+
+    it('does not mount codex state for non-codex runtimes', () => {
+      process.env.HOME = tempHome;
+
+      const mounts = buildVolumeMounts(
+        { folder: groupFolder, name: 'Claude Test' } as any,
+        false,
+        false,
+        `${runtimeFolder}-claude`,
+        'claude-agent-sdk',
+      );
+
+      expect(
+        mounts.some((mount) => mount.containerPath === '/home/bun/.codex'),
+      ).toBe(false);
     });
   });
 });

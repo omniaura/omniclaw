@@ -92,6 +92,11 @@ RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash \
     && cp /root/.opencode/bin/opencode /usr/local/bin/opencode \
     && chmod +x /usr/local/bin/opencode
 
+# Install Codex CLI (alternative agent runtime)
+# Pin version to avoid silent CLI contract changes breaking the container runtime.
+ARG CODEX_VERSION=0.111.0
+RUN npm install -g "@openai/codex@${CODEX_VERSION}"
+
 # Create app directory
 WORKDIR /app
 
