@@ -173,6 +173,12 @@ Run `./.claude/skills/setup/scripts/08-setup-service.sh` and parse.
 
 **If SERVICE_LOADED=false:** Check `logs/setup.log`. Common fix: old plist loaded. Unload it, re-run. If crashing: check `logs/omniclaw.error.log` for crash reason (wrong Node path, missing .env, missing auth). On Linux: `systemctl --user status omniclaw`.
 
+**Linux — if LINGER_ENABLED=false:** The service will stop when the user logs out (e.g. SSH disconnects). Fix with:
+```bash
+loginctl enable-linger $(whoami)
+```
+This may require sudo on some distributions. Without linger, systemd tears down all user services when the last login session ends.
+
 ## 10b. Auto-Updates (Optional)
 
 AskUserQuestion: Do you want OmniClaw to automatically update itself nightly?

@@ -1,166 +1,82 @@
-# OmniClaw Auto-Update Guide
-
-This document describes how to update OmniClaw instances to pick up the latest code and rebuild containers.
+# OmniClaw Auto-Update
 
 ## Quick Update
 
 ```bash
-# From the omniclaw repo root:
 ./container/auto-update.sh
 ```
 
-This script:
-1. Pulls the latest code from GitHub
-2. Rebuilds the container image with the new code
-3. Provides instructions for restarting instances
+The script checks for upstream changes, pulls, rebuilds the host app + container image, waits for active agents to finish (up to 10 min), then restarts the service.
 
-## Manual Update Steps
-
-If you prefer to update manually:
-
-### 1. Pull Latest Code
+## Manual Update
 
 ```bash
-cd /path/to/omniclaw
 git pull origin main
+bun run build
+./container/build.sh
+# Restart service:
+launchctl kickstart -k gui/$(id -u)/com.omniclaw   # macOS
+systemctl --user restart omniclaw                    # Linux
 ```
-
-### 2. Rebuild Container
-
-```bash
-cd container
-./build.sh latest
-```
-
-### 3. Restart Instances
-
-**For local instances (Apple Container / Docker):**
-```bash
-# Find running instances
-ps aux | grep agent-runner
-
-# Stop instances
-kill <pid>
-
-# Restart with new image
-# (Use your normal startup command)
-```
-
-## What's New
-
-### Recent Updates (Feb 2026)
-
-- **Go 1.25 Support**: Go is now pre-installed in the container image
-  - Enables working with Go repositories (like ditto-assistant/backend)
-  - `GOPATH=/workspace/go`, `GOBIN=/workspace/go/bin`
-  - Go binaries available in PATH
-
-### Container Image Changes
-
-The Dockerfile now includes:
-- Node.js, npm, bun (for JavaScript/TypeScript)
-- Go 1.25 (for Go repositories)
-- GitHub CLI (gh) for PR creation
-- Git for version control
-- TypeScript native checker (tsgo)
 
 ## Automated Updates
 
-For production deployments, consider setting up automated updates:
+### macOS (launchd)
 
-### GitHub Actions Workflow
+The setup skill (step 10b) creates `~/Library/LaunchAgents/com.omniclaw.autoupdate.plist` that runs nightly at 3 AM.
 
-Create `.github/workflows/auto-update.yml`:
+```bash
+# Check status
+launchctl list | grep omniclaw.autoupdate
 
-```yaml
-name: Auto-Update Instances
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-jobs:
-  rebuild-and-deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build container image
-        run: |
-          cd container
-          # Use Docker for GitHub Actions
-          docker build -t omniclaw-agent:latest .
-
-      - name: Push to registry
-        run: |
-          # Push to your container registry
-          # (Configure registry authentication as needed)
+# Load/unload
+launchctl load ~/Library/LaunchAgents/com.omniclaw.autoupdate.plist
+launchctl unload ~/Library/LaunchAgents/com.omniclaw.autoupdate.plist
 ```
 
-### Scheduled Updates
+### Linux (systemd timer)
 
-For automated updates on a schedule:
+The setup skill (step 10b) creates `~/.config/systemd/user/omniclaw-autoupdate.{service,timer}`.
 
-```yaml
-on:
-  schedule:
-    - cron: '0 6 * * *'  # Daily at 6 AM UTC
+```bash
+# Check status
+systemctl --user status omniclaw-autoupdate.timer
+systemctl --user list-timers | grep omniclaw
+
+# Enable/disable
+systemctl --user enable --now omniclaw-autoupdate.timer
+systemctl --user disable --now omniclaw-autoupdate.timer
+
+# Trigger immediately
+systemctl --user start omniclaw-autoupdate.service
 ```
+
+## Safety Features
+
+- Only updates if remote has newer commits
+- Stashes local changes before pulling
+- Waits for active agent containers to drain before restarting
+- Exits on any error (`set -e`)
+- Cannot run from inside a container
 
 ## Rollback
 
-If an update causes issues:
-
 ```bash
-# Revert to previous commit
-git reset --hard HEAD~1
-
-# Rebuild with old code
-cd container
-./build.sh latest
-
-# Restart instances
+git log --oneline -5            # Find previous good commit
+git checkout <commit> -- .      # Restore files
+bun run build
+./container/build.sh
+# Restart service (see above)
 ```
 
-## Monitoring
-
-After updating, verify instances are healthy:
+## Logs
 
 ```bash
-# Check running instances
-ps aux | grep agent-runner
-
-# Check logs
-tail -f /workspace/server/logs/*.log
-
-# Test basic functionality
-echo '{"prompt":"test","groupFolder":"test","chatJid":"test@g.us"}' | container run -i omniclaw-agent:latest
+tail -f logs/auto-update.log
 ```
 
 ## Troubleshooting
 
-### Container Build Fails
-
-- Check Dockerfile syntax
-- Ensure all dependencies are available
-- Verify network connectivity for package downloads
-
-### Instances Won't Start
-
-- Check if old instances are still running (kill them first)
-- Verify environment variables are set correctly
-- Check disk space: `df -h`
-
-### Missing Dependencies
-
-If Go or other tools are missing:
-- Pull latest code: `git pull origin main`
-- Rebuild: `./container/build.sh latest`
-- Verify Dockerfile includes the dependency
-
-## Related Documentation
-
-- [Container README](./README.md)
-- [Deployment Guide](../DEPLOYMENT.md)
-- [Container Architecture](../docs/container-architecture.md)
+- **Timer not firing:** Re-run `/setup` step 10b or check `systemctl --user list-timers` / `launchctl list`
+- **Build fails:** Check `logs/auto-update.log`, ensure network connectivity for package downloads
+- **Service not restarting:** Check disk space (`df -h`), verify service config
