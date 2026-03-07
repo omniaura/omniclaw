@@ -487,9 +487,6 @@ ${renderNav('/')}
     sse.onerror = function() {
       setDisconnectedStatus();
     };
-    sse.onmessage = function(e) {
-      try { handleEvent(JSON.parse(e.data)); } catch (ex) {}
-    };
     sse.addEventListener('log', function(e) {
       try { handleEvent(JSON.parse(e.data)); } catch (ex) {}
     });

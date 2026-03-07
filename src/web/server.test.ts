@@ -180,12 +180,18 @@ async function readUntilContains(
 
   while (Date.now() < deadline) {
     const remainingMs = Math.max(1, deadline - Date.now());
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const chunk = await Promise.race([
       reader.read(),
       new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Timed out reading stream')), remainingMs);
+        timeoutId = setTimeout(
+          () => reject(new Error('Timed out reading stream')),
+          remainingMs,
+        );
       }),
-    ]);
+    ]).finally(() => {
+      if (timeoutId) clearTimeout(timeoutId);
+    });
 
     if (chunk.done) break;
     output += decoder.decode(chunk.value, { stream: true });
@@ -941,6 +947,27 @@ describe('SSE', () => {
 
     const res = await fetch(url('/api/events'));
     expect(res.status).toBe(401);
+  });
+
+  it('enforces the MAX_SSE_CLIENTS connection limit', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+
+    const readers: ReadableStreamDefaultReader<Uint8Array>[] = [];
+    for (let i = 0; i < 100; i++) {
+      const res = await fetch(url('/api/events?channels=logs'), {
+        headers: { Accept: 'text/event-stream' },
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).toBeTruthy();
+      readers.push(res.body!.getReader());
+    }
+
+    const overflow = await fetch(url('/api/events?channels=logs'), {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(overflow.status).toBe(429);
+
+    await Promise.all(readers.map(async (reader) => reader.cancel()));
   });
 });
 

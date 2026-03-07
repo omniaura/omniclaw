@@ -96,9 +96,26 @@ export function startWebServer(
         );
 
         let heartbeat: ReturnType<typeof setInterval> | undefined;
+        let client: SseClient | undefined;
+        const cleanup = () => {
+          if (heartbeat) {
+            clearInterval(heartbeat);
+            heartbeat = undefined;
+          }
+          if (!client) return;
+          const removed = sseClients.delete(client);
+          if (removed) {
+            logger.debug(
+              { sseClients: sseClients.size },
+              'SSE client disconnected',
+            );
+          }
+          client = undefined;
+        };
+
         const stream = new ReadableStream<Uint8Array>({
           start(controller) {
-            const client: SseClient = {
+            const nextClient: SseClient = {
               subscriptions,
               send(payload: string) {
                 controller.enqueue(encoder.encode(payload));
@@ -111,30 +128,27 @@ export function startWebServer(
                 }
               },
             };
+            client = nextClient;
 
-            sseClients.add(client);
+            sseClients.add(nextClient);
             logger.debug(
               { sseClients: sseClients.size },
               'SSE client connected',
             );
 
-            client.send('event: connected\ndata: {"ok":true}\n\n');
+            nextClient.send('event: connected\ndata: {"ok":true}\n\n');
             heartbeat = setInterval(() => {
-              client.send(': keepalive\n\n');
+              nextClient.send(': keepalive\n\n');
             }, 15000);
 
             req.signal.addEventListener('abort', () => {
-              if (heartbeat) clearInterval(heartbeat);
-              sseClients.delete(client);
-              client.close();
-              logger.debug(
-                { sseClients: sseClients.size },
-                'SSE client disconnected',
-              );
+              const currentClient = client;
+              cleanup();
+              currentClient?.close();
             });
           },
           cancel() {
-            if (heartbeat) clearInterval(heartbeat);
+            cleanup();
           },
         });
 
@@ -143,6 +157,7 @@ export function startWebServer(
             'Content-Type': 'text/event-stream; charset=utf-8',
             'Cache-Control': 'no-cache, no-transform',
             Connection: 'keep-alive',
+            'X-Accel-Buffering': 'no',
             ...corsHeaders(),
           },
         });
