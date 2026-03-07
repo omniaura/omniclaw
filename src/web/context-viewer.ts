@@ -6,7 +6,9 @@ import { buildAgentChannelData, renderAgentGroups } from './agent-channels.js';
 /** Render context viewer content (no shell). */
 export function renderContextViewerContent(state: WebStateProvider): string {
   const agentData = buildAgentChannelData(state);
-  const sidebarHtml = renderAgentGroups(agentData, { includeContextAttrs: true });
+  const sidebarHtml = renderAgentGroups(agentData, {
+    includeContextAttrs: true,
+  });
 
   return (
     '<div data-init="window.__initPage && window.__initPage(\'context\')">' +
@@ -60,4 +62,3 @@ export function renderContextViewer(state: WebStateProvider): string {
     allPageScripts(),
   );
 }
-

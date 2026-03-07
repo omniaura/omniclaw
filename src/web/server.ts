@@ -434,8 +434,7 @@ function renderTaskRows(tasks: ScheduledTask[]): string {
             : 'status-completed';
       const toggleLabel = task.status === 'active' ? 'Pause' : 'Resume';
       const toggleStatus = task.status === 'active' ? 'paused' : 'active';
-      const agentShort =
-        task.group_folder.split('-')[0] || task.group_folder;
+      const agentShort = task.group_folder.split('-')[0] || task.group_folder;
       const promptShort =
         task.prompt.slice(0, 40) + (task.prompt.length > 40 ? '…' : '');
       return (

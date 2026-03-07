@@ -21,7 +21,9 @@ export interface AgentChannelData {
 }
 
 /** Build enriched agent+channel data with human-readable channel names. */
-export function buildAgentChannelData(state: WebStateProvider): AgentChannelData[] {
+export function buildAgentChannelData(
+  state: WebStateProvider,
+): AgentChannelData[] {
   const agents = Object.values(state.getAgents());
   const subs = state.getChannelSubscriptions();
   const chats = state.getChats();
@@ -122,7 +124,9 @@ export function renderAgentGroups(
         `<span class="agent-name">${esc(a.name)}</span>` +
         `<span class="badge badge-sm ${badgeClass}">${esc(a.backend)}</span>` +
         `<span class="badge badge-sm">${esc(a.agentRuntime)}</span>` +
-        (a.isAdmin ? `<span class="badge badge-sm badge-admin">admin</span>` : '') +
+        (a.isAdmin
+          ? `<span class="badge badge-sm badge-admin">admin</span>`
+          : '') +
         `<span class="channel-count">${a.channels.length}</span>` +
         `</div>` +
         `<div class="channel-list">${channelsHtml}</div>` +

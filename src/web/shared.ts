@@ -452,8 +452,12 @@ function shellScript(pageScripts: Record<string, string>): string {
 
   // ---- State from localStorage ----
   parts.push('var STORAGE_KEY="omniclaw_sidebar";');
-  parts.push('function loadPrefs(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}")}catch(e){return{}}}');
-  parts.push('function savePrefs(p){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(p))}catch(e){}}');
+  parts.push(
+    'function loadPrefs(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}")}catch(e){return{}}}',
+  );
+  parts.push(
+    'function savePrefs(p){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(p))}catch(e){}}',
+  );
   parts.push('var prefs=loadPrefs();');
   parts.push('var workspace=document.getElementById("workspace");');
   parts.push('var sidebar=document.getElementById("log-sidebar");');
@@ -462,33 +466,55 @@ function shellScript(pageScripts: Record<string, string>): string {
 
   // Apply saved prefs
   parts.push('if(prefs.side==="left")workspace.classList.add("sidebar-left");');
-  parts.push('if(prefs.collapsed)workspace.classList.add("sidebar-collapsed");');
-  parts.push('if(prefs.width){document.documentElement.style.setProperty("--sidebar-w",prefs.width+"px");}');
+  parts.push(
+    'if(prefs.collapsed)workspace.classList.add("sidebar-collapsed");',
+  );
+  parts.push(
+    'if(prefs.width){document.documentElement.style.setProperty("--sidebar-w",prefs.width+"px");}',
+  );
 
   // ---- Sidebar toggle side ----
-  parts.push('document.getElementById("btn-toggle-side").addEventListener("click",function(){');
+  parts.push(
+    'document.getElementById("btn-toggle-side").addEventListener("click",function(){',
+  );
   parts.push('  workspace.classList.toggle("sidebar-left");');
-  parts.push('  prefs.side=workspace.classList.contains("sidebar-left")?"left":"right";');
+  parts.push(
+    '  prefs.side=workspace.classList.contains("sidebar-left")?"left":"right";',
+  );
   parts.push('  savePrefs(prefs);');
   parts.push('});');
 
   // ---- Sidebar collapse ----
-  parts.push('document.getElementById("btn-collapse").addEventListener("click",function(){');
+  parts.push(
+    'document.getElementById("btn-collapse").addEventListener("click",function(){',
+  );
   parts.push('  workspace.classList.toggle("sidebar-collapsed");');
-  parts.push('  prefs.collapsed=workspace.classList.contains("sidebar-collapsed");');
+  parts.push(
+    '  prefs.collapsed=workspace.classList.contains("sidebar-collapsed");',
+  );
   parts.push('  savePrefs(prefs);');
   parts.push('});');
 
   // ---- Sidebar tab switching ----
-  parts.push('document.querySelector(".sidebar-tabs").addEventListener("click",function(e){');
-  parts.push('  var tab=e.target.closest("[data-sidebar-tab]");if(!tab)return;');
+  parts.push(
+    'document.querySelector(".sidebar-tabs").addEventListener("click",function(e){',
+  );
+  parts.push(
+    '  var tab=e.target.closest("[data-sidebar-tab]");if(!tab)return;',
+  );
   parts.push('  var name=tab.getAttribute("data-sidebar-tab");');
-  parts.push('  document.querySelectorAll(".sidebar-tab").forEach(function(t){t.classList.toggle("active",t.getAttribute("data-sidebar-tab")===name);});');
-  parts.push('  document.querySelectorAll(".sidebar-panel").forEach(function(p){p.classList.toggle("active",p.id==="panel-"+name);});');
+  parts.push(
+    '  document.querySelectorAll(".sidebar-tab").forEach(function(t){t.classList.toggle("active",t.getAttribute("data-sidebar-tab")===name);});',
+  );
+  parts.push(
+    '  document.querySelectorAll(".sidebar-panel").forEach(function(p){p.classList.toggle("active",p.id==="panel-"+name);});',
+  );
   parts.push('});');
 
   // ---- Sidebar reopen button ----
-  parts.push('document.getElementById("btn-reopen-sidebar").addEventListener("click",function(){');
+  parts.push(
+    'document.getElementById("btn-reopen-sidebar").addEventListener("click",function(){',
+  );
   parts.push('  workspace.classList.remove("sidebar-collapsed");');
   parts.push('  prefs.collapsed=false;savePrefs(prefs);');
   parts.push('});');
@@ -500,25 +526,35 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('  e.preventDefault();dragging=true;startX=e.clientX;');
   parts.push('  startW=sidebar.getBoundingClientRect().width;');
   parts.push('  handle.classList.add("dragging");');
-  parts.push('  document.body.style.cursor="col-resize";document.body.style.userSelect="none";');
+  parts.push(
+    '  document.body.style.cursor="col-resize";document.body.style.userSelect="none";',
+  );
   parts.push('});');
   parts.push('document.addEventListener("mousemove",function(e){');
   parts.push('  if(!dragging)return;');
   parts.push('  var isLeft=workspace.classList.contains("sidebar-left");');
   parts.push('  var delta=isLeft?(e.clientX-startX):(startX-e.clientX);');
   parts.push('  var w=Math.max(200,Math.min(800,startW+delta));');
-  parts.push('  document.documentElement.style.setProperty("--sidebar-w",w+"px");');
+  parts.push(
+    '  document.documentElement.style.setProperty("--sidebar-w",w+"px");',
+  );
   parts.push('});');
   parts.push('document.addEventListener("mouseup",function(){');
   parts.push('  if(!dragging)return;dragging=false;');
   parts.push('  handle.classList.remove("dragging");');
-  parts.push('  document.body.style.cursor="";document.body.style.userSelect="";');
-  parts.push('  prefs.width=sidebar.getBoundingClientRect().width;savePrefs(prefs);');
+  parts.push(
+    '  document.body.style.cursor="";document.body.style.userSelect="";',
+  );
+  parts.push(
+    '  prefs.width=sidebar.getBoundingClientRect().width;savePrefs(prefs);',
+  );
   parts.push('});');
   parts.push('})();');
 
   // ---- Log filtering ----
-  parts.push('var levelFilters={debug:true,info:true,warn:true,error:true,fatal:true};');
+  parts.push(
+    'var levelFilters={debug:true,info:true,warn:true,error:true,fatal:true};',
+  );
   parts.push('var autoScroll=true;');
   parts.push('var logContainer=document.getElementById("log-container");');
   parts.push('var logCountEl=document.getElementById("log-count");');
@@ -527,54 +563,88 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('var logObs=new MutationObserver(function(){');
   parts.push('  var count=logContainer.querySelectorAll(".log-line").length;');
   parts.push('  logCountEl.textContent=count;');
-  parts.push('  if(autoScroll)logContainer.scrollTop=logContainer.scrollHeight;');
+  parts.push(
+    '  if(autoScroll)logContainer.scrollTop=logContainer.scrollHeight;',
+  );
   parts.push('});');
   parts.push('logObs.observe(logContainer,{childList:true,subtree:true});');
 
   // Level filter clicks
-  parts.push('document.getElementById("log-toolbar").addEventListener("click",function(e){');
+  parts.push(
+    'document.getElementById("log-toolbar").addEventListener("click",function(e){',
+  );
   parts.push('  var btn=e.target.closest(".filter-btn[data-level]");');
   parts.push('  if(!btn)return;');
   parts.push('  var level=btn.getAttribute("data-level");');
   parts.push('  if(level==="all"){');
-  parts.push('    var allOn=Object.keys(levelFilters).every(function(k){return levelFilters[k];});');
-  parts.push('    var ns=!allOn;Object.keys(levelFilters).forEach(function(k){levelFilters[k]=ns;});');
-  parts.push('    document.querySelectorAll("#log-toolbar .filter-btn[data-level]").forEach(function(b){');
-  parts.push('      if(ns)b.classList.add("active");else b.classList.remove("active");');
+  parts.push(
+    '    var allOn=Object.keys(levelFilters).every(function(k){return levelFilters[k];});',
+  );
+  parts.push(
+    '    var ns=!allOn;Object.keys(levelFilters).forEach(function(k){levelFilters[k]=ns;});',
+  );
+  parts.push(
+    '    document.querySelectorAll("#log-toolbar .filter-btn[data-level]").forEach(function(b){',
+  );
+  parts.push(
+    '      if(ns)b.classList.add("active");else b.classList.remove("active");',
+  );
   parts.push('    });');
   parts.push('  }else{');
   parts.push('    levelFilters[level]=!levelFilters[level];');
-  parts.push('    if(levelFilters[level])btn.classList.add("active");else btn.classList.remove("active");');
-  parts.push('    var allBtn=document.querySelector("#log-toolbar .filter-btn[data-level=\\"all\\"]");');
-  parts.push('    var ao=Object.keys(levelFilters).every(function(k){return levelFilters[k];});');
-  parts.push('    if(ao)allBtn.classList.add("active");else allBtn.classList.remove("active");');
+  parts.push(
+    '    if(levelFilters[level])btn.classList.add("active");else btn.classList.remove("active");',
+  );
+  parts.push(
+    '    var allBtn=document.querySelector("#log-toolbar .filter-btn[data-level=\\"all\\"]");',
+  );
+  parts.push(
+    '    var ao=Object.keys(levelFilters).every(function(k){return levelFilters[k];});',
+  );
+  parts.push(
+    '    if(ao)allBtn.classList.add("active");else allBtn.classList.remove("active");',
+  );
   parts.push('  }');
-  parts.push('  logContainer.querySelectorAll(".log-line[data-level]").forEach(function(line){');
+  parts.push(
+    '  logContainer.querySelectorAll(".log-line[data-level]").forEach(function(line){',
+  );
   parts.push('    var lv=line.getAttribute("data-level");');
   parts.push('    line.style.display=levelFilters[lv]?"":"none";');
   parts.push('  });');
   parts.push('});');
 
   // Auto-scroll toggle
-  parts.push('document.getElementById("btn-autoscroll").addEventListener("click",function(){');
-  parts.push('  autoScroll=!autoScroll;this.classList.toggle("active",autoScroll);');
+  parts.push(
+    'document.getElementById("btn-autoscroll").addEventListener("click",function(){',
+  );
+  parts.push(
+    '  autoScroll=!autoScroll;this.classList.toggle("active",autoScroll);',
+  );
   parts.push('});');
 
   // Clear logs
-  parts.push('document.getElementById("btn-clear-logs").addEventListener("click",function(){');
+  parts.push(
+    'document.getElementById("btn-clear-logs").addEventListener("click",function(){',
+  );
   parts.push('  logContainer.innerHTML="";logCountEl.textContent="0";');
   parts.push('});');
 
   // ---- Agent group toggle (shared by dashboard + context) ----
   parts.push('document.addEventListener("click",function(e){');
   parts.push('  var hdr=e.target.closest("[data-toggle-agent]");');
-  parts.push('  if(hdr){hdr.querySelector(".chevron").classList.toggle("open");hdr.nextElementSibling.classList.toggle("open");return;}');
+  parts.push(
+    '  if(hdr){hdr.querySelector(".chevron").classList.toggle("open");hdr.nextElementSibling.classList.toggle("open");return;}',
+  );
   parts.push('  var cpBtn=e.target.closest("[data-copy]");');
   parts.push('  if(cpBtn){');
   parts.push('    var val=cpBtn.getAttribute("data-copy");');
   parts.push('    navigator.clipboard.writeText(val).then(function(){');
-  parts.push('      cpBtn.classList.add("copied");cpBtn.textContent="\\u2713";');
-  parts.push('      setTimeout(function(){cpBtn.classList.remove("copied");cpBtn.textContent="\\u2398";},1200);');
+  parts.push(
+    '      cpBtn.classList.add("copied");cpBtn.textContent="\\u2713";',
+  );
+  parts.push(
+    '      setTimeout(function(){cpBtn.classList.remove("copied");cpBtn.textContent="\\u2398";},1200);',
+  );
   parts.push('    });');
   parts.push('    e.stopPropagation();return;');
   parts.push('  }');
@@ -584,19 +654,29 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('var navLoading=false;');
   parts.push('function navigateTo(pageName,href){');
   parts.push('  if(navLoading)return;navLoading=true;');
-  parts.push('  if(window.__cleanup){window.__cleanup();window.__cleanup=null;}');
+  parts.push(
+    '  if(window.__cleanup){window.__cleanup();window.__cleanup=null;}',
+  );
   parts.push('  fetch("/api/page/"+encodeURIComponent(pageName))');
-  parts.push('  .then(function(r){if(!r.ok)throw new Error("nav failed");return r.json();})');
+  parts.push(
+    '  .then(function(r){if(!r.ok)throw new Error("nav failed");return r.json();})',
+  );
   parts.push('  .then(function(data){');
   parts.push('    contentEl.innerHTML=data.html;');
   parts.push('    document.title="OmniClaw \\u2014 "+data.title;');
   parts.push('    history.pushState({page:pageName},"",data.path);');
-  parts.push('    document.querySelectorAll("[data-nav]").forEach(function(a){');
-  parts.push('      a.classList.toggle("active",a.getAttribute("href")===data.path);');
+  parts.push(
+    '    document.querySelectorAll("[data-nav]").forEach(function(a){',
+  );
+  parts.push(
+    '      a.classList.toggle("active",a.getAttribute("href")===data.path);',
+  );
   parts.push('    });');
   parts.push('    window.__initPage(pageName);');
   parts.push('    navLoading=false;');
-  parts.push('  }).catch(function(err){console.error("SPA nav error:",err);navLoading=false;location.href=href;});');
+  parts.push(
+    '  }).catch(function(err){console.error("SPA nav error:",err);navLoading=false;location.href=href;});',
+  );
   parts.push('}');
   parts.push('document.addEventListener("click",function(e){');
   parts.push('  var link=e.target.closest("[data-nav]");if(!link)return;');
@@ -606,7 +686,9 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('  navigateTo(pageName,href);');
   parts.push('});');
   parts.push('window.addEventListener("popstate",function(e){');
-  parts.push('  if(e.state&&e.state.page){navigateTo(e.state.page,location.pathname);}');
+  parts.push(
+    '  if(e.state&&e.state.page){navigateTo(e.state.page,location.pathname);}',
+  );
   parts.push('  else{location.reload();}');
   parts.push('});');
 
@@ -614,48 +696,82 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('window.__cleanup=null;');
   parts.push('window.__pageInits={};');
   parts.push('window.__initPage=function(name){');
-  parts.push('  if(window.__cleanup){window.__cleanup();window.__cleanup=null;}');
+  parts.push(
+    '  if(window.__cleanup){window.__cleanup();window.__cleanup=null;}',
+  );
   parts.push('  if(window.__pageInits[name])window.__pageInits[name]();');
   parts.push('};');
 
   // ---- Toast helper (used by multiple pages) ----
   parts.push('window.__toast=function(msg,type){');
   parts.push('  var ex=document.querySelector(".toast");if(ex)ex.remove();');
-  parts.push('  var el=document.createElement("div");el.className="toast "+(type||"success");');
+  parts.push(
+    '  var el=document.createElement("div");el.className="toast "+(type||"success");',
+  );
   parts.push('  el.textContent=msg;document.body.appendChild(el);');
   parts.push('  setTimeout(function(){el.remove();},3000);');
   parts.push('};');
 
   // ---- Task actions (in persistent sidebar) ----
-  parts.push('document.getElementById("sidebar-tasks").addEventListener("click",function(e){');
-  parts.push('  var btn=e.target.closest("button[data-action]");if(!btn)return;');
-  parts.push('  var card=btn.closest("[data-task-id]");var taskId=card.getAttribute("data-task-id");');
+  parts.push(
+    'document.getElementById("sidebar-tasks").addEventListener("click",function(e){',
+  );
+  parts.push(
+    '  var btn=e.target.closest("button[data-action]");if(!btn)return;',
+  );
+  parts.push(
+    '  var card=btn.closest("[data-task-id]");var taskId=card.getAttribute("data-task-id");',
+  );
   parts.push('  var action=btn.getAttribute("data-action");');
   parts.push('  if(action==="toggle"){');
   parts.push('    var ns=btn.getAttribute("data-status");btn.disabled=true;');
-  parts.push('    fetch("/api/tasks/"+encodeURIComponent(taskId),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:ns})})');
-  parts.push('    .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})');
-  parts.push('    .then(function(){window.__toast("Task "+(ns==="paused"?"paused":"resumed"));})');
-  parts.push('    .catch(function(err){window.__toast(err.message||"Failed","error");btn.disabled=false;});');
+  parts.push(
+    '    fetch("/api/tasks/"+encodeURIComponent(taskId),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:ns})})',
+  );
+  parts.push(
+    '    .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})',
+  );
+  parts.push(
+    '    .then(function(){window.__toast("Task "+(ns==="paused"?"paused":"resumed"));})',
+  );
+  parts.push(
+    '    .catch(function(err){window.__toast(err.message||"Failed","error");btn.disabled=false;});',
+  );
   parts.push('  }');
   parts.push('  if(action==="delete"){');
   parts.push('    btn.disabled=true;');
-  parts.push('    fetch("/api/tasks/"+encodeURIComponent(taskId),{method:"DELETE"})');
-  parts.push('    .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})');
-  parts.push('    .then(function(){window.__toast("Task deleted");card.remove();})');
-  parts.push('    .catch(function(err){window.__toast(err.message||"Failed","error");btn.disabled=false;});');
+  parts.push(
+    '    fetch("/api/tasks/"+encodeURIComponent(taskId),{method:"DELETE"})',
+  );
+  parts.push(
+    '    .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})',
+  );
+  parts.push(
+    '    .then(function(){window.__toast("Task deleted");card.remove();})',
+  );
+  parts.push(
+    '    .catch(function(err){window.__toast(err.message||"Failed","error");btn.disabled=false;});',
+  );
   parts.push('  }');
   parts.push('});');
 
   // Create task button opens modal (modal is in dashboard page content)
-  parts.push('document.getElementById("btn-create-task").addEventListener("click",function(){');
+  parts.push(
+    'document.getElementById("btn-create-task").addEventListener("click",function(){',
+  );
   parts.push('  var modal=document.getElementById("create-task-modal");');
-  parts.push('  if(modal){modal.classList.add("open");var e=document.getElementById("ct-error");if(e)e.textContent="";}');
-  parts.push('  else{window.__toast("Navigate to Dashboard to create tasks","error");}');
+  parts.push(
+    '  if(modal){modal.classList.add("open");var e=document.getElementById("ct-error");if(e)e.textContent="";}',
+  );
+  parts.push(
+    '  else{window.__toast("Navigate to Dashboard to create tasks","error");}',
+  );
   parts.push('});');
 
   // ---- Escape helper (used by page inits) ----
-  parts.push('window.__esc=function(s){if(!s)return"";var d=document.createElement("div");d.textContent=String(s);return d.innerHTML;};');
+  parts.push(
+    'window.__esc=function(s){if(!s)return"";var d=document.createElement("div");d.textContent=String(s);return d.innerHTML;};',
+  );
 
   // ---- Embed page scripts ----
   for (const [name, script] of Object.entries(pageScripts)) {
