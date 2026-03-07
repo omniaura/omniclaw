@@ -206,7 +206,9 @@ interface ChannelRosterOptions {
   agentFolder?: string;
 }
 
-function formatChannelRosterNames(members: ChannelRosterMemberView[]): string[] {
+function formatChannelRosterNames(
+  members: ChannelRosterMemberView[],
+): string[] {
   return members.map((member) => {
     if (member.roles.length > 0) {
       return `${member.displayName} [${member.roles.join(', ')}]`;
@@ -868,7 +870,10 @@ async function getChannelRosterNames(
   const normalizedRoleFilters = roleFilters
     .map((r) => r.trim().toLowerCase())
     .filter(Boolean);
-  const preferredBotId = getPreferredChannelBotId(chatJid, options.discordBotId);
+  const preferredBotId = getPreferredChannelBotId(
+    chatJid,
+    options.discordBotId,
+  );
 
   const cacheKey = [
     guildId || '__no_guild__',
@@ -899,10 +904,7 @@ async function getChannelRosterNames(
   }
 
   if (guildId && scope === 'channel' && chatJid.startsWith('dc:')) {
-    const discord = findChannelForJid(
-      chatJid,
-      preferredBotId,
-    );
+    const discord = findChannelForJid(chatJid, preferredBotId);
     if (discord instanceof DiscordChannel) {
       const visibleMembers = await discord.fetchChannelRoster(chatJid);
       if (visibleMembers && visibleMembers.length > 0) {
@@ -2087,8 +2089,8 @@ async function main(): Promise<void> {
         readContextFile: (layerPath) => {
           const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
           const resolved = path.resolve(filePath);
-          if (!resolved.startsWith(GROUPS_DIR)) return null;
           try {
+            assertPathWithin(resolved, GROUPS_DIR, 'readContextFile');
             return fs.readFileSync(resolved, 'utf-8');
           } catch {
             return null;
@@ -2097,9 +2099,7 @@ async function main(): Promise<void> {
         writeContextFile: (layerPath, content) => {
           const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
           const resolved = path.resolve(filePath);
-          if (!resolved.startsWith(GROUPS_DIR)) {
-            throw new Error('Path traversal detected');
-          }
+          assertPathWithin(resolved, GROUPS_DIR, 'writeContextFile');
           const dir = path.dirname(resolved);
           fs.mkdirSync(dir, { recursive: true });
           fs.writeFileSync(resolved, content, 'utf-8');

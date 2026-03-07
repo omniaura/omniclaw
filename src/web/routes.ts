@@ -40,7 +40,8 @@ export function handleRequest(
   }
 
   // Context file operations
-  if (pathname === '/api/context/layers') return handleGetContextLayers(url, state);
+  if (pathname === '/api/context/layers')
+    return handleGetContextLayers(url, state);
   if (pathname === '/api/context/file') {
     if (method === 'PUT') return handleWriteContextFile(req, state);
     return json({ error: 'Method not allowed' }, 405);
@@ -404,7 +405,10 @@ function handleGetContextLayers(url: URL, state: WebStateProvider): Response {
   const categoryPath = categoryFolder || null;
   const serverPath = serverFolder || null;
 
-  const layers: Record<string, { path: string | null; content: string | null; exists: boolean }> = {
+  const layers: Record<
+    string,
+    { path: string | null; content: string | null; exists: boolean }
+  > = {
     channel: {
       path: channelPath || null,
       content: channelPath ? state.readContextFile(channelPath) : null,
@@ -418,7 +422,9 @@ function handleGetContextLayers(url: URL, state: WebStateProvider): Response {
     category: {
       path: categoryPath,
       content: categoryPath ? state.readContextFile(categoryPath) : null,
-      exists: categoryPath ? state.readContextFile(categoryPath) !== null : false,
+      exists: categoryPath
+        ? state.readContextFile(categoryPath) !== null
+        : false,
     },
     server: {
       path: serverPath,
@@ -446,7 +452,10 @@ async function handleWriteContextFile(
     return json({ error: 'Missing or invalid "path" (string required)' }, 400);
   }
   if (typeof content !== 'string') {
-    return json({ error: 'Missing or invalid "content" (string required)' }, 400);
+    return json(
+      { error: 'Missing or invalid "content" (string required)' },
+      400,
+    );
   }
 
   // Reject path traversal
@@ -458,7 +467,9 @@ async function handleWriteContextFile(
     state.writeContextFile(layerPath, content);
   } catch (err) {
     return json(
-      { error: `Failed to write: ${err instanceof Error ? err.message : String(err)}` },
+      {
+        error: `Failed to write: ${err instanceof Error ? err.message : String(err)}`,
+      },
       500,
     );
   }
