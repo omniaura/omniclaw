@@ -1,20 +1,19 @@
-import type { Server, ServerWebSocket } from 'bun';
+import { ServerSentEventGenerator } from '@starfederation/datastar-sdk/web';
 
 import { logger } from '../logger.js';
 import { handleRequest } from './routes.js';
-import type {
-  WebServerConfig,
-  WebStateProvider,
-  WsData,
-  WsEvent,
-} from './types.js';
+import type { ScheduledTask } from '../types.js';
+import { escapeHtml } from './shared.js';
+import type { WebServerConfig, WebStateProvider, WsEvent } from './types.js';
 
-const MAX_WS_CLIENTS = 50;
 const MAX_SSE_CLIENTS = 100;
+const MAX_LOG_LINES = 500;
+const SNAPSHOT_INTERVAL_MS = 5000;
 
 interface SseClient {
   subscriptions: Set<string>;
-  send(payload: string): void;
+  stream: ServerSentEventGenerator;
+  logs: string[];
   close(): void;
 }
 
@@ -28,35 +27,19 @@ export function startWebServer(
   state: WebStateProvider,
 ): WebServerHandle {
   const { port, auth } = config;
-  const wsClients = new Set<ServerWebSocket<WsData>>();
   const sseClients = new Set<SseClient>();
-  const encoder = new TextEncoder();
 
-  const server: Server<WsData> = Bun.serve<WsData>({
+  const server = Bun.serve({
     port,
     development: false,
 
-    fetch(req, server) {
-      // --- WebSocket upgrade ---
+    fetch(req) {
       const url = new URL(req.url);
       if (url.pathname === '/ws') {
-        // Auth check for WebSocket too
-        if (auth && !checkBasicAuth(req, auth)) {
-          return new Response('Unauthorized', {
-            status: 401,
-            headers: { 'WWW-Authenticate': 'Basic realm="OmniClaw"' },
-          });
-        }
-        if (wsClients.size >= MAX_WS_CLIENTS) {
-          return new Response('Too many WebSocket connections', {
-            status: 429,
-          });
-        }
-        const upgraded = server.upgrade(req, {
-          data: { subscriptions: new Set<string>() },
+        return new Response('WebSocket is deprecated for the web dashboard', {
+          status: 410,
+          headers: corsHeaders(),
         });
-        if (upgraded) return undefined as unknown as Response;
-        return new Response('WebSocket upgrade failed', { status: 400 });
       }
 
       // --- Basic auth for HTTP ---
@@ -95,13 +78,8 @@ export function startWebServer(
           queryChannels.length > 0 ? queryChannels : ['logs', 'stats'],
         );
 
-        let heartbeat: ReturnType<typeof setInterval> | undefined;
         let client: SseClient | undefined;
         const cleanup = () => {
-          if (heartbeat) {
-            clearInterval(heartbeat);
-            heartbeat = undefined;
-          }
           if (!client) return;
           const removed = sseClients.delete(client);
           if (removed) {
@@ -113,54 +91,43 @@ export function startWebServer(
           client = undefined;
         };
 
-        const stream = new ReadableStream<Uint8Array>({
-          start(controller) {
+        const responseInit = {
+          headers: {
+            ...corsHeaders(),
+            'Cache-Control': 'no-cache, no-transform',
+            'X-Accel-Buffering': 'no',
+          },
+        };
+
+        return ServerSentEventGenerator.stream(
+          (stream) => {
             const nextClient: SseClient = {
               subscriptions,
-              send(payload: string) {
-                controller.enqueue(encoder.encode(payload));
-              },
+              stream,
+              logs: [],
               close() {
-                try {
-                  controller.close();
-                } catch {
-                  // Stream already closed.
-                }
+                stream.close();
               },
             };
-            client = nextClient;
 
+            client = nextClient;
             sseClients.add(nextClient);
             logger.debug(
               { sseClients: sseClients.size },
               'SSE client connected',
             );
 
-            nextClient.send('event: connected\ndata: {"ok":true}\n\n');
-            heartbeat = setInterval(() => {
-              nextClient.send(': keepalive\n\n');
-            }, 15000);
-
-            req.signal.addEventListener('abort', () => {
-              const currentClient = client;
-              cleanup();
-              currentClient?.close();
-            });
+            stream.patchElements(
+              renderStatusBadge('connected (datastar)', 'connected'),
+            );
+            patchSnapshot(nextClient, state);
           },
-          cancel() {
-            cleanup();
+          {
+            keepalive: true,
+            onAbort: cleanup,
+            responseInit,
           },
-        });
-
-        return new Response(stream, {
-          headers: {
-            'Content-Type': 'text/event-stream; charset=utf-8',
-            'Cache-Control': 'no-cache, no-transform',
-            Connection: 'keep-alive',
-            'X-Accel-Buffering': 'no',
-            ...corsHeaders(),
-          },
-        });
+        );
       }
 
       // --- CORS for API routes ---
@@ -186,62 +153,54 @@ export function startWebServer(
       }
       return addCors(result);
     },
-
-    websocket: {
-      open(ws) {
-        wsClients.add(ws);
-        logger.debug(
-          { wsClients: wsClients.size },
-          'WebSocket client connected',
-        );
-      },
-      message(ws, message) {
-        try {
-          const data = JSON.parse(String(message));
-          if (data.subscribe && Array.isArray(data.subscribe)) {
-            for (const channel of data.subscribe) {
-              if (typeof channel === 'string') {
-                ws.data.subscriptions.add(channel);
-              }
-            }
-          }
-        } catch {
-          // Ignore malformed messages
-        }
-      },
-      close(ws) {
-        wsClients.delete(ws);
-        logger.debug(
-          { wsClients: wsClients.size },
-          'WebSocket client disconnected',
-        );
-      },
-    },
   });
+
+  const snapshotTicker = setInterval(() => {
+    for (const client of sseClients) {
+      try {
+        patchSnapshot(client, state);
+      } catch {
+        client.close();
+        sseClients.delete(client);
+      }
+    }
+  }, SNAPSHOT_INTERVAL_MS);
 
   logger.info({ port, auth: !!auth }, 'Web UI server started');
 
   const handle: WebServerHandle = {
     port: server.port!,
     broadcast(event: WsEvent) {
-      const payload = JSON.stringify(event);
       const channel = eventChannel(event);
 
-      for (const ws of wsClients) {
-        try {
-          if (ws.data.subscriptions.has(channel)) {
-            ws.send(payload);
-          }
-        } catch {
-          // Client disconnected; will be cleaned up in close handler
-        }
-      }
-
-      const ssePayload = `event: ${event.type}\ndata: ${payload}\n\n`;
       for (const client of sseClients) {
         if (!client.subscriptions.has(channel)) continue;
         try {
-          client.send(ssePayload);
+          if (event.type === 'log') {
+            client.logs.push(renderLogLine(event.data));
+            if (client.logs.length > MAX_LOG_LINES) {
+              client.logs.splice(0, client.logs.length - MAX_LOG_LINES);
+            }
+            client.stream.patchElements(client.logs.join(''), {
+              selector: '#log-container',
+              mode: 'inner',
+            });
+            client.stream.patchElements(
+              `<span class="log-count" id="log-count">${client.logs.length} lines</span>`,
+            );
+            continue;
+          }
+
+          if (event.type === 'agent_status') {
+            patchStats(client, state);
+            continue;
+          }
+
+          if (event.type === 'task_update') {
+            patchTasks(client, state);
+            patchStats(client, state);
+            continue;
+          }
         } catch {
           client.close();
           sseClients.delete(client);
@@ -249,10 +208,7 @@ export function startWebServer(
       }
     },
     async stop() {
-      for (const ws of wsClients) {
-        ws.close(1001, 'Server shutting down');
-      }
-      wsClients.clear();
+      clearInterval(snapshotTicker);
       for (const client of sseClients) {
         client.close();
       }
@@ -261,7 +217,7 @@ export function startWebServer(
       logger.info('Web UI server stopped');
     },
     get clientCount() {
-      return wsClients.size;
+      return sseClients.size;
     },
   };
 
@@ -324,4 +280,146 @@ function eventChannel(event: WsEvent): string {
     return 'stats';
   }
   return event.type;
+}
+
+function patchSnapshot(client: SseClient, state: WebStateProvider): void {
+  patchStats(client, state);
+  patchAgents(client, state);
+  patchTasks(client, state);
+}
+
+function patchStats(client: SseClient, state: WebStateProvider): void {
+  if (!client.subscriptions.has('stats')) return;
+  const stats = state.getQueueStats();
+  const tasks = state.getTasks();
+  const activeContainers = Math.max(
+    0,
+    stats.activeContainers - stats.idleContainers,
+  );
+  const activeTasks = tasks.filter((task) => task.status === 'active').length;
+
+  client.stream.patchElements(
+    `<div class="value" id="stat-agents">${Object.keys(state.getAgents()).length}</div>`,
+  );
+  client.stream.patchElements(
+    `<div class="value" id="stat-active">${activeContainers}/${stats.maxActive}</div>`,
+  );
+  client.stream.patchElements(
+    `<div class="value" id="stat-idle">${stats.idleContainers}/${stats.maxIdle}</div>`,
+  );
+  client.stream.patchElements(
+    `<div class="value" id="stat-tasks">${activeTasks}</div>`,
+  );
+}
+
+function patchAgents(client: SseClient, state: WebStateProvider): void {
+  if (!client.subscriptions.has('agents')) return;
+  client.stream.patchElements(renderAgentRows(state), {
+    selector: '#agents-tbody',
+    mode: 'inner',
+  });
+}
+
+function patchTasks(client: SseClient, state: WebStateProvider): void {
+  if (
+    !client.subscriptions.has('tasks') &&
+    !client.subscriptions.has('stats')
+  ) {
+    return;
+  }
+  client.stream.patchElements(renderTaskRows(state.getTasks()), {
+    selector: '#tasks-tbody',
+    mode: 'inner',
+  });
+}
+
+function renderStatusBadge(
+  label: string,
+  statusClass: 'connected' | 'disconnected',
+): string {
+  return `<span id="ws-status" class="ws-status ${statusClass}">${escapeHtml(label)}</span>`;
+}
+
+function renderAgentRows(state: WebStateProvider): string {
+  const agents = Object.values(state.getAgents());
+  const subs = state.getChannelSubscriptions();
+  return agents
+    .map((agent) => {
+      const channels = Object.entries(subs)
+        .filter(([, subscriptions]) =>
+          subscriptions.some((sub) => sub.agentId === agent.id),
+        )
+        .map(([jid]) => escapeHtml(jid));
+      return `<tr>
+        <td>${escapeHtml(agent.id)}</td>
+        <td>${escapeHtml(agent.name)}</td>
+        <td><span class="badge ${agent.backend === 'apple-container' ? 'badge-apple-container' : agent.backend === 'docker' ? 'badge-docker' : ''}">${escapeHtml(agent.backend)}</span></td>
+        <td>${escapeHtml(agent.agentRuntime)}</td>
+        <td>${agent.isAdmin ? '<span class="badge badge-admin">admin</span>' : ''}</td>
+        <td class="channels">${channels.join('<br>') || '—'}</td>
+      </tr>`;
+    })
+    .join('\n');
+}
+
+function renderTaskRows(tasks: ScheduledTask[]): string {
+  return tasks
+    .slice(0, 50)
+    .map((task) => {
+      const statusClass =
+        task.status === 'active'
+          ? 'status-active'
+          : task.status === 'paused'
+            ? 'status-paused'
+            : 'status-completed';
+      const nextRun = task.next_run
+        ? new Date(task.next_run).toLocaleString()
+        : '—';
+      const lastRun = task.last_run
+        ? new Date(task.last_run).toLocaleString()
+        : '—';
+      const toggleLabel = task.status === 'active' ? 'Pause' : 'Resume';
+      const toggleStatus = task.status === 'active' ? 'paused' : 'active';
+      return `<tr data-task-id="${escapeHtml(task.id)}">
+        <td title="${escapeHtml(task.id)}">${escapeHtml(task.id.slice(0, 8))}…</td>
+        <td>${escapeHtml(task.group_folder)}</td>
+        <td><span class="badge ${statusClass}">${escapeHtml(task.status)}</span></td>
+        <td>${escapeHtml(task.schedule_type)}: ${escapeHtml(task.schedule_value)}</td>
+        <td title="${escapeHtml(task.prompt)}">${escapeHtml(task.prompt.slice(0, 80))}${task.prompt.length > 80 ? '…' : ''}</td>
+        <td>${escapeHtml(nextRun)}</td>
+        <td>${escapeHtml(lastRun)}</td>
+        <td class="actions">
+          <button class="btn btn-sm btn-toggle" data-action="toggle" data-status="${toggleStatus}" title="${toggleLabel}">${toggleLabel}</button>
+          <button class="btn btn-sm btn-danger" data-action="delete" title="Delete">Delete</button>
+        </td>
+      </tr>`;
+    })
+    .join('\n');
+}
+
+function renderLogLine(data: unknown): string {
+  const log = (data ?? {}) as Record<string, unknown>;
+  const level = String(log.level ?? 'info');
+  const lineClass =
+    level === 'error' || level === 'fatal'
+      ? 'log-line error'
+      : level === 'warn'
+        ? 'log-line warn'
+        : 'log-line';
+  const timestamp = new Date(
+    typeof log.ts === 'number' ? log.ts : Date.now(),
+  ).toLocaleTimeString();
+  const context = log.container || log.group;
+  let message = String(log.msg ?? '');
+  if (typeof log.durationMs === 'number') message += ` (${log.durationMs}ms)`;
+  if (typeof log.costUsd === 'number') message += ` $${log.costUsd}`;
+
+  return `<div class="${lineClass}" data-level="${escapeHtml(level)}">
+    <span class="ts">${escapeHtml(timestamp)}</span>
+    <span class="level-badge ${escapeHtml(level)}">${escapeHtml(level)}</span>
+    ${context ? `<span class="context">${escapeHtml(String(context))}</span>` : ''}
+    ${log.op ? `<span class="op">[${escapeHtml(String(log.op))}]</span>` : ''}
+    <span class="msg">${escapeHtml(message)}</span>
+    ${log.err ? `<span class="err-detail">${escapeHtml(String(log.err))}</span>` : ''}
+  </div>`;
 }

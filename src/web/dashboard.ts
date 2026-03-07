@@ -297,8 +297,9 @@ export function renderDashboard(state: WebStateProvider): string {
     .stats-grid { grid-template-columns: 1fr; }
   }
 </style>
+<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/[email protected]/bundles/datastar.js"></script>
 </head>
-<body>
+<body data-on:load="@get('/api/events?channels=logs,stats,tasks,agents')">
 ${renderNav('/')}
 <main>
   <div class="stats-grid">
@@ -346,7 +347,7 @@ ${renderNav('/')}
       <button class="filter-btn active" id="btn-autoscroll">Auto-scroll</button>
       <button class="filter-btn" id="btn-clear-logs">Clear</button>
     </div>
-    <div id="log-container"><div class="log-line"><span class="msg">Waiting for WebSocket connection…</span></div></div>
+    <div id="log-container"><div class="log-line"><span class="msg">Waiting for Datastar stream…</span></div></div>
   </div>
 </main>
 
@@ -396,156 +397,21 @@ ${renderNav('/')}
 
 <script>
 (function() {
-  // ---- WebSocket ----
-  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  var wsUrl = proto + '//' + location.host + '/ws';
-  var sseUrl = '/api/events?channels=logs,stats';
-  var statusEl = document.getElementById('ws-status');
   var logContainer = document.getElementById('log-container');
   var logCountEl = document.getElementById('log-count');
-  var MAX_LOG_LINES = 500;
-  var logCount = 0;
+  var logCount = logContainer.querySelectorAll('.log-line').length;
+  logCountEl.textContent = logCount + ' lines';
   var autoScroll = true;
 
   // Level filter state
   var levelFilters = { debug: true, info: true, warn: true, error: true, fatal: true };
-  var ws = null;
-  var sse = null;
 
-  function setConnectedStatus(mode) {
-    statusEl.textContent = mode === 'sse' ? 'connected (sse)' : 'connected';
-    statusEl.className = 'ws-status connected';
-  }
-
-  function setDisconnectedStatus() {
-    statusEl.textContent = 'disconnected';
-    statusEl.className = 'ws-status disconnected';
-  }
-
-  function resetLogs() {
-    logContainer.innerHTML = '';
-    logCount = 0;
-    logCountEl.textContent = '0 lines';
-  }
-
-  function appendLog(d) {
-    var lvl = d.level || 'info';
-
-    var line = document.createElement('div');
-    line.className = 'log-line' + (lvl === 'error' || lvl === 'fatal' ? ' error' : lvl === 'warn' ? ' warn' : '');
-    line.setAttribute('data-level', lvl);
-    if (!levelFilters[lvl]) line.style.display = 'none';
-
-    var ts = new Date(d.ts).toLocaleTimeString();
-    var parts = '<span class="ts">' + ts + '</span>';
-    parts += '<span class="level-badge ' + escapeHtmlJs(lvl) + '">' + escapeHtmlJs(lvl) + '</span>';
-
-    var ctx = d.container || d.group;
-    if (ctx) parts += '<span class="context">' + escapeHtmlJs(String(ctx)) + '</span>';
-    if (d.op) parts += '<span class="op">[' + escapeHtmlJs(String(d.op)) + ']</span>';
-
-    var msg = d.msg || '';
-    if (d.durationMs != null) msg += ' (' + d.durationMs + 'ms)';
-    if (d.costUsd != null) msg += ' $' + d.costUsd;
-    parts += '<span class="msg">' + escapeHtmlJs(msg) + '</span>';
-    if (d.err) parts += '<span class="err-detail">' + escapeHtmlJs(String(d.err)) + '</span>';
-
-    line.innerHTML = parts;
-    logContainer.appendChild(line);
-    logCount++;
-
-    while (logContainer.children.length > MAX_LOG_LINES) {
-      logContainer.removeChild(logContainer.firstChild);
-      logCount = Math.max(0, logCount - 1);
-    }
+  var observer = new MutationObserver(function() {
+    logCount = logContainer.querySelectorAll('.log-line').length;
     logCountEl.textContent = logCount + ' lines';
     if (autoScroll) logContainer.scrollTop = logContainer.scrollHeight;
-  }
-
-  function updateStats(s) {
-    var el = function(id) { return document.getElementById(id); };
-    if (s.activeContainers != null && s.idleContainers != null && s.maxActive != null) {
-      el('stat-active').textContent = Math.max(0, s.activeContainers - s.idleContainers) + '/' + s.maxActive;
-    }
-    if (s.idleContainers != null && s.maxIdle != null) {
-      el('stat-idle').textContent = s.idleContainers + '/' + s.maxIdle;
-    }
-  }
-
-  function handleEvent(evt) {
-    if (!evt || !evt.type) return;
-    if (evt.type === 'log') appendLog(evt.data || {});
-    if (evt.type === 'agent_status') updateStats(evt.data || {});
-  }
-
-  function connectSse() {
-    if (sse) return;
-    sse = new EventSource(sseUrl);
-    sse.onopen = function() {
-      setConnectedStatus('sse');
-    };
-    sse.onerror = function() {
-      setDisconnectedStatus();
-    };
-    sse.addEventListener('log', function(e) {
-      try { handleEvent(JSON.parse(e.data)); } catch (ex) {}
-    });
-    sse.addEventListener('agent_status', function(e) {
-      try { handleEvent(JSON.parse(e.data)); } catch (ex) {}
-    });
-  }
-
-  function disconnectSse() {
-    if (!sse) return;
-    sse.close();
-    sse = null;
-  }
-
-  function connect() {
-    ws = new WebSocket(wsUrl);
-    ws.onopen = function() {
-      disconnectSse();
-      setConnectedStatus('ws');
-      resetLogs();
-      ws.send(JSON.stringify({ subscribe: ['logs', 'stats'] }));
-    };
-    ws.onclose = function() {
-      if (sse) {
-        setConnectedStatus('sse');
-      } else {
-        setDisconnectedStatus();
-        connectSse();
-      }
-      setTimeout(connect, 3000);
-    };
-    ws.onerror = function() { ws.close(); };
-    ws.onmessage = function(e) {
-      try {
-        handleEvent(JSON.parse(e.data));
-      } catch(ex) {}
-    };
-  }
-
-  function escapeHtmlJs(s) {
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
-
-  connect();
-
-  // ---- Stats polling (semi-live) ----
-  setInterval(function() {
-    fetch('/api/stats')
-      .then(function(r) { return r.json(); })
-      .then(function(s) {
-        document.getElementById('stat-agents').textContent = String(s.agents || 0);
-        document.getElementById('stat-active').textContent = Math.max(0, (s.activeContainers || 0) - (s.idleContainers || 0)) + '/' + (s.maxActive || 0);
-        document.getElementById('stat-idle').textContent = (s.idleContainers || 0) + '/' + (s.maxIdle || 0);
-        document.getElementById('stat-tasks').textContent = String(s.activeTasks || 0);
-      })
-      .catch(function() {});
-  }, 10000);
+  });
+  observer.observe(logContainer, { childList: true, subtree: true });
 
   // ---- Log toolbar: level filters ----
   document.querySelectorAll('.log-toolbar .filter-btn[data-level]').forEach(function(btn) {

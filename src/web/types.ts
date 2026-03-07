@@ -73,12 +73,6 @@ export interface WebServerConfig {
   auth?: { username: string; password: string };
 }
 
-/** Shape of a WebSocket data attachment. */
-export interface WsData {
-  /** Channels the client is subscribed to for live events. */
-  subscriptions: Set<string>;
-}
-
 export type WsEventType = 'agent_status' | 'task_update' | 'log' | 'ipc_event';
 
 export interface WsEvent {

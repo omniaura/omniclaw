@@ -799,104 +799,13 @@ describe('GET /api/stats', () => {
   });
 });
 
-// ---- WebSocket ----
+// ---- WebSocket deprecation ----
 
 describe('WebSocket', () => {
-  it('connects and receives broadcast events', async () => {
+  it('returns 410 for deprecated /ws endpoint', async () => {
     handle = startWebServer({ port: randomPort() }, makeState());
-
-    const ws = new WebSocket(`ws://localhost:${handle.port}/ws`);
-    const received: unknown[] = [];
-
-    await new Promise<void>((resolve, reject) => {
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ subscribe: ['logs'] }));
-        // Give the subscription time to register, then broadcast
-        setTimeout(() => {
-          handle!.broadcast({
-            type: 'log',
-            data: { level: 'info', msg: 'test log', ts: Date.now() },
-            timestamp: new Date().toISOString(),
-          });
-        }, 50);
-      };
-      ws.onmessage = (e) => {
-        received.push(JSON.parse(e.data));
-        ws.close();
-      };
-      ws.onclose = () => resolve();
-      ws.onerror = (e) => reject(e);
-      // Timeout safety
-      setTimeout(() => {
-        ws.close();
-        resolve();
-      }, 2000);
-    });
-
-    expect(received.length).toBeGreaterThanOrEqual(1);
-    const evt = received[0] as { type: string; data: { msg: string } };
-    expect(evt.type).toBe('log');
-    expect(evt.data.msg).toBe('test log');
-  });
-
-  it('only sends events matching subscribed channels', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-
-    const ws = new WebSocket(`ws://localhost:${handle.port}/ws`);
-    const received: unknown[] = [];
-
-    await new Promise<void>((resolve) => {
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ subscribe: ['stats'] })); // NOT 'logs'
-        setTimeout(() => {
-          // Send a log event — should NOT be received
-          handle!.broadcast({
-            type: 'log',
-            data: { level: 'info', msg: 'should not arrive', ts: Date.now() },
-            timestamp: new Date().toISOString(),
-          });
-          // Send a stats event — should be received
-          handle!.broadcast({
-            type: 'agent_status',
-            data: { activeContainers: 3 },
-            timestamp: new Date().toISOString(),
-          });
-        }, 50);
-      };
-      ws.onmessage = (e) => {
-        received.push(JSON.parse(e.data));
-        ws.close();
-      };
-      ws.onclose = () => resolve();
-      setTimeout(() => {
-        ws.close();
-        resolve();
-      }, 2000);
-    });
-
-    expect(received.length).toBe(1);
-    expect((received[0] as { type: string }).type).toBe('agent_status');
-  });
-
-  it('rejects WebSocket when auth is configured and no credentials given', async () => {
-    handle = startWebServer(
-      { port: randomPort(), auth: { username: 'admin', password: 'secret' } },
-      makeState(),
-    );
-
-    const ws = new WebSocket(`ws://localhost:${handle.port}/ws`);
-    const closeCode = await new Promise<number>((resolve) => {
-      ws.onclose = (e) => resolve(e.code);
-      ws.onerror = () => {}; // Suppress error noise
-      // If the server rejects with 401, the browser closes the socket with a specific code
-      setTimeout(() => {
-        ws.close();
-        resolve(-1);
-      }, 2000);
-    });
-
-    // WebSocket libraries handle auth rejection differently, but the connection should not stay open
-    expect(ws.readyState).toBeGreaterThanOrEqual(2); // CLOSING or CLOSED
+    const res = await fetch(url('/ws'));
+    expect(res.status).toBe(410);
   });
 });
 
@@ -906,9 +815,12 @@ describe('SSE', () => {
   it('connects and receives broadcast events', async () => {
     handle = startWebServer({ port: randomPort() }, makeState());
 
-    const res = await fetch(url('/api/events?channels=logs'), {
-      headers: { Accept: 'text/event-stream' },
-    });
+    const res = await fetch(
+      url('/api/events?channels=logs,tasks,stats,agents'),
+      {
+        headers: { Accept: 'text/event-stream' },
+      },
+    );
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toContain('text/event-stream');
     expect(res.body).toBeTruthy();
@@ -920,7 +832,8 @@ describe('SSE', () => {
       timestamp: new Date().toISOString(),
     });
 
-    const payload = await readUntilContains(reader, '"type":"log"');
+    const payload = await readUntilContains(reader, 'sse log');
+    expect(payload).toContain('selector #log-container');
     expect(payload).toContain('sse log');
     reader.releaseLock();
   });
@@ -952,7 +865,7 @@ describe('SSE', () => {
       timestamp: new Date().toISOString(),
     });
 
-    const payload = await readUntilContains(reader, '"type":"agent_status"');
+    const payload = await readUntilContains(reader, 'id="stat-active"');
     expect(payload).not.toContain('should not arrive');
     reader.releaseLock();
   });
@@ -1068,10 +981,11 @@ describe('dashboard', () => {
     expect(html).toContain('create-task-form');
   });
 
-  it('includes SSE fallback endpoint in dashboard script', async () => {
+  it('includes datastar stream endpoint in dashboard markup', async () => {
     handle = startWebServer({ port: randomPort() }, makeState());
     const res = await fetch(url('/'));
     const html = await res.text();
-    expect(html).toContain('/api/events?channels=logs,stats');
+    expect(html).toContain('/api/events?channels=logs,stats,tasks,agents');
+    expect(html).toContain('bundles/datastar.js');
   });
 });
