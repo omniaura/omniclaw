@@ -153,7 +153,7 @@ function shellCSS(): string {
     `.status-badge.disconnected{color:var(--red);background:rgba(248,113,113,.1)}`,
 
     // --- Workspace (sidebar + content grid) ---
-    `.workspace{display:grid;grid-template-columns:1fr 5px var(--sidebar-w);grid-template-areas:"content handle sidebar";flex:1;min-height:0;overflow:hidden;height:calc(100vh - 40px)}`,
+    `.workspace{display:grid;grid-template-columns:1fr 5px var(--sidebar-w);grid-template-rows:1fr;grid-template-areas:"content handle sidebar";flex:1;min-height:0;overflow:hidden;height:calc(100vh - 40px)}`,
     `.workspace.sidebar-left{grid-template-columns:var(--sidebar-w) 5px 1fr;grid-template-areas:"sidebar handle content"}`,
     `.workspace.sidebar-collapsed{grid-template-columns:1fr 0 0}`,
     `.workspace.sidebar-collapsed .log-sidebar,.workspace.sidebar-collapsed .resize-handle{display:none}`,
@@ -161,7 +161,8 @@ function shellCSS(): string {
     `.sidebar-reopen:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}`,
     `.workspace.sidebar-collapsed~.sidebar-reopen{display:block}`,
     `.workspace.sidebar-left.sidebar-collapsed~.sidebar-reopen{right:auto;left:0;border-radius:0 4px 4px 0;border-right:1px solid var(--border);border-left:none}`,
-    `#content{grid-area:content;overflow-y:auto;overflow-x:hidden;min-width:0}`,
+    `#content{grid-area:content;overflow:hidden;min-width:0;min-height:0;display:flex;flex-direction:column}`,
+    `#content>div{display:flex;flex-direction:column;flex:1;min-height:0}`,
 
     // --- Resize Handle ---
     `.resize-handle{grid-area:handle;cursor:col-resize;display:flex;align-items:center;justify-content:center;background:var(--border);transition:background .15s;position:relative;z-index:5}`,
@@ -263,7 +264,7 @@ function shellCSS(): string {
     `.form-error{color:var(--red);font-size:11px;margin-top:4px}`,
 
     // --- Page: Dashboard ---
-    `.dash-layout{display:flex;height:calc(100vh - 40px);overflow:hidden}`,
+    `.dash-layout{display:flex;flex:1;min-height:0;overflow:hidden}`,
     `.dash-main{flex:1;display:flex;flex-direction:column;gap:8px;padding:12px 16px;min-width:0;min-height:0;overflow:hidden}`,
     `.dash-main .stats-grid{flex-shrink:0}`,
     `.task-list{flex:1;overflow-y:auto;padding:4px}`,
@@ -308,7 +309,7 @@ function shellCSS(): string {
     `.table-wrap{overflow:auto;flex:1;border-radius:4px;border:1px solid var(--border)}`,
 
     // --- Page: Conversations ---
-    `.conv-layout{display:flex;height:100%}`,
+    `.conv-layout{display:flex;flex:1;min-height:0;overflow:hidden}`,
     `.conv-sidebar{width:260px;flex-shrink:0;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--surface)}`,
     `.conv-sidebar-header{padding:8px;border-bottom:1px solid var(--border)}`,
     `.conv-sidebar-header input{width:100%;padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:11px}`,
@@ -341,7 +342,7 @@ function shellCSS(): string {
     `.loading{text-align:center;padding:2rem;color:var(--text-dim);font-size:12px}`,
 
     // --- Page: Context Viewer ---
-    `.ctx-layout{display:flex;height:100%}`,
+    `.ctx-layout{display:flex;flex:1;min-height:0;overflow:hidden}`,
     `.ctx-sidebar{width:260px;min-width:260px;border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}`,
     `.ctx-sidebar-title{font-size:10px;text-transform:lowercase;letter-spacing:.06em;color:var(--text-dim);padding:10px 12px 4px;font-weight:600}`,
     `.agent-group{border-bottom:1px solid var(--border)}`,
@@ -411,7 +412,7 @@ function shellCSS(): string {
     `.path-display{font-size:10px;color:var(--text-dim);padding:4px 12px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}`,
 
     // --- Page: IPC Inspector ---
-    `.ipc-layout{padding:12px 16px}`,
+    `.ipc-layout{padding:12px 16px;flex:1;min-height:0;overflow-y:auto}`,
     `.ipc-layout section{margin-bottom:1.5rem}`,
     `.ipc-layout section h2{font-size:11px;font-weight:600;margin-bottom:8px;color:var(--text-dim);text-transform:lowercase;letter-spacing:.06em}`,
     `.ipc-layout table{border:1px solid var(--border);border-radius:4px;overflow:hidden}`,
