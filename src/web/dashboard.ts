@@ -399,6 +399,7 @@ ${renderNav('/')}
   // ---- WebSocket ----
   var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   var wsUrl = proto + '//' + location.host + '/ws';
+  var sseUrl = '/api/events?channels=logs,stats';
   var statusEl = document.getElementById('ws-status');
   var logContainer = document.getElementById('log-container');
   var logCountEl = document.getElementById('log-count');
@@ -408,78 +409,118 @@ ${renderNav('/')}
 
   // Level filter state
   var levelFilters = { debug: true, info: true, warn: true, error: true, fatal: true };
+  var ws = null;
+  var sse = null;
+
+  function setConnectedStatus(mode) {
+    statusEl.textContent = mode === 'sse' ? 'connected (sse)' : 'connected';
+    statusEl.className = 'ws-status connected';
+  }
+
+  function setDisconnectedStatus() {
+    statusEl.textContent = 'disconnected';
+    statusEl.className = 'ws-status disconnected';
+  }
+
+  function resetLogs() {
+    logContainer.innerHTML = '';
+    logCount = 0;
+    logCountEl.textContent = '0 lines';
+  }
+
+  function appendLog(d) {
+    var lvl = d.level || 'info';
+
+    var line = document.createElement('div');
+    line.className = 'log-line' + (lvl === 'error' || lvl === 'fatal' ? ' error' : lvl === 'warn' ? ' warn' : '');
+    line.setAttribute('data-level', lvl);
+    if (!levelFilters[lvl]) line.style.display = 'none';
+
+    var ts = new Date(d.ts).toLocaleTimeString();
+    var parts = '<span class="ts">' + ts + '</span>';
+    parts += '<span class="level-badge ' + escapeHtmlJs(lvl) + '">' + escapeHtmlJs(lvl) + '</span>';
+
+    var ctx = d.container || d.group;
+    if (ctx) parts += '<span class="context">' + escapeHtmlJs(String(ctx)) + '</span>';
+    if (d.op) parts += '<span class="op">[' + escapeHtmlJs(String(d.op)) + ']</span>';
+
+    var msg = d.msg || '';
+    if (d.durationMs != null) msg += ' (' + d.durationMs + 'ms)';
+    if (d.costUsd != null) msg += ' $' + d.costUsd;
+    parts += '<span class="msg">' + escapeHtmlJs(msg) + '</span>';
+    if (d.err) parts += '<span class="err-detail">' + escapeHtmlJs(String(d.err)) + '</span>';
+
+    line.innerHTML = parts;
+    logContainer.appendChild(line);
+    logCount++;
+
+    while (logContainer.children.length > MAX_LOG_LINES) {
+      logContainer.removeChild(logContainer.firstChild);
+      logCount = Math.max(0, logCount - 1);
+    }
+    logCountEl.textContent = logCount + ' lines';
+    if (autoScroll) logContainer.scrollTop = logContainer.scrollHeight;
+  }
+
+  function updateStats(s) {
+    var el = function(id) { return document.getElementById(id); };
+    if (s.activeContainers != null && s.idleContainers != null && s.maxActive != null) {
+      el('stat-active').textContent = Math.max(0, s.activeContainers - s.idleContainers) + '/' + s.maxActive;
+    }
+    if (s.idleContainers != null && s.maxIdle != null) {
+      el('stat-idle').textContent = s.idleContainers + '/' + s.maxIdle;
+    }
+  }
+
+  function handleEvent(evt) {
+    if (!evt || !evt.type) return;
+    if (evt.type === 'log') appendLog(evt.data || {});
+    if (evt.type === 'agent_status') updateStats(evt.data || {});
+  }
+
+  function connectSse() {
+    if (sse) return;
+    sse = new EventSource(sseUrl);
+    sse.onopen = function() {
+      setConnectedStatus('sse');
+    };
+    sse.onerror = function() {
+      setDisconnectedStatus();
+    };
+    sse.onmessage = function(e) {
+      try { handleEvent(JSON.parse(e.data)); } catch (ex) {}
+    };
+    sse.addEventListener('log', function(e) {
+      try { handleEvent(JSON.parse(e.data)); } catch (ex) {}
+    });
+    sse.addEventListener('agent_status', function(e) {
+      try { handleEvent(JSON.parse(e.data)); } catch (ex) {}
+    });
+  }
+
+  function disconnectSse() {
+    if (!sse) return;
+    sse.close();
+    sse = null;
+  }
 
   function connect() {
-    var ws = new WebSocket(wsUrl);
+    ws = new WebSocket(wsUrl);
     ws.onopen = function() {
-      statusEl.textContent = 'connected';
-      statusEl.className = 'ws-status connected';
-      logContainer.innerHTML = '';
-      logCount = 0;
-      logCountEl.textContent = '0 lines';
+      disconnectSse();
+      setConnectedStatus('ws');
+      resetLogs();
       ws.send(JSON.stringify({ subscribe: ['logs', 'stats'] }));
     };
     ws.onclose = function() {
-      statusEl.textContent = 'disconnected';
-      statusEl.className = 'ws-status disconnected';
+      setDisconnectedStatus();
+      connectSse();
       setTimeout(connect, 3000);
     };
     ws.onerror = function() { ws.close(); };
     ws.onmessage = function(e) {
       try {
-        var evt = JSON.parse(e.data);
-        if (evt.type === 'log') {
-          var d = evt.data;
-          var lvl = d.level || 'info';
-
-          var line = document.createElement('div');
-          line.className = 'log-line' + (lvl === 'error' || lvl === 'fatal' ? ' error' : lvl === 'warn' ? ' warn' : '');
-          line.setAttribute('data-level', lvl);
-
-          // Hide if level is filtered out
-          if (!levelFilters[lvl]) line.style.display = 'none';
-
-          var ts = new Date(d.ts).toLocaleTimeString();
-          var parts = '<span class="ts">' + ts + '</span>';
-          parts += '<span class="level-badge ' + escapeHtmlJs(lvl) + '">' + escapeHtmlJs(lvl) + '</span>';
-
-          // Context: container/group name
-          var ctx = d.container || d.group;
-          if (ctx) parts += '<span class="context">' + escapeHtmlJs(String(ctx)) + '</span>';
-
-          // Operation tag
-          if (d.op) parts += '<span class="op">[' + escapeHtmlJs(String(d.op)) + ']</span>';
-
-          // Message
-          var msg = d.msg || '';
-          if (d.durationMs != null) msg += ' (' + d.durationMs + 'ms)';
-          if (d.costUsd != null) msg += ' $' + d.costUsd;
-          parts += '<span class="msg">' + escapeHtmlJs(msg) + '</span>';
-
-          // Error detail
-          if (d.err) parts += '<span class="err-detail">' + escapeHtmlJs(String(d.err)) + '</span>';
-
-          line.innerHTML = parts;
-          logContainer.appendChild(line);
-          logCount++;
-
-          while (logContainer.children.length > MAX_LOG_LINES) {
-            logContainer.removeChild(logContainer.firstChild);
-            logCount = Math.max(0, logCount - 1);
-          }
-          logCountEl.textContent = logCount + ' lines';
-          if (autoScroll) logContainer.scrollTop = logContainer.scrollHeight;
-        }
-        if (evt.type === 'agent_status') {
-          var s = evt.data;
-          var el = function(id) { return document.getElementById(id); };
-          if (s.activeContainers != null && s.idleContainers != null && s.maxActive != null) {
-            el('stat-active').textContent = Math.max(0, s.activeContainers - s.idleContainers) + '/' + s.maxActive;
-          }
-          if (s.idleContainers != null && s.maxIdle != null) {
-            el('stat-idle').textContent = s.idleContainers + '/' + s.maxIdle;
-          }
-        }
+        handleEvent(JSON.parse(e.data));
       } catch(ex) {}
     };
   }
