@@ -18,6 +18,7 @@ description: Run initial OmniClaw setup. Use when user wants to install dependen
 | github, discord bot/agent, webhooks, github watches | → read [guides/advanced-setup.md](guides/advanced-setup.md) |
 | add agent to channel, subscribe agent, register agent in chat, new channel for agent | → read [guides/agents-and-context.md](guides/agents-and-context.md) (see "Adding an existing agent to a new channel" or "Adding a new agent to an existing channel") |
 | agent identity, context, workspace mounts, agent-to-agent routing, triggers, wrong identity, sender identity, channel context | → read [guides/agents-and-context.md](guides/agents-and-context.md) |
+| linger, ssh disconnect, service dies, agents go offline | → [Linger fix](#linger-fix) below |
 | broken, not working, error, troubleshoot | → read [guides/troubleshooting.md](guides/troubleshooting.md) |
 
 ---
@@ -83,6 +84,26 @@ tail -5 logs/omniclaw.log
 ```
 
 Report whether the service came back up successfully.
+
+---
+
+## Linger fix
+
+**Linux only.** If user reports agents going offline after SSH disconnect:
+
+```bash
+# Check
+loginctl show-user $(whoami) | grep Linger
+
+# Fix
+loginctl enable-linger $(whoami)
+
+# Verify
+loginctl show-user $(whoami) | grep Linger
+# Should show Linger=yes
+```
+
+Without linger, systemd tears down all user services when the last session ends. This is also handled automatically by step 10 (`08-setup-service.sh`) during fresh install.
 
 ---
 

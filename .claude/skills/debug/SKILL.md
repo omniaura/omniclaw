@@ -10,8 +10,8 @@ This guide covers debugging the containerized agent execution system.
 ## Architecture Overview
 
 ```
-Host (macOS)                          Container (Linux VM)
-─────────────────────────────────────────────────────────────
+Host (macOS / Linux)                  Container (Linux VM / Docker)
+─────────────────────────────────────────────────────────────────
 src/backends/local-backend.ts          container/agent-runner/
     │                                      │
     │ spawns container via backend         │ runs Claude Agent SDK
@@ -30,7 +30,7 @@ src/backends/local-backend.ts          container/agent-runner/
 
 | Log | Location | Content |
 |-----|----------|---------|
-| **Main app logs** | `logs/omniclaw.log` | Host-side WhatsApp, routing, container spawning |
+| **Main app logs** | `logs/omniclaw.log` | Host-side messaging, routing, container spawning |
 | **Main app errors** | `logs/omniclaw.error.log` | Host-side errors |
 | **Container run logs** | `groups/{folder}/logs/container-*.log` | Per-run: input, mounts, stderr, stdout |
 | **Claude sessions** | `~/.claude/projects/` | Claude Code session history |
@@ -41,11 +41,15 @@ Set `LOG_LEVEL=debug` for verbose output:
 
 ```bash
 # For development
-LOG_LEVEL=debug npm run dev
+LOG_LEVEL=debug bun run dev
 
-# For launchd service, add to plist EnvironmentVariables:
-<key>LOG_LEVEL</key>
-<string>debug</string>
+# For systemd service (Linux), add to unit override:
+systemctl --user edit omniclaw
+# Add: Environment=LOG_LEVEL=debug
+
+# For launchd service (macOS), add to plist EnvironmentVariables:
+# <key>LOG_LEVEL</key>
+# <string>debug</string>
 ```
 
 Debug level shows:
@@ -67,7 +71,7 @@ Invalid API key · Please run /login
 ```
 **Fix:** Ensure `.env` file exists with either OAuth token or API key:
 ```bash
-cat .env  # Should show one of:
+# Should show one of:
 # CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...  (subscription)
 # ANTHROPIC_API_KEY=sk-ant-api03-...        (pay-per-use)
 ```
@@ -80,12 +84,17 @@ cat .env  # Should show one of:
 
 ### 2. Environment Variables Not Passing
 
-**Apple Container Bug:** Environment variables passed via `-e` are lost when using `-i` (interactive/piped stdin).
-
-**Workaround:** The system extracts only authentication variables (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) from `.env` and mounts them for sourcing inside the container. Other env vars are not exposed.
+The system extracts only authentication variables (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) from `.env` and mounts them for sourcing inside the container.
 
 To verify env vars are reaching the container:
 ```bash
+# Docker
+docker run --rm \
+  -v $(pwd)/data/env:/workspace/env-dir:ro \
+  --entrypoint /bin/bash omniclaw-agent:latest \
+  -c 'export $(cat /workspace/env-dir/env | xargs); echo "OAuth: ${#CLAUDE_CODE_OAUTH_TOKEN} chars, API: ${#ANTHROPIC_API_KEY} chars"'
+
+# Apple Container
 echo '{}' | container run -i \
   --mount type=bind,source=$(pwd)/data/env,target=/workspace/env-dir,readonly \
   --entrypoint /bin/bash omniclaw-agent:latest \
@@ -94,19 +103,12 @@ echo '{}' | container run -i \
 
 ### 3. Mount Issues
 
-**Apple Container quirks:**
-- Only mounts directories, not individual files
-- `-v` syntax does NOT support `:ro` suffix - use `--mount` for readonly:
-  ```bash
-  # Readonly: use --mount
-  --mount "type=bind,source=/path,target=/container/path,readonly"
-
-  # Read-write: use -v
-  -v /path:/container/path
-  ```
-
 To check what's mounted inside a container:
 ```bash
+# Docker
+docker run --rm --entrypoint /bin/bash omniclaw-agent:latest -c 'ls -la /workspace/'
+
+# Apple Container (quirks: only mounts directories, -v doesn't support :ro)
 container run --rm --entrypoint /bin/bash omniclaw-agent:latest -c 'ls -la /workspace/'
 ```
 
@@ -118,47 +120,20 @@ Expected structure:
 ├── project/              # Project root (main channel only)
 ├── global/               # Global CLAUDE.md (non-main only)
 ├── ipc/                  # Inter-process communication
-│   ├── messages/         # Outgoing WhatsApp messages
+│   ├── messages/         # Outgoing messages
 │   ├── tasks/            # Scheduled task commands
 │   ├── current_tasks.json    # Read-only: scheduled tasks visible to this group
-│   └── available_groups.json # Read-only: WhatsApp groups for activation (main only)
+│   └── available_groups.json # Read-only: groups for activation (main only)
 └── extra/                # Additional custom mounts
 ```
 
 ### 4. Permission Issues
 
-The container runs as user `node` (uid 1000). Check ownership:
-```bash
-container run --rm --entrypoint /bin/bash omniclaw-agent:latest -c '
-  whoami
-  ls -la /workspace/
-  ls -la /app/
-'
-```
-
-All of `/workspace/` and `/app/` should be owned by `node`.
+The container runs as user `node` (uid 1000). All of `/workspace/` and `/app/` should be owned by `node`.
 
 ### 5. Session Not Resuming / "Claude Code process exited with code 1"
 
-If sessions aren't being resumed (new session ID every time), or Claude Code exits with code 1 when resuming:
-
 **Root cause:** The SDK looks for sessions at `$HOME/.claude/projects/`. Inside the container, `HOME=/home/node`, so it looks at `/home/node/.claude/projects/`.
-
-**Check the mount path:**
-```bash
-# In local-backend.ts, verify mount is to /home/node/.claude/, NOT /root/.claude/
-grep -A3 "Claude sessions" src/backends/local-backend.ts
-```
-
-**Verify sessions are accessible:**
-```bash
-container run --rm --entrypoint /bin/bash \
-  -v ~/.claude:/home/node/.claude \
-  omniclaw-agent:latest -c '
-echo "HOME=$HOME"
-ls -la $HOME/.claude/projects/ 2>&1 | head -5
-'
-```
 
 **Fix:** Ensure `local-backend.ts` mounts to `/home/node/.claude/`:
 ```typescript
@@ -169,9 +144,53 @@ mounts.push({
 });
 ```
 
-### 6. MCP Server Failures
+### 6. Service Stops After SSH Disconnect (Linux)
+
+Systemd user services are killed when the last login session ends unless lingering is enabled.
+
+**Diagnose:**
+```bash
+loginctl show-user $(whoami) | grep Linger
+# Linger=no means services die on logout
+```
+
+**Fix:**
+```bash
+loginctl enable-linger $(whoami)
+```
+
+This persists across reboots. The setup script (step 10) enables this automatically. If it fails with a permissions error, sudo or a polkit rule may be needed.
+
+### 7. MCP Server Failures
 
 If an MCP server fails to start, the agent may exit. Check the container logs for MCP initialization errors.
+
+## Service Management
+
+```bash
+# Check status
+launchctl list | grep omniclaw                    # macOS
+systemctl --user status omniclaw                  # Linux
+
+# Restart
+launchctl kickstart -k gui/$(id -u)/com.omniclaw  # macOS
+systemctl --user restart omniclaw                  # Linux
+
+# Stop
+launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist   # macOS
+systemctl --user stop omniclaw                                # Linux
+
+# View live logs
+tail -f logs/omniclaw.log
+
+# Check running agent containers
+docker ps --filter name=omniclaw                  # Docker
+launchctl list | grep 'container-runtime-linux.omniclaw'  # Apple Container
+
+# Rebuild after code changes
+bun run build
+# Then restart service (see above)
+```
 
 ## Manual Container Testing
 
@@ -179,30 +198,20 @@ If an MCP server fails to start, the agent may exit. Check the container logs fo
 ```bash
 # Set up env file
 mkdir -p data/env groups/test
-cp .env data/env/env
 
-# Run test query
+# Run test query (Docker)
 echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isMain":false}' | \
-  container run -i \
-  --mount "type=bind,source=$(pwd)/data/env,target=/workspace/env-dir,readonly" \
+  docker run -i --rm \
+  -v $(pwd)/data/env:/workspace/env-dir:ro \
   -v $(pwd)/groups/test:/workspace/group \
   -v $(pwd)/data/ipc:/workspace/ipc \
   omniclaw-agent:latest
 ```
 
-### Test Claude Code directly:
-```bash
-container run --rm --entrypoint /bin/bash \
-  --mount "type=bind,source=$(pwd)/data/env,target=/workspace/env-dir,readonly" \
-  omniclaw-agent:latest -c '
-  export $(cat /workspace/env-dir/env | xargs)
-  claude -p "Say hello" --dangerously-skip-permissions --allowedTools ""
-'
-```
-
 ### Interactive shell in container:
 ```bash
-container run --rm -it --entrypoint /bin/bash omniclaw-agent:latest
+docker run --rm -it --entrypoint /bin/bash omniclaw-agent:latest   # Docker
+container run --rm -it --entrypoint /bin/bash omniclaw-agent:latest  # Apple Container
 ```
 
 ## SDK Options Reference
@@ -229,38 +238,22 @@ query({
 
 ```bash
 # Rebuild main app
-npm run build
+bun run build
 
-# Rebuild container (use --no-cache for clean rebuild)
+# Rebuild container
 ./container/build.sh
 
-# Or force full rebuild
-container builder prune -af
+# Force clean rebuild (Docker)
+docker builder prune -f && ./container/build.sh
+
+# Force clean rebuild (Apple Container — flush builder cache)
+container builder stop && container builder rm && container builder start
 ./container/build.sh
-```
-
-## Checking Container Image
-
-```bash
-# List images
-container images
-
-# Check what's in the image
-container run --rm --entrypoint /bin/bash omniclaw-agent:latest -c '
-  echo "=== Node version ==="
-  node --version
-
-  echo "=== Claude Code version ==="
-  claude --version
-
-  echo "=== Installed packages ==="
-  ls /app/node_modules/
-'
 ```
 
 ## Session Persistence
 
-Claude sessions are stored per-group in `data/sessions/{group}/.claude/` for security isolation. Each group has its own session directory, preventing cross-group access to conversation history.
+Claude sessions are stored per-group in `data/sessions/{group}/.claude/` for security isolation.
 
 **Critical:** The mount path must match the container user's HOME directory:
 - Container user: `node`
@@ -280,12 +273,6 @@ rm -rf data/sessions/{groupFolder}/.claude/
 sqlite3 store/messages.db "DELETE FROM sessions WHERE group_folder = '{groupFolder}'"
 ```
 
-To verify session resumption is working, check the logs for the same session ID across messages:
-```bash
-grep "Session initialized" logs/omniclaw.log | tail -5
-# Should show the SAME session ID for consecutive messages in the same group
-```
-
 ## Discord Multi-Bot Routing
 
 ### Internal bot key vs Discord snowflake ID
@@ -297,14 +284,12 @@ OmniClaw uses **two completely different identifiers** for Discord bots — they
 | **Internal bot key** | `DISCORD_BOT_IDS` in `.env` | `PRIMARY`, `OCPEYTON` | OmniClaw routing |
 | **Discord snowflake ID** | Discord Developer Portal → App → General | `1476396931709276191` | Discord's own API |
 
-The internal bot key is set by **you** when you configure `.env`. It must match exactly across:
+The internal bot key must match exactly across:
 - `DISCORD_BOT_IDS=PRIMARY,OCPEYTON`
 - `DISCORD_BOT_<KEY>_TOKEN=<token>` (e.g., `DISCORD_BOT_OCPEYTON_TOKEN`)
 - `channel_subscriptions.discord_bot_id` in SQLite
 
-The Discord snowflake ID is **never stored in OmniClaw's DB** and is never used for routing. It only appears in Discord API responses.
-
-**Common mistake:** Looking up the bot's numeric ID in the Discord Developer Portal and writing it into `channel_subscriptions.discord_bot_id`. This breaks routing silently — `findChannelForJid` won't match any bot and falls back to the default, so the wrong bot sends all messages.
+**Common mistake:** Using the numeric Discord snowflake ID in `channel_subscriptions.discord_bot_id` instead of the human-readable key. This breaks routing silently.
 
 ### Diagnosing wrong-bot-sending issues
 
@@ -315,34 +300,11 @@ grep DISCORD_BOT_IDS .env
 # Check what's stored in the DB (should match keys above, NOT numeric IDs)
 sqlite3 store/messages.db "SELECT DISTINCT discord_bot_id FROM channel_subscriptions WHERE discord_bot_id IS NOT NULL"
 
-# Check which bot actually sent a message (look for the jid in logs)
-grep "Discord message sent" logs/omniclaw.log | tail -10
-```
-
-If the DB contains numeric snowflake IDs instead of human-readable keys, fix them:
-```bash
-# Example: replace numeric ID with the correct key
+# Fix if DB contains numeric IDs instead of keys
 sqlite3 store/messages.db "UPDATE channel_subscriptions SET discord_bot_id = 'OCPEYTON' WHERE discord_bot_id = '1476396931709276191'"
 ```
 
-### Scheduled task routing
-
-Scheduled tasks route their result message through `group.discordBotId`, which comes from the task's assigned agent's `channel_subscriptions.discord_bot_id`. If the task was assigned to `ocpeyton-discord` but the reply came from the wrong bot, check:
-
-```bash
-sqlite3 store/messages.db "
-SELECT st.id, st.group_folder, cs.discord_bot_id, cs.is_primary
-FROM scheduled_tasks st
-JOIN channel_subscriptions cs ON cs.channel_jid = st.chat_jid AND cs.agent_id = st.group_folder
-WHERE st.status = 'active' LIMIT 10;
-"
-```
-
-The `discord_bot_id` shown must match a key in `DISCORD_BOT_IDS`.
-
 ## IPC Debugging
-
-The container communicates back to the host via files in `/workspace/ipc/`:
 
 ```bash
 # Check pending messages
@@ -351,9 +313,6 @@ ls -la data/ipc/messages/
 # Check pending task operations
 ls -la data/ipc/tasks/
 
-# Read a specific IPC file
-cat data/ipc/messages/*.json
-
 # Check available groups (main channel only)
 cat data/ipc/main/available_groups.json
 
@@ -361,41 +320,39 @@ cat data/ipc/main/available_groups.json
 cat data/ipc/{groupFolder}/current_tasks.json
 ```
 
-**IPC file types:**
-- `messages/*.json` - Agent writes: outgoing WhatsApp messages
-- `tasks/*.json` - Agent writes: task operations (schedule, pause, resume, cancel, refresh_groups)
-- `current_tasks.json` - Host writes: read-only snapshot of scheduled tasks
-- `available_groups.json` - Host writes: read-only list of WhatsApp groups (main only)
-
 ## Quick Diagnostic Script
 
-Run this to check common issues:
-
 ```bash
-echo "=== Checking OmniClaw Container Setup ==="
+echo "=== OmniClaw Diagnostic ==="
 
-echo -e "\n1. Authentication configured?"
-[ -f .env ] && (grep -q "CLAUDE_CODE_OAUTH_TOKEN=sk-" .env || grep -q "ANTHROPIC_API_KEY=sk-" .env) && echo "OK" || echo "MISSING - add CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY to .env"
+echo -e "\n1. Service running?"
+if command -v systemctl &>/dev/null; then
+  systemctl --user is-active omniclaw 2>/dev/null && echo "OK (systemd)" || echo "NOT RUNNING"
+  echo -n "   Linger: "; loginctl show-user $(whoami) 2>/dev/null | grep Linger || echo "unknown"
+elif command -v launchctl &>/dev/null; then
+  launchctl list 2>/dev/null | grep -q com.omniclaw && echo "OK (launchd)" || echo "NOT RUNNING"
+fi
 
-echo -e "\n2. Env file copied for container?"
-[ -f data/env/env ] && echo "OK" || echo "MISSING - will be created on first run"
+echo -e "\n2. Authentication configured?"
+[ -f .env ] && (grep -q "CLAUDE_CODE_OAUTH_TOKEN=sk-" .env || grep -q "ANTHROPIC_API_KEY=sk-" .env) && echo "OK" || echo "MISSING"
 
-echo -e "\n3. Apple Container system running?"
-container system status &>/dev/null && echo "OK" || echo "NOT RUNNING - OmniClaw should auto-start it; check logs"
+echo -e "\n3. Container runtime?"
+if command -v docker &>/dev/null; then
+  docker info &>/dev/null && echo "OK (Docker)" || echo "Docker installed but not running"
+elif command -v container &>/dev/null; then
+  container system status &>/dev/null && echo "OK (Apple Container)" || echo "Apple Container not running"
+else
+  echo "No container runtime found"
+fi
 
-echo -e "\n4. Container image exists?"
-echo '{}' | container run -i --entrypoint /bin/echo omniclaw-agent:latest "OK" 2>/dev/null || echo "MISSING - run ./container/build.sh"
+echo -e "\n4. Container image?"
+docker images omniclaw-agent:latest --format "OK ({{.Size}})" 2>/dev/null || \
+  (echo '{}' | container run -i --entrypoint /bin/echo omniclaw-agent:latest "OK" 2>/dev/null) || \
+  echo "MISSING — run ./container/build.sh"
 
-echo -e "\n5. Session mount path correct?"
-grep -q "/home/node/.claude" src/backends/local-backend.ts 2>/dev/null && echo "OK" || echo "WRONG - should mount to /home/node/.claude/, not /root/.claude/"
+echo -e "\n5. Recent errors?"
+grep -E '"level":"error"' logs/omniclaw.log 2>/dev/null | tail -3 || echo "No error log"
 
-echo -e "\n6. Groups directory?"
-ls -la groups/ 2>/dev/null || echo "MISSING - run setup"
-
-echo -e "\n7. Recent container logs?"
-ls -t groups/*/logs/container-*.log 2>/dev/null | head -3 || echo "No container logs yet"
-
-echo -e "\n8. Session continuity working?"
-SESSIONS=$(grep "Session initialized" logs/omniclaw.log 2>/dev/null | tail -5 | awk '{print $NF}' | sort -u | wc -l)
-[ "$SESSIONS" -le 2 ] && echo "OK (recent sessions reusing IDs)" || echo "CHECK - multiple different session IDs, may indicate resumption issues"
+echo -e "\n6. Groups loaded?"
+grep 'groupCount' logs/omniclaw.log 2>/dev/null | tail -1 || echo "No log data"
 ```

@@ -3,9 +3,23 @@
 ## Service not starting
 
 Check `logs/omniclaw.error.log`. Common causes:
-- Wrong Node/bun path in plist → re-run step 10 of fresh install
+- Wrong Node/bun path in plist/unit file → re-run step 10 of fresh install
 - Missing `.env` → re-run step 4
 - Missing WhatsApp auth → re-run step 5
+
+## Service stops after SSH disconnect (Linux)
+
+Systemd user services are killed when the last login session ends unless lingering is enabled:
+
+```bash
+# Check current state
+loginctl show-user $(whoami) | grep Linger
+
+# Enable (persists across reboots)
+loginctl enable-linger $(whoami)
+```
+
+If `loginctl enable-linger` fails with a permissions error, it may need sudo or a polkit rule. The setup script (step 10) enables this automatically.
 
 ## Container agent fails ("Claude Code process exited with code 1")
 
@@ -91,11 +105,16 @@ The web dashboard supports real-time log streaming. If the dashboard log panel i
 ## Useful commands
 
 ```bash
-# Unload service
-launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist
-
 # Restart service
-launchctl kickstart -k gui/$(id -u)/com.omniclaw
+launchctl kickstart -k gui/$(id -u)/com.omniclaw   # macOS
+systemctl --user restart omniclaw                    # Linux
+
+# Stop service
+launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist   # macOS
+systemctl --user stop omniclaw                                # Linux
+
+# Check linger (Linux — prevents service death on SSH disconnect)
+loginctl show-user $(whoami) | grep Linger
 
 # Tail main log
 tail -f logs/omniclaw.log
