@@ -957,20 +957,20 @@ describe('server shutdown', () => {
 // ---- Dashboard content ----
 
 describe('dashboard', () => {
-  it('includes create task button', async () => {
+  it('includes create task button in sidebar', async () => {
     handle = startWebServer({ port: randomPort() }, makeState());
     const res = await fetch(url('/'));
     const html = await res.text();
     expect(html).toContain('btn-create-task');
-    expect(html).toContain('+ new');
+    expect(html).toContain('+ new task');
   });
 
-  it('includes task action buttons', async () => {
+  it('includes sidebar tasks panel', async () => {
     handle = startWebServer({ port: randomPort() }, makeState());
     const res = await fetch(url('/'));
     const html = await res.text();
-    expect(html).toContain('data-action="toggle"');
-    expect(html).toContain('data-action="delete"');
+    expect(html).toContain('sidebar-tasks');
+    expect(html).toContain('panel-tasks');
   });
 
   it('includes create task modal', async () => {

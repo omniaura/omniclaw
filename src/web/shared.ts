@@ -24,7 +24,6 @@ export function renderNavLinks(activePath: string): string {
   return NAV_ITEMS.map(
     (item) =>
       `<a href="${item.href}" data-nav data-page="${item.page}" ` +
-      `data-on:click.prevent="@get('/api/page/${item.page}')" ` +
       `class="nav-link${item.href === activePath ? ' active' : ''}">${item.label}</a>`,
   ).join('');
 }
@@ -77,11 +76,16 @@ export function renderShell(
     `<div class="resize-handle" id="resize-handle"><div class="resize-grip"></div></div>` +
     `<aside class="log-sidebar" id="log-sidebar">` +
     `<div class="sidebar-head">` +
-    `<span class="sidebar-title">logs</span>` +
+    `<div class="sidebar-tabs">` +
+    `<button class="sidebar-tab active" data-sidebar-tab="logs">logs</button>` +
+    `<button class="sidebar-tab" data-sidebar-tab="tasks">tasks</button>` +
+    `</div>` +
     `<div class="sidebar-actions">` +
     `<button id="btn-toggle-side" class="icon-btn" title="Move to other side">\u21c4</button>` +
     `<button id="btn-collapse" class="icon-btn" title="Toggle sidebar">\u2715</button>` +
     `</div></div>` +
+    // Logs panel
+    `<div class="sidebar-panel active" id="panel-logs">` +
     `<div class="log-toolbar" id="log-toolbar">` +
     `<button class="filter-btn active" data-level="all">all</button>` +
     `<button class="filter-btn active" data-level="debug">dbg</button>` +
@@ -94,6 +98,14 @@ export function renderShell(
     `<button class="filter-btn" id="btn-clear-logs" title="Clear">clr</button>` +
     `</div>` +
     `<div id="log-container" class="log-stream"></div>` +
+    `</div>` +
+    // Tasks panel
+    `<div class="sidebar-panel" id="panel-tasks">` +
+    `<div class="tasks-toolbar">` +
+    `<button class="btn btn-primary btn-sm" id="btn-create-task">+ new task</button>` +
+    `</div>` +
+    `<div class="task-list" id="sidebar-tasks"></div>` +
+    `</div>` +
     `</aside>` +
     `</div>` +
     `<button class="sidebar-reopen" id="btn-reopen-sidebar" title="Show logs">\u2261 logs</button>` +
@@ -160,8 +172,14 @@ function shellCSS(): string {
     // --- Log Sidebar ---
     `.log-sidebar{grid-area:sidebar;display:flex;flex-direction:column;background:var(--bg);border-left:1px solid var(--border);min-width:0;overflow:hidden}`,
     `.workspace.sidebar-left .log-sidebar{border-left:none;border-right:1px solid var(--border)}`,
-    `.sidebar-head{display:flex;align-items:center;justify-content:space-between;padding:0 10px;height:32px;flex-shrink:0;border-bottom:1px solid var(--border);background:var(--surface)}`,
-    `.sidebar-title{font-size:10px;font-weight:600;text-transform:lowercase;letter-spacing:.08em;color:var(--text-dim)}`,
+    `.sidebar-head{display:flex;align-items:center;justify-content:space-between;padding:0 4px 0 0;height:32px;flex-shrink:0;border-bottom:1px solid var(--border);background:var(--surface)}`,
+    `.sidebar-tabs{display:flex;gap:0;height:100%}`,
+    `.sidebar-tab{font-family:var(--mono);font-size:10px;font-weight:600;text-transform:lowercase;letter-spacing:.06em;color:var(--text-dim);background:none;border:none;border-bottom:2px solid transparent;padding:0 12px;cursor:pointer;transition:all .12s}`,
+    `.sidebar-tab:hover{color:var(--text)}`,
+    `.sidebar-tab.active{color:var(--accent);border-bottom-color:var(--accent)}`,
+    `.sidebar-panel{display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden}`,
+    `.sidebar-panel.active{display:flex}`,
+    `.tasks-toolbar{display:flex;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border);flex-shrink:0}`,
     `.sidebar-actions{display:flex;gap:2px}`,
     `.icon-btn{background:none;border:1px solid transparent;color:var(--text-dim);cursor:pointer;font-size:12px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:3px;transition:all .12s}`,
     `.icon-btn:hover{color:var(--text);background:var(--surface-2);border-color:var(--border)}`,
@@ -196,6 +214,7 @@ function shellCSS(): string {
     `.badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.03em}`,
     `.badge-apple-container{background:rgba(96,165,250,.1);color:var(--blue)}`,
     `.badge-docker{background:rgba(52,211,153,.1);color:var(--green)}`,
+    `.badge-sm{font-size:9px;padding:0 5px}`,
     `.badge-admin{background:rgba(167,139,250,.1);color:#a78bfa}`,
     `.status-active{background:rgba(52,211,153,.1);color:var(--green)}`,
     `.status-paused{background:rgba(251,191,36,.1);color:var(--yellow)}`,
@@ -244,8 +263,44 @@ function shellCSS(): string {
     `.form-error{color:var(--red);font-size:11px;margin-top:4px}`,
 
     // --- Page: Dashboard ---
-    `.dash-layout{padding:12px 16px;display:flex;flex-direction:column;gap:10px;height:100%}`,
+    `.dash-layout{display:flex;height:calc(100vh - 40px);overflow:hidden}`,
+    `.dash-main{flex:1;display:flex;flex-direction:column;gap:8px;padding:12px 16px;min-width:0;min-height:0;overflow:hidden}`,
+    `.dash-main .stats-grid{flex-shrink:0}`,
+    `.task-list{flex:1;overflow-y:auto;padding:4px}`,
+    `.task-card{padding:8px 10px;border:1px solid var(--border);border-radius:4px;margin-bottom:4px;font-size:11px;background:var(--bg);transition:border-color .12s}`,
+    `.task-card:hover{border-color:var(--border-bright)}`,
+    `.task-top{display:flex;align-items:center;gap:5px;margin-bottom:3px}`,
+    `.task-agent{font-weight:600;font-size:10px;color:var(--text)}`,
+    `.task-sched{margin-left:auto;font-size:9px;color:var(--text-dim);font-variant-numeric:tabular-nums}`,
+    `.task-prompt{font-size:10px;color:var(--text-dim);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}`,
+    `.task-actions{display:flex;gap:4px}`,
+    `.task-actions .btn{padding:1px 6px;font-size:9px}`,
+    `.agent-groups-wrap{border:1px solid var(--border);border-radius:4px;overflow:auto;flex:1}`,
     `.tables-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;flex:1;min-height:0;overflow:hidden}`,
+    // Topology
+    `.topo-section{position:relative;flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}`,
+    `.topo-section .section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}`,
+    `.topo-section .section-header h2{font-size:10px;font-weight:600;color:var(--text-dim);text-transform:lowercase;letter-spacing:.06em;margin:0}`,
+    `.topo-legend{display:flex;gap:12px;align-items:center}`,
+    `.legend-item{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--text-dim)}`,
+    `.legend-dot{width:8px;height:8px;border-radius:50%}`,
+    `.legend-agent{background:var(--accent);box-shadow:0 0 6px var(--accent)}`,
+    `.legend-channel{background:var(--green);box-shadow:0 0 6px var(--green)}`,
+    `.legend-server{background:var(--yellow);box-shadow:0 0 6px var(--yellow)}`,
+    `.legend-category{background:var(--cyan);box-shadow:0 0 6px var(--cyan)}`,
+    `.topo-canvas-wrap{border:1px solid var(--border);border-radius:6px;background:var(--surface);overflow:hidden;flex:1;min-height:0;position:relative}`,
+    `.topo-canvas-wrap canvas{width:100%;height:100%;display:block;cursor:grab}`,
+    `.topo-canvas-wrap canvas.dragging{cursor:grabbing}`,
+    `.topo-tooltip{display:none;position:absolute;z-index:20;background:var(--surface-2);border:1px solid var(--border-bright);border-radius:4px;padding:6px 10px;font-size:11px;pointer-events:none;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.4)}`,
+    `.topo-tooltip.visible{display:block}`,
+    `.topo-tooltip .tt-name{font-weight:600;color:var(--text-bright)}`,
+    `.topo-tooltip .tt-type{font-size:9px;text-transform:uppercase;letter-spacing:.04em;margin-left:6px}`,
+    `.topo-tooltip .tt-type.agent{color:var(--accent)}`,
+    `.topo-tooltip .tt-type.channel{color:var(--green)}`,
+    `.topo-tooltip .tt-type.server{color:var(--yellow)}`,
+    `.topo-tooltip .tt-detail{color:var(--text-dim);font-size:10px;margin-top:2px}`,
+    `.topo-tooltip .tt-copy{color:var(--accent);font-size:9px;margin-top:2px;opacity:.6}`,
+    `.tasks-section{flex-shrink:0}`,
     `.table-section{display:flex;flex-direction:column;overflow:hidden}`,
     `.table-section h2{font-size:10px;font-weight:600;margin-bottom:6px;color:var(--text-dim);text-transform:lowercase;letter-spacing:.06em}`,
     `.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}`,
@@ -299,7 +354,11 @@ function shellCSS(): string {
     `.channel-list{display:none}.channel-list.open{display:block}`,
     `.channel-item{padding:4px 12px 4px 24px;font-size:11px;color:var(--text-dim);cursor:pointer;transition:all .12s;display:flex;flex-direction:column}`,
     `.ch-name{font-weight:500;color:var(--text)}`,
+    `.ch-jid-row{display:flex;align-items:center;gap:4px}`,
     `.ch-jid{font-size:9px;color:var(--text-dim);opacity:.6}`,
+    `.copy-btn{background:none;border:1px solid transparent;color:var(--text-dim);opacity:.4;cursor:pointer;font-size:10px;padding:0 3px;border-radius:2px;transition:all .12s;line-height:1;flex-shrink:0}`,
+    `.copy-btn:hover{opacity:1;color:var(--accent);border-color:var(--border)}`,
+    `.copy-btn.copied{opacity:1;color:var(--green);border-color:var(--green)}`,
     `.channel-item:hover{color:var(--text);background:var(--accent-dim)}`,
     `.channel-item.active{color:var(--accent);background:var(--accent-dim)}`,
     `.ctx-content{flex:1;display:flex;flex-direction:column;overflow:hidden}`,
@@ -419,6 +478,14 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('  savePrefs(prefs);');
   parts.push('});');
 
+  // ---- Sidebar tab switching ----
+  parts.push('document.querySelector(".sidebar-tabs").addEventListener("click",function(e){');
+  parts.push('  var tab=e.target.closest("[data-sidebar-tab]");if(!tab)return;');
+  parts.push('  var name=tab.getAttribute("data-sidebar-tab");');
+  parts.push('  document.querySelectorAll(".sidebar-tab").forEach(function(t){t.classList.toggle("active",t.getAttribute("data-sidebar-tab")===name);});');
+  parts.push('  document.querySelectorAll(".sidebar-panel").forEach(function(p){p.classList.toggle("active",p.id==="panel-"+name);});');
+  parts.push('});');
+
   // ---- Sidebar reopen button ----
   parts.push('document.getElementById("btn-reopen-sidebar").addEventListener("click",function(){');
   parts.push('  workspace.classList.remove("sidebar-collapsed");');
@@ -497,17 +564,50 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('  logContainer.innerHTML="";logCountEl.textContent="0";');
   parts.push('});');
 
-  // ---- SPA Navigation ----
+  // ---- Agent group toggle (shared by dashboard + context) ----
+  parts.push('document.addEventListener("click",function(e){');
+  parts.push('  var hdr=e.target.closest("[data-toggle-agent]");');
+  parts.push('  if(hdr){hdr.querySelector(".chevron").classList.toggle("open");hdr.nextElementSibling.classList.toggle("open");return;}');
+  parts.push('  var cpBtn=e.target.closest("[data-copy]");');
+  parts.push('  if(cpBtn){');
+  parts.push('    var val=cpBtn.getAttribute("data-copy");');
+  parts.push('    navigator.clipboard.writeText(val).then(function(){');
+  parts.push('      cpBtn.classList.add("copied");cpBtn.textContent="\\u2713";');
+  parts.push('      setTimeout(function(){cpBtn.classList.remove("copied");cpBtn.textContent="\\u2398";},1200);');
+  parts.push('    });');
+  parts.push('    e.stopPropagation();return;');
+  parts.push('  }');
+  parts.push('});');
+
+  // ---- SPA Navigation via fetch ----
+  parts.push('var navLoading=false;');
+  parts.push('function navigateTo(pageName,href){');
+  parts.push('  if(navLoading)return;navLoading=true;');
+  parts.push('  if(window.__cleanup){window.__cleanup();window.__cleanup=null;}');
+  parts.push('  fetch("/api/page/"+encodeURIComponent(pageName))');
+  parts.push('  .then(function(r){if(!r.ok)throw new Error("nav failed");return r.json();})');
+  parts.push('  .then(function(data){');
+  parts.push('    contentEl.innerHTML=data.html;');
+  parts.push('    document.title="OmniClaw \\u2014 "+data.title;');
+  parts.push('    history.pushState({page:pageName},"",data.path);');
+  parts.push('    document.querySelectorAll("[data-nav]").forEach(function(a){');
+  parts.push('      a.classList.toggle("active",a.getAttribute("href")===data.path);');
+  parts.push('    });');
+  parts.push('    window.__initPage(pageName);');
+  parts.push('    navLoading=false;');
+  parts.push('  }).catch(function(err){console.error("SPA nav error:",err);navLoading=false;location.href=href;});');
+  parts.push('}');
   parts.push('document.addEventListener("click",function(e){');
   parts.push('  var link=e.target.closest("[data-nav]");if(!link)return;');
+  parts.push('  e.preventDefault();');
+  parts.push('  var pageName=link.getAttribute("data-page");');
   parts.push('  var href=link.getAttribute("href");');
-  parts.push('  history.pushState({},"",href);');
-  parts.push('  document.querySelectorAll("[data-nav]").forEach(function(a){');
-  parts.push('    a.classList.toggle("active",a.getAttribute("href")===href);');
-  parts.push('  });');
-  parts.push('  if(window.__cleanup){window.__cleanup();window.__cleanup=null;}');
+  parts.push('  navigateTo(pageName,href);');
   parts.push('});');
-  parts.push('window.addEventListener("popstate",function(){location.reload();});');
+  parts.push('window.addEventListener("popstate",function(e){');
+  parts.push('  if(e.state&&e.state.page){navigateTo(e.state.page,location.pathname);}');
+  parts.push('  else{location.reload();}');
+  parts.push('});');
 
   // ---- Page init dispatch ----
   parts.push('window.__cleanup=null;');
@@ -524,6 +624,34 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('  el.textContent=msg;document.body.appendChild(el);');
   parts.push('  setTimeout(function(){el.remove();},3000);');
   parts.push('};');
+
+  // ---- Task actions (in persistent sidebar) ----
+  parts.push('document.getElementById("sidebar-tasks").addEventListener("click",function(e){');
+  parts.push('  var btn=e.target.closest("button[data-action]");if(!btn)return;');
+  parts.push('  var card=btn.closest("[data-task-id]");var taskId=card.getAttribute("data-task-id");');
+  parts.push('  var action=btn.getAttribute("data-action");');
+  parts.push('  if(action==="toggle"){');
+  parts.push('    var ns=btn.getAttribute("data-status");btn.disabled=true;');
+  parts.push('    fetch("/api/tasks/"+encodeURIComponent(taskId),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:ns})})');
+  parts.push('    .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})');
+  parts.push('    .then(function(){window.__toast("Task "+(ns==="paused"?"paused":"resumed"));})');
+  parts.push('    .catch(function(err){window.__toast(err.message||"Failed","error");btn.disabled=false;});');
+  parts.push('  }');
+  parts.push('  if(action==="delete"){');
+  parts.push('    btn.disabled=true;');
+  parts.push('    fetch("/api/tasks/"+encodeURIComponent(taskId),{method:"DELETE"})');
+  parts.push('    .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})');
+  parts.push('    .then(function(){window.__toast("Task deleted");card.remove();})');
+  parts.push('    .catch(function(err){window.__toast(err.message||"Failed","error");btn.disabled=false;});');
+  parts.push('  }');
+  parts.push('});');
+
+  // Create task button opens modal (modal is in dashboard page content)
+  parts.push('document.getElementById("btn-create-task").addEventListener("click",function(){');
+  parts.push('  var modal=document.getElementById("create-task-modal");');
+  parts.push('  if(modal){modal.classList.add("open");var e=document.getElementById("ct-error");if(e)e.textContent="";}');
+  parts.push('  else{window.__toast("Navigate to Dashboard to create tasks","error");}');
+  parts.push('});');
 
   // ---- Escape helper (used by page inits) ----
   parts.push('window.__esc=function(s){if(!s)return"";var d=document.createElement("div");d.textContent=String(s);return d.innerHTML;};');

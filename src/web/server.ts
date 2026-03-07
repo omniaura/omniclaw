@@ -174,25 +174,19 @@ export function startWebServer(
           });
         }
 
-        const sseInit = {
-          headers: {
-            ...corsHeaders(),
-            'Cache-Control': 'no-cache, no-transform',
+        // JSON response for shell-script SPA navigation
+        return new Response(
+          JSON.stringify({
+            html: page.render(),
+            title: page.title,
+            path: page.path,
+          }),
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              ...corsHeaders(),
+            },
           },
-        };
-
-        return ServerSentEventGenerator.stream(
-          (stream) => {
-            stream.patchElements(page.render(), {
-              selector: '#content',
-              mode: 'inner',
-            });
-            stream.patchElements(renderNavLinks(page.path), {
-              selector: '#nav-links',
-              mode: 'inner',
-            });
-          },
-          { keepalive: false, responseInit: sseInit },
         );
       }
 
@@ -394,7 +388,7 @@ function patchTasks(client: SseClient, state: WebStateProvider): void {
     return;
   }
   client.stream.patchElements(renderTaskRows(state.getTasks()), {
-    selector: '#tasks-tbody',
+    selector: '#sidebar-tasks',
     mode: 'inner',
   });
 }
@@ -438,27 +432,23 @@ function renderTaskRows(tasks: ScheduledTask[]): string {
           : task.status === 'paused'
             ? 'status-paused'
             : 'status-completed';
-      const nextRun = task.next_run
-        ? new Date(task.next_run).toLocaleString()
-        : '—';
-      const lastRun = task.last_run
-        ? new Date(task.last_run).toLocaleString()
-        : '—';
       const toggleLabel = task.status === 'active' ? 'Pause' : 'Resume';
       const toggleStatus = task.status === 'active' ? 'paused' : 'active';
-      return `<tr data-task-id="${escapeHtml(task.id)}">
-        <td title="${escapeHtml(task.id)}">${escapeHtml(task.id.slice(0, 8))}…</td>
-        <td>${escapeHtml(task.group_folder)}</td>
-        <td><span class="badge ${statusClass}">${escapeHtml(task.status)}</span></td>
-        <td>${escapeHtml(task.schedule_type)}: ${escapeHtml(task.schedule_value)}</td>
-        <td title="${escapeHtml(task.prompt)}">${escapeHtml(task.prompt.slice(0, 80))}${task.prompt.length > 80 ? '…' : ''}</td>
-        <td>${escapeHtml(nextRun)}</td>
-        <td>${escapeHtml(lastRun)}</td>
-        <td class="actions">
-          <button class="btn btn-sm btn-toggle" data-action="toggle" data-status="${toggleStatus}" title="${toggleLabel}">${toggleLabel}</button>
-          <button class="btn btn-sm btn-danger" data-action="delete" title="Delete">Delete</button>
-        </td>
-      </tr>`;
+      const agentShort =
+        task.group_folder.split('-')[0] || task.group_folder;
+      const promptShort =
+        task.prompt.slice(0, 40) + (task.prompt.length > 40 ? '…' : '');
+      return (
+        `<div class="task-card" data-task-id="${escapeHtml(task.id)}">` +
+        `<div class="task-top"><span class="badge ${statusClass}">${escapeHtml(task.status)}</span>` +
+        `<span class="task-agent">${escapeHtml(agentShort)}</span>` +
+        `<span class="task-sched">${escapeHtml(task.schedule_value)}</span></div>` +
+        `<div class="task-prompt" title="${escapeHtml(task.prompt)}">${escapeHtml(promptShort)}</div>` +
+        `<div class="task-actions">` +
+        `<button class="btn btn-sm btn-toggle" data-action="toggle" data-status="${toggleStatus}">${toggleLabel}</button>` +
+        `<button class="btn btn-sm btn-danger" data-action="delete">Del</button>` +
+        `</div></div>`
+      );
     })
     .join('\n');
 }

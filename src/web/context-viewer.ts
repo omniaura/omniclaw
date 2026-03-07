@@ -1,109 +1,12 @@
 import type { WebStateProvider } from './types.js';
 import { renderShell } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
+import { buildAgentChannelData, renderAgentGroups } from './agent-channels.js';
 
 /** Render context viewer content (no shell). */
 export function renderContextViewerContent(state: WebStateProvider): string {
-  const agents = Object.values(state.getAgents());
-  const subs = state.getChannelSubscriptions();
-  const chats = state.getChats();
-
-  const chatNameMap: Record<string, string> = {};
-  for (const c of chats) {
-    if (c.name) chatNameMap[c.jid] = c.name;
-  }
-
-  function channelDisplayName(jid: string, channelFolder?: string): string {
-    if (chatNameMap[jid]) return chatNameMap[jid];
-    if (channelFolder) {
-      const lastSeg = channelFolder.split('/').pop();
-      if (lastSeg) return '#' + lastSeg;
-    }
-    return jid;
-  }
-
-  const agentData = agents.map((a) => {
-    const channels: Array<{
-      jid: string;
-      displayName: string;
-      channelFolder?: string;
-      categoryFolder?: string;
-    }> = [];
-    for (const [jid, subList] of Object.entries(subs)) {
-      const sub = subList.find((s) => s.agentId === a.id);
-      if (sub) {
-        channels.push({
-          jid,
-          displayName: channelDisplayName(jid, sub.channelFolder),
-          channelFolder: sub.channelFolder,
-          categoryFolder: sub.categoryFolder,
-        });
-      }
-    }
-    return {
-      id: a.id,
-      name: a.name,
-      folder: a.folder,
-      serverFolder: a.serverFolder,
-      agentContextFolder: a.agentContextFolder,
-      channels,
-    };
-  });
-
-  const sidebarHtml = agentData
-    .map(
-      (a) =>
-        '<div class="agent-group" data-agent-id="' +
-        esc(a.id) +
-        '">' +
-        '<div class="agent-header" data-toggle-agent>' +
-        '<span class="chevron">&#9654;</span>' +
-        '<span class="agent-name">' +
-        esc(a.name) +
-        '</span>' +
-        '<span class="channel-count">' +
-        a.channels.length +
-        '</span>' +
-        '</div>' +
-        '<div class="channel-list">' +
-        a.channels
-          .map(
-            (ch) =>
-              '<div class="channel-item"' +
-              ' data-agent-id="' +
-              esc(a.id) +
-              '"' +
-              ' data-jid="' +
-              esc(ch.jid) +
-              '"' +
-              ' data-folder="' +
-              esc(a.folder) +
-              '"' +
-              ' data-server-folder="' +
-              esc(a.serverFolder || '') +
-              '"' +
-              ' data-agent-context-folder="' +
-              esc(a.agentContextFolder || '') +
-              '"' +
-              ' data-channel-folder="' +
-              esc(ch.channelFolder || '') +
-              '"' +
-              ' data-category-folder="' +
-              esc(ch.categoryFolder || '') +
-              '"' +
-              ' data-select-channel>' +
-              '<span class="ch-name">' +
-              esc(ch.displayName) +
-              '</span>' +
-              '<span class="ch-jid">' +
-              esc(ch.jid) +
-              '</span>' +
-              '</div>',
-          )
-          .join('') +
-        '</div></div>',
-    )
-    .join('');
+  const agentData = buildAgentChannelData(state);
+  const sidebarHtml = renderAgentGroups(agentData, { includeContextAttrs: true });
 
   return (
     '<div data-init="window.__initPage && window.__initPage(\'context\')">' +
@@ -158,9 +61,3 @@ export function renderContextViewer(state: WebStateProvider): string {
   );
 }
 
-const esc = (str: string): string =>
-  str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');

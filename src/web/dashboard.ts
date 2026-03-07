@@ -1,13 +1,13 @@
 import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
+import { buildAgentChannelData } from './agent-channels.js';
 
 /** Render the dashboard content (no shell wrapper). */
 export function renderDashboardContent(state: WebStateProvider): string {
   const stats = state.getQueueStats();
-  const agents = Object.values(state.getAgents());
+  const agentData = buildAgentChannelData(state);
   const tasks = state.getTasks();
-  const subs = state.getChannelSubscriptions();
 
   const activeContainers = Math.max(
     0,
@@ -15,88 +15,61 @@ export function renderDashboardContent(state: WebStateProvider): string {
   );
   const activeTasks = tasks.filter((t) => t.status === 'active').length;
 
-  const agentRows = agents
-    .map((a) => {
-      const channels = Object.entries(subs)
-        .filter(([, s]) => s.some((sub) => sub.agentId === a.id))
-        .map(([jid]) => escapeHtml(jid));
-      return `<tr>
-        <td>${escapeHtml(a.id)}</td>
-        <td>${escapeHtml(a.name)}</td>
-        <td><span class="badge ${a.backend === 'apple-container' ? 'badge-apple-container' : a.backend === 'docker' ? 'badge-docker' : ''}">${escapeHtml(a.backend)}</span></td>
-        <td>${escapeHtml(a.agentRuntime)}</td>
-        <td>${a.isAdmin ? '<span class="badge badge-admin">admin</span>' : ''}</td>
-        <td class="channels">${channels.join('<br>') || '\u2014'}</td>
-      </tr>`;
-    })
-    .join('\n');
+  // Serialize agent topology data for canvas renderer
+  const topoData = JSON.stringify(
+    agentData.map((a) => ({
+      id: a.id,
+      name: a.name,
+      backend: a.backend,
+      runtime: a.agentRuntime,
+      isAdmin: a.isAdmin,
+      server: a.serverFolder || null,
+      channels: a.channels.map((ch) => ({
+        jid: ch.jid,
+        name: ch.displayName,
+        category: ch.categoryFolder || null,
+        channelFolder: ch.channelFolder || null,
+      })),
+    })),
+  );
 
-  const taskRows = tasks
-    .slice(0, 50)
-    .map((t) => {
-      const statusClass =
-        t.status === 'active'
-          ? 'status-active'
-          : t.status === 'paused'
-            ? 'status-paused'
-            : 'status-completed';
-      const nextRun = t.next_run ? new Date(t.next_run).toLocaleString() : '\u2014';
-      const lastRun = t.last_run ? new Date(t.last_run).toLocaleString() : '\u2014';
-      const toggleLabel = t.status === 'active' ? 'Pause' : 'Resume';
-      const toggleStatus = t.status === 'active' ? 'paused' : 'active';
-      return `<tr data-task-id="${escapeHtml(t.id)}">
-        <td title="${escapeHtml(t.id)}">${escapeHtml(t.id.slice(0, 8))}\u2026</td>
-        <td>${escapeHtml(t.group_folder)}</td>
-        <td><span class="badge ${statusClass}">${escapeHtml(t.status)}</span></td>
-        <td>${escapeHtml(t.schedule_type)}: ${escapeHtml(t.schedule_value)}</td>
-        <td title="${escapeHtml(t.prompt)}">${escapeHtml(t.prompt.slice(0, 80))}${t.prompt.length > 80 ? '\u2026' : ''}</td>
-        <td>${escapeHtml(nextRun)}</td>
-        <td>${escapeHtml(lastRun)}</td>
-        <td class="actions">
-          <button class="btn btn-sm btn-toggle" data-action="toggle" data-status="${toggleStatus}" title="${toggleLabel}">${toggleLabel}</button>
-          <button class="btn btn-sm btn-danger" data-action="delete" title="Delete">Delete</button>
-        </td>
-      </tr>`;
-    })
-    .join('\n');
-
-  const agentOptions = agents
-    .map((a) => {
-      const jids = Object.entries(subs)
-        .filter(([, s]) => s.some((sub) => sub.agentId === a.id))
-        .map(([jid]) => jid);
-      return jids.map(
-        (jid) =>
-          `<option value="${escapeHtml(a.folder)}|${escapeHtml(jid)}">${escapeHtml(a.name)} (${escapeHtml(jid)})</option>`,
-      );
-    })
+  const agentOptions = agentData
+    .map((a) =>
+      a.channels.map(
+        (ch) =>
+          `<option value="${escapeHtml(a.folder)}|${escapeHtml(ch.jid)}">${escapeHtml(a.name)} \u2014 ${escapeHtml(ch.displayName)}</option>`,
+      ),
+    )
     .flat()
     .join('\n');
 
   return (
     `<div data-init="window.__initPage && window.__initPage('dashboard')">` +
     `<div class="dash-layout">` +
+    // Main area: stats + topology
+    `<div class="dash-main">` +
     `<div class="stats-grid">` +
-    `<div class="stat-card"><div class="label">agents</div><div class="value" id="stat-agents">${agents.length}</div></div>` +
+    `<div class="stat-card"><div class="label">agents</div><div class="value" id="stat-agents">${agentData.length}</div></div>` +
     `<div class="stat-card"><div class="label">active containers</div><div class="value" id="stat-active">${activeContainers}/${stats.maxActive}</div></div>` +
     `<div class="stat-card"><div class="label">idle containers</div><div class="value" id="stat-idle">${stats.idleContainers}/${stats.maxIdle}</div></div>` +
     `<div class="stat-card"><div class="label">active tasks</div><div class="value" id="stat-tasks">${activeTasks}</div></div>` +
     `</div>` +
-    `<div class="tables-grid">` +
-    `<div class="table-section">` +
-    `<h2>agents</h2>` +
-    `<div class="table-wrap"><table>` +
-    `<thead><tr><th>id</th><th>name</th><th>backend</th><th>runtime</th><th>role</th><th>channels</th></tr></thead>` +
-    `<tbody id="agents-tbody">${agentRows}</tbody>` +
-    `</table></div></div>` +
-    `<div class="table-section">` +
-    `<div class="section-header"><h2>scheduled tasks</h2>` +
-    `<button class="btn btn-primary btn-sm" id="btn-create-task">+ new</button></div>` +
-    `<div class="table-wrap"><table>` +
-    `<thead><tr><th>id</th><th>agent</th><th>status</th><th>schedule</th><th>prompt</th><th>next</th><th>last</th><th>actions</th></tr></thead>` +
-    `<tbody id="tasks-tbody">${taskRows}</tbody>` +
-    `</table></div></div>` +
+    `<div class="topo-section">` +
+    `<div class="section-header"><h2>agent topology</h2>` +
+    `<div class="topo-legend">` +
+    `<span class="legend-item"><span class="legend-dot legend-agent"></span>agent</span>` +
+    `<span class="legend-item"><span class="legend-dot legend-server"></span>server</span>` +
+    `<span class="legend-item"><span class="legend-dot legend-category"></span>category</span>` +
+    `<span class="legend-item"><span class="legend-dot legend-channel"></span>channel</span>` +
     `</div></div>` +
+    `<div class="topo-canvas-wrap"><canvas id="topo-canvas"></canvas></div>` +
+    `<div class="topo-tooltip" id="topo-tooltip"></div>` +
+    `</div>` +
+    `</div>` +
+    `</div>` +
+    `<script type="application/json" id="topo-data">${topoData}</script>` +
+    `<div id="agents-tbody" style="display:none"></div>` +
+    // Create task modal
     `<div class="modal-overlay" id="create-task-modal">` +
     `<div class="modal"><h3>Create Scheduled Task</h3>` +
     `<form id="create-task-form">` +
