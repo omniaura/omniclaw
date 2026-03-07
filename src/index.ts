@@ -88,6 +88,7 @@ import {
 } from './db.js';
 import { buildAgentToChannelsMapFromSubscriptions } from './channel-routes.js';
 import { resolveContextLayers } from './context-layers.js';
+import { parseScopedSlackJid } from './slack-jid.js';
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import {
@@ -352,14 +353,6 @@ function parseScopedTelegramJid(
   const m = /^tg:([^:]+):(-?\d+)$/.exec(jid);
   if (!m) return null;
   return { botId: m[1], chatId: m[2] };
-}
-
-function parseScopedSlackJid(
-  jid: string,
-): { botId: string; channelId: string } | null {
-  const m = /^slack:([^:]+):([^\s]+)$/.exec(jid);
-  if (!m) return null;
-  return { botId: m[1], channelId: m[2] };
 }
 
 function toLegacyTelegramJid(jid: string): string | undefined {

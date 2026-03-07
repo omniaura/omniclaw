@@ -1,3 +1,5 @@
+import { parseScopedSlackJid } from './slack-jid.js';
+
 export interface ContextLayerInput {
   channelJid: string;
   discordGuildId?: string;
@@ -72,12 +74,4 @@ function parseScopedTelegramJid(
   const m = /^tg:([^:]+):(-?\d+)$/.exec(jid);
   if (!m) return null;
   return { botId: m[1], chatId: m[2] };
-}
-
-function parseScopedSlackJid(
-  jid: string,
-): { botId: string; channelId: string } | null {
-  const m = /^slack:([^:]+):([^\s]+)$/.exec(jid);
-  if (!m) return null;
-  return { botId: m[1], channelId: m[2] };
 }

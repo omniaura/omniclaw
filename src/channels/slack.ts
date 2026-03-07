@@ -10,18 +10,13 @@ import {
   RegisteredGroup,
 } from '../types.js';
 import { splitMessage as splitMessageShared } from './utils.js';
+import { parseScopedSlackJid } from '../slack-jid.js';
+
+export { parseScopedSlackJid };
 
 // JID format: "slack:{channelId}" for channels/DMs
 // e.g. "slack:C12345678" for a channel, "slack:D12345678" for a DM
 // Multi-bot format: "slack:{botId}:{channelId}"
-
-export function parseScopedSlackJid(
-  jid: string,
-): { botId: string; channelId: string } | null {
-  const m = /^slack:([^:]+):([^\s]+)$/.exec(jid);
-  if (!m) return null;
-  return { botId: m[1], channelId: m[2] };
-}
 
 export function jidToChannelId(jid: string): string | null {
   const scoped = parseScopedSlackJid(jid);
