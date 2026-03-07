@@ -182,18 +182,18 @@ describe('IPC Inspector API routes', () => {
     handle = startWebServer({ port: randomPort() }, makeState());
     const res = await fetch(`http://localhost:${handle.port}/api/ipc/queue`);
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = (await res.json()) as GroupQueueDetail[];
     expect(data).toHaveLength(2);
     expect(data[0].folderKey).toBe('agent-alpha');
     expect(data[1].folderKey).toBe('agent-beta');
-    expect(data[0].taskLane.activeTask.taskId).toBe('task-123');
+    expect(data[0].taskLane.activeTask?.taskId).toBe('task-123');
   });
 
   it('GET /api/ipc/events returns recent events', async () => {
     handle = startWebServer({ port: randomPort() }, makeState());
     const res = await fetch(`http://localhost:${handle.port}/api/ipc/events`);
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = (await res.json()) as IpcEvent[];
     expect(data).toHaveLength(2);
     expect(data[0].kind).toBe('task_created');
   });

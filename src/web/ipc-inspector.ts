@@ -280,7 +280,7 @@ export function renderIpcInspector(state: WebStateProvider): string {
     ws.onopen = function() {
       wsStatus.textContent = 'connected';
       wsStatus.className = 'ws-status connected';
-      ws.send(JSON.stringify({ subscribe: ['stats', 'ipc'] }));
+      ws.send(JSON.stringify({ subscribe: ['stats', 'ipc_event'] }));
     };
 
     ws.onclose = function() {

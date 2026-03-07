@@ -112,6 +112,7 @@ import {
   startWebServer,
   startLogStream,
   IpcEventBuffer,
+  type IpcEventKind,
   type WebServerHandle,
 } from './web/index.js';
 import { Effect } from 'effect';
@@ -2524,13 +2525,8 @@ async function main(): Promise<void> {
         agentFolder: agents[s.agentId]?.folder ?? s.agentId,
       }));
     },
-    onIpcEvent: (kind, sourceGroup, summary, details) => {
-      const event = ipcEvents.push(
-        kind as Parameters<typeof ipcEvents.push>[0],
-        sourceGroup,
-        summary,
-        details,
-      );
+    onIpcEvent: (kind: IpcEventKind, sourceGroup, summary, details) => {
+      const event = ipcEvents.push(kind, sourceGroup, summary, details);
       webServer?.broadcast({
         type: 'ipc_event',
         data: event,
