@@ -20,9 +20,7 @@ import {
   setRegisteredGroup,
   updateTask,
 } from './db.js';
-import {
-  findGroupByFolder,
-} from './group-helpers.js';
+import { findGroupByFolder } from './group-helpers.js';
 import {
   listIpcJsonFiles,
   quarantineIpcFile,

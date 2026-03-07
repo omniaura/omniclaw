@@ -123,6 +123,18 @@ describe('buildDiscordBotConfigFromEnv', () => {
     expect(parsed.defaultBotId).toBe('CLAUDE');
   });
 
+  it('parses codex runtime', () => {
+    const parsed = buildDiscordBotConfigFromEnv({
+      DISCORD_BOT_IDS: 'CODEX',
+      DISCORD_BOT_CODEX_TOKEN: 'token-codex',
+      DISCORD_BOT_CODEX_RUNTIME: 'codex',
+    });
+
+    expect(parsed.bots).toEqual([
+      { id: 'CODEX', token: 'token-codex', runtime: 'codex' },
+    ]);
+  });
+
   it('supports legacy DISCORD_BOT_TOKEN', () => {
     const parsed = buildDiscordBotConfigFromEnv({
       DISCORD_BOT_TOKEN: 'legacy-token',

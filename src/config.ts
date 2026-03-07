@@ -1,7 +1,7 @@
 import os from 'os';
 import path from 'path';
 
-export type AgentRuntime = 'claude-agent-sdk' | 'opencode';
+export type AgentRuntime = 'claude-agent-sdk' | 'opencode' | 'codex';
 
 export interface DiscordBotConfig {
   id: string;
@@ -21,7 +21,8 @@ function parseAgentRuntime(
   value: string | undefined,
 ): AgentRuntime | undefined {
   if (!value) return undefined;
-  if (value === 'claude-agent-sdk' || value === 'opencode') return value;
+  if (value === 'claude-agent-sdk' || value === 'opencode' || value === 'codex')
+    return value;
   return undefined;
 }
 

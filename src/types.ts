@@ -44,7 +44,7 @@ export interface ContainerConfig {
 export type BackendType = 'apple-container' | 'docker';
 
 /** Which agent runtime runs inside the container. */
-export type AgentRuntime = 'claude-agent-sdk' | 'opencode';
+export type AgentRuntime = 'claude-agent-sdk' | 'opencode' | 'codex';
 
 export interface RegisteredGroup {
   name: string;

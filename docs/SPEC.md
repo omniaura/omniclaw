@@ -238,7 +238,7 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 | `DISCORD_BOT_TOKEN` | Discord | Single bot token (backward compatible) |
 | `DISCORD_BOT_IDS` | Discord | Ordered bot IDs for prefixed multi-bot config (e.g. `CLAUDE,OPENCODE`) |
 | `DISCORD_BOT_<ID>_TOKEN` | Discord | Token for a specific Discord bot ID |
-| `DISCORD_BOT_<ID>_RUNTIME` | Discord | Default runtime for that bot ID (`claude-agent-sdk` or `opencode`) |
+| `DISCORD_BOT_<ID>_RUNTIME` | Discord | Default runtime for that bot ID (`claude-agent-sdk`, `opencode`, or `codex`) |
 | `DISCORD_BOT_DEFAULT` | Discord | Default bot ID for unassigned Discord channels |
 | `TELEGRAM_BOT_TOKENS` | Telegram | Comma/newline-separated bot tokens for multi-bot mode |
 | `TELEGRAM_BOT_TOKEN` | Telegram | Legacy single bot token (backward compatible) |
@@ -258,6 +258,13 @@ DISCORD_BOT_CLAUDE_TOKEN=discord_token_a
 DISCORD_BOT_OPENCODE_TOKEN=discord_token_b
 DISCORD_BOT_OPENCODE_RUNTIME=opencode
 DISCORD_BOT_DEFAULT=CLAUDE
+
+# Codex CLI runtime
+DISCORD_BOT_IDS=CODEX
+DISCORD_BOT_CODEX_TOKEN=discord_token_c
+DISCORD_BOT_CODEX_RUNTIME=codex
+CODEX_API_KEY=your_openai_api_key
+CODEX_MODEL=gpt-5.3-codex
 ```
 
 Telegram multi-bot examples:
@@ -290,6 +297,20 @@ ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
 Only auth variables are extracted to `data/env/env` and mounted into containers at `/workspace/env-dir/env`. Other `.env` variables are not exposed to agents.
+
+### Codex CLI Authentication
+
+For agents using the `codex` runtime:
+
+```bash
+# Codex API key (required for codex runtime)
+CODEX_API_KEY=your_openai_api_key
+
+# Optional: Override the default model
+CODEX_MODEL=gpt-5.3-codex
+```
+
+The Codex runtime spawns `codex exec` as a subprocess. It uses `--sandbox workspace-write` and `--ask-for-approval never` for non-interactive operation. Session continuity uses `codex exec resume --last`.
 
 ### Container Configuration
 
