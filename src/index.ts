@@ -111,6 +111,8 @@ import { redactSensitiveData } from './security/redaction.js';
 import {
   startWebServer,
   startLogStream,
+  IpcEventBuffer,
+  type IpcEventKind,
   type WebServerHandle,
 } from './web/index.js';
 import { Effect } from 'effect';
@@ -184,6 +186,7 @@ const MAX_CONSECUTIVE_ERRORS = 3;
 let whatsapp: WhatsAppChannel | null = null;
 let channels: Channel[] = [];
 const queue = new GroupQueue();
+const ipcEvents = new IpcEventBuffer();
 let githubWebhookServer: { stop: () => void } | null = null;
 
 const MAX_CHANNEL_AGENT_FANOUT = parseInt(
@@ -2082,6 +2085,8 @@ async function main(): Promise<void> {
         },
         getChats: () => getAllChats(),
         getQueueStats: () => queue.getStats(),
+        getQueueDetails: () => queue.getDetailedStats(),
+        getIpcEvents: (count) => ipcEvents.recent(count),
         createTask: (task) => dbCreateTask(task),
         updateTask: (id, updates) => dbUpdateTask(id, updates),
         deleteTask: (id) => dbDeleteTask(id),
@@ -2537,6 +2542,14 @@ async function main(): Promise<void> {
         agentId: s.agentId,
         agentFolder: agents[s.agentId]?.folder ?? s.agentId,
       }));
+    },
+    onIpcEvent: (kind: IpcEventKind, sourceGroup, summary, details) => {
+      const event = ipcEvents.push(kind, sourceGroup, summary, details);
+      webServer?.broadcast({
+        type: 'ipc_event',
+        data: event,
+        timestamp: event.timestamp,
+      });
     },
   });
 }

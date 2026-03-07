@@ -3,6 +3,7 @@ import type { WebStateProvider } from './types.js';
 import { renderConversations } from './conversations.js';
 import { renderContextViewer } from './context-viewer.js';
 import { renderDashboard } from './dashboard.js';
+import { renderIpcInspector } from './ipc-inspector.js';
 
 /**
  * Handle an authenticated HTTP request and return a Response.
@@ -52,6 +53,10 @@ export function handleRequest(
     return handleGetMessages(url, state);
   if (pathname === '/api/stats') return handleGetStats(state);
 
+  // IPC inspector API
+  if (pathname === '/api/ipc/queue') return handleGetQueueDetails(state);
+  if (pathname === '/api/ipc/events') return handleGetIpcEvents(url, state);
+
   // --- Dashboard ---
   if (pathname === '/' || pathname === '/index.html')
     return new Response(renderDashboard(state), {
@@ -67,6 +72,12 @@ export function handleRequest(
   // --- Context viewer ---
   if (pathname === '/context')
     return new Response(renderContextViewer(state), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+
+  // --- IPC Inspector ---
+  if (pathname === '/ipc')
+    return new Response(renderIpcInspector(state), {
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
 
@@ -475,6 +486,18 @@ async function handleWriteContextFile(
   }
 
   return json({ ok: true });
+}
+
+function handleGetQueueDetails(state: WebStateProvider): Response {
+  return json(state.getQueueDetails());
+}
+
+function handleGetIpcEvents(url: URL, state: WebStateProvider): Response {
+  const countParam = url.searchParams.get('count');
+  const count = countParam
+    ? Math.min(Math.max(1, parseInt(countParam, 10) || 50), 200)
+    : 50;
+  return json(state.getIpcEvents(count));
 }
 
 // ---- Helpers ----

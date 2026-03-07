@@ -258,6 +258,53 @@ grep "DISCORD_BOT_IDS\|DISCORD_BOT_DEFAULT" .env 2>/dev/null
 
 ---
 
+## Adding an existing agent to a new channel
+
+When the same agent (same folder, identity, and persona) needs to respond in an additional chat — e.g. a Telegram agent joining a second group — just add a `channel_subscriptions` row. **Do NOT create a new `agents` row or a new folder.**
+
+The `registered_groups.folder` column has a UNIQUE constraint, so you **cannot** insert a second `registered_groups` row with the same folder. The canonical data lives in `agents` + `channel_subscriptions`; the `registered_groups` table is synthesized from those on startup by `refreshRegisteredGroupsFromCanonicalState()`.
+
+**Steps:**
+
+1. **Verify the agent exists:**
+
+   ```bash
+   sqlite3 store/messages.db "SELECT id, name, folder FROM agents WHERE id = '<agent-id>'"
+   ```
+
+2. **Check existing subscriptions:**
+
+   ```bash
+   sqlite3 store/messages.db "SELECT channel_jid, trigger_pattern FROM channel_subscriptions WHERE agent_id = '<agent-id>'"
+   ```
+
+3. **Add the new subscription:**
+
+   ```sql
+   INSERT INTO channel_subscriptions
+     (channel_jid, agent_id, trigger_pattern, requires_trigger, priority, is_primary, created_at)
+   VALUES
+     ('<new-jid>', '<agent-id>', '<trigger>', 1, 100, 0, datetime('now'));
+   ```
+
+   For scoped Telegram JIDs, use the format `tg:<botId>:<chatId>`.
+
+4. **Restart the service** — the new subscription is picked up on boot:
+
+   ```bash
+   launchctl kickstart -k gui/$(id -u)/com.omniclaw
+   ```
+
+5. **Verify** — check startup log for updated `subscriptionChannelCount`:
+
+   ```bash
+   grep 'State loaded' logs/omniclaw.log | tail -1
+   ```
+
+**That's it.** No new folder, no new agent row, no `registered_groups` INSERT. The synthesizer handles the rest.
+
+---
+
 ## Adding a new agent to an existing channel
 
 1. **Create identity file:**

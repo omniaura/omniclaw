@@ -15,22 +15,24 @@ Both timers fire at the same time, so containers always exit via hard SIGKILL (c
 
 ```bash
 # 1. Is the service running?
-launchctl list | grep omniclaw
-# Expected: PID  0  com.omniclaw (PID = running, "-" = not running, non-zero exit = crashed)
+launchctl list | grep omniclaw                    # macOS
+systemctl --user status omniclaw                  # Linux
 
-# 2. Any running containers?
-container ls --format '{{.Names}} {{.Status}}' 2>/dev/null | grep omniclaw
+# 1b. Will the service survive logout? (Linux only)
+loginctl show-user $(whoami) | grep Linger
+# Linger=no → service dies on SSH disconnect. Fix: loginctl enable-linger $(whoami)
 
-# 3. Any stopped/orphaned containers?
-container ls -a --format '{{.Names}} {{.Status}}' 2>/dev/null | grep omniclaw
+# 2. Any running agent containers?
+docker ps --filter name=omniclaw 2>/dev/null                              # Docker
+launchctl list 2>/dev/null | grep 'container-runtime-linux.omniclaw'      # Apple Container
 
-# 4. Recent errors in service log?
-grep -E 'ERROR|WARN' logs/omniclaw.log | tail -20
+# 3. Recent errors in service log?
+grep -E '"level":"error"' logs/omniclaw.log | tail -20
 
-# 5. Is WhatsApp connected? (look for last connection event)
-grep -E 'Connected to WhatsApp|Connection closed|connection.*close' logs/omniclaw.log | tail -5
+# 4. Is the channel connected? (look for last connection event)
+grep -E 'Connected|Connection closed|connection.*close' logs/omniclaw.log | tail -5
 
-# 6. Are groups loaded?
+# 5. Are groups loaded?
 grep 'groupCount' logs/omniclaw.log | tail -3
 ```
 
@@ -42,20 +44,6 @@ ls -la data/sessions/<group>/.claude/debug/
 
 # Count unique SDK processes that handled messages
 # Each .txt file = one CLI subprocess. Multiple = concurrent queries.
-
-# Check parentUuid branching in transcript
-python3 -c "
-import json, sys
-lines = open('data/sessions/<group>/.claude/projects/-workspace-group/<session>.jsonl').read().strip().split('\n')
-for i, line in enumerate(lines):
-  try:
-    d = json.loads(line)
-    if d.get('type') == 'user' and d.get('message'):
-      parent = d.get('parentUuid', 'ROOT')[:8]
-      content = str(d['message'].get('content', ''))[:60]
-      print(f'L{i+1} parent={parent} {content}')
-  except: pass
-"
 ```
 
 ## Container Timeout Investigation
@@ -67,9 +55,6 @@ grep -E 'Container timeout|timed out' logs/omniclaw.log | tail -10
 # Check container log files for the timed-out container
 ls -lt groups/*/logs/container-*.log | head -10
 
-# Read the most recent container log (replace path)
-cat groups/<group>/logs/container-<timestamp>.log
-
 # Check if retries were scheduled and what happened
 grep -E 'Scheduling retry|retry|Max retries' logs/omniclaw.log | tail -10
 ```
@@ -77,7 +62,7 @@ grep -E 'Scheduling retry|retry|Max retries' logs/omniclaw.log | tail -10
 ## Agent Not Responding
 
 ```bash
-# Check if messages are being received from WhatsApp
+# Check if messages are being received
 grep 'New messages' logs/omniclaw.log | tail -10
 
 # Check if messages are being processed (container spawned)
@@ -88,9 +73,6 @@ grep -E 'Piped messages|sendMessage' logs/omniclaw.log | tail -10
 
 # Check the queue state — any active containers?
 grep -E 'Starting container|Container active|concurrency limit' logs/omniclaw.log | tail -10
-
-# Check lastAgentTimestamp vs latest message timestamp
-sqlite3 store/messages.db "SELECT chat_jid, MAX(timestamp) as latest FROM messages GROUP BY chat_jid ORDER BY latest DESC LIMIT 5;"
 ```
 
 ## Container Mount Issues
@@ -101,43 +83,36 @@ grep -E 'Mount validated|Mount.*REJECTED|mount' logs/omniclaw.log | tail -10
 
 # Verify the mount allowlist is readable
 cat ~/.config/omniclaw/mount-allowlist.json
-
-# Check group's container_config in DB
-sqlite3 store/messages.db "SELECT name, container_config FROM registered_groups;"
-
-# Test-run a container to check mounts (dry run)
-# Replace <group-folder> with the group's folder name
-container run -i --rm --entrypoint ls omniclaw-agent:latest /workspace/extra/
 ```
 
-## WhatsApp Auth Issues
+## Auth Issues
 
 ```bash
-# Check if QR code was requested (means auth expired)
-grep 'QR\|authentication required\|qr' logs/omniclaw.log | tail -5
+# Check if auth expired
+grep -Ei 'QR|authentication required|login' logs/omniclaw.log | tail -5
 
 # Check auth files exist
 ls -la store/auth/
 
 # Re-authenticate if needed
-npm run auth
+bun run auth
 ```
 
 ## Service Management
 
 ```bash
-# Restart the service
-launchctl kickstart -k gui/$(id -u)/com.omniclaw
+# Restart
+launchctl kickstart -k gui/$(id -u)/com.omniclaw   # macOS
+systemctl --user restart omniclaw                    # Linux
+
+# Stop
+launchctl bootout gui/$(id -u)/com.omniclaw                  # macOS
+systemctl --user stop omniclaw                                # Linux
 
 # View live logs
 tail -f logs/omniclaw.log
 
-# Stop the service (careful — running containers are detached, not killed)
-launchctl bootout gui/$(id -u)/com.omniclaw
-
-# Start the service
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.omniclaw.plist
-
 # Rebuild after code changes
-npm run build && launchctl kickstart -k gui/$(id -u)/com.omniclaw
+bun run build
+# Then restart (see above)
 ```

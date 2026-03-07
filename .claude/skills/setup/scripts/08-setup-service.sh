@@ -158,6 +158,21 @@ UNITEOF
     systemctl --user enable omniclaw >> "$LOG_FILE" 2>&1 || true
     systemctl --user start omniclaw >> "$LOG_FILE" 2>&1 || true
 
+    # Enable lingering so user services survive SSH logout
+    LINGER_ENABLED="false"
+    if loginctl show-user "$(whoami)" 2>/dev/null | grep -q "Linger=yes"; then
+      LINGER_ENABLED="true"
+      log "Linger already enabled"
+    else
+      log "Enabling linger for $(whoami)"
+      if loginctl enable-linger "$(whoami)" >> "$LOG_FILE" 2>&1; then
+        LINGER_ENABLED="true"
+        log "Linger enabled successfully"
+      else
+        log "Failed to enable linger (may need sudo)"
+      fi
+    fi
+
     # Verify
     SERVICE_LOADED="false"
     if systemctl --user is-active omniclaw >/dev/null 2>&1; then
@@ -174,6 +189,7 @@ NODE_PATH: $NODE_PATH
 PROJECT_PATH: $PROJECT_PATH
 UNIT_PATH: $UNIT_PATH
 SERVICE_LOADED: $SERVICE_LOADED
+LINGER_ENABLED: $LINGER_ENABLED
 STATUS: success
 LOG: logs/setup.log
 === END ===

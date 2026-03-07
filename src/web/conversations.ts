@@ -220,6 +220,7 @@ export function renderConversations(state: WebStateProvider): string {
     <a href="/">Dashboard</a>
     <a href="/conversations" class="active">Conversations</a>
     <a href="/context">Context</a>
+    <a href="/ipc">IPC</a>
   </nav>
 </header>
 <div class="layout">

@@ -112,6 +112,8 @@ function makeState(
     },
     getChats: () => testChats,
     getQueueStats: () => defaultStats,
+    getQueueDetails: () => [],
+    getIpcEvents: () => [],
     createTask: () => {},
     updateTask: () => {},
     deleteTask: () => {},

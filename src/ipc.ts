@@ -34,6 +34,7 @@ import {
   IpcTaskPayload,
   RegisteredGroup,
 } from './types.js';
+import type { IpcEventKind } from './web/ipc-events.js';
 
 export interface IpcDeps {
   sendMessage: (
@@ -68,6 +69,13 @@ export interface IpcDeps {
   getSubscriptions?: (
     jid: string,
   ) => Array<{ agentId: string; agentFolder: string }>;
+  /** Called when an IPC event occurs (for the web UI inspector). */
+  onIpcEvent?: (
+    kind: IpcEventKind,
+    sourceGroup: string,
+    summary: string,
+    details?: Record<string, unknown>,
+  ) => void;
 }
 
 /**
@@ -101,6 +109,23 @@ function resolveOwnerGroupFolder(
     return null; // Owner unknown or digest malformed
   }
   return owner;
+}
+
+function safeEmitIpcEvent(
+  deps: IpcDeps,
+  ...args: Parameters<NonNullable<IpcDeps['onIpcEvent']>>
+): void {
+  if (!deps.onIpcEvent) return;
+  queueMicrotask(() => {
+    try {
+      deps.onIpcEvent?.(...args);
+    } catch (err) {
+      logger.warn(
+        { err, kind: args[0], sourceGroup: args[1] },
+        'IPC event observer failed',
+      );
+    }
+  });
 }
 
 /** Result of processing an IPC message. */
@@ -244,6 +269,13 @@ export async function processMessageIpc(
         { chatJid: data.chatJid, sourceGroup },
         'IPC message suppressed (internal-only)',
       );
+      safeEmitIpcEvent(
+        deps,
+        'message_suppressed',
+        sourceGroup,
+        'Message suppressed (internal-only)',
+        { chatJid: data.chatJid },
+      );
       return { action: 'suppressed', reason: 'internal-only' };
     }
     // Authorization: any registered agent can message any other registered agent
@@ -265,11 +297,25 @@ export async function processMessageIpc(
         deps.notifyGroup(msgChatJid, msgText, sourceGroup);
       }
       logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
+      safeEmitIpcEvent(
+        deps,
+        'message_sent',
+        sourceGroup,
+        `Message sent to ${msgChatJid}`,
+        { chatJid: msgChatJid },
+      );
       return { action: 'handled' };
     } else {
       logger.warn(
         { chatJid: data.chatJid, sourceGroup },
         'Unauthorized IPC message attempt blocked (target not registered)',
+      );
+      safeEmitIpcEvent(
+        deps,
+        'message_blocked',
+        sourceGroup,
+        `Blocked: target ${msgChatJid} not registered`,
+        { chatJid: msgChatJid },
       );
       return { action: 'blocked', reason: 'target not registered' };
     }
@@ -493,6 +539,13 @@ export async function processTaskIpc(
     if (isMainGroup || task.group_folder === srcGroup) {
       deleteTask(taskId);
       logger.info({ taskId, sourceGroup: srcGroup }, 'Task cancelled via IPC');
+      safeEmitIpcEvent(
+        deps,
+        'task_cancelled',
+        srcGroup,
+        `Task ${taskId} cancelled`,
+        { taskId },
+      );
       refreshTasksSnapshot();
     } else {
       logger.warn(
@@ -564,6 +617,13 @@ export async function processTaskIpc(
         logger.info(
           { taskId, sourceGroup, targetFolder, contextMode },
           'Task created via IPC',
+        );
+        safeEmitIpcEvent(
+          deps,
+          'task_created',
+          sourceGroup,
+          `Task ${taskId} created for ${targetFolder}`,
+          { taskId, targetFolder },
         );
         refreshTasksSnapshot();
       }
@@ -643,6 +703,13 @@ export async function processTaskIpc(
         { taskId: data.taskId, sourceGroup, updates: Object.keys(updates) },
         'Task edited via IPC',
       );
+      safeEmitIpcEvent(
+        deps,
+        'task_edited',
+        sourceGroup,
+        `Task ${data.taskId} updated: ${Object.keys(updates).join(', ')}`,
+        { taskId: data.taskId, fields: Object.keys(updates) },
+      );
       refreshTasksSnapshot();
       break;
     }
@@ -715,6 +782,13 @@ export async function processTaskIpc(
         }
 
         deps.registerGroup(data.jid, groupToRegister);
+        safeEmitIpcEvent(
+          deps,
+          'group_registered',
+          sourceGroup,
+          `Group registered: ${data.name} (${data.folder})`,
+          { jid: data.jid, name: data.name, folder: data.folder },
+        );
       } else {
         logger.warn(
           { data },

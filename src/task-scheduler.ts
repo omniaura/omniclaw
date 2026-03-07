@@ -19,6 +19,7 @@ import {
   getDueTasks,
   getTaskById,
   logTaskRun,
+  updateTask,
   updateTaskAfterRun,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
@@ -294,4 +295,53 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   };
 
   loop();
+}
+
+// ---------------------------------------------------------------------------
+// Scheduler control functions (pause/resume/cancel/trigger)
+// ---------------------------------------------------------------------------
+
+interface TaskActionResult {
+  ok: boolean;
+  reason?: 'not_found' | 'invalid_state';
+}
+
+export function pauseScheduledTask(taskId: string): TaskActionResult {
+  const task = getTaskById(taskId);
+  if (!task) return { ok: false, reason: 'not_found' };
+  updateTask(taskId, { status: 'paused' });
+  return { ok: true };
+}
+
+export function resumeScheduledTask(taskId: string): TaskActionResult {
+  const task = getTaskById(taskId);
+  if (!task) return { ok: false, reason: 'not_found' };
+  updateTask(taskId, { status: 'active' });
+  return { ok: true };
+}
+
+export function cancelScheduledTask(taskId: string): TaskActionResult {
+  const task = getTaskById(taskId);
+  if (!task) return { ok: false, reason: 'not_found' };
+  deleteTask(taskId);
+  return { ok: true };
+}
+
+export function triggerTaskNow(
+  taskId: string,
+  deps: SchedulerDependencies,
+): TaskActionResult {
+  const task = getTaskById(taskId);
+  if (!task) return { ok: false, reason: 'not_found' };
+  if (task.status !== 'active' && task.status !== 'paused') {
+    return { ok: false, reason: 'invalid_state' };
+  }
+  const promptPreview = task.prompt.slice(0, 100);
+  deps.queue.enqueueTask(
+    task.chat_jid,
+    task.id,
+    () => runTask(task, deps),
+    promptPreview,
+  );
+  return { ok: true };
 }
