@@ -268,7 +268,11 @@ function getRuntimeGroupFolder(
 function getSubscriptionsForChannelInMemory(
   channelJid: string,
 ): ChannelSubscription[] {
-  return channelSubscriptions[channelJid] || [];
+  const exact = channelSubscriptions[channelJid];
+  if (exact && exact.length > 0) return exact;
+  const legacyJid = toLegacyTelegramJid(channelJid);
+  if (legacyJid) return channelSubscriptions[legacyJid] || [];
+  return [];
 }
 
 function buildRegisteredGroupFromSubscription(
