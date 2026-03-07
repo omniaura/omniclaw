@@ -89,7 +89,7 @@ cat ~/.config/omniclaw/mount-allowlist.json
 
 ```bash
 # Check if auth expired
-grep -E 'QR\|authentication required\|qr\|login' logs/omniclaw.log | tail -5
+grep -Ei 'QR|authentication required|login' logs/omniclaw.log | tail -5
 
 # Check auth files exist
 ls -la store/auth/
@@ -106,7 +106,7 @@ launchctl kickstart -k gui/$(id -u)/com.omniclaw   # macOS
 systemctl --user restart omniclaw                    # Linux
 
 # Stop
-launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist   # macOS
+launchctl bootout gui/$(id -u)/com.omniclaw                  # macOS
 systemctl --user stop omniclaw                                # Linux
 
 # View live logs

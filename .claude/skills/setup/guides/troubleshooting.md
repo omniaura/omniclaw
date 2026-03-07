@@ -110,7 +110,7 @@ launchctl kickstart -k gui/$(id -u)/com.omniclaw   # macOS
 systemctl --user restart omniclaw                    # Linux
 
 # Stop service
-launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist   # macOS
+launchctl bootout gui/$(id -u)/com.omniclaw                  # macOS
 systemctl --user stop omniclaw                                # Linux
 
 # Check linger (Linux — prevents service death on SSH disconnect)

@@ -177,7 +177,7 @@ launchctl kickstart -k gui/$(id -u)/com.omniclaw  # macOS
 systemctl --user restart omniclaw                  # Linux
 
 # Stop
-launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist   # macOS
+launchctl bootout gui/$(id -u)/com.omniclaw                  # macOS
 systemctl --user stop omniclaw                                # Linux
 
 # View live logs
