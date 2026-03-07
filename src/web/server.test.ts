@@ -169,8 +169,21 @@ function url(path: string): string {
   return `http://localhost:${handle!.port}${path}`;
 }
 
+interface StreamReadResult {
+  done: boolean;
+  value?: Uint8Array;
+}
+
+interface StreamReader {
+  read(): Promise<StreamReadResult>;
+}
+
+interface CancellableReader extends StreamReader {
+  cancel(): Promise<void>;
+}
+
 async function readUntilContains(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
+  reader: StreamReader,
   needle: string,
   timeoutMs = 2000,
 ): Promise<string> {
@@ -930,7 +943,12 @@ describe('SSE', () => {
     });
     handle.broadcast({
       type: 'agent_status',
-      data: { activeContainers: 2, idleContainers: 1, maxActive: 8, maxIdle: 4 },
+      data: {
+        activeContainers: 2,
+        idleContainers: 1,
+        maxActive: 8,
+        maxIdle: 4,
+      },
       timestamp: new Date().toISOString(),
     });
 
@@ -952,14 +970,14 @@ describe('SSE', () => {
   it('enforces the MAX_SSE_CLIENTS connection limit', async () => {
     handle = startWebServer({ port: randomPort() }, makeState());
 
-    const readers: ReadableStreamDefaultReader<Uint8Array>[] = [];
+    const readers: CancellableReader[] = [];
     for (let i = 0; i < 100; i++) {
       const res = await fetch(url('/api/events?channels=logs'), {
         headers: { Accept: 'text/event-stream' },
       });
       expect(res.status).toBe(200);
       expect(res.body).toBeTruthy();
-      readers.push(res.body!.getReader());
+      readers.push(res.body!.getReader() as unknown as CancellableReader);
     }
 
     const overflow = await fetch(url('/api/events?channels=logs'), {

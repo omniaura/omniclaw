@@ -510,8 +510,12 @@ ${renderNav('/')}
       ws.send(JSON.stringify({ subscribe: ['logs', 'stats'] }));
     };
     ws.onclose = function() {
-      setDisconnectedStatus();
-      connectSse();
+      if (sse) {
+        setConnectedStatus('sse');
+      } else {
+        setDisconnectedStatus();
+        connectSse();
+      }
       setTimeout(connect, 3000);
     };
     ws.onerror = function() { ws.close(); };
