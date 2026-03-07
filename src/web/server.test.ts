@@ -905,7 +905,7 @@ describe('dashboard', () => {
     const res = await fetch(url('/'));
     const html = await res.text();
     expect(html).toContain('btn-create-task');
-    expect(html).toContain('New Task');
+    expect(html).toContain('+ New');
   });
 
   it('includes task action buttons', async () => {
