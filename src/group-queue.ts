@@ -29,6 +29,28 @@ const BASE_RETRY_MS = 5000;
 
 export type Lane = 'message' | 'task';
 
+export interface GroupQueueDetail {
+  folderKey: string;
+  messageLane: {
+    active: boolean;
+    idle: boolean;
+    pendingCount: number;
+    containerName: string | null;
+  };
+  taskLane: {
+    active: boolean;
+    pendingCount: number;
+    containerName: string | null;
+    activeTask: {
+      taskId: string;
+      promptPreview: string;
+      startedAt: number;
+      runningMs: number;
+    } | null;
+  };
+  retryCount: number;
+}
+
 interface ActiveTaskInfo {
   taskId: string;
   promptPreview: string;
@@ -722,6 +744,37 @@ export class GroupQueue {
       maxActive: MAX_ACTIVE_CONTAINERS,
       maxIdle: MAX_IDLE_CONTAINERS,
     };
+  }
+
+  /** Return per-group queue state for the IPC inspector. */
+  getDetailedStats(): GroupQueueDetail[] {
+    const details: GroupQueueDetail[] = [];
+    for (const [folderKey, state] of this.groups) {
+      details.push({
+        folderKey,
+        messageLane: {
+          active: state.messageActive,
+          idle: state.idleWaiting,
+          pendingCount: state.pendingMessageJids.length,
+          containerName: state.messageContainerName,
+        },
+        taskLane: {
+          active: state.taskActive,
+          pendingCount: state.pendingTasks.length,
+          containerName: state.taskContainerName,
+          activeTask: state.activeTaskInfo
+            ? {
+                taskId: state.activeTaskInfo.taskId,
+                promptPreview: state.activeTaskInfo.promptPreview,
+                startedAt: state.activeTaskInfo.startedAt,
+                runningMs: Date.now() - state.activeTaskInfo.startedAt,
+              }
+            : null,
+        },
+        retryCount: state.retryCount,
+      });
+    }
+    return details;
   }
 
   async shutdown(_gracePeriodMs: number): Promise<void> {

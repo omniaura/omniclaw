@@ -130,6 +130,8 @@ function makeState(
       },
     ],
     getQueueStats: () => defaultStats,
+    getQueueDetails: () => [],
+    getIpcEvents: () => [],
     createTask: (task) => store.create(task),
     updateTask: (id, updates) => store.update(id, updates),
     deleteTask: (id) => store.delete(id),
