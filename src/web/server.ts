@@ -10,6 +10,13 @@ import type {
 } from './types.js';
 
 const MAX_WS_CLIENTS = 50;
+const MAX_SSE_CLIENTS = 100;
+
+interface SseClient {
+  subscriptions: Set<string>;
+  send(payload: string): void;
+  close(): void;
+}
 
 /**
  * Start the OmniClaw web UI server.
@@ -22,6 +29,8 @@ export function startWebServer(
 ): WebServerHandle {
   const { port, auth } = config;
   const wsClients = new Set<ServerWebSocket<WsData>>();
+  const sseClients = new Set<SseClient>();
+  const encoder = new TextEncoder();
 
   const server: Server<WsData> = Bun.serve<WsData>({
     port,
@@ -55,6 +64,87 @@ export function startWebServer(
         return new Response('Unauthorized', {
           status: 401,
           headers: { 'WWW-Authenticate': 'Basic realm="OmniClaw"' },
+        });
+      }
+
+      // --- SSE stream ---
+      if (url.pathname === '/api/events') {
+        if (req.method !== 'GET') {
+          return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+            status: 405,
+            headers: {
+              'Content-Type': 'application/json',
+              ...corsHeaders(),
+            },
+          });
+        }
+        if (sseClients.size >= MAX_SSE_CLIENTS) {
+          return new Response('Too many SSE connections', {
+            status: 429,
+            headers: corsHeaders(),
+          });
+        }
+
+        const queryChannels =
+          url.searchParams
+            .get('channels')
+            ?.split(',')
+            .map((ch) => ch.trim())
+            .filter((ch) => ch.length > 0) ?? [];
+        const subscriptions = new Set<string>(
+          queryChannels.length > 0 ? queryChannels : ['logs', 'stats'],
+        );
+
+        let heartbeat: ReturnType<typeof setInterval> | undefined;
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            const client: SseClient = {
+              subscriptions,
+              send(payload: string) {
+                controller.enqueue(encoder.encode(payload));
+              },
+              close() {
+                try {
+                  controller.close();
+                } catch {
+                  // Stream already closed.
+                }
+              },
+            };
+
+            sseClients.add(client);
+            logger.debug(
+              { sseClients: sseClients.size },
+              'SSE client connected',
+            );
+
+            client.send('event: connected\ndata: {"ok":true}\n\n');
+            heartbeat = setInterval(() => {
+              client.send(': keepalive\n\n');
+            }, 15000);
+
+            req.signal.addEventListener('abort', () => {
+              if (heartbeat) clearInterval(heartbeat);
+              sseClients.delete(client);
+              client.close();
+              logger.debug(
+                { sseClients: sseClients.size },
+                'SSE client disconnected',
+              );
+            });
+          },
+          cancel() {
+            if (heartbeat) clearInterval(heartbeat);
+          },
+        });
+
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache, no-transform',
+            Connection: 'keep-alive',
+            ...corsHeaders(),
+          },
         });
       }
 
@@ -119,23 +209,27 @@ export function startWebServer(
   const handle: WebServerHandle = {
     port: server.port!,
     broadcast(event: WsEvent) {
-      if (wsClients.size === 0) return;
       const payload = JSON.stringify(event);
+      const channel = eventChannel(event);
+
       for (const ws of wsClients) {
         try {
-          // Only send if client is subscribed to this event type's channel
-          // 'logs' channel gets 'log' events, 'stats' channel gets stat events, etc.
-          const channel =
-            event.type === 'log'
-              ? 'logs'
-              : event.type === 'agent_status' || event.type === 'task_update'
-                ? 'stats'
-                : event.type;
           if (ws.data.subscriptions.has(channel)) {
             ws.send(payload);
           }
         } catch {
           // Client disconnected; will be cleaned up in close handler
+        }
+      }
+
+      const ssePayload = `event: ${event.type}\ndata: ${payload}\n\n`;
+      for (const client of sseClients) {
+        if (!client.subscriptions.has(channel)) continue;
+        try {
+          client.send(ssePayload);
+        } catch {
+          client.close();
+          sseClients.delete(client);
         }
       }
     },
@@ -144,6 +238,10 @@ export function startWebServer(
         ws.close(1001, 'Server shutting down');
       }
       wsClients.clear();
+      for (const client of sseClients) {
+        client.close();
+      }
+      sseClients.clear();
       server.stop(true);
       logger.info('Web UI server stopped');
     },
@@ -203,4 +301,12 @@ function corsHeaders(): Record<string, string> {
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
   };
+}
+
+function eventChannel(event: WsEvent): string {
+  if (event.type === 'log') return 'logs';
+  if (event.type === 'agent_status' || event.type === 'task_update') {
+    return 'stats';
+  }
+  return event.type;
 }
