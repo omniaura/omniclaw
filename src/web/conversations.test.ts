@@ -128,10 +128,6 @@ function makeState(
 
 let handle: WebServerHandle | null = null;
 
-function randomPort(): number {
-  return 30000 + Math.floor(Math.random() * 20000);
-}
-
 afterEach(async () => {
   if (handle) {
     await handle.stop();
@@ -145,7 +141,7 @@ function url(path: string): string {
 
 describe('conversations page', () => {
   it('serves conversations HTML at /conversations', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer({ port: 0 }, makeState());
     const res = await fetch(url('/conversations'));
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
@@ -155,7 +151,7 @@ describe('conversations page', () => {
   });
 
   it('renders chat list from state', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer({ port: 0 }, makeState());
     const res = await fetch(url('/conversations'));
     const html = await res.text();
     expect(html).toContain('general');
@@ -165,7 +161,7 @@ describe('conversations page', () => {
   });
 
   it('shows chat count', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer({ port: 0 }, makeState());
     const res = await fetch(url('/conversations'));
     const html = await res.text();
     expect(html).toContain('2 chats');
@@ -175,7 +171,7 @@ describe('conversations page', () => {
     const state = makeState({
       getChats: () => [testChats[0]],
     });
-    handle = startWebServer({ port: randomPort() }, state);
+    handle = startWebServer({ port: 0 }, state);
     const res = await fetch(url('/conversations'));
     const html = await res.text();
     expect(html).toContain('1 chat');
@@ -185,7 +181,7 @@ describe('conversations page', () => {
 
   it('handles empty chat list', async () => {
     const state = makeState({ getChats: () => [] });
-    handle = startWebServer({ port: randomPort() }, state);
+    handle = startWebServer({ port: 0 }, state);
     const res = await fetch(url('/conversations'));
     const html = await res.text();
     expect(html).toContain('0 chats');
@@ -202,7 +198,7 @@ describe('conversations page', () => {
         },
       ],
     });
-    handle = startWebServer({ port: randomPort() }, state);
+    handle = startWebServer({ port: 0 }, state);
     const res = await fetch(url('/conversations'));
     const html = await res.text();
     expect(html).not.toContain('<script>alert("xss")</script>');
@@ -210,7 +206,7 @@ describe('conversations page', () => {
   });
 
   it('includes navigation links', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer({ port: 0 }, makeState());
     const res = await fetch(url('/conversations'));
     const html = await res.text();
     // Has link back to dashboard
@@ -223,7 +219,7 @@ describe('conversations page', () => {
 
 describe('dashboard navigation', () => {
   it('includes link to conversations from dashboard', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer({ port: 0 }, makeState());
     const res = await fetch(url('/'));
     const html = await res.text();
     expect(html).toContain('href="/conversations"');
@@ -233,7 +229,7 @@ describe('dashboard navigation', () => {
 
 describe('messages API for conversations', () => {
   it('returns messages for a specific chat', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer({ port: 0 }, makeState());
     const res = await fetch(url('/api/messages/dc:123'));
     expect(res.status).toBe(200);
     const messages = (await res.json()) as Array<{ sender_name: string }>;
@@ -243,7 +239,7 @@ describe('messages API for conversations', () => {
   });
 
   it('returns messages for a different chat', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer({ port: 0 }, makeState());
     const res = await fetch(url('/api/messages/dc:456'));
     expect(res.status).toBe(200);
     const messages = (await res.json()) as Array<{ sender_name: string }>;
@@ -252,7 +248,7 @@ describe('messages API for conversations', () => {
   });
 
   it('returns empty array for unknown chat', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer({ port: 0 }, makeState());
     const res = await fetch(url('/api/messages/dc:unknown'));
     expect(res.status).toBe(200);
     const messages = (await res.json()) as Array<unknown>;
@@ -260,7 +256,7 @@ describe('messages API for conversations', () => {
   });
 
   it('respects limit parameter', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer({ port: 0 }, makeState());
     const res = await fetch(url('/api/messages/dc:123?limit=1'));
     expect(res.status).toBe(200);
     const messages = (await res.json()) as Array<unknown>;
@@ -268,7 +264,7 @@ describe('messages API for conversations', () => {
   });
 
   it('chats endpoint returns all chats', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer({ port: 0 }, makeState());
     const res = await fetch(url('/api/chats'));
     expect(res.status).toBe(200);
     const chats = (await res.json()) as Array<{ name: string }>;

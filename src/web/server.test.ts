@@ -169,6 +169,51 @@ function url(path: string): string {
   return `http://localhost:${handle!.port}${path}`;
 }
 
+interface StreamReadResult {
+  done: boolean;
+  value?: Uint8Array;
+}
+
+interface StreamReader {
+  read(): Promise<StreamReadResult>;
+}
+
+interface CancellableReader extends StreamReader {
+  cancel(): Promise<void>;
+}
+
+async function readUntilContains(
+  reader: StreamReader,
+  needle: string,
+  timeoutMs = 2000,
+): Promise<string> {
+  const decoder = new TextDecoder();
+  const deadline = Date.now() + timeoutMs;
+  let output = '';
+
+  while (Date.now() < deadline) {
+    const remainingMs = Math.max(1, deadline - Date.now());
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const chunk = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error('Timed out reading stream')),
+          remainingMs,
+        );
+      }),
+    ]).finally(() => {
+      if (timeoutId) clearTimeout(timeoutId);
+    });
+
+    if (chunk.done) break;
+    output += decoder.decode(chunk.value, { stream: true });
+    if (output.includes(needle)) return output;
+  }
+
+  throw new Error(`Did not find expected token in stream: ${needle}`);
+}
+
 // ---- Server startup ----
 
 describe('startWebServer', () => {
@@ -668,6 +713,16 @@ describe('method not allowed', () => {
     });
     expect(res.status).toBe(405);
   });
+
+  it('returns 405 for POST on /api/events', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/api/events'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(405);
+  });
 });
 
 // ---- API: /api/chats ----
@@ -744,104 +799,106 @@ describe('GET /api/stats', () => {
   });
 });
 
-// ---- WebSocket ----
+// ---- WebSocket deprecation ----
 
 describe('WebSocket', () => {
+  it('returns 410 for deprecated /ws endpoint', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/ws'));
+    expect(res.status).toBe(410);
+  });
+});
+
+// ---- SSE ----
+
+describe('SSE', () => {
   it('connects and receives broadcast events', async () => {
     handle = startWebServer({ port: randomPort() }, makeState());
 
-    const ws = new WebSocket(`ws://localhost:${handle.port}/ws`);
-    const received: unknown[] = [];
+    const res = await fetch(
+      url('/api/events?channels=logs,tasks,stats,agents'),
+      {
+        headers: { Accept: 'text/event-stream' },
+      },
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/event-stream');
+    expect(res.body).toBeTruthy();
 
-    await new Promise<void>((resolve, reject) => {
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ subscribe: ['logs'] }));
-        // Give the subscription time to register, then broadcast
-        setTimeout(() => {
-          handle!.broadcast({
-            type: 'log',
-            data: { level: 'info', msg: 'test log', ts: Date.now() },
-            timestamp: new Date().toISOString(),
-          });
-        }, 50);
-      };
-      ws.onmessage = (e) => {
-        received.push(JSON.parse(e.data));
-        ws.close();
-      };
-      ws.onclose = () => resolve();
-      ws.onerror = (e) => reject(e);
-      // Timeout safety
-      setTimeout(() => {
-        ws.close();
-        resolve();
-      }, 2000);
+    const reader = res.body!.getReader();
+    handle.broadcast({
+      type: 'log',
+      data: { level: 'info', msg: 'sse log', ts: Date.now() },
+      timestamp: new Date().toISOString(),
     });
 
-    expect(received.length).toBeGreaterThanOrEqual(1);
-    const evt = received[0] as { type: string; data: { msg: string } };
-    expect(evt.type).toBe('log');
-    expect(evt.data.msg).toBe('test log');
+    const payload = await readUntilContains(reader, 'sse log');
+    expect(payload).toContain('selector #log-container');
+    expect(payload).toContain('sse log');
+    reader.releaseLock();
   });
 
   it('only sends events matching subscribed channels', async () => {
     handle = startWebServer({ port: randomPort() }, makeState());
 
-    const ws = new WebSocket(`ws://localhost:${handle.port}/ws`);
-    const received: unknown[] = [];
+    const res = await fetch(url('/api/events?channels=stats'), {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toBeTruthy();
 
-    await new Promise<void>((resolve) => {
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ subscribe: ['stats'] })); // NOT 'logs'
-        setTimeout(() => {
-          // Send a log event — should NOT be received
-          handle!.broadcast({
-            type: 'log',
-            data: { level: 'info', msg: 'should not arrive', ts: Date.now() },
-            timestamp: new Date().toISOString(),
-          });
-          // Send a stats event — should be received
-          handle!.broadcast({
-            type: 'agent_status',
-            data: { activeContainers: 3 },
-            timestamp: new Date().toISOString(),
-          });
-        }, 50);
-      };
-      ws.onmessage = (e) => {
-        received.push(JSON.parse(e.data));
-        ws.close();
-      };
-      ws.onclose = () => resolve();
-      setTimeout(() => {
-        ws.close();
-        resolve();
-      }, 2000);
+    const reader = res.body!.getReader();
+
+    handle.broadcast({
+      type: 'log',
+      data: { level: 'info', msg: 'should not arrive', ts: Date.now() },
+      timestamp: new Date().toISOString(),
+    });
+    handle.broadcast({
+      type: 'agent_status',
+      data: {
+        activeContainers: 2,
+        idleContainers: 1,
+        maxActive: 8,
+        maxIdle: 4,
+      },
+      timestamp: new Date().toISOString(),
     });
 
-    expect(received.length).toBe(1);
-    expect((received[0] as { type: string }).type).toBe('agent_status');
+    const payload = await readUntilContains(reader, 'id="stat-active"');
+    expect(payload).not.toContain('should not arrive');
+    reader.releaseLock();
   });
 
-  it('rejects WebSocket when auth is configured and no credentials given', async () => {
+  it('rejects SSE when auth is configured and no credentials given', async () => {
     handle = startWebServer(
       { port: randomPort(), auth: { username: 'admin', password: 'secret' } },
       makeState(),
     );
 
-    const ws = new WebSocket(`ws://localhost:${handle.port}/ws`);
-    const closeCode = await new Promise<number>((resolve) => {
-      ws.onclose = (e) => resolve(e.code);
-      ws.onerror = () => {}; // Suppress error noise
-      // If the server rejects with 401, the browser closes the socket with a specific code
-      setTimeout(() => {
-        ws.close();
-        resolve(-1);
-      }, 2000);
-    });
+    const res = await fetch(url('/api/events'));
+    expect(res.status).toBe(401);
+  });
 
-    // WebSocket libraries handle auth rejection differently, but the connection should not stay open
-    expect(ws.readyState).toBeGreaterThanOrEqual(2); // CLOSING or CLOSED
+  it('enforces the MAX_SSE_CLIENTS connection limit', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+
+    const readers: CancellableReader[] = [];
+    for (let i = 0; i < 100; i++) {
+      const res = await fetch(url('/api/events?channels=logs'), {
+        headers: { Accept: 'text/event-stream' },
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).toBeTruthy();
+      readers.push(res.body!.getReader() as unknown as CancellableReader);
+    }
+
+    const overflow = await fetch(url('/api/events?channels=logs'), {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(overflow.status).toBe(429);
+
+    await Promise.all(readers.map(async (reader) => reader.cancel()));
   });
 });
 
@@ -900,20 +957,20 @@ describe('server shutdown', () => {
 // ---- Dashboard content ----
 
 describe('dashboard', () => {
-  it('includes create task button', async () => {
+  it('includes create task button in sidebar', async () => {
     handle = startWebServer({ port: randomPort() }, makeState());
     const res = await fetch(url('/'));
     const html = await res.text();
     expect(html).toContain('btn-create-task');
-    expect(html).toContain('+ New');
+    expect(html).toContain('+ new task');
   });
 
-  it('includes task action buttons', async () => {
+  it('includes sidebar tasks panel', async () => {
     handle = startWebServer({ port: randomPort() }, makeState());
     const res = await fetch(url('/'));
     const html = await res.text();
-    expect(html).toContain('data-action="toggle"');
-    expect(html).toContain('data-action="delete"');
+    expect(html).toContain('sidebar-tasks');
+    expect(html).toContain('panel-tasks');
   });
 
   it('includes create task modal', async () => {
@@ -922,5 +979,13 @@ describe('dashboard', () => {
     const html = await res.text();
     expect(html).toContain('create-task-modal');
     expect(html).toContain('create-task-form');
+  });
+
+  it('includes datastar stream endpoint in dashboard markup', async () => {
+    handle = startWebServer({ port: randomPort() }, makeState());
+    const res = await fetch(url('/'));
+    const html = await res.text();
+    expect(html).toContain('/api/events?channels=logs,stats,agents,tasks');
+    expect(html).toContain('bundles/datastar.js');
   });
 });
