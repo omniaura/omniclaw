@@ -47,8 +47,8 @@ export function startWebServer(
         });
       }
 
-      // --- Basic auth for HTTP (always enforced) ---
-      if (!checkBasicAuth(req, auth)) {
+      // --- Basic auth for HTTP (optional on trusted local setups) ---
+      if (auth && !checkBasicAuth(req, auth)) {
         return new Response('Unauthorized', {
           status: 401,
           headers: { 'WWW-Authenticate': 'Basic realm="OmniClaw"' },
