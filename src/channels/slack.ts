@@ -198,9 +198,7 @@ export class SlackChannel implements Channel {
     try {
       const info = await this.client.users.info({ user: this.botUserId });
       return (
-        info.user?.profile?.image_512 ||
-        info.user?.profile?.image_192 ||
-        null
+        info.user?.profile?.image_512 || info.user?.profile?.image_192 || null
       );
     } catch (err) {
       logger.warn({ err }, 'Failed to get Slack avatar');

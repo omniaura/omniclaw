@@ -168,8 +168,7 @@ function mapRowToAgent(row: AgentRow): Agent {
     agentContextFolder: row.agent_context_folder || undefined,
     rosterRoleFilters,
     avatarUrl: row.avatar_url || undefined,
-    avatarSource:
-      (row.avatar_source as Agent['avatarSource']) || undefined,
+    avatarSource: (row.avatar_source as Agent['avatarSource']) || undefined,
   };
 }
 
