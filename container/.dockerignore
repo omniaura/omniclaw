@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!Dockerfile.base
+!entrypoint.sh
+!agent-runner/
+!agent-runner/**

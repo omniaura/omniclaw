@@ -11,9 +11,11 @@ Issue #191 starts by adding Rust (`cargo`/`rustc`) to the base image and defines
 
 ## Current baseline (Mar 2026)
 
-- Base image includes Bun, Node/npm, Go, GitHub CLI, Graphite CLI, and agent-browser.
+- Shared base image includes Bun, Node/npm, Go, GitHub CLI, Graphite CLI, and agent-browser.
 - Rust (`cargo` and `rustc`) is now included in base image for immediate productivity.
+- Browser tooling stays in the shared base image for now because it is broadly useful across agents.
 - Container startup remains deterministic (no runtime language bootstrap required for Go/Rust workflows).
+- Container builds should use `container/` as the build context directly rather than relying on repo-root ignore rules.
 
 ## Design goals
 
@@ -54,13 +56,15 @@ Rules:
 
 ### Phase 1 (now)
 
-- Keep one base image and include commonly needed tools (Go + Rust).
+- Keep one shared base image and include commonly needed tools (browser + Go + Rust).
 - No behavior change in container runner.
 
 ### Phase 2
 
 - Add pack definitions under `container/packs/`.
 - Add a small build orchestrator that generates or selects image variants by pack key.
+- Let each agent select an LLM model and a canonical dev tool pack independently.
+- Support repo-shipped Dockerfile templates so advanced users can derive custom variants without forking the runtime.
 - Cache built images locally to avoid repeated rebuilds.
 
 ### Phase 3
@@ -82,6 +86,7 @@ Rules:
 
 ## Open questions
 
+- Should model choice and tool pack choice both live on the existing agent record?
 - Should we expose pack config globally per channel, per agent, or both?
 - Should `full` be a first-class pack alias (`go + rust + web`) for convenience?
 - Should pack images be prebuilt in CI or built lazily on first use?
