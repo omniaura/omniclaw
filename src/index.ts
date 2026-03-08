@@ -114,6 +114,7 @@ import { logger } from './logger.js';
 import { createResumePositionStore } from './resume-position-store.js';
 import { assertPathWithin } from './path-security.js';
 import { redactSensitiveData } from './security/redaction.js';
+import { serveCachedRemoteImage } from './web/image-cache.js';
 import {
   startWebServer,
   startLogStream,
@@ -406,6 +407,44 @@ async function resolveDiscordGuildImageUrl(
     : channels.find((c) => c.name === 'discord');
   if (!preferred?.getServerIconUrl) return null;
   return preferred.getServerIconUrl(guildId);
+}
+
+function isTelegramChatJid(jid: string): boolean {
+  return /^tg:(?:[^:]+:)?-?\d+$/.test(jid);
+}
+
+async function warmTopologyImageCache(): Promise<void> {
+  const guildTargets = new Map<string, { guildId: string; botId?: string }>();
+  const chatTargets = new Set<string>();
+
+  for (const subs of Object.values(channelSubscriptions)) {
+    for (const sub of subs) {
+      if (sub.discordGuildId) {
+        guildTargets.set(`${sub.discordGuildId}:${sub.discordBotId || ''}`, {
+          guildId: sub.discordGuildId,
+          botId: sub.discordBotId,
+        });
+      }
+      if (isTelegramChatJid(sub.channelJid)) {
+        chatTargets.add(sub.channelJid);
+      }
+    }
+  }
+
+  await Promise.allSettled([
+    ...Array.from(guildTargets.values()).map((target) =>
+      serveCachedRemoteImage(
+        `discord-guild:${target.guildId}:${target.botId || ''}`,
+        async () =>
+          resolveDiscordGuildImageUrl(target.guildId, target.botId),
+      ),
+    ),
+    ...Array.from(chatTargets).map((chatJid) =>
+      serveCachedRemoteImage(`chat:${chatJid}`, async () =>
+        resolveChatImageUrl(chatJid),
+      ),
+    ),
+  ]);
 }
 
 function backfillDiscordBotIds(): void {
@@ -2489,6 +2528,9 @@ async function main(): Promise<void> {
       getSubscriptionsForAgent(agentId),
     ).catch((err) => {
       logger.warn({ err }, 'Avatar sync failed (non-critical)');
+    });
+    warmTopologyImageCache().catch((err) => {
+      logger.warn({ err }, 'Topology image cache warmup failed (non-critical)');
     });
   };
 

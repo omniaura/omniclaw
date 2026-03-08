@@ -62,8 +62,18 @@ function dashboardScript(): string {
     if(!node.avatarUrl)return;
     var img=new Image();
     img.crossOrigin="anonymous";
-    img.src=node.avatarUrl;
+    var attempts=0;
+    function load(){
+      var sep=node.avatarUrl.indexOf("?")===-1?"?":"&";
+      img.src=node.avatarUrl+(attempts>0?sep+"retry="+attempts:"");
+    }
     img.onload=function(){node.avatarImg=img;};
+    img.onerror=function(){
+      if(attempts>=3)return;
+      attempts++;
+      setTimeout(load,1500*attempts);
+    };
+    load();
   }
 
   // 1) Collect servers

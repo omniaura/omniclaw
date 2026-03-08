@@ -60,17 +60,13 @@ export function buildAgentChannelData(
           serverIconUrl = `/api/discord/guilds/${encodeURIComponent(sub.discordGuildId)}/icon${botQuery}`;
         }
 
-        const isTelegramDm =
-          (jid.startsWith('tg:') &&
-            !jid.startsWith('tg:-') &&
-            /^tg:[^:]+:\d+$/.test(jid)) ||
-          /^tg:\d+$/.test(jid);
+        const isTelegramChat = /^tg:(?:[^:]+:)?-?\d+$/.test(jid);
         channels.push({
           jid,
           displayName: channelDisplayName(jid, sub.channelFolder),
           channelFolder: sub.channelFolder,
           categoryFolder: sub.categoryFolder,
-          iconUrl: isTelegramDm
+          iconUrl: isTelegramChat
             ? `/api/chats/${encodeURIComponent(jid)}/icon`
             : undefined,
           discordGuildId: sub.discordGuildId,

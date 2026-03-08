@@ -452,18 +452,30 @@ export class TelegramChannel implements Channel {
   async getChatAvatarUrl(jid: string): Promise<string | null> {
     if (!this.bot) return null;
     const numericChatId = this.extractNumericChatId(jid);
-    if (!numericChatId || numericChatId.startsWith('-')) return null;
+    if (!numericChatId) return null;
 
     try {
-      const photos = await this.bot.api.getUserProfilePhotos(
-        Number(numericChatId),
-        {
-          limit: 1,
-        },
-      );
-      if (!photos.photos.length || !photos.photos[0].length) return null;
-      const photo = photos.photos[0][photos.photos[0].length - 1];
-      const file = await this.bot.api.getFile(photo.file_id);
+      let fileId: string | undefined;
+
+      if (!numericChatId.startsWith('-')) {
+        const photos = await this.bot.api.getUserProfilePhotos(
+          Number(numericChatId),
+          {
+            limit: 1,
+          },
+        );
+        if (photos.photos.length && photos.photos[0].length) {
+          fileId = photos.photos[0][photos.photos[0].length - 1]?.file_id;
+        }
+      }
+
+      if (!fileId) {
+        const chat = await this.bot.api.getChat(Number(numericChatId));
+        fileId = chat.photo?.big_file_id || chat.photo?.small_file_id;
+      }
+
+      if (!fileId) return null;
+      const file = await this.bot.api.getFile(fileId);
       if (!file.file_path) return null;
       return `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
     } catch (err) {
