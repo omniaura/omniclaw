@@ -1,7 +1,13 @@
+import { createHash } from 'crypto';
+
 import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 import { buildAgentChannelData } from './agent-channels.js';
+
+function imageRev(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 12);
+}
 
 /** Render the dashboard content (no shell wrapper). */
 export function renderDashboardContent(state: WebStateProvider): string {
@@ -24,12 +30,16 @@ export function renderDashboardContent(state: WebStateProvider): string {
       runtime: a.agentRuntime,
       isAdmin: a.isAdmin,
       server: a.serverFolder || null,
-      avatarUrl: a.avatarUrl || null,
+      serverIconUrl: a.serverIconUrl || null,
+      avatarUrl: a.avatarUrl
+        ? `/api/agents/${encodeURIComponent(a.id)}/avatar/image?rev=${imageRev(a.avatarUrl)}`
+        : null,
       channels: a.channels.map((ch) => ({
         jid: ch.jid,
         name: ch.displayName,
         category: ch.categoryFolder || null,
         channelFolder: ch.channelFolder || null,
+        iconUrl: ch.iconUrl || null,
       })),
     })),
   );

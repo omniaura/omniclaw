@@ -66,6 +66,13 @@ export interface WebStateProvider {
     url: string | null,
     source: string | null,
   ): void;
+  /** Resolve a platform-backed icon for a specific chat/channel JID. */
+  resolveChatImage?(chatJid: string): Promise<string | null>;
+  /** Resolve a Discord guild/server icon, optionally through a specific bot. */
+  resolveDiscordGuildImage?(
+    guildId: string,
+    botId?: string,
+  ): Promise<string | null>;
 }
 
 export interface QueueStats {

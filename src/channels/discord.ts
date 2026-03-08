@@ -321,6 +321,20 @@ export class DiscordChannel implements Channel {
     }
   }
 
+  async getServerIconUrl(guildId: string): Promise<string | null> {
+    if (!this.connected) return null;
+    try {
+      const guild = await this.client.guilds.fetch(guildId);
+      return guild?.iconURL({ size: 256, extension: 'png' }) || null;
+    } catch (err) {
+      logger.warn(
+        { err, botId: this.botId, guildId },
+        'Failed to get Discord guild icon',
+      );
+      return null;
+    }
+  }
+
   isConnected(): boolean {
     return this.connected;
   }

@@ -3,6 +3,16 @@ import { updateAgentAvatar } from './db.js';
 import type { Agent, Channel } from './types.js';
 
 type AvatarSource = 'discord' | 'telegram' | 'slack';
+type AvatarSubscription = {
+  channelJid: string;
+  discordBotId?: string;
+};
+type AvatarCandidate = {
+  platform: AvatarSource;
+  identity: string;
+  count: number;
+  channel: Channel;
+};
 
 /** Map a channel JID prefix to its platform name. */
 function jidPlatform(jid: string): AvatarSource | undefined {
@@ -17,7 +27,7 @@ function jidPlatform(jid: string): AvatarSource | undefined {
  * Returns the platform name, or undefined if the agent has no platform subscriptions.
  */
 export function detectDominantPlatform(
-  subscriptions: Array<{ channelJid: string }>,
+  subscriptions: AvatarSubscription[],
 ): AvatarSource | undefined {
   const counts: Partial<Record<AvatarSource, number>> = {};
   for (const sub of subscriptions) {
@@ -35,12 +45,86 @@ export function detectDominantPlatform(
   return best;
 }
 
-/** Map a Channel adapter to its platform name. */
-function channelPlatform(ch: Channel): AvatarSource | undefined {
-  if (ch.name === 'discord') return 'discord';
-  if (ch.name === 'telegram') return 'telegram';
-  if (ch.name === 'slack') return 'slack';
-  return undefined;
+function parseTelegramBotId(jid: string): string | undefined {
+  const match = /^tg:([^:]+):/.exec(jid);
+  return match?.[1];
+}
+
+function getChannelForCandidate(
+  platform: AvatarSource,
+  identity: string,
+  channels: Channel[],
+): Channel | undefined {
+  if (platform === 'discord') {
+    return channels.find(
+      (channel) =>
+        channel.name === 'discord' &&
+        channel.getAvatarUrl &&
+        (!identity || channel.botId === identity),
+    );
+  }
+  if (platform === 'telegram') {
+    return channels.find(
+      (channel) =>
+        channel.name === 'telegram' &&
+        channel.getAvatarUrl &&
+        (identity === 'legacy' || channel.botId === identity),
+    );
+  }
+  return channels.find(
+    (channel) => channel.name === 'slack' && !!channel.getAvatarUrl,
+  );
+}
+
+export function buildAvatarCandidates(
+  subscriptions: AvatarSubscription[],
+  channels: Channel[],
+): AvatarCandidate[] {
+  const counts = new Map<string, { platform: AvatarSource; count: number }>();
+  for (const sub of subscriptions) {
+    const platform = jidPlatform(sub.channelJid);
+    if (!platform) continue;
+
+    let identity: string;
+    if (platform === 'discord') {
+      identity = sub.discordBotId || '';
+    } else if (platform === 'telegram') {
+      identity = parseTelegramBotId(sub.channelJid) || 'legacy';
+    } else {
+      identity = 'workspace';
+    }
+
+    const key = `${platform}:${identity}`;
+    const current = counts.get(key);
+    counts.set(key, {
+      platform,
+      count: (current?.count || 0) + 1,
+    });
+  }
+
+  const candidates: AvatarCandidate[] = [];
+  for (const [key, value] of counts.entries()) {
+    const identity = key.slice(value.platform.length + 1);
+    const channel = getChannelForCandidate(value.platform, identity, channels);
+    if (!channel) continue;
+    candidates.push({
+      platform: value.platform,
+      identity,
+      count: value.count,
+      channel,
+    });
+  }
+
+  const platformRank: Record<AvatarSource, number> = {
+    telegram: 0,
+    slack: 1,
+    discord: 2,
+  };
+  candidates.sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    return platformRank[a.platform] - platformRank[b.platform];
+  });
+  return candidates;
 }
 
 /**
@@ -56,44 +140,55 @@ function channelPlatform(ch: Channel): AvatarSource | undefined {
 export async function syncAvatars(
   agents: Record<string, Agent>,
   channels: Channel[],
-  getSubscriptions: (agentId: string) => Array<{ channelJid: string }>,
+  getSubscriptions: (agentId: string) => AvatarSubscription[],
 ): Promise<void> {
-  // Build platform → channel map (first matching adapter wins per platform)
-  const platformChannels = new Map<AvatarSource, Channel>();
-  for (const ch of channels) {
-    const p = channelPlatform(ch);
-    if (p && ch.getAvatarUrl && !platformChannels.has(p)) {
-      platformChannels.set(p, ch);
+  const candidatesByAgent = new Map<string, AvatarCandidate[]>();
+  const ownersByIdentity = new Map<string, Set<string>>();
+
+  for (const agent of Object.values(agents)) {
+    const candidates = buildAvatarCandidates(
+      getSubscriptions(agent.id),
+      channels,
+    );
+    candidatesByAgent.set(agent.id, candidates);
+    for (const candidate of candidates) {
+      const key = `${candidate.platform}:${candidate.identity}`;
+      const owners = ownersByIdentity.get(key) || new Set<string>();
+      owners.add(agent.id);
+      ownersByIdentity.set(key, owners);
     }
   }
-
-  if (platformChannels.size === 0) return;
 
   for (const agent of Object.values(agents)) {
     // Skip agents with custom avatars (user-uploaded)
     if (agent.avatarSource === 'custom') continue;
 
-    const subs = getSubscriptions(agent.id);
-    const dominant = detectDominantPlatform(subs);
-    if (!dominant) continue;
-
-    const ch = platformChannels.get(dominant);
-    if (!ch?.getAvatarUrl) continue;
+    const candidate = (candidatesByAgent.get(agent.id) || []).find((entry) => {
+      const owners = ownersByIdentity.get(
+        `${entry.platform}:${entry.identity}`,
+      );
+      return owners?.size === 1;
+    });
+    if (!candidate?.channel.getAvatarUrl) continue;
 
     try {
-      const url = await ch.getAvatarUrl();
+      const url = await candidate.channel.getAvatarUrl();
       if (url && url !== agent.avatarUrl) {
-        updateAgentAvatar(agent.id, url, dominant);
+        updateAgentAvatar(agent.id, url, candidate.platform);
         agent.avatarUrl = url;
-        agent.avatarSource = dominant;
+        agent.avatarSource = candidate.platform;
         logger.info(
-          { agentId: agent.id, platform: dominant },
+          {
+            agentId: agent.id,
+            platform: candidate.platform,
+            identity: candidate.identity || undefined,
+          },
           'Agent avatar synced from platform',
         );
       }
     } catch (err) {
       logger.warn(
-        { agentId: agent.id, platform: dominant, err },
+        { agentId: agent.id, platform: candidate.platform, err },
         'Failed to sync avatar',
       );
     }
