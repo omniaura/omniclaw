@@ -104,7 +104,7 @@ describe('Slack JID roundtrip', () => {
 describe('SlackChannel.ownsJid', () => {
   const ownsJid = (jid: string, botId = 'OPS', allowLegacy = true) =>
     SlackChannel.prototype.ownsJid.call(
-      { botId, allowLegacyJidRouting: allowLegacy } as SlackChannel,
+      { botId, allowLegacyJidRouting: allowLegacy } as unknown as SlackChannel,
       jid,
     );
 
