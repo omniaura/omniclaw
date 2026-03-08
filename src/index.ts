@@ -435,8 +435,7 @@ async function warmTopologyImageCache(): Promise<void> {
     ...Array.from(guildTargets.values()).map((target) =>
       serveCachedRemoteImage(
         `discord-guild:${target.guildId}:${target.botId || ''}`,
-        async () =>
-          resolveDiscordGuildImageUrl(target.guildId, target.botId),
+        async () => resolveDiscordGuildImageUrl(target.guildId, target.botId),
       ),
     ),
     ...Array.from(chatTargets).map((chatJid) =>

@@ -97,7 +97,10 @@ export function handleRequest(
     if (method === 'POST') return handleSetAgentAvatar(agentId, req, state);
     return json({ error: 'Method not allowed' }, 405);
   }
-  if (pathname.startsWith('/api/agents/') && pathname.endsWith('/avatar/image')) {
+  if (
+    pathname.startsWith('/api/agents/') &&
+    pathname.endsWith('/avatar/image')
+  ) {
     const agentId = decodeURIComponent(
       pathname.slice('/api/agents/'.length, -'/avatar/image'.length),
     );
@@ -113,13 +116,20 @@ export function handleRequest(
     if (method === 'GET') return handleGetChatIcon(chatJid, state);
     return json({ error: 'Method not allowed' }, 405);
   }
-  if (pathname.startsWith('/api/discord/guilds/') && pathname.endsWith('/icon')) {
+  if (
+    pathname.startsWith('/api/discord/guilds/') &&
+    pathname.endsWith('/icon')
+  ) {
     const guildId = decodeURIComponent(
       pathname.slice('/api/discord/guilds/'.length, -'/icon'.length),
     );
     if (!guildId) return json({ error: 'Missing guild ID' }, 400);
     if (method === 'GET')
-      return handleGetDiscordGuildIcon(guildId, url.searchParams.get('botId'), state);
+      return handleGetDiscordGuildIcon(
+        guildId,
+        url.searchParams.get('botId'),
+        state,
+      );
     return json({ error: 'Method not allowed' }, 405);
   }
 

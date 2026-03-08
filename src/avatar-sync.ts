@@ -146,7 +146,10 @@ export async function syncAvatars(
   const ownersByIdentity = new Map<string, Set<string>>();
 
   for (const agent of Object.values(agents)) {
-    const candidates = buildAvatarCandidates(getSubscriptions(agent.id), channels);
+    const candidates = buildAvatarCandidates(
+      getSubscriptions(agent.id),
+      channels,
+    );
     candidatesByAgent.set(agent.id, candidates);
     for (const candidate of candidates) {
       const key = `${candidate.platform}:${candidate.identity}`;
@@ -161,7 +164,9 @@ export async function syncAvatars(
     if (agent.avatarSource === 'custom') continue;
 
     const candidate = (candidatesByAgent.get(agent.id) || []).find((entry) => {
-      const owners = ownersByIdentity.get(`${entry.platform}:${entry.identity}`);
+      const owners = ownersByIdentity.get(
+        `${entry.platform}:${entry.identity}`,
+      );
       return owners?.size === 1;
     });
     if (!candidate?.channel.getAvatarUrl) continue;

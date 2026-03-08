@@ -15,7 +15,8 @@ function makeChannel(
     isConnected: () => true,
     ownsJid: () => true,
     disconnect: async () => {},
-    getAvatarUrl: async () => `https://example.test/${name}/${botId || 'default'}.png`,
+    getAvatarUrl: async () =>
+      `https://example.test/${name}/${botId || 'default'}.png`,
   };
 }
 
@@ -26,10 +27,7 @@ describe('buildAvatarCandidates', () => {
         { channelJid: 'dc:123', discordBotId: 'OCPEYTON' },
         { channelJid: 'dc:456', discordBotId: 'OCPEYTON' },
       ],
-      [
-        makeChannel('discord', 'PRIMARY'),
-        makeChannel('discord', 'OCPEYTON'),
-      ],
+      [makeChannel('discord', 'PRIMARY'), makeChannel('discord', 'OCPEYTON')],
     );
 
     expect(candidates).toHaveLength(1);
