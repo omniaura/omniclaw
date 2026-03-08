@@ -30,11 +30,12 @@ export function startWebServer(
   config: WebServerConfig,
   state: WebStateProvider,
 ): WebServerHandle {
-  const { port, auth } = config;
+  const { port, auth, hostname, corsOrigin } = config;
   const sseClients = new Set<SseClient>();
 
   const server = Bun.serve({
     port,
+    hostname: hostname || '127.0.0.1',
     development: false,
 
     fetch(req) {
@@ -42,12 +43,12 @@ export function startWebServer(
       if (url.pathname === '/ws') {
         return new Response('WebSocket is deprecated for the web dashboard', {
           status: 410,
-          headers: corsHeaders(),
+          headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
         });
       }
 
-      // --- Basic auth for HTTP ---
-      if (auth && !checkBasicAuth(req, auth)) {
+      // --- Basic auth for HTTP (always enforced) ---
+      if (!checkBasicAuth(req, auth)) {
         return new Response('Unauthorized', {
           status: 401,
           headers: { 'WWW-Authenticate': 'Basic realm="OmniClaw"' },
@@ -61,14 +62,14 @@ export function startWebServer(
             status: 405,
             headers: {
               'Content-Type': 'application/json',
-              ...corsHeaders(),
+              ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
             },
           });
         }
         if (sseClients.size >= MAX_SSE_CLIENTS) {
           return new Response('Too many SSE connections', {
             status: 429,
-            headers: corsHeaders(),
+            headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
           });
         }
 
@@ -97,7 +98,7 @@ export function startWebServer(
 
         const responseInit = {
           headers: {
-            ...corsHeaders(),
+            ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
             'Cache-Control': 'no-cache, no-transform',
             'X-Accel-Buffering': 'no',
           },
@@ -169,7 +170,7 @@ export function startWebServer(
             status: 404,
             headers: {
               'Content-Type': 'application/json',
-              ...corsHeaders(),
+              ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
             },
           });
         }
@@ -184,25 +185,25 @@ export function startWebServer(
           {
             headers: {
               'Content-Type': 'application/json',
-              ...corsHeaders(),
+              ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
             },
           },
         );
       }
 
-      // --- CORS for API routes ---
-      if (req.method === 'OPTIONS') {
+      // --- CORS preflight (only when corsOrigin is configured) ---
+      if (req.method === 'OPTIONS' && corsOrigin) {
         return new Response(null, {
           status: 204,
-          headers: corsHeaders(),
+          headers: makeCorsHeaders(corsOrigin),
         });
       }
 
       const result = handleRequest(req, state);
       // handleRequest may return a Promise (for POST/PATCH with body parsing)
       const addCors = (response: Response) => {
-        if (url.pathname.startsWith('/api/')) {
-          for (const [k, v] of Object.entries(corsHeaders())) {
+        if (corsOrigin && url.pathname.startsWith('/api/')) {
+          for (const [k, v] of Object.entries(makeCorsHeaders(corsOrigin))) {
             response.headers.set(k, v);
           }
         }
@@ -226,7 +227,10 @@ export function startWebServer(
     }
   }, SNAPSHOT_INTERVAL_MS);
 
-  logger.info({ port, auth: !!auth }, 'Web UI server started');
+  logger.info(
+    { port, hostname: hostname || '127.0.0.1', cors: corsOrigin || 'disabled' },
+    'Web UI server started',
+  );
 
   const handle: WebServerHandle = {
     port: server.port!,
@@ -326,9 +330,9 @@ function timingSafeEqual(a: string, b: string): boolean {
   return result === 0;
 }
 
-function corsHeaders(): Record<string, string> {
+function makeCorsHeaders(origin: string): Record<string, string> {
   return {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
   };

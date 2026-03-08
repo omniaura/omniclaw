@@ -151,6 +151,9 @@ function makeState(
 
 // ---- Test suite ----
 
+const testAuth = { username: 'admin', password: 'secret' };
+const authHeader = `Basic ${btoa(`${testAuth.username}:${testAuth.password}`)}`;
+
 let handle: WebServerHandle | null = null;
 
 // Use port 0 to let the OS assign an ephemeral port — avoids collisions in parallel test runs
@@ -214,19 +217,35 @@ async function readUntilContains(
   throw new Error(`Did not find expected token in stream: ${needle}`);
 }
 
+/** Authenticated fetch — automatically injects Basic Auth header. */
+function authedFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  if (!headers.has('Authorization')) {
+    headers.set('Authorization', authHeader);
+  }
+  return fetch(url(path), { ...init, headers });
+}
+
+/** Default server config with auth for all tests. */
+function testConfig(
+  overrides: Partial<import('./types.js').WebServerConfig> = {},
+) {
+  return { port: randomPort(), auth: testAuth, ...overrides };
+}
+
 // ---- Server startup ----
 
 describe('startWebServer', () => {
   it('starts and serves on an available port', async () => {
-    handle = startWebServer({ port: 0 }, makeState());
+    handle = startWebServer(testConfig({ port: 0 }), makeState());
     expect(handle.port).toBeGreaterThan(0);
-    const res = await fetch(url('/'));
+    const res = await authedFetch('/');
     expect(res.status).toBe(200);
   });
 
   it('serves the dashboard at /', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/');
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toContain('text/html');
     const html = await res.text();
@@ -235,42 +254,30 @@ describe('startWebServer', () => {
   });
 
   it('returns 404 for unknown paths', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/nonexistent'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/nonexistent');
     expect(res.status).toBe(404);
   });
 });
 
-// ---- Basic auth ----
+// ---- Basic auth (always enforced) ----
 
 describe('basic auth', () => {
-  it('rejects unauthenticated requests when auth is configured', async () => {
-    handle = startWebServer(
-      { port: randomPort(), auth: { username: 'admin', password: 'secret' } },
-      makeState(),
-    );
+  it('rejects requests without credentials', async () => {
+    handle = startWebServer(testConfig(), makeState());
     const res = await fetch(url('/'));
     expect(res.status).toBe(401);
     expect(res.headers.get('WWW-Authenticate')).toContain('Basic');
   });
 
   it('accepts valid credentials', async () => {
-    handle = startWebServer(
-      { port: randomPort(), auth: { username: 'admin', password: 'secret' } },
-      makeState(),
-    );
-    const creds = btoa('admin:secret');
-    const res = await fetch(url('/'), {
-      headers: { Authorization: `Basic ${creds}` },
-    });
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/');
     expect(res.status).toBe(200);
   });
 
   it('rejects wrong password', async () => {
-    handle = startWebServer(
-      { port: randomPort(), auth: { username: 'admin', password: 'secret' } },
-      makeState(),
-    );
+    handle = startWebServer(testConfig(), makeState());
     const creds = btoa('admin:wrong');
     const res = await fetch(url('/'), {
       headers: { Authorization: `Basic ${creds}` },
@@ -278,10 +285,10 @@ describe('basic auth', () => {
     expect(res.status).toBe(401);
   });
 
-  it('allows unauthenticated requests when auth is not configured', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/'));
-    expect(res.status).toBe(200);
+  it('rejects requests to API endpoints without credentials', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await fetch(url('/api/agents'));
+    expect(res.status).toBe(401);
   });
 });
 
@@ -289,8 +296,8 @@ describe('basic auth', () => {
 
 describe('GET /api/agents', () => {
   it('returns agents with channel info', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/agents'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/agents');
     expect(res.status).toBe(200);
     const data = (await res.json()) as Array<Agent & { channels: string[] }>;
     expect(data.length).toBe(2);
@@ -304,16 +311,16 @@ describe('GET /api/agents', () => {
 
 describe('GET /api/tasks', () => {
   it('returns all tasks', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks');
     expect(res.status).toBe(200);
     const data = (await res.json()) as ScheduledTask[];
     expect(data.length).toBe(2);
   });
 
   it('filters by status', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks?status=active'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks?status=active');
     const data = (await res.json()) as ScheduledTask[];
     expect(data.length).toBe(1);
     expect(data[0].status).toBe('active');
@@ -324,8 +331,8 @@ describe('GET /api/tasks', () => {
 
 describe('GET /api/tasks/:id', () => {
   it('returns a single task by ID', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/task-001'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/task-001');
     expect(res.status).toBe(200);
     const data = (await res.json()) as ScheduledTask;
     expect(data.id).toBe('task-001');
@@ -333,8 +340,8 @@ describe('GET /api/tasks/:id', () => {
   });
 
   it('returns 404 for unknown task', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/nonexistent'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/nonexistent');
     expect(res.status).toBe(404);
   });
 });
@@ -343,8 +350,8 @@ describe('GET /api/tasks/:id', () => {
 
 describe('POST /api/tasks', () => {
   it('creates a task with valid payload', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -365,8 +372,8 @@ describe('POST /api/tasks', () => {
   });
 
   it('creates a task with interval schedule', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -384,8 +391,8 @@ describe('POST /api/tasks', () => {
   });
 
   it('defaults context_mode to isolated', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -402,8 +409,8 @@ describe('POST /api/tasks', () => {
   });
 
   it('rejects missing prompt', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -419,8 +426,8 @@ describe('POST /api/tasks', () => {
   });
 
   it('rejects invalid schedule_type', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -437,8 +444,8 @@ describe('POST /api/tasks', () => {
   });
 
   it('rejects missing group_folder', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -454,8 +461,8 @@ describe('POST /api/tasks', () => {
   });
 
   it('rejects missing chat_jid', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -471,8 +478,8 @@ describe('POST /api/tasks', () => {
   });
 
   it('rejects invalid JSON body', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: 'not json',
@@ -486,8 +493,8 @@ describe('POST /api/tasks', () => {
     const state = makeState({
       calculateNextRun: () => null,
     });
-    handle = startWebServer({ port: randomPort() }, state);
-    const res = await fetch(url('/api/tasks'), {
+    handle = startWebServer(testConfig(), state);
+    const res = await authedFetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -504,8 +511,8 @@ describe('POST /api/tasks', () => {
   });
 
   it('task is retrievable after creation', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const createRes = await fetch(url('/api/tasks'), {
+    handle = startWebServer(testConfig(), makeState());
+    const createRes = await authedFetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -519,7 +526,7 @@ describe('POST /api/tasks', () => {
     const created = (await createRes.json()) as ScheduledTask;
 
     // Fetch all tasks and verify the new one is included
-    const listRes = await fetch(url('/api/tasks'));
+    const listRes = await authedFetch('/api/tasks');
     const tasks = (await listRes.json()) as ScheduledTask[];
     expect(tasks.some((t) => t.id === created.id)).toBe(true);
   });
@@ -529,8 +536,8 @@ describe('POST /api/tasks', () => {
 
 describe('PATCH /api/tasks/:id', () => {
   it('updates task status to paused', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/task-001'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/task-001', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'paused' }),
@@ -541,8 +548,8 @@ describe('PATCH /api/tasks/:id', () => {
   });
 
   it('resumes a paused task', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/task-002'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/task-002', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'active' }),
@@ -553,8 +560,8 @@ describe('PATCH /api/tasks/:id', () => {
   });
 
   it('updates task prompt', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/task-001'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/task-001', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: 'Updated prompt text' }),
@@ -565,8 +572,8 @@ describe('PATCH /api/tasks/:id', () => {
   });
 
   it('updates schedule type and value', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/task-001'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/task-001', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -581,8 +588,8 @@ describe('PATCH /api/tasks/:id', () => {
   });
 
   it('returns 404 for unknown task', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/nonexistent'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/nonexistent', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'paused' }),
@@ -591,8 +598,8 @@ describe('PATCH /api/tasks/:id', () => {
   });
 
   it('rejects invalid status value', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/task-001'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/task-001', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'deleted' }),
@@ -603,8 +610,8 @@ describe('PATCH /api/tasks/:id', () => {
   });
 
   it('rejects invalid schedule_type', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/task-001'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/task-001', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ schedule_type: 'weekly' }),
@@ -613,8 +620,8 @@ describe('PATCH /api/tasks/:id', () => {
   });
 
   it('rejects empty update body', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/task-001'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/task-001', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -625,8 +632,8 @@ describe('PATCH /api/tasks/:id', () => {
   });
 
   it('rejects invalid JSON body', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/task-001'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/task-001', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: 'not json',
@@ -635,8 +642,8 @@ describe('PATCH /api/tasks/:id', () => {
   });
 
   it('rejects empty prompt string', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/task-001'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/task-001', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: '' }),
@@ -651,8 +658,8 @@ describe('PATCH /api/tasks/:id', () => {
 
 describe('DELETE /api/tasks/:id', () => {
   it('deletes an existing task', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/task-001'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/task-001', {
       method: 'DELETE',
     });
     expect(res.status).toBe(200);
@@ -661,31 +668,31 @@ describe('DELETE /api/tasks/:id', () => {
     expect(data.id).toBe('task-001');
 
     // Verify task is gone
-    const checkRes = await fetch(url('/api/tasks/task-001'));
+    const checkRes = await authedFetch('/api/tasks/task-001');
     expect(checkRes.status).toBe(404);
   });
 
   it('returns 404 for unknown task', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/nonexistent'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/nonexistent', {
       method: 'DELETE',
     });
     expect(res.status).toBe(404);
   });
 
   it('task count decreases after deletion', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer(testConfig(), makeState());
 
     // Get initial count
-    const beforeRes = await fetch(url('/api/tasks'));
+    const beforeRes = await authedFetch('/api/tasks');
     const before = (await beforeRes.json()) as ScheduledTask[];
     const initialCount = before.length;
 
     // Delete a task
-    await fetch(url('/api/tasks/task-001'), { method: 'DELETE' });
+    await authedFetch('/api/tasks/task-001', { method: 'DELETE' });
 
     // Get updated count
-    const afterRes = await fetch(url('/api/tasks'));
+    const afterRes = await authedFetch('/api/tasks');
     const after = (await afterRes.json()) as ScheduledTask[];
     expect(after.length).toBe(initialCount - 1);
   });
@@ -695,8 +702,8 @@ describe('DELETE /api/tasks/:id', () => {
 
 describe('method not allowed', () => {
   it('returns 405 for PUT on /api/tasks', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -705,8 +712,8 @@ describe('method not allowed', () => {
   });
 
   it('returns 405 for POST on /api/tasks/:id', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks/task-001'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/tasks/task-001', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -715,8 +722,8 @@ describe('method not allowed', () => {
   });
 
   it('returns 405 for POST on /api/events', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/events'), {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -729,8 +736,8 @@ describe('method not allowed', () => {
 
 describe('GET /api/chats', () => {
   it('returns chat list', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/chats'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/chats');
     expect(res.status).toBe(200);
     const data = (await res.json()) as Array<{ jid: string; name: string }>;
     expect(data.length).toBe(1);
@@ -742,8 +749,8 @@ describe('GET /api/chats', () => {
 
 describe('GET /api/messages/:chatJid', () => {
   it('returns messages for a chat', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/messages/dc:123'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/messages/dc:123');
     expect(res.status).toBe(200);
     const data = (await res.json()) as Array<{ id: string; content: string }>;
     expect(data.length).toBe(1);
@@ -760,9 +767,9 @@ describe('GET /api/messages/:chatJid', () => {
         return [];
       },
     });
-    handle = startWebServer({ port: randomPort() }, state);
-    await fetch(
-      url('/api/messages/dc:123?since=2026-01-01T00:00:00.000Z&limit=25'),
+    handle = startWebServer(testConfig(), state);
+    await authedFetch(
+      '/api/messages/dc:123?since=2026-01-01T00:00:00.000Z&limit=25',
     );
     expect(capturedSince).toBe('2026-01-01T00:00:00.000Z');
     expect(capturedLimit).toBe(25);
@@ -776,8 +783,8 @@ describe('GET /api/messages/:chatJid', () => {
         return [];
       },
     });
-    handle = startWebServer({ port: randomPort() }, state);
-    await fetch(url('/api/messages/dc:123?limit=9999'));
+    handle = startWebServer(testConfig(), state);
+    await authedFetch('/api/messages/dc:123?limit=9999');
     expect(capturedLimit).toBe(500);
   });
 });
@@ -786,8 +793,8 @@ describe('GET /api/messages/:chatJid', () => {
 
 describe('GET /api/stats', () => {
   it('returns aggregate stats', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/stats'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/stats');
     expect(res.status).toBe(200);
     const data = (await res.json()) as Record<string, number>;
     expect(data.agents).toBe(2);
@@ -803,7 +810,7 @@ describe('GET /api/stats', () => {
 
 describe('WebSocket', () => {
   it('returns 410 for deprecated /ws endpoint', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer(testConfig(), makeState());
     const res = await fetch(url('/ws'));
     expect(res.status).toBe(410);
   });
@@ -813,10 +820,10 @@ describe('WebSocket', () => {
 
 describe('SSE', () => {
   it('connects and receives broadcast events', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer(testConfig(), makeState());
 
-    const res = await fetch(
-      url('/api/events?channels=logs,tasks,stats,agents'),
+    const res = await authedFetch(
+      '/api/events?channels=logs,tasks,stats,agents',
       {
         headers: { Accept: 'text/event-stream' },
       },
@@ -839,9 +846,9 @@ describe('SSE', () => {
   });
 
   it('only sends events matching subscribed channels', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer(testConfig(), makeState());
 
-    const res = await fetch(url('/api/events?channels=stats'), {
+    const res = await authedFetch('/api/events?channels=stats', {
       headers: { Accept: 'text/event-stream' },
     });
     expect(res.status).toBe(200);
@@ -870,22 +877,19 @@ describe('SSE', () => {
     reader.releaseLock();
   });
 
-  it('rejects SSE when auth is configured and no credentials given', async () => {
-    handle = startWebServer(
-      { port: randomPort(), auth: { username: 'admin', password: 'secret' } },
-      makeState(),
-    );
+  it('rejects SSE when no credentials given', async () => {
+    handle = startWebServer(testConfig(), makeState());
 
     const res = await fetch(url('/api/events'));
     expect(res.status).toBe(401);
   });
 
   it('enforces the MAX_SSE_CLIENTS connection limit', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer(testConfig(), makeState());
 
     const readers: CancellableReader[] = [];
     for (let i = 0; i < 100; i++) {
-      const res = await fetch(url('/api/events?channels=logs'), {
+      const res = await authedFetch('/api/events?channels=logs', {
         headers: { Accept: 'text/event-stream' },
       });
       expect(res.status).toBe(200);
@@ -893,7 +897,7 @@ describe('SSE', () => {
       readers.push(res.body!.getReader() as unknown as CancellableReader);
     }
 
-    const overflow = await fetch(url('/api/events?channels=logs'), {
+    const overflow = await authedFetch('/api/events?channels=logs', {
       headers: { Accept: 'text/event-stream' },
     });
     expect(overflow.status).toBe(429);
@@ -905,22 +909,48 @@ describe('SSE', () => {
 // ---- CORS ----
 
 describe('CORS', () => {
-  it('returns CORS headers on OPTIONS', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/agents'), { method: 'OPTIONS' });
+  it('does not send CORS headers when corsOrigin is unset', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/stats');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
+  });
+
+  it('does not respond to OPTIONS preflight when corsOrigin is unset', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    // OPTIONS without corsOrigin is just a regular request through the router
+    const res = await authedFetch('/api/agents', { method: 'OPTIONS' });
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
+  });
+
+  it('returns CORS headers with explicit origin on OPTIONS', async () => {
+    handle = startWebServer(
+      testConfig({ corsOrigin: 'https://my-dashboard.example.com' }),
+      makeState(),
+    );
+    const res = await authedFetch('/api/agents', { method: 'OPTIONS' });
     expect(res.status).toBe(204);
-    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe(
+      'https://my-dashboard.example.com',
+    );
   });
 
-  it('includes CORS headers on API responses', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/stats'));
-    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+  it('includes CORS headers on API responses when corsOrigin is set', async () => {
+    handle = startWebServer(
+      testConfig({ corsOrigin: 'https://dashboard.local' }),
+      makeState(),
+    );
+    const res = await authedFetch('/api/stats');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe(
+      'https://dashboard.local',
+    );
   });
 
-  it('CORS allows POST, PATCH, DELETE methods', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/api/tasks'), { method: 'OPTIONS' });
+  it('CORS allows POST, PATCH, DELETE methods when configured', async () => {
+    handle = startWebServer(
+      testConfig({ corsOrigin: 'https://dashboard.local' }),
+      makeState(),
+    );
+    const res = await authedFetch('/api/tasks', { method: 'OPTIONS' });
     const methods = res.headers.get('Access-Control-Allow-Methods') || '';
     expect(methods).toContain('POST');
     expect(methods).toContain('PATCH');
@@ -932,11 +962,11 @@ describe('CORS', () => {
 
 describe('server shutdown', () => {
   it('stops accepting connections after stop()', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer(testConfig(), makeState());
     const assignedPort = handle.port;
 
     // Verify it works
-    const res = await fetch(url('/'));
+    const res = await authedFetch('/');
     expect(res.status).toBe(200);
 
     await handle.stop();
@@ -958,32 +988,32 @@ describe('server shutdown', () => {
 
 describe('dashboard', () => {
   it('includes create task button in sidebar', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/');
     const html = await res.text();
     expect(html).toContain('btn-create-task');
     expect(html).toContain('+ new task');
   });
 
   it('includes sidebar tasks panel', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/');
     const html = await res.text();
     expect(html).toContain('sidebar-tasks');
     expect(html).toContain('panel-tasks');
   });
 
   it('includes create task modal', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/');
     const html = await res.text();
     expect(html).toContain('create-task-modal');
     expect(html).toContain('create-task-form');
   });
 
   it('includes datastar stream endpoint in dashboard markup', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(url('/'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/');
     const html = await res.text();
     expect(html).toContain('/api/events?channels=logs,stats,agents,tasks');
     expect(html).toContain('bundles/datastar.js');

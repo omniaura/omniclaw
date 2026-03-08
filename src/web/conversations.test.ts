@@ -126,6 +126,9 @@ function makeState(
 
 // ---- Test suite ----
 
+const testAuth = { username: 'admin', password: 'secret' };
+const authHeader = `Basic ${btoa(`${testAuth.username}:${testAuth.password}`)}`;
+
 let handle: WebServerHandle | null = null;
 
 afterEach(async () => {
@@ -139,10 +142,22 @@ function url(path: string): string {
   return `http://localhost:${handle!.port}${path}`;
 }
 
+function authedFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  if (!headers.has('Authorization')) headers.set('Authorization', authHeader);
+  return fetch(url(path), { ...init, headers });
+}
+
+function testConfig(
+  overrides: Partial<import('./types.js').WebServerConfig> = {},
+) {
+  return { port: 0, auth: testAuth, ...overrides };
+}
+
 describe('conversations page', () => {
   it('serves conversations HTML at /conversations', async () => {
-    handle = startWebServer({ port: 0 }, makeState());
-    const res = await fetch(url('/conversations'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/conversations');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
     const html = await res.text();
@@ -151,8 +166,8 @@ describe('conversations page', () => {
   });
 
   it('renders chat list from state', async () => {
-    handle = startWebServer({ port: 0 }, makeState());
-    const res = await fetch(url('/conversations'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/conversations');
     const html = await res.text();
     expect(html).toContain('general');
     expect(html).toContain('dev-chat');
@@ -161,8 +176,8 @@ describe('conversations page', () => {
   });
 
   it('shows chat count', async () => {
-    handle = startWebServer({ port: 0 }, makeState());
-    const res = await fetch(url('/conversations'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/conversations');
     const html = await res.text();
     expect(html).toContain('2 chats');
   });
@@ -171,8 +186,8 @@ describe('conversations page', () => {
     const state = makeState({
       getChats: () => [testChats[0]],
     });
-    handle = startWebServer({ port: 0 }, state);
-    const res = await fetch(url('/conversations'));
+    handle = startWebServer(testConfig(), state);
+    const res = await authedFetch('/conversations');
     const html = await res.text();
     expect(html).toContain('1 chat');
     // Should not contain "1 chats"
@@ -181,8 +196,8 @@ describe('conversations page', () => {
 
   it('handles empty chat list', async () => {
     const state = makeState({ getChats: () => [] });
-    handle = startWebServer({ port: 0 }, state);
-    const res = await fetch(url('/conversations'));
+    handle = startWebServer(testConfig(), state);
+    const res = await authedFetch('/conversations');
     const html = await res.text();
     expect(html).toContain('0 chats');
     expect(html).toContain('No chats found');
@@ -198,16 +213,16 @@ describe('conversations page', () => {
         },
       ],
     });
-    handle = startWebServer({ port: 0 }, state);
-    const res = await fetch(url('/conversations'));
+    handle = startWebServer(testConfig(), state);
+    const res = await authedFetch('/conversations');
     const html = await res.text();
     expect(html).not.toContain('<script>alert("xss")</script>');
     expect(html).toContain('&lt;script&gt;');
   });
 
   it('includes navigation links', async () => {
-    handle = startWebServer({ port: 0 }, makeState());
-    const res = await fetch(url('/conversations'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/conversations');
     const html = await res.text();
     // Has link back to dashboard
     expect(html).toContain('href="/"');
@@ -219,8 +234,8 @@ describe('conversations page', () => {
 
 describe('dashboard navigation', () => {
   it('includes link to conversations from dashboard', async () => {
-    handle = startWebServer({ port: 0 }, makeState());
-    const res = await fetch(url('/'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/');
     const html = await res.text();
     expect(html).toContain('href="/conversations"');
     expect(html).toContain('Conversations');
@@ -229,8 +244,8 @@ describe('dashboard navigation', () => {
 
 describe('messages API for conversations', () => {
   it('returns messages for a specific chat', async () => {
-    handle = startWebServer({ port: 0 }, makeState());
-    const res = await fetch(url('/api/messages/dc:123'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/messages/dc:123');
     expect(res.status).toBe(200);
     const messages = (await res.json()) as Array<{ sender_name: string }>;
     expect(messages).toHaveLength(2);
@@ -239,8 +254,8 @@ describe('messages API for conversations', () => {
   });
 
   it('returns messages for a different chat', async () => {
-    handle = startWebServer({ port: 0 }, makeState());
-    const res = await fetch(url('/api/messages/dc:456'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/messages/dc:456');
     expect(res.status).toBe(200);
     const messages = (await res.json()) as Array<{ sender_name: string }>;
     expect(messages).toHaveLength(1);
@@ -248,24 +263,24 @@ describe('messages API for conversations', () => {
   });
 
   it('returns empty array for unknown chat', async () => {
-    handle = startWebServer({ port: 0 }, makeState());
-    const res = await fetch(url('/api/messages/dc:unknown'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/messages/dc:unknown');
     expect(res.status).toBe(200);
     const messages = (await res.json()) as Array<unknown>;
     expect(messages).toHaveLength(0);
   });
 
   it('respects limit parameter', async () => {
-    handle = startWebServer({ port: 0 }, makeState());
-    const res = await fetch(url('/api/messages/dc:123?limit=1'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/messages/dc:123?limit=1');
     expect(res.status).toBe(200);
     const messages = (await res.json()) as Array<unknown>;
     expect(messages).toHaveLength(1);
   });
 
   it('chats endpoint returns all chats', async () => {
-    handle = startWebServer({ port: 0 }, makeState());
-    const res = await fetch(url('/api/chats'));
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/chats');
     expect(res.status).toBe(200);
     const chats = (await res.json()) as Array<{ name: string }>;
     expect(chats).toHaveLength(2);

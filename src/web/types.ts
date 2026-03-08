@@ -69,8 +69,12 @@ export interface QueueStats {
 
 export interface WebServerConfig {
   port: number;
-  /** Basic auth credentials. If unset, auth is disabled (dev mode). */
-  auth?: { username: string; password: string };
+  /** Basic auth credentials. Required — server refuses to start without them. */
+  auth: { username: string; password: string };
+  /** Bind hostname. Defaults to '127.0.0.1' (loopback only). */
+  hostname?: string;
+  /** Allowed CORS origin. If unset, no CORS headers are sent. */
+  corsOrigin?: string;
 }
 
 export type WsEventType = 'agent_status' | 'task_update' | 'log' | 'ipc_event';
