@@ -50,6 +50,8 @@ interface AgentRow {
   created_at: string;
   agent_context_folder: string | null;
   roster_role_filters: string | null;
+  avatar_url: string | null;
+  avatar_source: string | null;
 }
 
 /** Row type for channel_routes table SELECT * queries */
@@ -165,6 +167,9 @@ function mapRowToAgent(row: AgentRow): Agent {
     createdAt: row.created_at,
     agentContextFolder: row.agent_context_folder || undefined,
     rosterRoleFilters,
+    avatarUrl: row.avatar_url || undefined,
+    avatarSource:
+      (row.avatar_source as Agent['avatarSource']) || undefined,
   };
 }
 
@@ -465,6 +470,10 @@ export function createSchema(database: Database): void {
     'category_folder',
     'TEXT',
   );
+
+  // Agent profile image columns
+  addColumnIfNotExists(database, 'agents', 'avatar_url', 'TEXT');
+  addColumnIfNotExists(database, 'agents', 'avatar_source', 'TEXT');
 
   // Auto-migrate from registered_groups → agents + channel_routes
   migrateRegisteredGroupsToAgents(database);
@@ -1354,8 +1363,8 @@ export function getAllAgents(): Record<string, Agent> {
 export function setAgent(agent: Agent): void {
   db.query(
     `
-    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at, agent_context_folder, roster_role_filters)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at, agent_context_folder, roster_role_filters, avatar_url, avatar_source)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     agent.id,
@@ -1372,7 +1381,20 @@ export function setAgent(agent: Agent): void {
     agent.rosterRoleFilters === undefined
       ? null
       : agent.rosterRoleFilters.join(','),
+    agent.avatarUrl || null,
+    agent.avatarSource || null,
   );
+}
+
+/** Update only the avatar fields for an agent (lightweight, avoids full setAgent). */
+export function updateAgentAvatar(
+  agentId: string,
+  avatarUrl: string | null,
+  avatarSource: string | null,
+): void {
+  db.query(
+    'UPDATE agents SET avatar_url = ?, avatar_source = ? WHERE id = ?',
+  ).run(avatarUrl, avatarSource, agentId);
 }
 
 /** Look up a channel route by JID, returning undefined if not found. */

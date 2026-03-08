@@ -120,6 +120,7 @@ function makeState(
     calculateNextRun: () => '2026-03-03T09:00:00.000Z',
     readContextFile: () => null,
     writeContextFile: () => {},
+    updateAgentAvatar: () => {},
     ...overrides,
   };
 }

@@ -1,3 +1,8 @@
+import fs from 'fs';
+import path from 'path';
+
+import { GROUPS_DIR } from '../config.js';
+import { assertPathWithin } from '../path-security.js';
 import type { ScheduledTask } from '../types.js';
 import type { WebStateProvider } from './types.js';
 import { renderConversations } from './conversations.js';
@@ -80,6 +85,22 @@ export function handleRequest(
     return new Response(renderIpcInspector(state), {
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
+
+  // --- Agent avatar endpoints ---
+  if (pathname.startsWith('/api/agents/') && pathname.endsWith('/avatar')) {
+    const agentId = decodeURIComponent(
+      pathname.slice('/api/agents/'.length, -'/avatar'.length),
+    );
+    if (!agentId) return json({ error: 'Missing agent ID' }, 400);
+    if (method === 'GET') return handleGetAgentAvatar(agentId, state);
+    if (method === 'POST') return handleSetAgentAvatar(agentId, req, state);
+    return json({ error: 'Method not allowed' }, 405);
+  }
+
+  // Serve locally-stored avatar files
+  if (pathname.startsWith('/avatars/')) {
+    return handleServeAvatar(pathname);
+  }
 
   return json({ error: 'Not found' }, 404);
 }
@@ -498,6 +519,91 @@ function handleGetIpcEvents(url: URL, state: WebStateProvider): Response {
     ? Math.min(Math.max(1, parseInt(countParam, 10) || 50), 200)
     : 50;
   return json(state.getIpcEvents(count));
+}
+
+// ---- Avatar handlers ----
+
+function handleGetAgentAvatar(
+  agentId: string,
+  state: WebStateProvider,
+): Response {
+  const agents = state.getAgents();
+  const agent = agents[agentId];
+  if (!agent) return json({ error: 'Agent not found' }, 404);
+  return json({
+    avatarUrl: agent.avatarUrl || null,
+    avatarSource: agent.avatarSource || null,
+  });
+}
+
+const VALID_AVATAR_SOURCES = new Set([
+  'discord',
+  'telegram',
+  'slack',
+  'custom',
+]);
+
+async function handleSetAgentAvatar(
+  agentId: string,
+  req: Request,
+  state: WebStateProvider,
+): Promise<Response> {
+  const agents = state.getAgents();
+  const agent = agents[agentId];
+  if (!agent) return json({ error: 'Agent not found' }, 404);
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { source, url } = body;
+  if (source && !VALID_AVATAR_SOURCES.has(source as string)) {
+    return json(
+      { error: '"source" must be discord | telegram | slack | custom' },
+      400,
+    );
+  }
+
+  state.updateAgentAvatar(
+    agentId,
+    (url as string) || null,
+    (source as string) || null,
+  );
+
+  return json({
+    success: true,
+    agentId,
+    avatarUrl: (url as string) || null,
+    avatarSource: (source as string) || null,
+  });
+}
+
+/** Folder name pattern (same validation as db.ts). */
+const VALID_FOLDER_RE = /^[a-z0-9][a-z0-9_-]*$/i;
+
+function handleServeAvatar(pathname: string): Response {
+  // Expected format: /avatars/{folder}/avatar.png
+  const rest = pathname.slice('/avatars/'.length);
+  const parts = rest.split('/');
+  if (parts.length !== 2) return json({ error: 'Not found' }, 404);
+
+  const [folder, filename] = parts;
+  if (!VALID_FOLDER_RE.test(folder)) {
+    return json({ error: 'Invalid folder' }, 400);
+  }
+  if (filename !== 'avatar.png') return json({ error: 'Not found' }, 404);
+
+  const filePath = path.join(GROUPS_DIR, folder, 'avatar.png');
+  assertPathWithin(filePath, GROUPS_DIR, 'avatar file');
+
+  if (!fs.existsSync(filePath)) return json({ error: 'Not found' }, 404);
+
+  return new Response(Bun.file(filePath), {
+    headers: { 'Content-Type': 'image/png', 'Cache-Control': 'max-age=3600' },
+  });
 }
 
 // ---- Helpers ----

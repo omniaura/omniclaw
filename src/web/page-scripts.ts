@@ -121,7 +121,9 @@ function dashboardScript(): string {
     var ak="a:"+a.id;
     var an={id:ak,type:"agent",label:a.name,sub:a.backend,
       detail:a.runtime+(a.isAdmin?" (admin)":""),fullName:a.name,
-      x:0,y:0,vx:0,vy:0,r:22,color:COLORS.agent,glow:COLORS.agentGlow,jid:a.id};
+      x:0,y:0,vx:0,vy:0,r:22,color:COLORS.agent,glow:COLORS.agentGlow,jid:a.id,
+      avatarUrl:a.avatarUrl||null,avatarImg:null};
+    if(an.avatarUrl){var img=new Image();img.crossOrigin="anonymous";img.src=an.avatarUrl;img.onload=function(){an.avatarImg=img;};};
     nodes.push(an);nodeMap[ak]=an;
 
     a.channels.forEach(function(ch){
@@ -328,12 +330,18 @@ function dashboardScript(): string {
       ctx.strokeStyle=isHover?"#fff":n.color;
       ctx.lineWidth=(isHover?2.5:1)/zoom;ctx.stroke();
 
-      // Icon/letter inside node
-      ctx.font="600 "+(r*0.7)+"px 'JetBrains Mono',monospace";
-      ctx.textAlign="center";ctx.textBaseline="middle";
-      ctx.fillStyle="rgba(0,0,0,.35)";
-      var icon=n.type==="server"?"S":n.type==="category"?"C":n.type==="agent"?"A":"#";
-      ctx.fillText(icon,n.x,n.y+1);
+      // Avatar image or icon/letter inside node
+      if(n.avatarImg){
+        ctx.save();ctx.beginPath();ctx.arc(n.x,n.y,r*0.85,0,Math.PI*2);ctx.clip();
+        ctx.drawImage(n.avatarImg,n.x-r*0.85,n.y-r*0.85,r*1.7,r*1.7);
+        ctx.restore();
+      } else {
+        ctx.font="600 "+(r*0.7)+"px 'JetBrains Mono',monospace";
+        ctx.textAlign="center";ctx.textBaseline="middle";
+        ctx.fillStyle="rgba(0,0,0,.35)";
+        var icon=n.type==="server"?"S":n.type==="category"?"C":n.type==="agent"?"A":"#";
+        ctx.fillText(icon,n.x,n.y+1);
+      }
 
       // Label below
       var fontSize=n.type==="agent"||n.type==="server"?11:n.type==="category"?10:9;

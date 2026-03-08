@@ -169,6 +169,8 @@ export interface Channel {
   // Telegram bots already display their name, so they return false.
   // WhatsApp returns true. Default true if not implemented.
   prefixAssistantName?: boolean;
+  /** Fetch the bot's own profile image URL from this channel's platform. */
+  getAvatarUrl?(): Promise<string | null>;
 }
 
 // Callback type that channels use to deliver inbound messages
@@ -204,6 +206,10 @@ export interface Agent {
   agentContextFolder?: string; // e.g., 'agents/peytonomi'
   /** Roles required to appear in this agent's channel roster context. Empty = no filter. */
   rosterRoleFilters?: string[];
+  /** Profile image URL (CDN URL or local /avatars/{folder}/avatar.png path). */
+  avatarUrl?: string;
+  /** Which platform the avatar was sourced from. */
+  avatarSource?: 'discord' | 'telegram' | 'slack' | 'custom';
 }
 
 /**

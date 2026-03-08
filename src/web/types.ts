@@ -58,6 +58,14 @@ export interface WebStateProvider {
   readContextFile(layerPath: string): string | null;
   /** Write a context file (CLAUDE.md) for a given layer path. Creates directories as needed. */
   writeContextFile(layerPath: string, content: string): void;
+
+  // ---- Avatar operations ----
+  /** Update an agent's avatar URL and source. */
+  updateAgentAvatar(
+    agentId: string,
+    url: string | null,
+    source: string | null,
+  ): void;
 }
 
 export interface QueueStats {

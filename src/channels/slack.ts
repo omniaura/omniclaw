@@ -193,6 +193,21 @@ export class SlackChannel implements Channel {
     }
   }
 
+  async getAvatarUrl(): Promise<string | null> {
+    if (!this.connected || !this.botUserId) return null;
+    try {
+      const info = await this.client.users.info({ user: this.botUserId });
+      return (
+        info.user?.profile?.image_512 ||
+        info.user?.profile?.image_192 ||
+        null
+      );
+    } catch (err) {
+      logger.warn({ err }, 'Failed to get Slack avatar');
+      return null;
+    }
+  }
+
   isConnected(): boolean {
     return this.connected;
   }
