@@ -87,10 +87,14 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
 
-          CHANGED_FILES="container/Dockerfile"
+          CHANGED_FILES=""
+          if [ "${{ steps.check.outputs.cli_changed }}" == "true" ]; then
+            CHANGED_FILES="container/Dockerfile"
+          fi
           if [ "${{ steps.check.outputs.sdk_changed }}" == "true" ]; then
             CHANGED_FILES="$CHANGED_FILES container/agent-runner/package.json container/agent-runner/bun.lock"
           fi
+          CHANGED_FILES=$(echo $CHANGED_FILES | xargs)
           git add $CHANGED_FILES
           git commit -m "chore(container): bump opencode to ${{ steps.latest.outputs.cli }}"
           git push origin "$BRANCH"
