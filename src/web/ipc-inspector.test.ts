@@ -171,6 +171,10 @@ describe('renderIpcInspector', () => {
 });
 
 describe('IPC Inspector API routes', () => {
+  const testAuth = { username: 'admin', password: 'secret' };
+  const authHeaders = {
+    Authorization: `Basic ${btoa(`${testAuth.username}:${testAuth.password}`)}`,
+  };
   let handle: WebServerHandle | undefined;
 
   afterEach(async () => {
@@ -181,8 +185,13 @@ describe('IPC Inspector API routes', () => {
   });
 
   it('GET /api/ipc/queue returns queue details', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(`http://localhost:${handle.port}/api/ipc/queue`);
+    handle = startWebServer(
+      { port: randomPort(), auth: testAuth },
+      makeState(),
+    );
+    const res = await fetch(`http://localhost:${handle.port}/api/ipc/queue`, {
+      headers: authHeaders,
+    });
     expect(res.status).toBe(200);
     const data = (await res.json()) as GroupQueueDetail[];
     expect(data).toHaveLength(2);
@@ -192,8 +201,13 @@ describe('IPC Inspector API routes', () => {
   });
 
   it('GET /api/ipc/events returns recent events', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(`http://localhost:${handle.port}/api/ipc/events`);
+    handle = startWebServer(
+      { port: randomPort(), auth: testAuth },
+      makeState(),
+    );
+    const res = await fetch(`http://localhost:${handle.port}/api/ipc/events`, {
+      headers: authHeaders,
+    });
     expect(res.status).toBe(200);
     const data = (await res.json()) as IpcEvent[];
     expect(data).toHaveLength(2);
@@ -201,20 +215,27 @@ describe('IPC Inspector API routes', () => {
   });
 
   it('GET /api/ipc/events respects count param', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
+    handle = startWebServer(
+      { port: randomPort(), auth: testAuth },
+      makeState(),
+    );
     const res = await fetch(
       `http://localhost:${handle.port}/api/ipc/events?count=1`,
+      { headers: authHeaders },
     );
     expect(res.status).toBe(200);
     const data = await res.json();
-    // The state mock returns the full array — count is passed to getIpcEvents
-    // Our mock ignores the count param, so this just verifies the route works
     expect(Array.isArray(data)).toBe(true);
   });
 
   it('GET /ipc returns HTML page', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(`http://localhost:${handle.port}/ipc`);
+    handle = startWebServer(
+      { port: randomPort(), auth: testAuth },
+      makeState(),
+    );
+    const res = await fetch(`http://localhost:${handle.port}/ipc`, {
+      headers: authHeaders,
+    });
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
     const html = await res.text();
@@ -223,15 +244,25 @@ describe('IPC Inspector API routes', () => {
   });
 
   it('nav links include IPC on dashboard', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(`http://localhost:${handle.port}/`);
+    handle = startWebServer(
+      { port: randomPort(), auth: testAuth },
+      makeState(),
+    );
+    const res = await fetch(`http://localhost:${handle.port}/`, {
+      headers: authHeaders,
+    });
     const html = await res.text();
     expect(html).toContain('href="/ipc"');
   });
 
   it('nav links include IPC on conversations', async () => {
-    handle = startWebServer({ port: randomPort() }, makeState());
-    const res = await fetch(`http://localhost:${handle.port}/conversations`);
+    handle = startWebServer(
+      { port: randomPort(), auth: testAuth },
+      makeState(),
+    );
+    const res = await fetch(`http://localhost:${handle.port}/conversations`, {
+      headers: authHeaders,
+    });
     const html = await res.text();
     expect(html).toContain('href="/ipc"');
   });

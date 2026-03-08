@@ -29,6 +29,8 @@ import {
   WEB_UI_PORT,
   WEB_UI_USER,
   WEB_UI_PASS,
+  WEB_UI_HOST,
+  WEB_UI_CORS_ORIGIN,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
 import { SlackChannel } from './channels/slack.js';
@@ -2070,13 +2072,19 @@ async function main(): Promise<void> {
   let webServer: WebServerHandle | undefined;
   let stopLogStream: (() => void) | undefined;
   if (WEB_UI_PORT) {
+    if (!WEB_UI_USER || !WEB_UI_PASS) {
+      logger.error(
+        'WEB_UI_PORT is set but WEB_UI_USER and/or WEB_UI_PASS are missing. ' +
+          'Refusing to start unauthenticated Web UI. Set both credentials or unset WEB_UI_PORT.',
+      );
+      process.exit(1);
+    }
     webServer = startWebServer(
       {
         port: WEB_UI_PORT,
-        auth:
-          WEB_UI_USER && WEB_UI_PASS
-            ? { username: WEB_UI_USER, password: WEB_UI_PASS }
-            : undefined,
+        auth: { username: WEB_UI_USER, password: WEB_UI_PASS },
+        hostname: WEB_UI_HOST,
+        corsOrigin: WEB_UI_CORS_ORIGIN,
       },
       {
         getAgents: () => agents,

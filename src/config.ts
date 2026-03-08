@@ -228,3 +228,9 @@ export const WEB_UI_PORT = process.env.WEB_UI_PORT
   : undefined;
 export const WEB_UI_USER = process.env.WEB_UI_USER || undefined;
 export const WEB_UI_PASS = process.env.WEB_UI_PASS || undefined;
+// Bind hostname: defaults to loopback (127.0.0.1) for security.
+// Set WEB_UI_HOST=0.0.0.0 to expose on all interfaces (e.g. behind a reverse proxy).
+export const WEB_UI_HOST = process.env.WEB_UI_HOST || '127.0.0.1';
+// CORS: explicit allowed origin. Defaults to empty (CORS disabled).
+// Set WEB_UI_CORS_ORIGIN to allow cross-origin requests from a specific origin.
+export const WEB_UI_CORS_ORIGIN = process.env.WEB_UI_CORS_ORIGIN || undefined;
