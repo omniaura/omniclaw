@@ -2072,9 +2072,10 @@ async function main(): Promise<void> {
   let webServer: WebServerHandle | undefined;
   let stopLogStream: (() => void) | undefined;
   if (WEB_UI_PORT) {
-    if (!WEB_UI_USER || !WEB_UI_PASS) {
+    const isPublic = WEB_UI_HOST !== '127.0.0.1' && WEB_UI_HOST !== 'localhost';
+    if (isPublic && (!WEB_UI_USER || !WEB_UI_PASS)) {
       logger.error(
-        'WEB_UI_PORT is set but WEB_UI_USER and/or WEB_UI_PASS are missing. ' +
+        'WEB_UI_HOST is set to a public interface but WEB_UI_USER and/or WEB_UI_PASS are missing. ' +
           'Refusing to start unauthenticated Web UI. Set both credentials or unset WEB_UI_PORT.',
       );
       process.exit(1);
