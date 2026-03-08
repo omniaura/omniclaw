@@ -260,7 +260,7 @@ describe('startWebServer', () => {
   });
 });
 
-// ---- Basic auth (always enforced) ----
+// ---- Basic auth ----
 
 describe('basic auth', () => {
   it('rejects requests without credentials', async () => {
@@ -289,6 +289,15 @@ describe('basic auth', () => {
     handle = startWebServer(testConfig(), makeState());
     const res = await fetch(url('/api/agents'));
     expect(res.status).toBe(401);
+  });
+
+  it('skips auth when no credentials are configured', async () => {
+    handle = startWebServer(testConfig({ auth: undefined }), makeState());
+    const pageRes = await fetch(url('/'));
+    expect(pageRes.status).toBe(200);
+
+    const apiRes = await fetch(url('/api/agents'));
+    expect(apiRes.status).toBe(200);
   });
 });
 

@@ -2080,10 +2080,14 @@ async function main(): Promise<void> {
       );
       process.exit(1);
     }
+    const webAuth =
+      WEB_UI_USER && WEB_UI_PASS
+        ? { username: WEB_UI_USER, password: WEB_UI_PASS }
+        : undefined;
     webServer = startWebServer(
       {
         port: WEB_UI_PORT,
-        auth: { username: WEB_UI_USER, password: WEB_UI_PASS },
+        auth: webAuth,
         hostname: WEB_UI_HOST,
         corsOrigin: WEB_UI_CORS_ORIGIN,
       },
