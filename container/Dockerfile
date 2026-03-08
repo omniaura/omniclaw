@@ -5,18 +5,18 @@ ARG BASE_IMAGE=omniclaw-agent-base:latest
 FROM ${BASE_IMAGE}
 
 # Copy package files first for better caching
-COPY container/agent-runner/package.json container/agent-runner/bun.lock* ./
+COPY agent-runner/package.json agent-runner/bun.lock* ./
 
 # Install dependencies
 RUN bun install
 
 # Copy source code
-COPY container/agent-runner/ ./
+COPY agent-runner/ ./
 
 # Copy entrypoint script
 # Sources env, configures git, pre-installs cross-platform deps for host mounts,
 # buffers stdin, then runs agent-runner
-COPY container/entrypoint.sh /app/entrypoint.sh
+COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Switch to non-root user (required for --dangerously-skip-permissions)

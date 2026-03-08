@@ -15,6 +15,7 @@ Issue #191 starts by adding Rust (`cargo`/`rustc`) to the base image and defines
 - Rust (`cargo` and `rustc`) is now included in base image for immediate productivity.
 - Browser tooling stays in the shared base image for now because it is broadly useful across agents.
 - Container startup remains deterministic (no runtime language bootstrap required for Go/Rust workflows).
+- Container builds should use `container/` as the build context directly rather than relying on repo-root ignore rules.
 
 ## Design goals
 
