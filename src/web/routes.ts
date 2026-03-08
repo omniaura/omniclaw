@@ -96,6 +96,14 @@ export function handleRequest(
     if (method === 'POST') return handleSetAgentAvatar(agentId, req, state);
     return json({ error: 'Method not allowed' }, 405);
   }
+  if (pathname.startsWith('/api/agents/') && pathname.endsWith('/avatar/image')) {
+    const agentId = decodeURIComponent(
+      pathname.slice('/api/agents/'.length, -'/avatar/image'.length),
+    );
+    if (!agentId) return json({ error: 'Missing agent ID' }, 400);
+    if (method === 'GET') return handleGetAgentAvatarImage(agentId, state);
+    return json({ error: 'Method not allowed' }, 405);
+  }
 
   // Serve locally-stored avatar files
   if (pathname.startsWith('/avatars/')) {
@@ -533,6 +541,40 @@ function handleGetAgentAvatar(
   return json({
     avatarUrl: agent.avatarUrl || null,
     avatarSource: agent.avatarSource || null,
+  });
+}
+
+async function handleGetAgentAvatarImage(
+  agentId: string,
+  state: WebStateProvider,
+): Promise<Response> {
+  const agents = state.getAgents();
+  const agent = agents[agentId];
+  if (!agent) return json({ error: 'Agent not found' }, 404);
+  if (!agent.avatarUrl) return json({ error: 'Avatar not found' }, 404);
+
+  if (agent.avatarUrl.startsWith('/avatars/')) {
+    return handleServeAvatar(agent.avatarUrl);
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(agent.avatarUrl);
+  } catch {
+    return json({ error: 'Failed to fetch avatar' }, 502);
+  }
+
+  if (!upstream.ok) {
+    return json({ error: 'Failed to fetch avatar' }, 502);
+  }
+
+  const contentType =
+    upstream.headers.get('content-type') || 'application/octet-stream';
+  return new Response(upstream.body, {
+    headers: {
+      'Content-Type': contentType,
+      'Cache-Control': 'private, max-age=300',
+    },
   });
 }
 
