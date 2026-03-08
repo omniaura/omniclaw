@@ -57,6 +57,15 @@ function dashboardScript(): string {
   var nodes=[],edges=[],nodeMap={};
   var serverSet={},categorySet={},channelSet={};
 
+  function attachAvatar(node){
+    node.avatarImg=null;
+    if(!node.avatarUrl)return;
+    var img=new Image();
+    img.crossOrigin="anonymous";
+    img.src=node.avatarUrl;
+    img.onload=function(){node.avatarImg=img;};
+  }
+
   // 1) Collect servers
   agents.forEach(function(a){
     if(a.server){
@@ -65,8 +74,13 @@ function dashboardScript(): string {
         serverSet[sk]=true;
         var sn={id:sk,type:"server",label:a.server.split("/").pop()||a.server,
           sub:"server",detail:a.server,fullName:a.server.split("/").pop()||a.server,
-          x:0,y:0,vx:0,vy:0,r:24,color:COLORS.server,glow:COLORS.serverGlow,jid:a.server};
+          x:0,y:0,vx:0,vy:0,r:24,color:COLORS.server,glow:COLORS.serverGlow,jid:a.server,
+          avatarUrl:a.serverIconUrl||null};
+        attachAvatar(sn);
         nodes.push(sn);nodeMap[sk]=sn;
+      } else if(a.serverIconUrl && !nodeMap[sk].avatarUrl){
+        nodeMap[sk].avatarUrl=a.serverIconUrl;
+        attachAvatar(nodeMap[sk]);
       }
     }
   });
@@ -100,7 +114,9 @@ function dashboardScript(): string {
         channelSet[chK]=true;
         var chNode={id:chK,type:"channel",label:ch.name.length>22?ch.name.slice(0,20)+"\\u2026":ch.name,
           sub:"channel",detail:ch.jid,fullName:ch.name,
-          x:0,y:0,vx:0,vy:0,r:10,color:COLORS.channel,glow:COLORS.channelGlow,jid:ch.jid};
+          x:0,y:0,vx:0,vy:0,r:10,color:COLORS.channel,glow:COLORS.channelGlow,jid:ch.jid,
+          avatarUrl:ch.iconUrl||null};
+        attachAvatar(chNode);
         nodes.push(chNode);nodeMap[chK]=chNode;
 
         // Link channel to its category
@@ -123,7 +139,7 @@ function dashboardScript(): string {
       detail:a.runtime+(a.isAdmin?" (admin)":""),fullName:a.name,
       x:0,y:0,vx:0,vy:0,r:22,color:COLORS.agent,glow:COLORS.agentGlow,jid:a.id,
       avatarUrl:a.avatarUrl||null,avatarImg:null};
-    if(an.avatarUrl){var img=new Image();img.crossOrigin="anonymous";img.src=an.avatarUrl;img.onload=function(){an.avatarImg=img;};};
+    attachAvatar(an);
     nodes.push(an);nodeMap[ak]=an;
 
     a.channels.forEach(function(ch){

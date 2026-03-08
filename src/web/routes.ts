@@ -5,6 +5,7 @@ import { GROUPS_DIR } from '../config.js';
 import { assertPathWithin } from '../path-security.js';
 import type { ScheduledTask } from '../types.js';
 import type { WebStateProvider } from './types.js';
+import { serveCachedRemoteImage } from './image-cache.js';
 import { renderConversations } from './conversations.js';
 import { renderContextViewer } from './context-viewer.js';
 import { renderDashboard } from './dashboard.js';
@@ -102,6 +103,23 @@ export function handleRequest(
     );
     if (!agentId) return json({ error: 'Missing agent ID' }, 400);
     if (method === 'GET') return handleGetAgentAvatarImage(agentId, state);
+    return json({ error: 'Method not allowed' }, 405);
+  }
+  if (pathname.startsWith('/api/chats/') && pathname.endsWith('/icon')) {
+    const chatJid = decodeURIComponent(
+      pathname.slice('/api/chats/'.length, -'/icon'.length),
+    );
+    if (!chatJid) return json({ error: 'Missing chat JID' }, 400);
+    if (method === 'GET') return handleGetChatIcon(chatJid, state);
+    return json({ error: 'Method not allowed' }, 405);
+  }
+  if (pathname.startsWith('/api/discord/guilds/') && pathname.endsWith('/icon')) {
+    const guildId = decodeURIComponent(
+      pathname.slice('/api/discord/guilds/'.length, -'/icon'.length),
+    );
+    if (!guildId) return json({ error: 'Missing guild ID' }, 400);
+    if (method === 'GET')
+      return handleGetDiscordGuildIcon(guildId, url.searchParams.get('botId'), state);
     return json({ error: 'Method not allowed' }, 405);
   }
 
@@ -554,28 +572,42 @@ async function handleGetAgentAvatarImage(
   if (!agent.avatarUrl) return json({ error: 'Avatar not found' }, 404);
 
   if (agent.avatarUrl.startsWith('/avatars/')) {
-    return handleServeAvatar(agent.avatarUrl);
+    const response = handleServeAvatar(agent.avatarUrl);
+    response.headers.set('Cache-Control', 'private, max-age=86400');
+    return response;
   }
 
-  let upstream: Response;
-  try {
-    upstream = await fetch(agent.avatarUrl);
-  } catch {
-    return json({ error: 'Failed to fetch avatar' }, 502);
-  }
+  const response = await serveCachedRemoteImage(
+    `agent:${agentId}:${agent.avatarUrl}`,
+    async () => agent.avatarUrl || null,
+  );
+  return response || json({ error: 'Failed to fetch avatar' }, 502);
+}
 
-  if (!upstream.ok) {
-    return json({ error: 'Failed to fetch avatar' }, 502);
-  }
+async function handleGetChatIcon(
+  chatJid: string,
+  state: WebStateProvider,
+): Promise<Response> {
+  if (!state.resolveChatImage) return json({ error: 'Not supported' }, 404);
+  const response = await serveCachedRemoteImage(`chat:${chatJid}`, async () =>
+    state.resolveChatImage!(chatJid),
+  );
+  return response || json({ error: 'Icon not found' }, 404);
+}
 
-  const contentType =
-    upstream.headers.get('content-type') || 'application/octet-stream';
-  return new Response(upstream.body, {
-    headers: {
-      'Content-Type': contentType,
-      'Cache-Control': 'private, max-age=300',
-    },
-  });
+async function handleGetDiscordGuildIcon(
+  guildId: string,
+  botId: string | null,
+  state: WebStateProvider,
+): Promise<Response> {
+  if (!state.resolveDiscordGuildImage) {
+    return json({ error: 'Not supported' }, 404);
+  }
+  const response = await serveCachedRemoteImage(
+    `discord-guild:${guildId}:${botId || ''}`,
+    async () => state.resolveDiscordGuildImage!(guildId, botId || undefined),
+  );
+  return response || json({ error: 'Icon not found' }, 404);
 }
 
 const VALID_AVATAR_SOURCES = new Set([

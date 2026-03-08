@@ -390,6 +390,24 @@ function findChannelForJid(
   return findChannel(channels, jid);
 }
 
+async function resolveChatImageUrl(chatJid: string): Promise<string | null> {
+  const preferredBotId = getPreferredChannelBotId(chatJid);
+  const channel = findChannelForJid(chatJid, preferredBotId);
+  if (!channel?.getChatAvatarUrl) return null;
+  return channel.getChatAvatarUrl(chatJid);
+}
+
+async function resolveDiscordGuildImageUrl(
+  guildId: string,
+  botId?: string,
+): Promise<string | null> {
+  const preferred = botId
+    ? channels.find((c) => c.name === 'discord' && c.botId === botId)
+    : channels.find((c) => c.name === 'discord');
+  if (!preferred?.getServerIconUrl) return null;
+  return preferred.getServerIconUrl(guildId);
+}
+
 function backfillDiscordBotIds(): void {
   if (!DISCORD_DEFAULT_BOT_ID) return;
 
@@ -2138,6 +2156,9 @@ async function main(): Promise<void> {
               (source as Agent['avatarSource']) || undefined;
           }
         },
+        resolveChatImage: (chatJid) => resolveChatImageUrl(chatJid),
+        resolveDiscordGuildImage: (guildId, botId) =>
+          resolveDiscordGuildImageUrl(guildId, botId),
       },
     );
     stopLogStream = startLogStream(webServer);

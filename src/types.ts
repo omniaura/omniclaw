@@ -171,6 +171,10 @@ export interface Channel {
   prefixAssistantName?: boolean;
   /** Fetch the bot's own profile image URL from this channel's platform. */
   getAvatarUrl?(): Promise<string | null>;
+  /** Fetch a chat/user image URL for a specific JID. */
+  getChatAvatarUrl?(jid: string): Promise<string | null>;
+  /** Fetch a server/community image URL for a specific server ID. */
+  getServerIconUrl?(serverId: string): Promise<string | null>;
 }
 
 // Callback type that channels use to deliver inbound messages

@@ -6,6 +6,9 @@ export interface ChannelInfo {
   displayName: string;
   channelFolder?: string;
   categoryFolder?: string;
+  iconUrl?: string;
+  discordGuildId?: string;
+  discordBotId?: string;
 }
 
 export interface AgentChannelData {
@@ -18,6 +21,7 @@ export interface AgentChannelData {
   serverFolder?: string;
   agentContextFolder?: string;
   avatarUrl?: string;
+  serverIconUrl?: string;
   channels: ChannelInfo[];
 }
 
@@ -45,14 +49,32 @@ export function buildAgentChannelData(
 
   return agents.map((a) => {
     const channels: ChannelInfo[] = [];
+    let serverIconUrl: string | undefined;
     for (const [jid, subList] of Object.entries(subs)) {
       const sub = subList.find((s) => s.agentId === a.id);
       if (sub) {
+        if (!serverIconUrl && sub.discordGuildId) {
+          const botQuery = sub.discordBotId
+            ? `?botId=${encodeURIComponent(sub.discordBotId)}`
+            : '';
+          serverIconUrl = `/api/discord/guilds/${encodeURIComponent(sub.discordGuildId)}/icon${botQuery}`;
+        }
+
+        const isTelegramDm =
+          (jid.startsWith('tg:') &&
+            !jid.startsWith('tg:-') &&
+            /^tg:[^:]+:\d+$/.test(jid)) ||
+          /^tg:\d+$/.test(jid);
         channels.push({
           jid,
           displayName: channelDisplayName(jid, sub.channelFolder),
           channelFolder: sub.channelFolder,
           categoryFolder: sub.categoryFolder,
+          iconUrl: isTelegramDm
+            ? `/api/chats/${encodeURIComponent(jid)}/icon`
+            : undefined,
+          discordGuildId: sub.discordGuildId,
+          discordBotId: sub.discordBotId,
         });
       }
     }
@@ -66,6 +88,7 @@ export function buildAgentChannelData(
       serverFolder: a.serverFolder,
       agentContextFolder: a.agentContextFolder,
       avatarUrl: a.avatarUrl,
+      serverIconUrl,
       channels,
     };
   });
