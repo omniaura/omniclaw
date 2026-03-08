@@ -24,6 +24,7 @@ export function renderDashboardContent(state: WebStateProvider): string {
       runtime: a.agentRuntime,
       isAdmin: a.isAdmin,
       server: a.serverFolder || null,
+      avatarUrl: a.avatarUrl || null,
       channels: a.channels.map((ch) => ({
         jid: ch.jid,
         name: ch.displayName,

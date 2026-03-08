@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 
+import { syncAvatars } from './avatar-sync.js';
+
 import {
   ASSISTANT_NAME,
   buildTriggerPattern,
@@ -78,6 +80,8 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  getSubscriptionsForAgent,
+  updateAgentAvatar,
 } from './db.js';
 import { buildAgentToChannelsMapFromSubscriptions } from './channel-routes.js';
 import { resolveContextLayers } from './context-layers.js';
@@ -2126,6 +2130,14 @@ async function main(): Promise<void> {
           fs.mkdirSync(dir, { recursive: true });
           fs.writeFileSync(resolved, content, 'utf-8');
         },
+        updateAgentAvatar: (agentId, url, source) => {
+          updateAgentAvatar(agentId, url, source);
+          if (agents[agentId]) {
+            agents[agentId].avatarUrl = url || undefined;
+            agents[agentId].avatarSource =
+              (source as Agent['avatarSource']) || undefined;
+          }
+        },
       },
     );
     stopLogStream = startLogStream(webServer);
@@ -2450,6 +2462,13 @@ async function main(): Promise<void> {
     // findChannel() can route recovered output to the correct channel.
     // (startMessageLoop already runs above for IPC/scheduled task responsiveness.)
     recoverPendingMessages();
+
+    // Sync agent avatars from platform APIs (non-blocking)
+    syncAvatars(agents, channels, (agentId) =>
+      getSubscriptionsForAgent(agentId),
+    ).catch((err) => {
+      logger.warn({ err }, 'Avatar sync failed (non-critical)');
+    });
   };
 
   // Fire-and-forget: channels connect in background while message loop already runs

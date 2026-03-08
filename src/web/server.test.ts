@@ -145,6 +145,7 @@ function makeState(
     },
     readContextFile: () => null,
     writeContextFile: () => {},
+    updateAgentAvatar: () => {},
     ...overrides,
   };
 }

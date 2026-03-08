@@ -311,6 +311,16 @@ export class DiscordChannel implements Channel {
     }
   }
 
+  async getAvatarUrl(): Promise<string | null> {
+    if (!this.connected || !this.client.user) return null;
+    try {
+      return this.client.user.displayAvatarURL({ size: 256, extension: 'png' });
+    } catch (err) {
+      logger.warn({ err, botId: this.botId }, 'Failed to get Discord avatar');
+      return null;
+    }
+  }
+
   isConnected(): boolean {
     return this.connected;
   }

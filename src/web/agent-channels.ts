@@ -17,6 +17,7 @@ export interface AgentChannelData {
   isAdmin: boolean;
   serverFolder?: string;
   agentContextFolder?: string;
+  avatarUrl?: string;
   channels: ChannelInfo[];
 }
 
@@ -64,6 +65,7 @@ export function buildAgentChannelData(
       isAdmin: a.isAdmin,
       serverFolder: a.serverFolder,
       agentContextFolder: a.agentContextFolder,
+      avatarUrl: a.avatarUrl,
       channels,
     };
   });
