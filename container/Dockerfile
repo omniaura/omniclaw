@@ -87,7 +87,7 @@ RUN echo 'trustedDependencies = ["agent-browser"]' >> /root/.bunfig.toml \
 # Pin version to prevent supply-chain attacks via unsigned curl|bash.
 # The installer always writes to ~/.opencode/bin/ regardless of OPENCODE_INSTALL_DIR,
 # so we copy the binary to /usr/local/bin/ (the symlink to /root/ fails for non-root users).
-ARG OPENCODE_VERSION=1.2.15
+ARG OPENCODE_VERSION=1.2.21
 RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash \
     && cp /root/.opencode/bin/opencode /usr/local/bin/opencode \
     && chmod +x /usr/local/bin/opencode
