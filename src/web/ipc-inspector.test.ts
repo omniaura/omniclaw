@@ -185,7 +185,10 @@ describe('IPC Inspector API routes', () => {
   });
 
   it('GET /api/ipc/queue returns queue details', async () => {
-    handle = startWebServer({ port: randomPort(), auth: testAuth }, makeState());
+    handle = startWebServer(
+      { port: randomPort(), auth: testAuth },
+      makeState(),
+    );
     const res = await fetch(`http://localhost:${handle.port}/api/ipc/queue`, {
       headers: authHeaders,
     });
@@ -198,7 +201,10 @@ describe('IPC Inspector API routes', () => {
   });
 
   it('GET /api/ipc/events returns recent events', async () => {
-    handle = startWebServer({ port: randomPort(), auth: testAuth }, makeState());
+    handle = startWebServer(
+      { port: randomPort(), auth: testAuth },
+      makeState(),
+    );
     const res = await fetch(`http://localhost:${handle.port}/api/ipc/events`, {
       headers: authHeaders,
     });
@@ -209,7 +215,10 @@ describe('IPC Inspector API routes', () => {
   });
 
   it('GET /api/ipc/events respects count param', async () => {
-    handle = startWebServer({ port: randomPort(), auth: testAuth }, makeState());
+    handle = startWebServer(
+      { port: randomPort(), auth: testAuth },
+      makeState(),
+    );
     const res = await fetch(
       `http://localhost:${handle.port}/api/ipc/events?count=1`,
       { headers: authHeaders },
@@ -220,7 +229,10 @@ describe('IPC Inspector API routes', () => {
   });
 
   it('GET /ipc returns HTML page', async () => {
-    handle = startWebServer({ port: randomPort(), auth: testAuth }, makeState());
+    handle = startWebServer(
+      { port: randomPort(), auth: testAuth },
+      makeState(),
+    );
     const res = await fetch(`http://localhost:${handle.port}/ipc`, {
       headers: authHeaders,
     });
@@ -232,7 +244,10 @@ describe('IPC Inspector API routes', () => {
   });
 
   it('nav links include IPC on dashboard', async () => {
-    handle = startWebServer({ port: randomPort(), auth: testAuth }, makeState());
+    handle = startWebServer(
+      { port: randomPort(), auth: testAuth },
+      makeState(),
+    );
     const res = await fetch(`http://localhost:${handle.port}/`, {
       headers: authHeaders,
     });
@@ -241,7 +256,10 @@ describe('IPC Inspector API routes', () => {
   });
 
   it('nav links include IPC on conversations', async () => {
-    handle = startWebServer({ port: randomPort(), auth: testAuth }, makeState());
+    handle = startWebServer(
+      { port: randomPort(), auth: testAuth },
+      makeState(),
+    );
     const res = await fetch(`http://localhost:${handle.port}/conversations`, {
       headers: authHeaders,
     });
