@@ -3,6 +3,7 @@
  * Uses native fetch() with peer authentication headers.
  */
 import type {
+  ContextFileEntry,
   PairRequestBody,
   PairResponse,
   PeerInfoResponse,
@@ -78,6 +79,12 @@ export class PeerClient {
       `/api/context/layers?${query}`,
     );
     return res.json();
+  }
+
+  /** GET /api/context/files — requires auth */
+  async listContextFiles(): Promise<ContextFileEntry[]> {
+    const res = await this.authenticatedFetch('/api/context/files');
+    return res.json() as Promise<ContextFileEntry[]>;
   }
 
   /** PUT /api/context/file — requires auth */

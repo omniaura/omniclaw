@@ -5,10 +5,13 @@
 import os from 'os';
 
 import { logger } from '../logger.js';
+import { listLocalContextFiles } from '../web/context-files.js';
 import type { WebStateProvider } from '../web/types.js';
 import { PeerClient } from './peer-client.js';
 import type { TrustStore } from './trust-store.js';
 import type {
+  ContextFileEntry,
+  ContextSyncComparison,
   DiscoveredPeer,
   DiscoveryHandle,
   PairRequestBody,
@@ -186,6 +189,51 @@ export function handleDiscoveryRequest(
       ),
     );
     return handleProxyContextWrite(instanceId, req, ctx);
+  }
+
+  // GET /api/discovery/peers/:id/context/compare — compare local vs remote context files
+  if (
+    pathname.startsWith('/api/discovery/peers/') &&
+    pathname.endsWith('/context/compare') &&
+    method === 'GET'
+  ) {
+    const instanceId = decodeURIComponent(
+      pathname.slice(
+        '/api/discovery/peers/'.length,
+        -'/context/compare'.length,
+      ),
+    );
+    return handleContextCompare(instanceId, ctx);
+  }
+
+  // POST /api/discovery/peers/:id/context/push — push a local file to the remote
+  if (
+    pathname.startsWith('/api/discovery/peers/') &&
+    pathname.endsWith('/context/push') &&
+    method === 'POST'
+  ) {
+    const instanceId = decodeURIComponent(
+      pathname.slice(
+        '/api/discovery/peers/'.length,
+        -'/context/push'.length,
+      ),
+    );
+    return handleContextPush(instanceId, req, ctx);
+  }
+
+  // POST /api/discovery/peers/:id/context/pull — pull a remote file to local
+  if (
+    pathname.startsWith('/api/discovery/peers/') &&
+    pathname.endsWith('/context/pull') &&
+    method === 'POST'
+  ) {
+    const instanceId = decodeURIComponent(
+      pathname.slice(
+        '/api/discovery/peers/'.length,
+        -'/context/pull'.length,
+      ),
+    );
+    return handleContextPull(instanceId, req, ctx);
   }
 
   return null; // not a discovery route
@@ -603,6 +651,155 @@ async function handleProxyContextWrite(
     return json(
       {
         error: `Proxy error: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      502,
+    );
+  }
+}
+
+// --- Context sync handlers ---
+
+async function handleContextCompare(
+  instanceId: string,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  const client = getPeerClient(instanceId, ctx);
+  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+
+  try {
+    // Get local files directly, fetch remote in parallel
+    const [localFiles, remoteFiles] = await Promise.all([
+      Promise.resolve(listLocalContextFiles()),
+      client.listContextFiles(),
+    ]);
+
+    const localMap = new Map(localFiles.map((f) => [f.path, f]));
+    const remoteMap = new Map(remoteFiles.map((f) => [f.path, f]));
+
+    const comparison: ContextSyncComparison = {
+      same: [],
+      differs: [],
+      localOnly: [],
+      remoteOnly: [],
+    };
+
+    // Check local files against remote
+    for (const [filePath, local] of localMap) {
+      const remote = remoteMap.get(filePath);
+      if (!remote) {
+        comparison.localOnly.push(local);
+      } else if (local.hash === remote.hash) {
+        comparison.same.push(local);
+      } else {
+        comparison.differs.push({ local, remote });
+      }
+    }
+
+    // Check remote-only files
+    for (const [filePath, remote] of remoteMap) {
+      if (!localMap.has(filePath)) {
+        comparison.remoteOnly.push(remote);
+      }
+    }
+
+    return json(comparison);
+  } catch (err) {
+    return json(
+      {
+        error: `Compare failed: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      502,
+    );
+  }
+}
+
+async function handleContextPush(
+  instanceId: string,
+  req: Request,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  const client = getPeerClient(instanceId, ctx);
+  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+
+  let body: { path: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  if (!body.path || typeof body.path !== 'string') {
+    return json({ error: 'Missing path' }, 400);
+  }
+
+  // Read local content
+  const content = ctx.state.readContextFile(body.path);
+  if (content === null) {
+    return json({ error: 'Local file not found' }, 404);
+  }
+
+  try {
+    await client.writeContextFile(body.path, content);
+    logger.info(
+      { instanceId, path: body.path },
+      'Context file pushed to peer',
+    );
+    return json({ ok: true, direction: 'push', path: body.path });
+  } catch (err) {
+    return json(
+      {
+        error: `Push failed: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      502,
+    );
+  }
+}
+
+async function handleContextPull(
+  instanceId: string,
+  req: Request,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  const client = getPeerClient(instanceId, ctx);
+  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+
+  let body: { path: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  if (!body.path || typeof body.path !== 'string') {
+    return json({ error: 'Missing path' }, 400);
+  }
+
+  try {
+    // Fetch content from remote via their context layers API
+    const layers = (await client.getContextLayers({
+      folder: body.path,
+    })) as Record<
+      string,
+      { path: string | null; content: string | null; exists: boolean }
+    >;
+
+    // Get the channel layer content (primary layer for a given path)
+    const layer = layers.channel;
+    if (!layer?.content) {
+      return json({ error: 'Remote file not found or empty' }, 404);
+    }
+
+    // Write locally
+    ctx.state.writeContextFile(body.path, layer.content);
+    logger.info(
+      { instanceId, path: body.path },
+      'Context file pulled from peer',
+    );
+    return json({ ok: true, direction: 'pull', path: body.path });
+  } catch (err) {
+    return json(
+      {
+        error: `Pull failed: ${err instanceof Error ? err.message : String(err)}`,
       },
       502,
     );

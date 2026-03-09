@@ -60,6 +60,8 @@ export function renderNetworkContent(pageState: NetworkPageState): string {
     `</div>` +
     // Remote agents section (populated dynamically)
     `<div id="remote-agents" style="margin-top:1.5rem"></div>` +
+    // Context sync panel (populated dynamically)
+    `<div id="sync-panel" style="margin-top:1.5rem"></div>` +
     `</div>`
   );
 }
@@ -114,6 +116,7 @@ function renderPeerActions(peer: PeerView): string {
   if (peer.status === 'trusted') {
     return (
       `<button class="btn btn-sm" onclick="networkAction('browse','${escapeHtml(peer.instanceId)}')">Browse</button> ` +
+      `<button class="btn btn-sm btn-primary" onclick="networkAction('sync','${escapeHtml(peer.instanceId)}')">Sync</button> ` +
       `<button class="btn btn-sm btn-danger" onclick="networkAction('revoke','${escapeHtml(peer.instanceId)}')">Revoke</button>`
     );
   }

@@ -94,3 +94,27 @@ export interface DiscoveryHandle {
   getPeers(): Map<string, DiscoveredPeer>;
   stop(): void;
 }
+
+/** A context file entry with its content hash for sync comparison. */
+export interface ContextFileEntry {
+  /** Relative path from groups dir (e.g. "my-group/CLAUDE.md") */
+  path: string;
+  /** SHA-256 hex hash of the content */
+  hash: string;
+  /** File size in bytes */
+  size: number;
+  /** Last modified time as ISO string */
+  mtime: string;
+}
+
+/** Result of comparing local vs remote context files. */
+export interface ContextSyncComparison {
+  /** Files that exist on both sides with same content */
+  same: ContextFileEntry[];
+  /** Files that exist on both sides but differ */
+  differs: Array<{ local: ContextFileEntry; remote: ContextFileEntry }>;
+  /** Files that only exist locally */
+  localOnly: ContextFileEntry[];
+  /** Files that only exist on the remote */
+  remoteOnly: ContextFileEntry[];
+}

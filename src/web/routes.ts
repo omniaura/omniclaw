@@ -14,6 +14,7 @@ import {
   handleDiscoveryRequest,
   type DiscoveryRouteContext,
 } from '../discovery/routes.js';
+import { listLocalContextFiles } from './context-files.js';
 import {
   renderNetworkPage,
   renderNetworkContent,
@@ -89,6 +90,8 @@ export function handleRequest(
   }
 
   // Context file operations
+  if (pathname === '/api/context/files' && method === 'GET')
+    return handleListContextFiles();
   if (pathname === '/api/context/layers')
     return handleGetContextLayers(url, state);
   if (pathname === '/api/context/file') {
@@ -501,6 +504,10 @@ function handleGetStats(state: WebStateProvider): Response {
 }
 
 // ---- Context handlers ----
+
+function handleListContextFiles(): Response {
+  return json(listLocalContextFiles());
+}
 
 function handleGetContextLayers(url: URL, state: WebStateProvider): Response {
   const folder = url.searchParams.get('folder') || '';

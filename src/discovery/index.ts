@@ -7,6 +7,8 @@ export {
   type DiscoveryRouteContext,
 } from './routes.js';
 export type {
+  ContextFileEntry,
+  ContextSyncComparison,
   DiscoveredPeer,
   StoredPeer,
   PairRequest,
