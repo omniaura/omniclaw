@@ -92,7 +92,15 @@ export interface WebServerConfig {
   corsOrigin?: string;
 }
 
-export type WsEventType = 'agent_status' | 'task_update' | 'log' | 'ipc_event';
+export type WsEventType =
+  | 'agent_status'
+  | 'task_update'
+  | 'log'
+  | 'ipc_event'
+  | 'peer_discovered'
+  | 'peer_lost'
+  | 'pair_request'
+  | 'pair_approved';
 
 export interface WsEvent {
   type: WsEventType;

@@ -474,6 +474,33 @@ export function createSchema(database: Database): void {
   addColumnIfNotExists(database, 'agents', 'avatar_url', 'TEXT');
   addColumnIfNotExists(database, 'agents', 'avatar_source', 'TEXT');
 
+  // --- Network Discovery tables ---
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS discovery_peers (
+      instance_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      shared_secret TEXT,
+      status TEXT NOT NULL DEFAULT 'discovered',
+      host TEXT,
+      port INTEGER,
+      approved_at TEXT,
+      last_seen TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS pair_requests (
+      id TEXT PRIMARY KEY,
+      from_instance_id TEXT NOT NULL,
+      from_name TEXT NOT NULL,
+      from_host TEXT NOT NULL,
+      from_port INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      shared_secret TEXT,
+      created_at TEXT NOT NULL,
+      resolved_at TEXT
+    );
+  `);
+
   // Auto-migrate from registered_groups → agents + channel_routes
   migrateRegisteredGroupsToAgents(database);
   migrateRoutesToSubscriptions(database);
@@ -503,6 +530,11 @@ function applyDiscordRequiresTriggerFix(database: Database): void {
     { updatedCount: result.changes },
     'Migration: Discord server channels now require trigger',
   );
+}
+
+/** Get the raw database instance (for discovery trust store, etc.). */
+export function getDatabase(): Database {
+  return db;
 }
 
 export function initDatabase(): void {

@@ -1,0 +1,669 @@
+/**
+ * HTTP route handlers for network discovery API.
+ * All routes are prefixed with /api/discovery/.
+ */
+import os from 'os';
+
+import { logger } from '../logger.js';
+import type { WebStateProvider } from '../web/types.js';
+import { PeerClient } from './peer-client.js';
+import type { TrustStore } from './trust-store.js';
+import type {
+  DiscoveredPeer,
+  DiscoveryHandle,
+  PairRequestBody,
+  PeerView,
+} from './types.js';
+
+export interface DiscoveryRouteContext {
+  instanceId: string;
+  instanceName: string;
+  version: string;
+  trustStore: TrustStore;
+  discovery: DiscoveryHandle | null;
+  state: WebStateProvider;
+  /** Callback to broadcast SSE events */
+  broadcast?: (event: { type: string; data: unknown; timestamp: string }) => void;
+}
+
+// Rate limiting for /api/discovery/pair
+const pairRateLimiter = new Map<string, { count: number; resetAt: number }>();
+const PAIR_RATE_LIMIT = 10;
+const PAIR_RATE_WINDOW_MS = 60_000;
+
+function checkPairRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = pairRateLimiter.get(ip);
+
+  if (!entry || now > entry.resetAt) {
+    pairRateLimiter.set(ip, { count: 1, resetAt: now + PAIR_RATE_WINDOW_MS });
+    return true;
+  }
+
+  if (entry.count >= PAIR_RATE_LIMIT) return false;
+  entry.count++;
+  return true;
+}
+
+/**
+ * Handle a /api/discovery/* request.
+ * Returns null if the path doesn't match any discovery route.
+ */
+export function handleDiscoveryRequest(
+  req: Request,
+  url: URL,
+  ctx: DiscoveryRouteContext,
+): Response | Promise<Response> | null {
+  const { pathname } = url;
+  const method = req.method;
+
+  // --- Unauthenticated endpoints ---
+
+  if (pathname === '/api/discovery/info' && method === 'GET') {
+    return handleGetInfo(ctx);
+  }
+
+  if (pathname === '/api/discovery/pair' && method === 'POST') {
+    return handlePairRequest(req, ctx);
+  }
+
+  if (pathname === '/api/discovery/complete-pairing' && method === 'POST') {
+    return handleCompletePairing(req, ctx);
+  }
+
+  // --- Locally authenticated endpoints (protected by Basic Auth in server.ts) ---
+
+  if (pathname === '/api/discovery/peers' && method === 'GET') {
+    return handleGetPeers(ctx);
+  }
+
+  if (pathname === '/api/discovery/requests' && method === 'GET') {
+    return handleGetRequests(ctx);
+  }
+
+  // POST /api/discovery/requests/:id/approve
+  if (
+    pathname.startsWith('/api/discovery/requests/') &&
+    pathname.endsWith('/approve') &&
+    method === 'POST'
+  ) {
+    const id = pathname.slice(
+      '/api/discovery/requests/'.length,
+      -'/approve'.length,
+    );
+    return handleApproveRequest(id, ctx);
+  }
+
+  // POST /api/discovery/requests/:id/reject
+  if (
+    pathname.startsWith('/api/discovery/requests/') &&
+    pathname.endsWith('/reject') &&
+    method === 'POST'
+  ) {
+    const id = pathname.slice(
+      '/api/discovery/requests/'.length,
+      -'/reject'.length,
+    );
+    return handleRejectRequest(id, ctx);
+  }
+
+  // POST /api/discovery/peers/:id/request-access
+  if (
+    pathname.startsWith('/api/discovery/peers/') &&
+    pathname.endsWith('/request-access') &&
+    method === 'POST'
+  ) {
+    const instanceId = decodeURIComponent(
+      pathname.slice(
+        '/api/discovery/peers/'.length,
+        -'/request-access'.length,
+      ),
+    );
+    return handleRequestAccess(instanceId, ctx);
+  }
+
+  // DELETE /api/discovery/peers/:instanceId
+  if (pathname.startsWith('/api/discovery/peers/') && method === 'DELETE') {
+    const rest = pathname.slice('/api/discovery/peers/'.length);
+    // Only match direct children, not sub-paths like /agents
+    if (!rest.includes('/')) {
+      const instanceId = decodeURIComponent(rest);
+      return handleRevokePeer(instanceId, ctx);
+    }
+  }
+
+  // --- Proxy routes for trusted remote peers ---
+
+  // GET /api/discovery/peers/:id/agents
+  if (
+    pathname.startsWith('/api/discovery/peers/') &&
+    pathname.endsWith('/agents') &&
+    method === 'GET'
+  ) {
+    const instanceId = decodeURIComponent(
+      pathname.slice('/api/discovery/peers/'.length, -'/agents'.length),
+    );
+    return handleProxyAgents(instanceId, ctx);
+  }
+
+  // GET /api/discovery/peers/:id/stats
+  if (
+    pathname.startsWith('/api/discovery/peers/') &&
+    pathname.endsWith('/stats') &&
+    method === 'GET'
+  ) {
+    const instanceId = decodeURIComponent(
+      pathname.slice('/api/discovery/peers/'.length, -'/stats'.length),
+    );
+    return handleProxyStats(instanceId, ctx);
+  }
+
+  // GET /api/discovery/peers/:id/context/layers
+  if (
+    pathname.startsWith('/api/discovery/peers/') &&
+    pathname.endsWith('/context/layers') &&
+    method === 'GET'
+  ) {
+    const instanceId = decodeURIComponent(
+      pathname.slice(
+        '/api/discovery/peers/'.length,
+        -'/context/layers'.length,
+      ),
+    );
+    return handleProxyContextLayers(instanceId, url, ctx);
+  }
+
+  // PUT /api/discovery/peers/:id/context/file
+  if (
+    pathname.startsWith('/api/discovery/peers/') &&
+    pathname.endsWith('/context/file') &&
+    method === 'PUT'
+  ) {
+    const instanceId = decodeURIComponent(
+      pathname.slice(
+        '/api/discovery/peers/'.length,
+        -'/context/file'.length,
+      ),
+    );
+    return handleProxyContextWrite(instanceId, req, ctx);
+  }
+
+  return null; // not a discovery route
+}
+
+// --- Handlers ---
+
+function handleGetInfo(ctx: DiscoveryRouteContext): Response {
+  const agents = ctx.state.getAgents();
+  return json({
+    instanceId: ctx.instanceId,
+    name: ctx.instanceName,
+    version: ctx.version,
+    agentCount: Object.keys(agents).length,
+  });
+}
+
+async function handlePairRequest(
+  req: Request,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  // Rate limit
+  const ip =
+    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  if (!checkPairRateLimit(ip)) {
+    return json({ error: 'Rate limit exceeded' }, 429);
+  }
+
+  let body: PairRequestBody;
+  try {
+    body = (await req.json()) as PairRequestBody;
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  if (!body.instanceId || !body.name || !body.host || !body.port) {
+    return json(
+      { error: 'Missing required fields: instanceId, name, host, port' },
+      400,
+    );
+  }
+
+  // Check if already trusted
+  if (ctx.trustStore.isPeerTrusted(body.instanceId)) {
+    const secret = ctx.trustStore.getPeerSecret(body.instanceId);
+    return json({
+      status: 'already_trusted',
+      sharedSecret: secret,
+    });
+  }
+
+  // Create or update pair request
+  const request = ctx.trustStore.createPairRequest(
+    body.instanceId,
+    body.name,
+    body.host,
+    body.port,
+  );
+
+  // Broadcast SSE event for the web UI
+  ctx.broadcast?.({
+    type: 'pair_request',
+    data: request,
+    timestamp: new Date().toISOString(),
+  });
+
+  return json({
+    status: 'pending',
+    requestId: request.id,
+  });
+}
+
+async function handleCompletePairing(
+  req: Request,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  let body: { sharedSecret: string; instanceId: string; name: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  if (!body.sharedSecret || !body.instanceId || !body.name) {
+    return json(
+      { error: 'Missing required fields: sharedSecret, instanceId, name' },
+      400,
+    );
+  }
+
+  // The remote instance is telling us they approved our request.
+  // Store them as a trusted peer with the shared secret.
+  const now = new Date().toISOString();
+  const db = ctx.trustStore['db']; // Access internal db for direct SQL
+  db.prepare(
+    `INSERT INTO discovery_peers (instance_id, name, status, shared_secret, approved_at, last_seen, created_at)
+     VALUES (?, ?, 'trusted', ?, ?, ?, ?)
+     ON CONFLICT(instance_id) DO UPDATE SET
+       name = excluded.name,
+       status = 'trusted',
+       shared_secret = excluded.shared_secret,
+       approved_at = excluded.approved_at,
+       last_seen = excluded.last_seen`,
+  ).run(body.instanceId, body.name, body.sharedSecret, now, now, now);
+
+  logger.info(
+    { instanceId: body.instanceId, name: body.name },
+    'Pairing completed — remote instance trusted',
+  );
+
+  ctx.broadcast?.({
+    type: 'pair_approved',
+    data: { instanceId: body.instanceId, name: body.name },
+    timestamp: now,
+  });
+
+  return json({ ok: true });
+}
+
+function handleGetPeers(ctx: DiscoveryRouteContext): Response {
+  const discoveredPeers = ctx.discovery?.getPeers() ?? new Map();
+  const storedPeers = ctx.trustStore.getAllPeers();
+  const storedMap = new Map(storedPeers.map((p) => [p.instanceId, p]));
+
+  const peers: PeerView[] = [];
+
+  // Merge discovered + stored
+  for (const [id, discovered] of discoveredPeers) {
+    const stored = storedMap.get(id);
+    peers.push({
+      instanceId: id,
+      name: discovered.name,
+      host: discovered.host,
+      port: discovered.port,
+      addresses: discovered.addresses,
+      status: stored?.status ?? 'discovered',
+      online: true,
+      approvedAt: stored?.approvedAt ?? null,
+      lastSeen: stored?.lastSeen ?? null,
+    });
+    storedMap.delete(id);
+  }
+
+  // Add stored-only peers (offline but still trusted)
+  for (const stored of storedMap.values()) {
+    if (stored.status === 'revoked') continue;
+    peers.push({
+      instanceId: stored.instanceId,
+      name: stored.name,
+      host: stored.host ?? '',
+      port: stored.port ?? 0,
+      addresses: [],
+      status: stored.status,
+      online: false,
+      approvedAt: stored.approvedAt,
+      lastSeen: stored.lastSeen,
+    });
+  }
+
+  return json(peers);
+}
+
+function handleGetRequests(ctx: DiscoveryRouteContext): Response {
+  return json(ctx.trustStore.getPendingRequests());
+}
+
+async function handleApproveRequest(
+  requestId: string,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  try {
+    const { sharedSecret, request } =
+      ctx.trustStore.approvePairRequest(requestId);
+
+    // Send the shared secret back to the requester via callback
+    try {
+      const client = new PeerClient(
+        request.fromHost,
+        request.fromPort,
+        ctx.instanceId,
+      );
+      await client.completePairing(
+        sharedSecret,
+        ctx.instanceId,
+        ctx.instanceName,
+      );
+    } catch (err) {
+      logger.warn(
+        {
+          requestId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'Failed to send pairing callback to requester — they can re-request',
+      );
+    }
+
+    ctx.broadcast?.({
+      type: 'pair_approved',
+      data: {
+        instanceId: request.fromInstanceId,
+        name: request.fromName,
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    return json({ approved: true, sharedSecret });
+  } catch (err) {
+    return json(
+      { error: err instanceof Error ? err.message : String(err) },
+      400,
+    );
+  }
+}
+
+function handleRejectRequest(
+  requestId: string,
+  ctx: DiscoveryRouteContext,
+): Response {
+  try {
+    ctx.trustStore.rejectPairRequest(requestId);
+    return json({ rejected: true });
+  } catch (err) {
+    return json(
+      { error: err instanceof Error ? err.message : String(err) },
+      400,
+    );
+  }
+}
+
+async function handleRequestAccess(
+  instanceId: string,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  // Find the peer in mDNS discovered peers
+  const discovered = ctx.discovery?.getPeers().get(instanceId);
+  if (!discovered) {
+    return json({ error: 'Peer not found in discovery' }, 404);
+  }
+
+  // Check if already trusted
+  if (ctx.trustStore.isPeerTrusted(instanceId)) {
+    return json({ status: 'already_trusted' });
+  }
+
+  // Send pair request to the remote instance
+  try {
+    const client = new PeerClient(
+      discovered.host,
+      discovered.port,
+      ctx.instanceId,
+    );
+    const response = await client.requestPairing({
+      instanceId: ctx.instanceId,
+      name: ctx.instanceName,
+      host: getLocalAddress(),
+      port: ctx.state.getQueueStats().maxActive > 0 ? 6001 : 6001, // use configured port
+    });
+
+    if (response.status === 'already_trusted' && response.sharedSecret) {
+      // They already trust us, store the secret
+      const now = new Date().toISOString();
+      ctx.trustStore.upsertPeer(
+        instanceId,
+        discovered.name,
+        discovered.host,
+        discovered.port,
+      );
+      const db = ctx.trustStore['db'];
+      db.prepare(
+        "UPDATE discovery_peers SET status = 'trusted', shared_secret = ?, approved_at = ? WHERE instance_id = ?",
+      ).run(response.sharedSecret, now, instanceId);
+
+      return json({ status: 'trusted' });
+    }
+
+    // Update peer status to pending
+    ctx.trustStore.upsertPeer(
+      instanceId,
+      discovered.name,
+      discovered.host,
+      discovered.port,
+    );
+    const db = ctx.trustStore['db'];
+    db.prepare(
+      "UPDATE discovery_peers SET status = 'pending' WHERE instance_id = ?",
+    ).run(instanceId);
+
+    return json({ status: 'pending', requestId: response.requestId });
+  } catch (err) {
+    return json(
+      {
+        error: `Failed to contact peer: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      502,
+    );
+  }
+}
+
+function handleRevokePeer(
+  instanceId: string,
+  ctx: DiscoveryRouteContext,
+): Response {
+  ctx.trustStore.revokePeer(instanceId);
+  return json({ revoked: true });
+}
+
+// --- Proxy handlers ---
+
+function getPeerClient(
+  instanceId: string,
+  ctx: DiscoveryRouteContext,
+): PeerClient | null {
+  const peer = ctx.trustStore.getPeer(instanceId);
+  if (!peer || peer.status !== 'trusted' || !peer.sharedSecret) return null;
+
+  // Prefer mDNS-discovered host (more current) over stored
+  const discovered = ctx.discovery?.getPeers().get(instanceId);
+  const host = discovered?.host ?? peer.host;
+  const port = discovered?.port ?? peer.port;
+
+  if (!host || !port) return null;
+
+  ctx.trustStore.updatePeerLastSeen(instanceId);
+  return new PeerClient(host, port, ctx.instanceId, peer.sharedSecret);
+}
+
+async function handleProxyAgents(
+  instanceId: string,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  const client = getPeerClient(instanceId, ctx);
+  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+
+  try {
+    const agents = await client.getAgents();
+    return json(agents);
+  } catch (err) {
+    return json(
+      {
+        error: `Proxy error: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      502,
+    );
+  }
+}
+
+async function handleProxyStats(
+  instanceId: string,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  const client = getPeerClient(instanceId, ctx);
+  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+
+  try {
+    const stats = await client.getStats();
+    return json(stats);
+  } catch (err) {
+    return json(
+      {
+        error: `Proxy error: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      502,
+    );
+  }
+}
+
+async function handleProxyContextLayers(
+  instanceId: string,
+  url: URL,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  const client = getPeerClient(instanceId, ctx);
+  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+
+  try {
+    const params: Record<string, string> = {};
+    for (const [key, value] of url.searchParams) {
+      params[key] = value;
+    }
+    const layers = await client.getContextLayers(params);
+    return json(layers);
+  } catch (err) {
+    return json(
+      {
+        error: `Proxy error: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      502,
+    );
+  }
+}
+
+async function handleProxyContextWrite(
+  instanceId: string,
+  req: Request,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  const client = getPeerClient(instanceId, ctx);
+  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+
+  let body: { path: string; content: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  if (!body.path || typeof body.content !== 'string') {
+    return json({ error: 'Missing path or content' }, 400);
+  }
+
+  try {
+    const result = await client.writeContextFile(body.path, body.content);
+    return json(result);
+  } catch (err) {
+    return json(
+      {
+        error: `Proxy error: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      502,
+    );
+  }
+}
+
+// --- Helpers ---
+
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache',
+    },
+  });
+}
+
+function getLocalAddress(): string {
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name] || []) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          return iface.address;
+        }
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return '127.0.0.1';
+}
+
+/**
+ * Check if an incoming API request is from a trusted peer.
+ * Used by the web server to authenticate peer-to-peer API calls.
+ */
+export function checkPeerAuth(
+  req: Request,
+  trustStore: TrustStore,
+): boolean {
+  const instanceId = req.headers.get('X-OmniClaw-Instance');
+  const authHeader = req.headers.get('Authorization');
+
+  if (!instanceId || !authHeader?.startsWith('Bearer ')) return false;
+
+  const token = authHeader.slice('Bearer '.length);
+  const storedSecret = trustStore.getPeerSecret(instanceId);
+
+  if (!storedSecret || storedSecret.length !== token.length) return false;
+
+  // Constant-time comparison
+  let result = 0;
+  for (let i = 0; i < storedSecret.length; i++) {
+    result |= storedSecret.charCodeAt(i) ^ token.charCodeAt(i);
+  }
+
+  if (result === 0) {
+    trustStore.updatePeerLastSeen(instanceId);
+  }
+
+  return result === 0;
+}

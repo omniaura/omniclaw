@@ -9,6 +9,9 @@ import { renderDashboardContent } from './dashboard.js';
 import { renderConversationsContent } from './conversations.js';
 import { renderContextViewerContent } from './context-viewer.js';
 import { renderIpcInspectorContent } from './ipc-inspector.js';
+import { renderNetworkContent, type NetworkPageState } from './network.js';
+import { checkPeerAuth } from '../discovery/routes.js';
+import type { TrustStore } from '../discovery/trust-store.js';
 
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
@@ -29,6 +32,7 @@ interface SseClient {
 export function startWebServer(
   config: WebServerConfig,
   state: WebStateProvider,
+  trustStore?: TrustStore,
 ): WebServerHandle {
   const { port, auth, hostname, corsOrigin } = config;
   const sseClients = new Set<SseClient>();
@@ -47,8 +51,20 @@ export function startWebServer(
         });
       }
 
-      // --- Basic auth for HTTP (optional on trusted local setups) ---
-      if (auth && !checkBasicAuth(req, auth)) {
+      // --- Peer auth: trusted remote OmniClaw instances bypass Basic Auth ---
+      const isPeerRequest =
+        url.pathname.startsWith('/api/') &&
+        req.headers.has('X-OmniClaw-Instance');
+      if (isPeerRequest && trustStore) {
+        if (!checkPeerAuth(req, trustStore)) {
+          return new Response('Unauthorized peer', {
+            status: 403,
+            headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
+          });
+        }
+        // Peer is authenticated — skip Basic Auth, fall through to routing
+      } else if (auth && !checkBasicAuth(req, auth)) {
+        // --- Basic auth for HTTP (optional on trusted local setups) ---
         return new Response('Unauthorized', {
           status: 401,
           headers: { 'WWW-Authenticate': 'Basic realm="OmniClaw"' },
@@ -161,6 +177,20 @@ export function startWebServer(
             path: '/ipc',
             title: 'IPC Inspector',
             render: () => renderIpcInspectorContent(state),
+          },
+          network: {
+            path: '/network',
+            title: 'Network',
+            render: () =>
+              renderNetworkContent(
+                networkPageStateGetter?.() ?? {
+                  instanceId: '',
+                  instanceName: '',
+                  discoveryEnabled: false,
+                  peers: [],
+                  pendingRequests: [],
+                },
+              ),
           },
         };
 
@@ -283,6 +313,9 @@ export function startWebServer(
     get clientCount() {
       return sseClients.size;
     },
+    setNetworkPageState(getter: () => NetworkPageState) {
+      networkPageStateGetter = getter;
+    },
   };
 
   return handle;
@@ -293,7 +326,12 @@ export interface WebServerHandle {
   broadcast(event: WsEvent): void;
   stop(): Promise<void>;
   readonly clientCount: number;
+  /** Set the network page state getter (called after discovery is initialized). */
+  setNetworkPageState(getter: () => NetworkPageState): void;
 }
+
+/** Network page state getter — set after discovery is initialized. */
+let networkPageStateGetter: (() => NetworkPageState) | null = null;
 
 // ---- Auth helpers ----
 
@@ -342,6 +380,14 @@ function eventChannel(event: WsEvent): string {
   if (event.type === 'log') return 'logs';
   if (event.type === 'agent_status' || event.type === 'task_update') {
     return 'stats';
+  }
+  if (
+    event.type === 'peer_discovered' ||
+    event.type === 'peer_lost' ||
+    event.type === 'pair_request' ||
+    event.type === 'pair_approved'
+  ) {
+    return 'network';
   }
   return event.type;
 }

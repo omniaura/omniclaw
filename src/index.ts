@@ -33,6 +33,8 @@ import {
   WEB_UI_PASS,
   WEB_UI_HOST,
   WEB_UI_CORS_ORIGIN,
+  DISCOVERY_ENABLED,
+  INSTANCE_NAME,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
 import { SlackChannel } from './channels/slack.js';
@@ -82,6 +84,7 @@ import {
   storeMessage,
   getSubscriptionsForAgent,
   updateAgentAvatar,
+  getDatabase,
 } from './db.js';
 import { buildAgentToChannelsMapFromSubscriptions } from './channel-routes.js';
 import { resolveContextLayers } from './context-layers.js';
@@ -122,6 +125,12 @@ import {
   type IpcEventKind,
   type WebServerHandle,
 } from './web/index.js';
+import {
+  startDiscovery,
+  TrustStore,
+  type DiscoveryHandle,
+} from './discovery/index.js';
+import { setDiscoveryContext } from './web/routes.js';
 import { Effect } from 'effect';
 
 // Global error handlers to prevent crashes from unhandled rejections/exceptions
@@ -2198,13 +2207,189 @@ async function main(): Promise<void> {
         resolveDiscordGuildImage: (guildId, botId) =>
           resolveDiscordGuildImageUrl(guildId, botId),
       },
+      DISCOVERY_ENABLED ? new TrustStore(getDatabase()) : undefined,
     );
     stopLogStream = startLogStream(webServer);
+  }
+
+  // --- Network Discovery (opt-in via DISCOVERY_ENABLED env var) ---
+  let discoveryHandle: DiscoveryHandle | undefined;
+  let trustStore: TrustStore | undefined;
+  if (DISCOVERY_ENABLED && webServer) {
+    trustStore = new TrustStore(getDatabase());
+    const instanceId = trustStore.getOrCreateInstanceId(getDatabase());
+    const version = '1.0.0';
+
+    discoveryHandle = startDiscovery({
+      instanceId,
+      instanceName: INSTANCE_NAME,
+      port: webServer.port,
+      version,
+      onPeerFound: (peer) => {
+        // Track discovered peer in DB
+        trustStore!.upsertPeer(
+          peer.instanceId,
+          peer.name,
+          peer.host,
+          peer.port,
+        );
+        webServer!.broadcast({
+          type: 'peer_discovered',
+          data: peer,
+          timestamp: new Date().toISOString(),
+        });
+      },
+      onPeerLost: (peerInstanceId) => {
+        webServer!.broadcast({
+          type: 'peer_lost',
+          data: { instanceId: peerInstanceId },
+          timestamp: new Date().toISOString(),
+        });
+      },
+    });
+
+    // Wire discovery context into routes
+    setDiscoveryContext(
+      {
+        instanceId,
+        instanceName: INSTANCE_NAME,
+        version,
+        trustStore,
+        discovery: discoveryHandle,
+        state: {
+          getAgents: () => agents,
+          getChannelSubscriptions: () => channelSubscriptions,
+          getTasks: () => getAllTasks(),
+          getTaskById: (id) => getTaskById(id),
+          getMessages: () => [],
+          getChats: () => [],
+          getQueueStats: () => queue.getStats(),
+          getQueueDetails: () => queue.getDetailedStats(),
+          getIpcEvents: (count) => ipcEvents.recent(count),
+          createTask: (task) => dbCreateTask(task),
+          updateTask: (id, updates) => dbUpdateTask(id, updates),
+          deleteTask: (id) => dbDeleteTask(id),
+          calculateNextRun: (type, value) => calculateNextRun(type, value),
+          readContextFile: () => null,
+          writeContextFile: () => {},
+          updateAgentAvatar: () => {},
+        },
+        broadcast: (event) => webServer!.broadcast(event as any),
+      },
+      () => ({
+        instanceId,
+        instanceName: INSTANCE_NAME,
+        discoveryEnabled: true,
+        peers: (() => {
+          const discovered = discoveryHandle!.getPeers();
+          const stored = trustStore!.getAllPeers();
+          const storedMap = new Map(stored.map((p) => [p.instanceId, p]));
+          const result: Array<{
+            instanceId: string;
+            name: string;
+            host: string;
+            port: number;
+            addresses: string[];
+            status: 'discovered' | 'pending' | 'trusted' | 'revoked';
+            online: boolean;
+            approvedAt: string | null;
+            lastSeen: string | null;
+          }> = [];
+
+          for (const [id, disc] of discovered) {
+            const st = storedMap.get(id);
+            result.push({
+              instanceId: id,
+              name: disc.name,
+              host: disc.host,
+              port: disc.port,
+              addresses: disc.addresses,
+              status: (st?.status as any) ?? 'discovered',
+              online: true,
+              approvedAt: st?.approvedAt ?? null,
+              lastSeen: st?.lastSeen ?? null,
+            });
+            storedMap.delete(id);
+          }
+
+          for (const st of storedMap.values()) {
+            if (st.status === 'revoked') continue;
+            result.push({
+              instanceId: st.instanceId,
+              name: st.name,
+              host: st.host ?? '',
+              port: st.port ?? 0,
+              addresses: [],
+              status: st.status as any,
+              online: false,
+              approvedAt: st.approvedAt,
+              lastSeen: st.lastSeen,
+            });
+          }
+
+          return result;
+        })(),
+        pendingRequests: trustStore!.getPendingRequests(),
+      }),
+    );
+
+    // Set the network page state getter on the web server
+    webServer.setNetworkPageState(() => ({
+      instanceId,
+      instanceName: INSTANCE_NAME,
+      discoveryEnabled: true,
+      peers: (() => {
+        const discovered = discoveryHandle!.getPeers();
+        const stored = trustStore!.getAllPeers();
+        const storedMap = new Map(stored.map((p) => [p.instanceId, p]));
+        const result: Array<any> = [];
+
+        for (const [id, disc] of discovered) {
+          const st = storedMap.get(id);
+          result.push({
+            instanceId: id,
+            name: disc.name,
+            host: disc.host,
+            port: disc.port,
+            addresses: disc.addresses,
+            status: st?.status ?? 'discovered',
+            online: true,
+            approvedAt: st?.approvedAt ?? null,
+            lastSeen: st?.lastSeen ?? null,
+          });
+          storedMap.delete(id);
+        }
+
+        for (const st of storedMap.values()) {
+          if (st.status === 'revoked') continue;
+          result.push({
+            instanceId: st.instanceId,
+            name: st.name,
+            host: st.host ?? '',
+            port: st.port ?? 0,
+            addresses: [],
+            status: st.status,
+            online: false,
+            approvedAt: st.approvedAt,
+            lastSeen: st.lastSeen,
+          });
+        }
+
+        return result;
+      })(),
+      pendingRequests: trustStore!.getPendingRequests(),
+    }));
+
+    logger.info(
+      { instanceId, instanceName: INSTANCE_NAME },
+      'Network discovery enabled',
+    );
   }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (discoveryHandle) discoveryHandle.stop();
     if (githubWebhookServer) {
       githubWebhookServer.stop();
       githubWebhookServer = null;

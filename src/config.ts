@@ -221,6 +221,11 @@ export const GITHUB_WEBHOOK_PORT = parseInt(
 export const GITHUB_WEBHOOK_PATH =
   process.env.GITHUB_WEBHOOK_PATH || '/webhooks/github';
 
+// --- Network Discovery ---
+// Set DISCOVERY_ENABLED=true to advertise this instance on the LAN via mDNS.
+export const DISCOVERY_ENABLED = process.env.DISCOVERY_ENABLED === 'true';
+export const INSTANCE_NAME = process.env.INSTANCE_NAME || os.hostname();
+
 // --- Web UI ---
 // Set WEB_UI_PORT to enable the web dashboard. Unset = disabled.
 export const WEB_UI_PORT = process.env.WEB_UI_PORT
