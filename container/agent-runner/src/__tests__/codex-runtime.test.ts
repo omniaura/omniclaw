@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
 import {
-  buildCodexArgs,
   buildCodexEnv,
-  extractLastJsonEventText,
+  buildCodexThreadResumeParams,
+  buildCodexThreadStartParams,
+  buildCodexTurnStartParams,
+  extractAssistantTextFromItem,
+  extractTextFromCodexContent,
+  isRecoverableThreadResumeError,
 } from '../codex-runtime.js';
 
 const ORIGINAL_ENV = { ...process.env };
@@ -23,53 +27,6 @@ afterEach(() => {
   resetEnv();
 });
 
-describe('buildCodexArgs', () => {
-  it('builds fresh exec argv with exec options before prompt', () => {
-    expect(
-      buildCodexArgs('solve this', {
-        resume: false,
-        model: 'gpt-5-codex',
-        outputPath: '/tmp/out.txt',
-      }),
-    ).toEqual([
-      'exec',
-      '--skip-git-repo-check',
-      '--sandbox',
-      'workspace-write',
-      '--ask-for-approval',
-      'never',
-      '--output-last-message',
-      '/tmp/out.txt',
-      '--json',
-      '--model',
-      'gpt-5-codex',
-      'solve this',
-    ]);
-  });
-
-  it('builds resume argv with exec options before nested resume subcommand', () => {
-    expect(
-      buildCodexArgs('follow up', {
-        resume: true,
-        outputPath: '/tmp/out.txt',
-      }),
-    ).toEqual([
-      'exec',
-      '--skip-git-repo-check',
-      '--sandbox',
-      'workspace-write',
-      '--ask-for-approval',
-      'never',
-      '--output-last-message',
-      '/tmp/out.txt',
-      '--json',
-      'resume',
-      '--last',
-      'follow up',
-    ]);
-  });
-});
-
 describe('buildCodexEnv', () => {
   it('mirrors either API key env var so both auth names work', () => {
     process.env.OPENAI_API_KEY = 'openai-key';
@@ -81,6 +38,15 @@ describe('buildCodexEnv', () => {
     expect(env.OPENAI_API_KEY).toBe('openai-key');
     expect(env.CODEX_API_KEY).toBe('openai-key');
     expect(env.CODEX_MODEL).toBe('gpt-5.4');
+    expect(env.CODEX_HOME).toBe('/home/bun/.codex');
+  });
+
+  it('preserves github auth for Codex shell commands', () => {
+    process.env.GITHUB_TOKEN = 'gh-token';
+
+    const env = buildCodexEnv({} as any);
+
+    expect(env.GITHUB_TOKEN).toBe('gh-token');
   });
 
   it('strips unrelated secrets but preserves Codex auth', () => {
@@ -96,38 +62,123 @@ describe('buildCodexEnv', () => {
   });
 });
 
-describe('extractLastJsonEventText', () => {
-  it('extracts assistant text from legacy message events', () => {
-    const jsonl = [
-      '{"type":"thread.started"}',
-      '{"type":"message","message":{"role":"assistant","content":"hello"}}',
-    ].join('\n');
+describe('buildCodexThreadStartParams', () => {
+  it('uses workspace-write with never approval and developer instructions', () => {
+    expect(
+      buildCodexThreadStartParams({
+        cwd: '/workspace/group',
+        model: 'gpt-5.4',
+        developerInstructions: 'system rules',
+      }),
+    ).toEqual({
+      model: 'gpt-5.4',
+      cwd: '/workspace/group',
+      approvalPolicy: 'never',
+      sandbox: 'workspace-write',
+      experimentalRawEvents: false,
+      developerInstructions: 'system rules',
+    });
+  });
+});
 
-    expect(extractLastJsonEventText(jsonl)).toBe('hello');
+describe('buildCodexThreadResumeParams', () => {
+  it('builds explicit thread resume params', () => {
+    expect(
+      buildCodexThreadResumeParams({
+        threadId: 'thread_123',
+        cwd: '/workspace/group',
+        model: 'gpt-5.4',
+      }),
+    ).toEqual({
+      threadId: 'thread_123',
+      model: 'gpt-5.4',
+      cwd: '/workspace/group',
+      approvalPolicy: 'never',
+      sandbox: 'workspace-write',
+    });
+  });
+});
+
+describe('buildCodexTurnStartParams', () => {
+  it('wraps prompt text in app-server turn input format', () => {
+    expect(
+      buildCodexTurnStartParams({
+        threadId: 'thread_123',
+        prompt: 'hello',
+        model: 'gpt-5.4',
+      }),
+    ).toEqual({
+      threadId: 'thread_123',
+      model: 'gpt-5.4',
+      input: [
+        {
+          type: 'text',
+          text: 'hello',
+          text_elements: [],
+        },
+      ],
+    });
+  });
+});
+
+describe('extractTextFromCodexContent', () => {
+  it('extracts output_text arrays', () => {
+    expect(
+      extractTextFromCodexContent([
+        { type: 'output_text', text: 'line 1' },
+        { type: 'output_text', text: 'line 2' },
+      ]),
+    ).toBe('line 1\nline 2');
   });
 
-  it('extracts text from item.completed agent_message events', () => {
-    const jsonl = [
-      '{"type":"thread.started"}',
-      '{"type":"item.completed","item":{"type":"agent_message","text":"final answer"}}',
-    ].join('\n');
+  it('returns null for unsupported content values', () => {
+    expect(extractTextFromCodexContent({})).toBeNull();
+  });
+});
 
-    expect(extractLastJsonEventText(jsonl)).toBe('final answer');
+describe('extractAssistantTextFromItem', () => {
+  it('extracts assistant text from completed assistant items', () => {
+    expect(
+      extractAssistantTextFromItem({
+        type: 'assistant_message',
+        text: 'final answer',
+      }),
+    ).toBe('final answer');
   });
 
-  it('extracts text content arrays from agent_message events', () => {
-    const jsonl = [
-      '{"type":"item.completed","item":{"type":"agent_message","content":[{"type":"output_text","text":"line 1"},{"type":"output_text","text":"line 2"}]}}',
-    ].join('\n');
-
-    expect(extractLastJsonEventText(jsonl)).toBe('line 1\nline 2');
+  it('extracts content arrays from agent_message items', () => {
+    expect(
+      extractAssistantTextFromItem({
+        type: 'agent_message',
+        content: [{ type: 'output_text', text: 'from content' }],
+      }),
+    ).toBe('from content');
   });
 
-  it('ignores error items so transport failures do not become user output', () => {
-    const jsonl = [
-      '{"type":"item.completed","item":{"type":"error","message":"network failed"}}',
-    ].join('\n');
+  it('ignores non-assistant items', () => {
+    expect(
+      extractAssistantTextFromItem({
+        type: 'command_execution',
+        text: 'ls -la',
+      }),
+    ).toBeNull();
+  });
+});
 
-    expect(extractLastJsonEventText(jsonl)).toBeNull();
+describe('isRecoverableThreadResumeError', () => {
+  it('accepts missing-thread resume failures', () => {
+    expect(
+      isRecoverableThreadResumeError(
+        new Error('thread/resume failed: unknown thread'),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects unrelated failures', () => {
+    expect(
+      isRecoverableThreadResumeError(
+        new Error('turn/start failed: unauthorized'),
+      ),
+    ).toBe(false);
   });
 });

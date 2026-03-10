@@ -1,19 +1,20 @@
 /**
- * Codex CLI Runtime for OmniClaw Agent Runner (container-side)
+ * Codex App Server Runtime for OmniClaw Agent Runner (container-side)
  *
- * Alternative to the Claude Agent SDK and OpenCode runtimes. Spawns `codex exec`
- * as a non-interactive subprocess per prompt, using the Codex CLI's built-in
- * session resume for conversational continuity.
+ * Starts `codex app-server` once per container session and drives it over
+ * JSON-RPC/stdio. This gives us explicit thread IDs, proper thread resume,
+ * and better parity with first-party Codex integrations than `codex exec`.
  *
- * Follows the same IPC protocol (stdin JSON → stdout markers → IPC polling).
+ * Follows the same IPC protocol (stdin JSON -> stdout markers -> IPC polling).
  *
- * Codex CLI manages its own tool execution (bash, file ops, etc.) natively.
  * Auth: Supports host-copied Codex login state (~/.codex/auth.json) and
  * OPENAI_API_KEY / CODEX_API_KEY env vars.
  */
 
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'fs';
 import path from 'path';
+import readline from 'node:readline';
 
 // ---------------------------------------------------------------------------
 // Types (duplicated from host — container can't import host source)
@@ -58,6 +59,57 @@ interface ContainerOutput {
   chatJid?: string;
 }
 
+interface JsonRpcRequest {
+  id: string | number;
+  method: string;
+  params?: unknown;
+}
+
+interface JsonRpcResponse {
+  id: string | number;
+  result?: unknown;
+  error?: {
+    code?: number;
+    message?: string;
+  };
+}
+
+interface JsonRpcNotification {
+  method: string;
+  params?: unknown;
+}
+
+interface PendingRequest {
+  method: string;
+  timeout: ReturnType<typeof setTimeout>;
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+}
+
+interface TurnState {
+  turnId?: string;
+  textByItem: Map<string, string>;
+  itemOrder: string[];
+  resolve: (result: CodexTurnResult) => void;
+  reject: (error: Error) => void;
+}
+
+interface CodexTurnResult {
+  text: string | null;
+  status: 'completed' | 'failed' | 'cancelled' | 'interrupted';
+  error?: string;
+}
+
+interface CodexAppServerSession {
+  child: ChildProcessWithoutNullStreams;
+  output: readline.Interface;
+  pending: Map<string, PendingRequest>;
+  nextRequestId: number;
+  threadId?: string;
+  turnState?: TurnState;
+  stopped: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -65,10 +117,16 @@ interface ContainerOutput {
 const OUTPUT_START_MARKER = '---OMNICLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---OMNICLAW_OUTPUT_END---';
 const IPC_POLL_MS = 500;
+const APP_SERVER_REQUEST_TIMEOUT_MS = 30_000;
+const TURN_TIMEOUT_MS = 1_800_000; // 30 min
 
-// Session marker: Codex CLI manages sessions via its internal .codex/ dir.
-// We use the special value 'codex-cli-last' to indicate "resume --last".
-const CODEX_SESSION_MARKER = 'codex-cli-last';
+const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
+  'not found',
+  'missing thread',
+  'no such thread',
+  'unknown thread',
+  'does not exist',
+];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -89,6 +147,628 @@ function resolveIpcInputDir(isScheduledTask?: boolean): string {
   return isScheduledTask
     ? '/workspace/ipc/input-task'
     : '/workspace/ipc/input';
+}
+
+function asObject(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function readObject(value: unknown, key?: string): Record<string, unknown> | undefined {
+  const target =
+    key === undefined
+      ? value
+      : value && typeof value === 'object'
+        ? (value as Record<string, unknown>)[key]
+        : undefined;
+  return asObject(target);
+}
+
+function readString(value: unknown, key: string): string | undefined {
+  const record = asObject(value);
+  if (!record) return undefined;
+  const candidate = record[key];
+  return typeof candidate === 'string' ? candidate : undefined;
+}
+
+function readBoolean(value: unknown, key: string): boolean | undefined {
+  const record = asObject(value);
+  if (!record) return undefined;
+  const candidate = record[key];
+  return typeof candidate === 'boolean' ? candidate : undefined;
+}
+
+function readRouteFields(params: unknown): { turnId?: string; itemId?: string } {
+  return {
+    turnId: readString(params, 'turnId') ?? readString(readObject(params, 'turn'), 'id'),
+    itemId: readString(params, 'itemId') ?? readString(readObject(params, 'item'), 'id'),
+  };
+}
+
+function isServerRequest(value: unknown): value is JsonRpcRequest {
+  const candidate = asObject(value);
+  return Boolean(
+    candidate &&
+      typeof candidate.method === 'string' &&
+      (typeof candidate.id === 'string' || typeof candidate.id === 'number'),
+  );
+}
+
+function isServerNotification(value: unknown): value is JsonRpcNotification {
+  const candidate = asObject(value);
+  return Boolean(candidate && typeof candidate.method === 'string' && !('id' in candidate));
+}
+
+function isResponse(value: unknown): value is JsonRpcResponse {
+  const candidate = asObject(value);
+  return Boolean(
+    candidate &&
+      (typeof candidate.id === 'string' || typeof candidate.id === 'number') &&
+      typeof candidate.method !== 'string',
+  );
+}
+
+export function extractTextFromCodexContent(content: unknown): string | null {
+  if (typeof content === 'string') {
+    return content.trim() ? content : null;
+  }
+  if (!Array.isArray(content)) {
+    return null;
+  }
+
+  const textParts = content
+    .map((part) => {
+      if (!part || typeof part !== 'object') return null;
+      const typedPart = part as { type?: string; text?: string };
+      if (
+        (typedPart.type === 'output_text' || typedPart.type === 'text') &&
+        typeof typedPart.text === 'string'
+      ) {
+        return typedPart.text;
+      }
+      return null;
+    })
+    .filter((part): part is string => Boolean(part && part.trim()));
+
+  return textParts.length > 0 ? textParts.join('\n') : null;
+}
+
+export function extractAssistantTextFromItem(item: unknown): string | null {
+  const record = asObject(item);
+  if (!record) return null;
+  const type = (readString(record, 'type') || '').toLowerCase();
+  const role = (readString(record, 'role') || '').toLowerCase();
+  const isAssistantLike =
+    role === 'assistant' ||
+    type === 'assistant_message' ||
+    type === 'agent_message' ||
+    type === 'agentmessage' ||
+    (type === 'message' && role === 'assistant');
+
+  if (!isAssistantLike) {
+    return null;
+  }
+
+  const directText = readString(record, 'text');
+  if (directText?.trim()) {
+    return directText;
+  }
+
+  return extractTextFromCodexContent(record.content);
+}
+
+function upsertTurnItem(turnState: TurnState, itemId: string, text: string, append = false): void {
+  if (!turnState.itemOrder.includes(itemId)) {
+    turnState.itemOrder.push(itemId);
+  }
+  const previous = turnState.textByItem.get(itemId) || '';
+  turnState.textByItem.set(itemId, append ? `${previous}${text}` : text);
+}
+
+function finalizeTurnText(turnState: TurnState): string | null {
+  const parts = turnState.itemOrder
+    .map((itemId) => turnState.textByItem.get(itemId)?.trim() || '')
+    .filter((text) => text.length > 0);
+  return parts.length > 0 ? parts.join('\n') : null;
+}
+
+function rejectPendingRequests(session: CodexAppServerSession, message: string): void {
+  for (const pending of session.pending.values()) {
+    clearTimeout(pending.timeout);
+    pending.reject(new Error(message));
+  }
+  session.pending.clear();
+}
+
+function failActiveTurn(session: CodexAppServerSession, message: string): void {
+  const turnState = session.turnState;
+  if (!turnState) return;
+  session.turnState = undefined;
+  turnState.reject(new Error(message));
+}
+
+function writeJsonRpcMessage(session: CodexAppServerSession, message: unknown): void {
+  if (!session.child.stdin.writable) {
+    throw new Error('Cannot write to codex app-server stdin.');
+  }
+  session.child.stdin.write(`${JSON.stringify(message)}\n`);
+}
+
+function handleServerRequest(
+  session: CodexAppServerSession,
+  request: JsonRpcRequest,
+): void {
+  if (
+    request.method === 'item/commandExecution/requestApproval' ||
+    request.method === 'item/fileChange/requestApproval' ||
+    request.method === 'item/fileRead/requestApproval' ||
+    request.method === 'applyPatchApproval' ||
+    request.method === 'execCommandApproval'
+  ) {
+    log(`Auto-declining unsupported approval request: ${request.method}`);
+    writeJsonRpcMessage(session, {
+      id: request.id,
+      result: {
+        decision: 'decline',
+      },
+    });
+    return;
+  }
+
+  log(`Unsupported app-server request: ${request.method}`);
+  writeJsonRpcMessage(session, {
+    id: request.id,
+    error: {
+      code: -32601,
+      message: `Unsupported server request: ${request.method}`,
+    },
+  });
+}
+
+function handleResponse(session: CodexAppServerSession, response: JsonRpcResponse): void {
+  const pending = session.pending.get(String(response.id));
+  if (!pending) return;
+
+  clearTimeout(pending.timeout);
+  session.pending.delete(String(response.id));
+
+  if (response.error?.message) {
+    pending.reject(new Error(`${pending.method} failed: ${String(response.error.message)}`));
+    return;
+  }
+
+  pending.resolve(response.result);
+}
+
+function handleNotification(
+  session: CodexAppServerSession,
+  notification: JsonRpcNotification,
+): void {
+  const route = readRouteFields(notification.params);
+
+  if (notification.method === 'thread/started') {
+    const threadId =
+      readString(readObject(notification.params, 'thread'), 'id') ??
+      readString(notification.params, 'threadId');
+    if (threadId?.trim()) {
+      session.threadId = threadId;
+    }
+    return;
+  }
+
+  if (notification.method === 'turn/started') {
+    if (session.turnState) {
+      session.turnState.turnId =
+        readString(readObject(notification.params, 'turn'), 'id') ??
+        route.turnId;
+    }
+    return;
+  }
+
+  if (notification.method === 'item/agentMessage/delta') {
+    const delta = readString(notification.params, 'delta');
+    if (session.turnState && route.itemId && delta) {
+      upsertTurnItem(session.turnState, route.itemId, delta, true);
+    }
+    return;
+  }
+
+  if (notification.method === 'item/completed') {
+    if (session.turnState && route.itemId) {
+      const text = extractAssistantTextFromItem(readObject(notification.params, 'item'));
+      if (text) {
+        const existing = session.turnState.textByItem.get(route.itemId) || '';
+        if (!existing.trim()) {
+          upsertTurnItem(session.turnState, route.itemId, text, false);
+        }
+      }
+    }
+    return;
+  }
+
+  if (notification.method === 'turn/completed') {
+    const turnState = session.turnState;
+    if (!turnState) return;
+
+    session.turnState = undefined;
+    const turn = readObject(notification.params, 'turn');
+    const status =
+      (readString(turn, 'status') as CodexTurnResult['status'] | undefined) ||
+      'completed';
+    const errorMessage = readString(readObject(turn, 'error'), 'message');
+    turnState.resolve({
+      text: finalizeTurnText(turnState),
+      status,
+      ...(errorMessage ? { error: errorMessage } : {}),
+    });
+    return;
+  }
+
+  if (notification.method === 'error') {
+    const errorMessage =
+      readString(readObject(notification.params, 'error'), 'message') ||
+      'codex app-server reported an error';
+    if (!readBoolean(notification.params, 'willRetry')) {
+      log(`[app-server error] ${errorMessage}`);
+    }
+  }
+}
+
+function attachProcessListeners(session: CodexAppServerSession): void {
+  session.output.on('line', (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      log(`Invalid JSON from codex app-server: ${trimmed.slice(0, 200)}`);
+      return;
+    }
+
+    if (isResponse(parsed)) {
+      handleResponse(session, parsed);
+      return;
+    }
+    if (isServerRequest(parsed)) {
+      handleServerRequest(session, parsed);
+      return;
+    }
+    if (isServerNotification(parsed)) {
+      handleNotification(session, parsed);
+      return;
+    }
+  });
+
+  session.child.stderr.on('data', (chunk: Buffer) => {
+    const lines = chunk.toString().split(/\r?\n/g);
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      log(`[stderr] ${line}`);
+    }
+  });
+
+  session.child.on('error', (error) => {
+    const message = error.message || 'codex app-server process errored';
+    rejectPendingRequests(session, message);
+    failActiveTurn(session, message);
+  });
+
+  session.child.on('exit', (code, signal) => {
+    if (session.stopped) return;
+
+    const message = `codex app-server exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`;
+    rejectPendingRequests(session, message);
+    failActiveTurn(session, message);
+  });
+}
+
+async function sendRequest<TResponse>(
+  session: CodexAppServerSession,
+  method: string,
+  params: unknown,
+  timeoutMs = APP_SERVER_REQUEST_TIMEOUT_MS,
+): Promise<TResponse> {
+  const id = session.nextRequestId;
+  session.nextRequestId += 1;
+
+  const result = await new Promise<unknown>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      session.pending.delete(String(id));
+      reject(new Error(`Timed out waiting for ${method}.`));
+    }, timeoutMs);
+
+    session.pending.set(String(id), {
+      method,
+      timeout,
+      resolve,
+      reject,
+    });
+
+    writeJsonRpcMessage(session, {
+      id,
+      method,
+      params,
+    });
+  });
+
+  return result as TResponse;
+}
+
+function stopCodexAppServer(session: CodexAppServerSession | null): void {
+  if (!session || session.stopped) return;
+  session.stopped = true;
+  rejectPendingRequests(session, 'Session stopped.');
+  failActiveTurn(session, 'Session stopped.');
+  session.output.close();
+  if (!session.child.killed) {
+    session.child.kill();
+  }
+}
+
+function assertCodexCliAvailable(
+  cwd: string,
+  env: Record<string, string | undefined>,
+): void {
+  const result = spawnSync('codex', ['--version'], {
+    cwd,
+    env: env as NodeJS.ProcessEnv,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: APP_SERVER_REQUEST_TIMEOUT_MS,
+  });
+
+  if (result.error) {
+    const lower = result.error.message.toLowerCase();
+    if (
+      lower.includes('enoent') ||
+      lower.includes('command not found') ||
+      lower.includes('not found')
+    ) {
+      throw new Error('Codex CLI is not installed or not executable.');
+    }
+    throw new Error(
+      `Failed to execute Codex CLI version check: ${result.error.message || String(result.error)}`,
+    );
+  }
+
+  if (result.status !== 0) {
+    const detail =
+      (result.stderr || '').trim() ||
+      (result.stdout || '').trim() ||
+      `Command exited with code ${result.status}.`;
+    throw new Error(`Codex CLI version check failed. ${detail}`);
+  }
+}
+
+function buildCodexInitializeParams() {
+  return {
+    clientInfo: {
+      name: 'omniclaw-agent-runner',
+      title: 'OmniClaw Agent Runner',
+      version: '1.0.0',
+    },
+    capabilities: {
+      experimentalApi: true,
+    },
+  } as const;
+}
+
+export function buildCodexThreadStartParams(input: {
+  cwd: string;
+  model?: string;
+  developerInstructions?: string;
+}) {
+  return {
+    ...(input.model ? { model: input.model } : {}),
+    cwd: input.cwd,
+    approvalPolicy: 'never' as const,
+    sandbox: 'workspace-write' as const,
+    experimentalRawEvents: false,
+    ...(input.developerInstructions
+      ? { developerInstructions: input.developerInstructions }
+      : {}),
+  };
+}
+
+export function buildCodexThreadResumeParams(input: {
+  threadId: string;
+  cwd: string;
+  model?: string;
+}) {
+  return {
+    threadId: input.threadId,
+    ...(input.model ? { model: input.model } : {}),
+    cwd: input.cwd,
+    approvalPolicy: 'never' as const,
+    sandbox: 'workspace-write' as const,
+  };
+}
+
+export function buildCodexTurnStartParams(input: {
+  threadId: string;
+  prompt: string;
+  model?: string;
+}) {
+  return {
+    threadId: input.threadId,
+    input: [
+      {
+        type: 'text' as const,
+        text: input.prompt,
+        text_elements: [],
+      },
+    ],
+    ...(input.model ? { model: input.model } : {}),
+  };
+}
+
+function readThreadIdFromResponse(response: unknown, method: string): string {
+  const threadId =
+    readString(readObject(response, 'thread'), 'id') ??
+    readString(response, 'threadId');
+  if (!threadId?.trim()) {
+    throw new Error(`${method} response did not include a thread id.`);
+  }
+  return threadId;
+}
+
+export function isRecoverableThreadResumeError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (!message.includes('thread/resume')) {
+    return false;
+  }
+  return RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS.some((snippet) =>
+    message.includes(snippet),
+  );
+}
+
+function resolveResumeThreadId(sessionId?: string): string | undefined {
+  const normalized = sessionId?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized;
+}
+
+async function startCodexAppServer(
+  cwd: string,
+  env: Record<string, string | undefined>,
+): Promise<CodexAppServerSession> {
+  assertCodexCliAvailable(cwd, env);
+
+  const child = spawn('codex', ['app-server'], {
+    cwd,
+    env: env as NodeJS.ProcessEnv,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const output = readline.createInterface({ input: child.stdout });
+  const session: CodexAppServerSession = {
+    child,
+    output,
+    pending: new Map(),
+    nextRequestId: 1,
+    stopped: false,
+  };
+
+  attachProcessListeners(session);
+  await sendRequest(session, 'initialize', buildCodexInitializeParams());
+  writeJsonRpcMessage(session, { method: 'initialized' });
+
+  try {
+    const accountReadResponse = await sendRequest<unknown>(
+      session,
+      'account/read',
+      {},
+    );
+    const accountType = readString(readObject(accountReadResponse, 'account'), 'type');
+    if (accountType) {
+      log(`Codex account type: ${accountType}`);
+    }
+  } catch (err) {
+    log(
+      `account/read failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  return session;
+}
+
+async function openCodexThread(
+  session: CodexAppServerSession,
+  opts: {
+    resumeThreadId?: string;
+    cwd: string;
+    model?: string;
+    developerInstructions?: string;
+  },
+): Promise<string> {
+  if (opts.resumeThreadId) {
+    try {
+      const resumed = await sendRequest<unknown>(
+        session,
+        'thread/resume',
+        buildCodexThreadResumeParams({
+          threadId: opts.resumeThreadId,
+          cwd: opts.cwd,
+          model: opts.model,
+        }),
+      );
+      const threadId = readThreadIdFromResponse(resumed, 'thread/resume');
+      session.threadId = threadId;
+      return threadId;
+    } catch (err) {
+      if (!isRecoverableThreadResumeError(err)) {
+        throw err;
+      }
+      log(
+        `thread/resume failed for ${opts.resumeThreadId}; starting a fresh thread instead`,
+      );
+    }
+  }
+
+  const started = await sendRequest<unknown>(
+    session,
+    'thread/start',
+    buildCodexThreadStartParams({
+      cwd: opts.cwd,
+      model: opts.model,
+      developerInstructions: opts.developerInstructions,
+    }),
+  );
+  const threadId = readThreadIdFromResponse(started, 'thread/start');
+  session.threadId = threadId;
+  return threadId;
+}
+
+async function runCodexTurn(
+  session: CodexAppServerSession,
+  opts: {
+    threadId: string;
+    prompt: string;
+    model?: string;
+    timeoutMs: number;
+  },
+): Promise<CodexTurnResult> {
+  if (session.turnState) {
+    throw new Error('A Codex turn is already active.');
+  }
+
+  const turnPromise = new Promise<CodexTurnResult>((resolve, reject) => {
+    session.turnState = {
+      textByItem: new Map(),
+      itemOrder: [],
+      resolve,
+      reject,
+    };
+  });
+
+  const timeout = setTimeout(() => {
+    failActiveTurn(session, `Codex turn timed out after ${opts.timeoutMs}ms`);
+  }, opts.timeoutMs);
+
+  try {
+    const response = await sendRequest<unknown>(
+      session,
+      'turn/start',
+      buildCodexTurnStartParams({
+        threadId: opts.threadId,
+        prompt: opts.prompt,
+        model: opts.model,
+      }),
+    );
+    const responseTurnId = readString(readObject(response, 'turn'), 'id');
+    if (responseTurnId && session.turnState) {
+      (session.turnState as TurnState).turnId = responseTurnId;
+    }
+    return await turnPromise;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -184,270 +864,7 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
-// Response extraction from Codex JSONL output
-// ---------------------------------------------------------------------------
-
-interface CodexJsonEvent {
-  type: string;
-  message?: { content?: string; role?: string };
-  content?: string;
-  item?: {
-    type?: string;
-    text?: string;
-    content?: unknown;
-  };
-  [key: string]: unknown;
-}
-
-function extractTextFromCodexContent(content: unknown): string | null {
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (!Array.isArray(content)) {
-    return null;
-  }
-
-  const textParts = content
-    .map((part) => {
-      if (!part || typeof part !== 'object') return null;
-      const typedPart = part as { type?: string; text?: string };
-      if (
-        (typedPart.type === 'output_text' || typedPart.type === 'text') &&
-        typeof typedPart.text === 'string'
-      ) {
-        return typedPart.text;
-      }
-      return null;
-    })
-    .filter((part): part is string => Boolean(part));
-
-  return textParts.length > 0 ? textParts.join('\n') : null;
-}
-
-/**
- * Extract the final assistant text from Codex JSONL output.
- * Codex --json emits newline-delimited JSON events. We look for the last
- * assistant message or completed event with text content.
- * @internal exported for testing
- */
-export function extractLastJsonEventText(jsonlOutput: string): string | null {
-  const lines = jsonlOutput.trim().split('\n');
-  let lastText: string | null = null;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const event: CodexJsonEvent = JSON.parse(trimmed);
-      // Check common event shapes:
-      // { type: "message", message: { role: "assistant", content: "..." } }
-      // { type: "completed", content: "..." }
-      if (event.message?.role === 'assistant' && event.message.content) {
-        lastText = event.message.content;
-      } else if (event.content && typeof event.content === 'string') {
-        lastText = event.content;
-      } else if (
-        event.item?.type &&
-        ['message', 'assistant_message', 'agent_message'].includes(
-          event.item.type,
-        )
-      ) {
-        if (typeof event.item.text === 'string' && event.item.text.trim()) {
-          lastText = event.item.text;
-        } else {
-          const itemText = extractTextFromCodexContent(event.item.content);
-          if (itemText) lastText = itemText;
-        }
-      }
-    } catch {
-      // Not JSON — ignore (could be progress text)
-    }
-  }
-  return lastText;
-}
-
-// ---------------------------------------------------------------------------
-// Codex subprocess management
-// ---------------------------------------------------------------------------
-
-/**
- * Build environment for Codex subprocess.
- * Strips secrets that Codex shouldn't leak to bash subprocesses, but preserves
- * the Codex auth env vars when present.
- */
-export function buildCodexEnv(
-  containerInput: ContainerInput,
-): Record<string, string | undefined> {
-  const SECRET_PREFIXES = [
-    'ANTHROPIC_',
-    'CLAUDE_CODE_',
-    'DISCORD_BOT_',
-    'TELEGRAM_',
-    'SLACK_',
-    'WHATSAPP_',
-    'GITHUB_TOKEN',
-  ];
-
-  const env: Record<string, string | undefined> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (!SECRET_PREFIXES.some((p) => k.startsWith(p))) {
-      env[k] = v;
-    }
-  }
-
-  // Inject auth from container secrets if provided
-  const secrets = containerInput.secrets || {};
-  if (secrets.CODEX_API_KEY) {
-    env.CODEX_API_KEY = secrets.CODEX_API_KEY;
-  }
-  if (secrets.OPENAI_API_KEY) {
-    env.OPENAI_API_KEY = secrets.OPENAI_API_KEY;
-  }
-
-  const apiKey = env.OPENAI_API_KEY || env.CODEX_API_KEY;
-  if (apiKey) {
-    if (!env.OPENAI_API_KEY) env.OPENAI_API_KEY = apiKey;
-    if (!env.CODEX_API_KEY) env.CODEX_API_KEY = apiKey;
-  }
-
-  return env;
-}
-
-export function buildCodexArgs(
-  prompt: string,
-  opts: {
-    resume: boolean;
-    model?: string;
-    outputPath: string;
-  },
-): string[] {
-  const args: string[] = [
-    'exec',
-    '--skip-git-repo-check',
-    '--sandbox',
-    'workspace-write',
-    '--ask-for-approval',
-    'never',
-    '--output-last-message',
-    opts.outputPath,
-    '--json',
-  ];
-
-  if (opts.model) {
-    args.push('--model', opts.model);
-  }
-
-  if (opts.resume) {
-    args.push('resume', '--last');
-  }
-
-  args.push(prompt);
-  return args;
-}
-
-function hasCodexStoredAuth(codexHome = '/home/bun/.codex'): boolean {
-  return fs.existsSync(path.join(codexHome, 'auth.json'));
-}
-
-/**
- * Run a single Codex exec invocation.
- * Returns the response text or null on failure.
- */
-async function runCodexExec(
-  prompt: string,
-  opts: {
-    resume: boolean;
-    env: Record<string, string | undefined>;
-    model?: string;
-    cwd: string;
-    timeoutMs: number;
-    outputPath: string;
-  },
-): Promise<{ text: string | null; timedOut: boolean }> {
-  const args = buildCodexArgs(prompt, opts);
-
-  log(`Spawning: codex ${args.slice(0, 5).join(' ')}... (${prompt.length} chars)`);
-
-  const proc = Bun.spawn(['codex', ...args], {
-    cwd: opts.cwd,
-    env: opts.env as Record<string, string>,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    log(`Codex exec timed out after ${opts.timeoutMs}ms, killing`);
-    proc.kill();
-  }, opts.timeoutMs);
-
-  // Stream stderr for progress logging
-  const stderrReader = (async () => {
-    const decoder = new TextDecoder();
-    for await (const chunk of proc.stderr as AsyncIterable<Uint8Array>) {
-      const text = decoder.decode(chunk);
-      for (const line of text.split('\n')) {
-        if (line.trim()) log(`[stderr] ${line.trim()}`);
-      }
-    }
-  })();
-
-  // Collect stdout (JSONL events)
-  const stdoutChunks: string[] = [];
-  const stdoutReader = (async () => {
-    const decoder = new TextDecoder();
-    for await (const chunk of proc.stdout as AsyncIterable<Uint8Array>) {
-      stdoutChunks.push(decoder.decode(chunk));
-    }
-  })();
-
-  const exitCode = await proc.exited;
-  clearTimeout(timer);
-  await Promise.allSettled([stderrReader, stdoutReader]);
-
-  log(`Codex exec exited with code ${exitCode}`);
-
-  if (timedOut) {
-    return { text: null, timedOut: true };
-  }
-
-  // Try to read the output file first (most reliable)
-  let responseText: string | null = null;
-  try {
-    if (fs.existsSync(opts.outputPath)) {
-      responseText = fs.readFileSync(opts.outputPath, 'utf-8').trim();
-      if (responseText) {
-        log(`Got response from output file (${responseText.length} chars)`);
-      }
-    }
-  } catch (err) {
-    log(
-      `Failed to read output file: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  // Fallback: parse JSONL stdout
-  if (!responseText) {
-    const jsonlOutput = stdoutChunks.join('');
-    responseText = extractLastJsonEventText(jsonlOutput);
-    if (responseText) {
-      log(`Got response from JSONL stdout (${responseText.length} chars)`);
-    }
-  }
-
-  // Clean up output file
-  try {
-    fs.unlinkSync(opts.outputPath);
-  } catch {
-    /* ignore */
-  }
-
-  return { text: responseText, timedOut: false };
-}
-
-// ---------------------------------------------------------------------------
-// System context (same as OpenCode runtime)
+// System context
 // ---------------------------------------------------------------------------
 
 function buildSystemContext(containerInput: ContainerInput): string | null {
@@ -488,159 +905,151 @@ function buildSystemContext(containerInput: ContainerInput): string | null {
     parts.push(`## Your Identity\n${identityParts.join(' ')}`);
   }
 
-  if (parts.length === 0) return null;
-  return parts.join('\n\n---\n\n');
+  return parts.length > 0 ? parts.join('\n\n---\n\n') : null;
+}
+
+// ---------------------------------------------------------------------------
+// Environment
+// ---------------------------------------------------------------------------
+
+function hasCodexStoredAuth(codexHome = '/home/bun/.codex'): boolean {
+  return fs.existsSync(path.join(codexHome, 'auth.json'));
+}
+
+export function buildCodexEnv(
+  containerInput: ContainerInput,
+): Record<string, string | undefined> {
+  const SECRET_PREFIXES = [
+    'ANTHROPIC_',
+    'CLAUDE_CODE_',
+    'DISCORD_BOT_',
+    'TELEGRAM_',
+    'SLACK_',
+    'WHATSAPP_',
+  ];
+
+  const env: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (!SECRET_PREFIXES.some((p) => k.startsWith(p))) {
+      env[k] = v;
+    }
+  }
+
+  const secrets = containerInput.secrets || {};
+  if (secrets.CODEX_API_KEY) {
+    env.CODEX_API_KEY = secrets.CODEX_API_KEY;
+  }
+  if (secrets.OPENAI_API_KEY) {
+    env.OPENAI_API_KEY = secrets.OPENAI_API_KEY;
+  }
+
+  const apiKey = env.OPENAI_API_KEY || env.CODEX_API_KEY;
+  if (apiKey) {
+    if (!env.OPENAI_API_KEY) env.OPENAI_API_KEY = apiKey;
+    if (!env.CODEX_API_KEY) env.CODEX_API_KEY = apiKey;
+  }
+
+  if (!env.CODEX_HOME) {
+    env.CODEX_HOME = '/home/bun/.codex';
+  }
+
+  return env;
 }
 
 // ---------------------------------------------------------------------------
 // Main runtime entry point
 // ---------------------------------------------------------------------------
 
-/**
- * Main entry point for the Codex CLI runtime.
- * Called from the agent-runner's main() when agentRuntime === 'codex'.
- */
 export async function runCodexRuntime(
   containerInput: ContainerInput,
 ): Promise<void> {
   log(`Starting Codex runtime for group: ${containerInput.groupFolder}`);
 
-  // Configure IPC directories
-  if (containerInput.isScheduledTask) {
-    ipcInputDir = '/workspace/ipc/input-task';
-    ipcCloseFile = path.join(ipcInputDir, '_close');
-    log('Using task IPC lane: /workspace/ipc/input-task');
-  }
+  ipcInputDir = resolveIpcInputDir(containerInput.isScheduledTask);
+  ipcCloseFile = path.join(ipcInputDir, '_close');
   fs.mkdirSync(ipcInputDir, { recursive: true });
 
-  // Clean up stale _close sentinel
   try {
     fs.unlinkSync(ipcCloseFile);
   } catch {
     /* ignore */
   }
 
-  // Initialize current chat JID
   setCurrentChat(containerInput.chatJid);
 
-  // Build env for Codex subprocess
   const codexEnv = buildCodexEnv(containerInput);
-
   const hasApiKey = Boolean(codexEnv.CODEX_API_KEY || codexEnv.OPENAI_API_KEY);
-  const hasStoredAuth = hasCodexStoredAuth();
+  const hasStoredAuth = hasCodexStoredAuth(codexEnv.CODEX_HOME);
   if (!hasApiKey && !hasStoredAuth) {
     log(
       'Warning: No Codex auth found — set OPENAI_API_KEY/CODEX_API_KEY or mount /home/bun/.codex/auth.json',
     );
   } else if (!hasApiKey && hasStoredAuth) {
-    log('Using saved Codex CLI login from /home/bun/.codex/auth.json');
+    log(`Using saved Codex CLI login from ${codexEnv.CODEX_HOME}/auth.json`);
   }
 
-  // Model override
   const model = (codexEnv.CODEX_MODEL || '').trim() || undefined;
   if (model) {
     log(`Using model: ${model}`);
   }
 
-  // Determine if we're resuming a session
-  const isResume =
-    containerInput.sessionId === CODEX_SESSION_MARKER &&
-    !containerInput.isScheduledTask;
-
   const cwd = '/workspace/group';
-  const outputPath = `/tmp/codex-output-${Date.now()}.txt`;
-  const timeoutMs = 1800000; // 30 min
+  const systemContext = buildSystemContext(containerInput) || undefined;
+  const resumeThreadId = resolveResumeThreadId(containerInput.sessionId);
 
-  // Build initial prompt with system context on first run
-  let prompt = containerInput.prompt;
-  if (!isResume) {
-    const systemContext = buildSystemContext(containerInput);
-    if (systemContext) {
-      prompt = `${systemContext}\n\n---\n\nUser message:\n${prompt}`;
-      log('Injected system context into initial prompt');
-    }
-  }
-
-  if (containerInput.isScheduledTask) {
-    prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
-  }
-
-  // Drain any pending IPC messages into the initial prompt
-  const pending = drainIpcInput();
-  if (pending.length > 0) {
-    log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + formatIpcMessages(pending);
-  }
-
-  // Query loop: exec prompt → emit result → wait for IPC → repeat
-  let useResume = isResume;
+  let session: CodexAppServerSession | null = null;
   try {
+    session = await startCodexAppServer(cwd, codexEnv);
+    const threadId = await openCodexThread(session, {
+      resumeThreadId,
+      cwd,
+      model,
+      developerInstructions: systemContext,
+    });
+
+    let prompt = containerInput.prompt;
+    if (containerInput.isScheduledTask) {
+      prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
+    }
+
+    const pending = drainIpcInput();
+    if (pending.length > 0) {
+      log(`Draining ${pending.length} pending IPC messages into initial prompt`);
+      prompt += '\n' + formatIpcMessages(pending);
+    }
+
     while (true) {
-      // Check for close before running
       if (shouldClose()) {
         log('Close sentinel detected before prompt, exiting');
         break;
       }
 
-      log(
-        `Running Codex exec (resume=${useResume}, ${prompt.length} chars)...`,
-      );
-
-      const result = await runCodexExec(prompt, {
-        resume: useResume,
-        env: codexEnv,
+      log(`Running Codex turn (${prompt.length} chars) on thread ${threadId}...`);
+      const turn = await runCodexTurn(session, {
+        threadId,
+        prompt,
         model,
-        cwd,
-        timeoutMs,
-        outputPath,
+        timeoutMs: TURN_TIMEOUT_MS,
       });
 
-      if (result.timedOut) {
+      if (turn.status !== 'completed' && !turn.text) {
         writeOutput({
           status: 'error',
           result: null,
-          newSessionId: CODEX_SESSION_MARKER,
-          error: 'Codex exec timed out',
+          newSessionId: threadId,
+          error: turn.error || `Codex turn ${turn.status}`,
         });
         break;
       }
 
-      if (!result.text) {
-        // If resume failed (no session), retry without resume
-        if (useResume) {
-          log('Resume failed (no prior session), retrying without resume');
-          useResume = false;
-          // Re-inject system context since this is now a fresh session
-          const systemContext = buildSystemContext(containerInput);
-          if (systemContext) {
-            prompt = `${systemContext}\n\n---\n\nUser message:\n${containerInput.prompt}`;
-          }
-          continue;
-        }
-
-        writeOutput({
-          status: 'error',
-          result: null,
-          newSessionId: CODEX_SESSION_MARKER,
-          error: 'Codex exec produced no response',
-        });
-        break;
-      }
-
-      // Emit response
-      const output: ContainerOutput = {
+      writeOutput({
         status: 'success',
-        result: result.text,
-        newSessionId: CODEX_SESSION_MARKER,
-      };
-      if (currentChatJid) output.chatJid = currentChatJid;
-      writeOutput(output);
-
-      // After first successful prompt, always resume for follow-ups
-      useResume = true;
+        result: turn.text,
+        newSessionId: threadId,
+        ...(currentChatJid ? { chatJid: currentChatJid } : {}),
+      });
 
       log('Prompt completed, waiting for next IPC message...');
-
       const nextMessage = await waitForIpcMessage();
       if (nextMessage === null) {
         log('Close sentinel received, exiting');
@@ -658,8 +1067,10 @@ export async function runCodexRuntime(
     writeOutput({
       status: 'error',
       result: null,
-      newSessionId: CODEX_SESSION_MARKER,
+      newSessionId: resolveResumeThreadId(containerInput.sessionId),
       error: `Codex runtime error: ${errorMessage}`,
     });
+  } finally {
+    stopCodexAppServer(session);
   }
 }

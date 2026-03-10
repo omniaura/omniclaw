@@ -325,7 +325,7 @@ CODEX_API_KEY=your_openai_api_key
 CODEX_MODEL=gpt-5.3-codex
 ```
 
-The Codex runtime spawns `codex exec` as a subprocess. It uses `--sandbox workspace-write` and `--ask-for-approval never` for non-interactive operation. Session continuity uses `codex exec resume --last`.
+The Codex runtime starts `codex app-server` inside the container and talks to it over JSON-RPC/stdio. Threads use `workspace-write` sandboxing with `never` approval, and OmniClaw persists the provider thread id as the session id for explicit `thread/resume` on follow-up turns.
 
 ### Container Configuration
 
