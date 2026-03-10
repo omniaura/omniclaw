@@ -865,7 +865,7 @@ function networkAction(action,id){
     fetch("/api/discovery/peers/"+encodeURIComponent(id)+"/request-access",{method:"POST"})
       .then(function(r){return r.json();})
       .then(function(d){
-        if(d.status==="trusted")window.__toast("Already trusted!");
+        if(d.status==="trusted"||d.status==="already_trusted")window.__toast("Already trusted!");
         else if(d.status==="pending")window.__toast("Access requested - awaiting approval");
         else if(d.error)window.__toast("Error: "+d.error);
         refreshPeers();

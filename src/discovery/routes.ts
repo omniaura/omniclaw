@@ -282,15 +282,10 @@ async function handlePairRequest(
 
   // Check if already trusted
   if (ctx.trustStore.isPeerTrusted(body.instanceId)) {
-    const sharedSecret = ctx.trustStore.getPeerSecret(body.instanceId);
-    if (sharedSecret) {
-      await sendPairingSecretToPeer(
-        body.instanceId,
-        sharedSecret,
-        body.callbackToken,
-        ctx,
-      );
-    }
+    logger.warn(
+      { peerInstanceId: body.instanceId },
+      'Refusing to replay stored pairing secret for an already trusted peer',
+    );
     return json({ status: 'already_trusted' });
   }
 
