@@ -273,12 +273,13 @@ async function handlePairRequest(
     !body.name ||
     !body.host ||
     !body.port ||
-    !body.callbackToken
+    !body.callbackToken ||
+    !body.keyAgreementPublicKey
   ) {
     return json(
       {
         error:
-          'Missing required fields: instanceId, name, host, port, callbackToken',
+          'Missing required fields: instanceId, name, host, port, callbackToken, keyAgreementPublicKey',
       },
       400,
     );
@@ -324,8 +325,7 @@ async function handleCompletePairing(
     instanceId: string;
     name: string;
     callbackToken: string;
-    sharedSecret?: string;
-    approval?: {
+    approval: {
       algorithm: 'x25519-aes-256-gcm';
       senderPublicKey: string;
       iv: string;
@@ -339,16 +339,11 @@ async function handleCompletePairing(
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
-  if (
-    !body.instanceId ||
-    !body.name ||
-    !body.callbackToken ||
-    (!body.sharedSecret && !body.approval)
-  ) {
+  if (!body.instanceId || !body.name || !body.callbackToken || !body.approval) {
     return json(
       {
         error:
-          'Missing required fields: instanceId, name, callbackToken, and sharedSecret or approval',
+          'Missing required fields: instanceId, name, callbackToken, approval',
       },
       400,
     );
@@ -356,21 +351,12 @@ async function handleCompletePairing(
 
   const now = new Date().toISOString();
   try {
-    if (body.approval) {
-      ctx.trustStore.completePendingEncryptedPairing(
-        body.instanceId,
-        body.name,
-        body.approval,
-        body.callbackToken,
-      );
-    } else {
-      ctx.trustStore.completePendingPairing(
-        body.instanceId,
-        body.name,
-        body.sharedSecret!,
-        body.callbackToken,
-      );
-    }
+    ctx.trustStore.completePendingEncryptedPairing(
+      body.instanceId,
+      body.name,
+      body.approval,
+      body.callbackToken,
+    );
   } catch (error) {
     return json(
       { error: error instanceof Error ? error.message : String(error) },
@@ -918,30 +904,19 @@ async function sendPairingSecretToPeer(
     request.fromPort,
     ctx.instanceId,
   );
-  const callbackToken = request.callbackToken ?? '';
-
-  if (request.keyAgreementPublicKey) {
-    await client.completePairing({
-      approved: true,
-      instanceId: ctx.instanceId,
-      name: ctx.instanceName,
-      callbackToken,
-      approval: encryptPairingSecret(request.keyAgreementPublicKey, {
-        sharedSecret,
-      }),
-    });
-    return;
+  if (!request.callbackToken || !request.keyAgreementPublicKey) {
+    throw new Error(
+      'Pair request missing callbackToken or keyAgreementPublicKey',
+    );
   }
 
-  logger.warn(
-    { peerInstanceId: request.fromInstanceId },
-    'Falling back to plaintext discovery secret delivery for legacy peer',
-  );
   await client.completePairing({
     approved: true,
     instanceId: ctx.instanceId,
     name: ctx.instanceName,
-    callbackToken,
-    sharedSecret,
+    callbackToken: request.callbackToken,
+    approval: encryptPairingSecret(request.keyAgreementPublicKey, {
+      sharedSecret,
+    }),
   });
 }

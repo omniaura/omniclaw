@@ -1,7 +1,7 @@
 ## Summary
 
 - stop replaying stored discovery secrets when an already-trusted peer re-requests access
-- encrypt new discovery secret delivery by default using per-request X25519 key agreement plus AES-GCM, while keeping a legacy plaintext fallback only for older peers that do not advertise a pairing key
+- require pairing public keys for new discovery requests and encrypt all discovery secret delivery with per-request X25519 key agreement plus AES-GCM
 - add regression coverage for the trusted-peer re-pair flow and encrypted pairing completion
 
 ## Validation

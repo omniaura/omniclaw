@@ -67,7 +67,7 @@ export interface PairRequestBody {
   host: string;
   port: number;
   callbackToken: string;
-  keyAgreementPublicKey?: string;
+  keyAgreementPublicKey: string;
 }
 
 /** Response from POST /api/discovery/pair when a request is accepted for review */
@@ -90,8 +90,7 @@ export interface PairApprovalCallback {
   instanceId: string;
   name: string;
   callbackToken: string;
-  sharedSecret?: string;
-  approval?: EncryptedPairingEnvelope;
+  approval: EncryptedPairingEnvelope;
 }
 
 export interface DiscoveryConfig {
