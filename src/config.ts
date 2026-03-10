@@ -90,9 +90,13 @@ export function buildSlackBotConfigFromEnv(env: NodeJS.ProcessEnv): {
   bots: SlackBotConfig[];
   defaultBotId?: string;
 } {
-  const ids = parseEnvList(env.SLACK_BOT_IDS)
-    .map(sanitizeBotId)
-    .filter((id) => id.length > 0);
+  const ids = [
+    ...new Set(
+      parseEnvList(env.SLACK_BOT_IDS)
+        .map(sanitizeBotId)
+        .filter((id) => id.length > 0),
+    ),
+  ];
 
   if (ids.length > 0) {
     const bots: SlackBotConfig[] = [];
