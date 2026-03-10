@@ -339,12 +339,10 @@ export function buildVolumeMounts(
     const containerCodexDir = path.join(codexDataBase, runtimeFolderName);
     assertPathWithin(containerCodexDir, codexDataBase, 'codex-data directory');
     fs.mkdirSync(containerCodexDir, { recursive: true });
-    if (fs.existsSync(hostCodexDir)) {
-      syncOptionalFiles(hostCodexDir, containerCodexDir, [
-        'auth.json',
-        'config.toml',
-      ]);
-    }
+    syncOptionalFiles(hostCodexDir, containerCodexDir, [
+      'auth.json',
+      'config.toml',
+    ]);
     mounts.push({
       hostPath: containerCodexDir,
       containerPath: '/home/bun/.codex',
@@ -372,7 +370,9 @@ export function buildVolumeMounts(
   });
 
   // Environment file
-  const envDir = path.join(DATA_DIR, 'env');
+  const envBase = path.join(DATA_DIR, 'env');
+  const envDir = path.join(envBase, runtimeFolderName);
+  assertPathWithin(envDir, envBase, 'env directory');
   fs.mkdirSync(envDir, { recursive: true });
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
@@ -389,9 +389,9 @@ export function buildVolumeMounts(
       'OPENCODE_MODEL',
       'OPENCODE_PROVIDER',
       'OPENCODE_MODEL_ID',
-      'OPENAI_API_KEY',
-      'CODEX_API_KEY',
-      'CODEX_MODEL',
+      ...(agentRuntime === 'codex'
+        ? ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_MODEL']
+        : []),
     ];
     const filteredLines = envContent.split('\n').filter((line) => {
       const trimmed = line.trim();
@@ -409,6 +409,12 @@ export function buildVolumeMounts(
         containerPath: '/workspace/env-dir',
         readonly: true,
       });
+    } else {
+      try {
+        fs.unlinkSync(path.join(envDir, 'env'));
+      } catch {
+        /* ignore */
+      }
     }
   }
 

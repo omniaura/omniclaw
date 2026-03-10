@@ -19,9 +19,11 @@ import { DATA_DIR, GROUPS_DIR } from '../config.js';
 
 describe('LocalBackend', () => {
   const originalHome = process.env.HOME;
+  const originalCwd = process.cwd();
 
   afterAll(() => {
     process.env.HOME = originalHome;
+    process.chdir(originalCwd);
   });
 
   describe('name property', () => {
@@ -112,16 +114,24 @@ describe('LocalBackend', () => {
 
   describe('buildVolumeMounts', () => {
     const runtimeFolder = '__test_codex_mount_runtime__';
+    const claudeRuntimeFolder = '__test_claude_mount_runtime__';
     const groupFolder = '__test_codex_mount_group__';
     const tempHome = path.join(DATA_DIR, 'tmp-home-codex-mount');
+    const tempProjectRoot = path.join(DATA_DIR, 'tmp-project-codex-mount');
     const hostCodexDir = path.join(tempHome, '.codex');
     const codexDataDir = path.join(DATA_DIR, 'codex-data', runtimeFolder);
+    const codexEnvDir = path.join(DATA_DIR, 'env', runtimeFolder);
+    const claudeEnvDir = path.join(DATA_DIR, 'env', claudeRuntimeFolder);
     const groupDir = path.join(GROUPS_DIR, groupFolder);
 
     afterAll(() => {
       process.env.HOME = originalHome;
+      process.chdir(originalCwd);
       fs.rmSync(tempHome, { recursive: true, force: true });
+      fs.rmSync(tempProjectRoot, { recursive: true, force: true });
       fs.rmSync(codexDataDir, { recursive: true, force: true });
+      fs.rmSync(codexEnvDir, { recursive: true, force: true });
+      fs.rmSync(claudeEnvDir, { recursive: true, force: true });
       fs.rmSync(groupDir, { recursive: true, force: true });
     });
 
@@ -156,6 +166,38 @@ describe('LocalBackend', () => {
       );
     });
 
+    it('removes stale copied codex auth files when host login is removed', () => {
+      fs.mkdirSync(hostCodexDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(hostCodexDir, 'auth.json'),
+        '{"auth_mode":"chatgpt"}\n',
+      );
+      fs.writeFileSync(path.join(hostCodexDir, 'config.toml'), 'model = "gpt-5"\n');
+      process.env.HOME = tempHome;
+
+      buildVolumeMounts(
+        { folder: groupFolder, name: 'Codex Test' } as any,
+        false,
+        false,
+        runtimeFolder,
+        'codex',
+      );
+
+      fs.unlinkSync(path.join(hostCodexDir, 'auth.json'));
+      fs.unlinkSync(path.join(hostCodexDir, 'config.toml'));
+
+      buildVolumeMounts(
+        { folder: groupFolder, name: 'Codex Test' } as any,
+        false,
+        false,
+        runtimeFolder,
+        'codex',
+      );
+
+      expect(fs.existsSync(path.join(codexDataDir, 'auth.json'))).toBe(false);
+      expect(fs.existsSync(path.join(codexDataDir, 'config.toml'))).toBe(false);
+    });
+
     it('does not mount codex state for non-codex runtimes', () => {
       process.env.HOME = tempHome;
 
@@ -170,6 +212,64 @@ describe('LocalBackend', () => {
       expect(
         mounts.some((mount) => mount.containerPath === '/home/bun/.codex'),
       ).toBe(false);
+    });
+
+    it('writes a runtime-scoped env mount and only includes codex vars for codex', () => {
+      const runnerSrc = path.join(
+        tempProjectRoot,
+        'container',
+        'agent-runner',
+        'src',
+      );
+      fs.mkdirSync(runnerSrc, { recursive: true });
+      fs.writeFileSync(path.join(runnerSrc, 'index.ts'), 'export {};\n');
+      fs.writeFileSync(
+        path.join(tempProjectRoot, '.env'),
+        [
+          'CLAUDE_CODE_OAUTH_TOKEN=claude-token',
+          'ANTHROPIC_API_KEY=anthropic-key',
+          'OPENAI_API_KEY=openai-key',
+          'CODEX_API_KEY=codex-key',
+          'CODEX_MODEL=gpt-5',
+        ].join('\n') + '\n',
+      );
+      process.chdir(tempProjectRoot);
+
+      const codexMounts = buildVolumeMounts(
+        { folder: groupFolder, name: 'Codex Test' } as any,
+        false,
+        false,
+        runtimeFolder,
+        'codex',
+      );
+      const codexEnvMount = codexMounts.find(
+        (mount) => mount.containerPath === '/workspace/env-dir',
+      );
+      expect(codexEnvMount?.hostPath).toBe(codexEnvDir);
+      expect(fs.readFileSync(path.join(codexEnvDir, 'env'), 'utf-8')).toContain(
+        'OPENAI_API_KEY=openai-key',
+      );
+      expect(fs.readFileSync(path.join(codexEnvDir, 'env'), 'utf-8')).toContain(
+        'CODEX_API_KEY=codex-key',
+      );
+
+      const claudeMounts = buildVolumeMounts(
+        { folder: groupFolder, name: 'Claude Test' } as any,
+        false,
+        false,
+        claudeRuntimeFolder,
+        'claude-agent-sdk',
+      );
+      const claudeEnvMount = claudeMounts.find(
+        (mount) => mount.containerPath === '/workspace/env-dir',
+      );
+      expect(claudeEnvMount?.hostPath).toBe(claudeEnvDir);
+
+      const claudeEnv = fs.readFileSync(path.join(claudeEnvDir, 'env'), 'utf-8');
+      expect(claudeEnv).toContain('CLAUDE_CODE_OAUTH_TOKEN=claude-token');
+      expect(claudeEnv).not.toContain('OPENAI_API_KEY=openai-key');
+      expect(claudeEnv).not.toContain('CODEX_API_KEY=codex-key');
+      expect(claudeEnv).not.toContain('CODEX_MODEL=gpt-5');
     });
   });
 });
