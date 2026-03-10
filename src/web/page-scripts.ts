@@ -4,12 +4,15 @@
  * Script functions return JS source strings that run inside the SPA shell.
  */
 
+import { DISCOVERY_POLL_INTERVAL } from '../config.js';
+
 export function allPageScripts(): Record<string, string> {
   return {
     dashboard: dashboardScript(),
     conversations: conversationsScript(),
     context: contextScript(),
     ipc: ipcScript(),
+    network: networkScript(),
   };
 }
 
@@ -849,4 +852,297 @@ function ipcScript(): string {
     '',
     'window.__cleanup=function(){clearInterval(pollTimer);clearInterval(eventPollTimer);};',
   ].join('\n');
+}
+
+function networkScript(): string {
+  return `
+var pollTimer=null;
+var syncPeerId=null;
+var networkClicksBound=false;
+
+function networkAction(action,id){
+  if(action==="request"){
+    fetch("/api/discovery/peers/"+encodeURIComponent(id)+"/request-access",{method:"POST"})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.status==="trusted")window.__toast("Already trusted!");
+        else if(d.status==="pending")window.__toast("Access requested - awaiting approval");
+        else if(d.error)window.__toast("Error: "+d.error);
+        refreshPeers();
+      }).catch(function(e){window.__toast("Failed: "+e.message);});
+    return;
+  }
+  if(action==="approve"){
+    fetch("/api/discovery/requests/"+encodeURIComponent(id)+"/approve",{method:"POST"})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.approved)window.__toast("Peer approved!");
+        else if(d.error)window.__toast("Error: "+d.error);
+        refreshPeers();refreshRequests();
+      }).catch(function(e){window.__toast("Failed: "+e.message);});
+    return;
+  }
+  if(action==="reject"){
+    fetch("/api/discovery/requests/"+encodeURIComponent(id)+"/reject",{method:"POST"})
+      .then(function(r){return r.json();})
+      .then(function(){window.__toast("Request rejected");refreshRequests();})
+      .catch(function(e){window.__toast("Failed: "+e.message);});
+    return;
+  }
+  if(action==="revoke"){
+    if(!confirm("Revoke trust for this peer?"))return;
+    fetch("/api/discovery/peers/"+encodeURIComponent(id),{method:"DELETE"})
+      .then(function(r){return r.json();})
+      .then(function(){window.__toast("Trust revoked");refreshPeers();})
+      .catch(function(e){window.__toast("Failed: "+e.message);});
+    return;
+  }
+  if(action==="browse"){browseRemoteAgents(id);return;}
+  if(action==="sync"){openSyncPanel(id);return;}
+  if(action==="close-sync"){closeSyncPanel();return;}
+  if(action==="push"){syncFile("push",id);return;}
+  if(action==="pull"){syncFile("pull",id);return;}
+  if(action==="bulk-push"){bulkSync("push",id);return;}
+  if(action==="bulk-pull"){bulkSync("pull",id);return;}
+}
+window.networkAction=networkAction;
+
+function bindNetworkClicks(){
+  if(networkClicksBound)return;
+  document.addEventListener("click",function(event){
+    var target=event.target instanceof Element?event.target.closest("[data-network-action]"):null;
+    if(!target)return;
+    event.preventDefault();
+    networkAction(target.getAttribute("data-network-action"),target.getAttribute("data-network-id")||"");
+  });
+  networkClicksBound=true;
+}
+
+function renderPeerStatus(status){
+  if(status==="discovered")return '<span class="badge">discovered</span>';
+  if(status==="trusted")return '<span class="badge badge-admin">trusted</span>';
+  if(status==="pending")return '<span class="badge" style="background:var(--warning);color:#000">pending</span>';
+  if(status==="revoked")return '<span class="badge" style="background:var(--red);color:#fff">revoked</span>';
+  return '<span class="badge">unknown</span>';
+}
+
+function renderPeerActions(peer){
+  var id=window.__esc(peer.instanceId||"");
+  if(peer.status==="trusted"){
+    return '<button class="btn btn-sm" data-network-action="browse" data-network-id="'+id+'">Browse</button> '
+      +'<button class="btn btn-sm btn-primary" data-network-action="sync" data-network-id="'+id+'">Sync</button> '
+      +'<button class="btn btn-sm btn-danger" data-network-action="revoke" data-network-id="'+id+'">Revoke</button>';
+  }
+  if(peer.status==="pending")return '<span style="color:var(--text-muted);font-size:0.8rem">awaiting approval...</span>';
+  if(peer.online)return '<button class="btn btn-sm btn-primary" data-network-action="request" data-network-id="'+id+'">Request Access</button>';
+  return '<span style="color:var(--text-muted);font-size:0.8rem">offline</span>';
+}
+
+function renderPeerRows(peers){
+  if(!Array.isArray(peers))return "";
+  return peers.map(function(peer){
+    return '<tr data-instance-id="'+window.__esc(peer.instanceId||"")+'">'
+      +'<td><strong>'+window.__esc(peer.name||"")+'</strong></td>'
+      +'<td><code>'+window.__esc(peer.host||"")+':'+window.__esc(String(peer.port||0))+'</code></td>'
+      +'<td>'+renderPeerStatus(peer.status)+'</td>'
+      +'<td>'+(peer.online?'<span style="color:var(--green)">●</span>':'<span style="color:var(--text-muted)">○</span>')+'</td>'
+      +'<td>'+renderPeerActions(peer)+'</td></tr>';
+  }).join("");
+}
+
+function renderPendingRequests(reqs){
+  if(!Array.isArray(reqs)||reqs.length===0){
+    return '<div style="padding:1.5rem;text-align:center;color:var(--text-muted);font-size:0.85rem">No pending requests</div>';
+  }
+  return reqs.map(function(r){
+    var id=window.__esc(r.id||"");
+    return '<div class="task-card" style="margin-bottom:0.75rem">'
+      +'<div style="margin-bottom:0.5rem"><strong>'+window.__esc(r.fromName||"")+'</strong></div>'
+      +'<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.5rem"><code>'+window.__esc(r.fromHost||"")+':'+window.__esc(String(r.fromPort||0))+'</code></div>'
+      +'<div style="display:flex;gap:0.5rem">'
+      +'<button class="btn btn-sm btn-primary" data-network-action="approve" data-network-id="'+id+'">Approve</button>'
+      +'<button class="btn btn-sm btn-danger" data-network-action="reject" data-network-id="'+id+'">Reject</button>'
+      +'</div></div>';
+  }).join("");
+}
+
+function refreshPeers(){
+  fetch("/api/discovery/peers").then(function(r){return r.json();})
+    .then(function(peers){
+      var online=peers.filter(function(p){return p.online;}).length;
+      var trusted=peers.filter(function(p){return p.status==="trusted";}).length;
+      var oe=document.getElementById("stat-peers-online");if(oe)oe.textContent=String(online);
+      var te=document.getElementById("stat-peers-trusted");if(te)te.textContent=String(trusted);
+      var body=document.getElementById("peers-tbody");if(body)body.innerHTML=renderPeerRows(peers);
+    }).catch(function(){});
+}
+
+function refreshRequests(){
+  fetch("/api/discovery/requests").then(function(r){return r.json();})
+    .then(function(reqs){
+      var ce=document.getElementById("pending-count");if(ce)ce.textContent=String(reqs.length);
+      var el=document.getElementById("pending-requests");if(el)el.innerHTML=renderPendingRequests(reqs);
+    }).catch(function(){});
+}
+
+function browseRemoteAgents(instanceId){
+  var container=document.getElementById("remote-agents");if(!container)return;
+  container.innerHTML='<div class="card"><div class="section-header"><h2>loading remote agents...</h2></div></div>';
+  fetch("/api/discovery/peers/"+encodeURIComponent(instanceId)+"/agents")
+    .then(function(r){if(!r.ok)throw new Error("Failed to fetch");return r.json();})
+    .then(function(agents){
+      if(!Array.isArray(agents)||agents.length===0){
+        container.innerHTML='<div class="card"><div style="padding:2rem;text-align:center;color:var(--text-muted)">No agents found on remote instance</div></div>';
+        return;
+      }
+      var rows=agents.map(function(a){
+        return '<tr><td>'+window.__esc(a.id||"")+'</td>'
+          +'<td>'+window.__esc(a.name||"")+'</td>'
+          +'<td><span class="badge">'+window.__esc(a.backend||"")+'</span></td>'
+          +'<td>'+window.__esc(a.agentRuntime||"")+'</td>'
+          +'<td>'+(a.channels?a.channels.map(function(c){return window.__esc(c);}).join('<br>'):'-')+'</td></tr>';
+      }).join("");
+      container.innerHTML='<div class="card"><div class="section-header"><h2>remote agents ('+agents.length+')</h2></div>'
+        +'<table class="data-table"><thead><tr><th>id</th><th>name</th><th>backend</th><th>runtime</th><th>channels</th></tr></thead>'
+        +'<tbody>'+rows+'</tbody></table></div>';
+    }).catch(function(e){
+      container.innerHTML='<div class="card"><div style="padding:2rem;text-align:center;color:var(--red)">Error: '+window.__esc(e.message)+'</div></div>';
+    });
+}
+
+function openSyncPanel(instanceId){
+  syncPeerId=instanceId;
+  var panel=document.getElementById("sync-panel");if(!panel)return;
+  panel.innerHTML='<div class="card"><div class="section-header"><h2>comparing context files...</h2></div>'
+    +'<div style="padding:2rem;text-align:center;color:var(--text-muted)">Scanning local and remote files...</div></div>';
+  fetch("/api/discovery/peers/"+encodeURIComponent(instanceId)+"/context/compare")
+    .then(function(r){if(!r.ok)throw new Error("Failed to compare");return r.json();})
+    .then(function(cmp){renderSyncPanel(instanceId,cmp);})
+    .catch(function(e){
+      panel.innerHTML='<div class="card"><div style="padding:2rem;text-align:center;color:var(--red)">Error: '+window.__esc(e.message)+'</div></div>';
+    });
+}
+
+function renderSyncPanel(instanceId,cmp){
+  var panel=document.getElementById("sync-panel");if(!panel)return;
+  var total=cmp.same.length+cmp.differs.length+cmp.localOnly.length+cmp.remoteOnly.length;
+  var escapedInstanceId=window.__esc(instanceId||"");
+  var h='<div class="card"><div class="section-header" style="display:flex;align-items:center;justify-content:space-between">'
+    +'<h2>context sync ('+total+' files)</h2>'
+    +'<div style="display:flex;gap:0.5rem">'
+    +'<button class="btn btn-sm" data-network-action="close-sync" data-network-id="">Close</button>'
+    +'<button class="btn btn-sm" data-network-action="sync" data-network-id="'+escapedInstanceId+'">Refresh</button>'
+    +'</div></div>';
+  h+='<div style="display:flex;gap:1rem;padding:0.75rem 1rem;background:var(--surface);border-radius:6px;margin-bottom:1rem;font-size:0.8rem">';
+  h+='<span style="color:var(--green)">✓ '+cmp.same.length+' identical</span>';
+  h+='<span style="color:var(--warning)">≠ '+cmp.differs.length+' differ</span>';
+  h+='<span style="color:var(--blue)">← '+cmp.localOnly.length+' local only</span>';
+  h+='<span style="color:var(--purple,#a78bfa)">→ '+cmp.remoteOnly.length+' remote only</span>';
+  h+='</div>';
+  if(total===0){
+    h+='<div style="padding:2rem;text-align:center;color:var(--text-muted)">No context files found</div>';
+  } else {
+    h+='<table class="data-table"><thead><tr><th>path</th><th>status</th><th>local size</th><th>remote size</th><th>actions</th></tr></thead><tbody>';
+    cmp.same.forEach(function(f){
+      h+='<tr><td><code>'+window.__esc(f.path||"(root)")+'/CLAUDE.md</code></td>'
+        +'<td><span style="color:var(--green)">identical</span></td>'
+        +'<td>'+fmtBytes(f.size)+'</td><td>'+fmtBytes(f.size)+'</td>'
+        +'<td><span style="color:var(--text-muted);font-size:0.8rem">in sync</span></td></tr>';
+    });
+    cmp.differs.forEach(function(d){
+      var pathValue=window.__esc(d.local.path||"");
+      var combined=escapedInstanceId+'|'+pathValue;
+      h+='<tr style="background:rgba(251,191,36,0.05)"><td><code>'+window.__esc(d.local.path||"(root)")+'/CLAUDE.md</code></td>'
+        +'<td><span style="color:var(--warning)">differs</span></td>'
+        +'<td>'+fmtBytes(d.local.size)+'</td><td>'+fmtBytes(d.remote.size)+'</td>'
+        +'<td><button class="btn btn-sm" data-network-action="push" data-network-id="'+combined+'">Push →</button> '
+        +'<button class="btn btn-sm" data-network-action="pull" data-network-id="'+combined+'">← Pull</button></td></tr>';
+    });
+    cmp.localOnly.forEach(function(f){
+      var pathValue=window.__esc(f.path||"");
+      h+='<tr style="background:rgba(96,165,250,0.05)"><td><code>'+window.__esc(f.path||"(root)")+'/CLAUDE.md</code></td>'
+        +'<td><span style="color:var(--blue)">local only</span></td>'
+        +'<td>'+fmtBytes(f.size)+'</td><td>-</td>'
+        +'<td><button class="btn btn-sm" data-network-action="push" data-network-id="'+escapedInstanceId+'|'+pathValue+'">Push →</button></td></tr>';
+    });
+    cmp.remoteOnly.forEach(function(f){
+      var pathValue=window.__esc(f.path||"");
+      h+='<tr style="background:rgba(167,139,250,0.05)"><td><code>'+window.__esc(f.path||"(root)")+'/CLAUDE.md</code></td>'
+        +'<td><span style="color:var(--purple,#a78bfa)">remote only</span></td>'
+        +'<td>-</td><td>'+fmtBytes(f.size)+'</td>'
+        +'<td><button class="btn btn-sm" data-network-action="pull" data-network-id="'+escapedInstanceId+'|'+pathValue+'">← Pull</button></td></tr>';
+    });
+    h+='</tbody></table>';
+    var pushable=cmp.differs.length+cmp.localOnly.length;
+    var pullable=cmp.differs.length+cmp.remoteOnly.length;
+    if(pushable>0||pullable>0){
+      h+='<div style="display:flex;gap:0.75rem;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">';
+      if(pushable>0)h+='<button class="btn btn-sm btn-primary" data-network-action="bulk-push" data-network-id="'+escapedInstanceId+'">Push All ('+pushable+') →</button>';
+      if(pullable>0)h+='<button class="btn btn-sm" data-network-action="bulk-pull" data-network-id="'+escapedInstanceId+'">← Pull All ('+pullable+')</button>';
+      h+='</div>';
+    }
+  }
+  h+='</div>';
+  panel.innerHTML=h;
+}
+
+function closeSyncPanel(){
+  var panel=document.getElementById("sync-panel");if(panel)panel.innerHTML="";
+  syncPeerId=null;
+}
+
+function syncFile(direction,idAndPath){
+  var parts=idAndPath.split("|");
+  var instanceId=parts[0],filePath=parts.slice(1).join("|");
+  fetch("/api/discovery/peers/"+encodeURIComponent(instanceId)+"/context/"+direction,{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({path:filePath})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.ok)window.__toast((direction==="push"?"Pushed":"Pulled")+" "+filePath);
+    else window.__toast("Error: "+(d.error||"unknown"));
+    if(syncPeerId)openSyncPanel(syncPeerId);
+  }).catch(function(e){window.__toast("Failed: "+e.message);});
+}
+
+function bulkSync(direction,instanceId){
+  fetch("/api/discovery/peers/"+encodeURIComponent(instanceId)+"/context/compare")
+    .then(function(r){return r.json();})
+    .then(function(cmp){
+      var paths=[];
+      if(direction==="push"){
+        cmp.differs.forEach(function(d){paths.push(d.local.path);});
+        cmp.localOnly.forEach(function(f){paths.push(f.path);});
+      } else {
+        cmp.differs.forEach(function(d){paths.push(d.remote.path);});
+        cmp.remoteOnly.forEach(function(f){paths.push(f.path);});
+      }
+      if(paths.length===0){window.__toast("Nothing to "+direction);return;}
+      if(!confirm(direction==="push"?"Push "+paths.length+" file(s) to remote?":"Pull "+paths.length+" file(s) from remote?"))return;
+      var done=0,errs=0;
+      var chain=Promise.resolve();
+      paths.forEach(function(p){
+        chain=chain.then(function(){
+          return fetch("/api/discovery/peers/"+encodeURIComponent(instanceId)+"/context/"+direction,{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({path:p})
+          }).then(function(r){return r.json();}).then(function(d){if(d.ok)done++;else errs++;}).catch(function(){errs++;});
+        });
+      });
+      chain.then(function(){
+        window.__toast(done+" file(s) synced"+(errs>0?", "+errs+" error(s)":""));
+        if(syncPeerId)openSyncPanel(syncPeerId);
+      });
+    }).catch(function(e){window.__toast("Failed: "+e.message);});
+}
+
+function fmtBytes(b){if(b<1024)return b+" B";if(b<1048576)return(b/1024).toFixed(1)+" KB";return(b/1048576).toFixed(1)+" MB";}
+
+bindNetworkClicks();
+refreshPeers();
+refreshRequests();
+pollTimer=setInterval(function(){refreshPeers();refreshRequests();},${DISCOVERY_POLL_INTERVAL});
+window.__cleanup=function(){if(pollTimer)clearInterval(pollTimer);};
+`;
 }

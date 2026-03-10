@@ -1,8 +1,10 @@
 import { Database } from 'bun:sqlite';
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, STORE_DIR } from './config.js';
+import { TrustStore } from './discovery/trust-store.js';
 import { logger } from './logger.js';
 import {
   Agent,
@@ -474,6 +476,36 @@ export function createSchema(database: Database): void {
   addColumnIfNotExists(database, 'agents', 'avatar_url', 'TEXT');
   addColumnIfNotExists(database, 'agents', 'avatar_source', 'TEXT');
 
+  // --- Network Discovery tables ---
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS discovery_peers (
+      instance_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      shared_secret TEXT,
+      status TEXT NOT NULL DEFAULT 'discovered',
+      host TEXT,
+      port INTEGER,
+      approved_at TEXT,
+      last_seen TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS pair_requests (
+      id TEXT PRIMARY KEY,
+      from_instance_id TEXT NOT NULL,
+      from_name TEXT NOT NULL,
+      from_host TEXT NOT NULL,
+      from_port INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      shared_secret TEXT,
+      created_at TEXT NOT NULL,
+      resolved_at TEXT
+    );
+  `);
+
+  addColumnIfNotExists(database, 'discovery_peers', 'pairing_token', 'TEXT');
+  addColumnIfNotExists(database, 'pair_requests', 'callback_token', 'TEXT');
+
   // Auto-migrate from registered_groups → agents + channel_routes
   migrateRegisteredGroupsToAgents(database);
   migrateRoutesToSubscriptions(database);
@@ -503,6 +535,27 @@ function applyDiscordRequiresTriggerFix(database: Database): void {
     { updatedCount: result.changes },
     'Migration: Discord server channels now require trigger',
   );
+}
+
+export function createTrustStore(): TrustStore {
+  return new TrustStore(db);
+}
+
+export function getOrCreateDiscoveryInstanceId(): string {
+  const row = db
+    .prepare(
+      "SELECT value FROM router_state WHERE key = 'discovery_instance_id'",
+    )
+    .get() as { value: string } | null;
+
+  if (row) return row.value;
+
+  const instanceId = randomUUID();
+  db.prepare(
+    'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
+  ).run('discovery_instance_id', instanceId);
+  logger.info({ instanceId }, 'Generated new discovery instance ID');
+  return instanceId;
 }
 
 export function initDatabase(): void {

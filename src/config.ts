@@ -92,6 +92,7 @@ export const TELEGRAM_BOT_TOKEN = TELEGRAM_BOT_TOKENS[0] || '';
 export const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
 export const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN || '';
 export const POLL_INTERVAL = 2000;
+export const DISCOVERY_POLL_INTERVAL = 10000;
 
 /** Separator used in runtime group folders to isolate multi-agent dispatch state. */
 export const DISPATCH_RUNTIME_SEP = '__dispatch__';
@@ -220,6 +221,11 @@ export const GITHUB_WEBHOOK_PORT = parseInt(
 );
 export const GITHUB_WEBHOOK_PATH =
   process.env.GITHUB_WEBHOOK_PATH || '/webhooks/github';
+
+// --- Network Discovery ---
+// Set DISCOVERY_ENABLED=true to advertise this instance on the LAN via mDNS.
+export const DISCOVERY_ENABLED = process.env.DISCOVERY_ENABLED === 'true';
+export const INSTANCE_NAME = process.env.INSTANCE_NAME || os.hostname();
 
 // --- Web UI ---
 // Set WEB_UI_PORT to enable the web dashboard. Unset = disabled.

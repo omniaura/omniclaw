@@ -33,6 +33,8 @@ import {
   WEB_UI_PASS,
   WEB_UI_HOST,
   WEB_UI_CORS_ORIGIN,
+  DISCOVERY_ENABLED,
+  INSTANCE_NAME,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
 import { SlackChannel } from './channels/slack.js';
@@ -82,6 +84,8 @@ import {
   storeMessage,
   getSubscriptionsForAgent,
   updateAgentAvatar,
+  createTrustStore,
+  getOrCreateDiscoveryInstanceId,
 } from './db.js';
 import { buildAgentToChannelsMapFromSubscriptions } from './channel-routes.js';
 import { resolveContextLayers } from './context-layers.js';
@@ -122,6 +126,13 @@ import {
   type IpcEventKind,
   type WebServerHandle,
 } from './web/index.js';
+import type { WebStateProvider } from './web/types.js';
+import {
+  startDiscovery,
+  TrustStore,
+  type DiscoveryHandle,
+} from './discovery/index.js';
+import { setDiscoveryContext } from './web/routes.js';
 import { Effect } from 'effect';
 
 // Global error handlers to prevent crashes from unhandled rejections/exceptions
@@ -2119,6 +2130,54 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  const webState: WebStateProvider = {
+    getAgents: () => agents,
+    getChannelSubscriptions: () => channelSubscriptions,
+    getTasks: () => getAllTasks(),
+    getTaskById: (id) => getTaskById(id),
+    getMessages: (chatJid, since, limit) => {
+      const msgs = getMessagesSince(chatJid, since);
+      return limit ? msgs.slice(0, limit) : msgs;
+    },
+    getChats: () => getAllChats(),
+    getQueueStats: () => queue.getStats(),
+    getQueueDetails: () => queue.getDetailedStats(),
+    getIpcEvents: (count) => ipcEvents.recent(count),
+    createTask: (task) => dbCreateTask(task),
+    updateTask: (id, updates) => dbUpdateTask(id, updates),
+    deleteTask: (id) => dbDeleteTask(id),
+    calculateNextRun: (type, value) => calculateNextRun(type, value),
+    readContextFile: (layerPath) => {
+      const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
+      const resolved = path.resolve(filePath);
+      try {
+        assertPathWithin(resolved, GROUPS_DIR, 'readContextFile');
+        return fs.readFileSync(resolved, 'utf-8');
+      } catch {
+        return null;
+      }
+    },
+    writeContextFile: (layerPath, content) => {
+      const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
+      const resolved = path.resolve(filePath);
+      assertPathWithin(resolved, GROUPS_DIR, 'writeContextFile');
+      const dir = path.dirname(resolved);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(resolved, content, 'utf-8');
+    },
+    updateAgentAvatar: (agentId, url, source) => {
+      updateAgentAvatar(agentId, url, source);
+      if (agents[agentId]) {
+        agents[agentId].avatarUrl = url || undefined;
+        agents[agentId].avatarSource =
+          (source as Agent['avatarSource']) || undefined;
+      }
+    },
+    resolveChatImage: (chatJid) => resolveChatImageUrl(chatJid),
+    resolveDiscordGuildImage: (guildId, botId) =>
+      resolveDiscordGuildImageUrl(guildId, botId),
+  };
+
   // Expire stale sessions on startup to prevent unbounded context growth
   const expired = expireStaleSessions(SESSION_MAX_AGE);
   if (expired.length > 0) {
@@ -2151,60 +2210,173 @@ async function main(): Promise<void> {
         hostname: WEB_UI_HOST,
         corsOrigin: WEB_UI_CORS_ORIGIN,
       },
-      {
-        getAgents: () => agents,
-        getChannelSubscriptions: () => channelSubscriptions,
-        getTasks: () => getAllTasks(),
-        getTaskById: (id) => getTaskById(id),
-        getMessages: (chatJid, since, limit) => {
-          const msgs = getMessagesSince(chatJid, since);
-          return limit ? msgs.slice(0, limit) : msgs;
-        },
-        getChats: () => getAllChats(),
-        getQueueStats: () => queue.getStats(),
-        getQueueDetails: () => queue.getDetailedStats(),
-        getIpcEvents: (count) => ipcEvents.recent(count),
-        createTask: (task) => dbCreateTask(task),
-        updateTask: (id, updates) => dbUpdateTask(id, updates),
-        deleteTask: (id) => dbDeleteTask(id),
-        calculateNextRun: (type, value) => calculateNextRun(type, value),
-        readContextFile: (layerPath) => {
-          const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
-          const resolved = path.resolve(filePath);
-          try {
-            assertPathWithin(resolved, GROUPS_DIR, 'readContextFile');
-            return fs.readFileSync(resolved, 'utf-8');
-          } catch {
-            return null;
-          }
-        },
-        writeContextFile: (layerPath, content) => {
-          const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
-          const resolved = path.resolve(filePath);
-          assertPathWithin(resolved, GROUPS_DIR, 'writeContextFile');
-          const dir = path.dirname(resolved);
-          fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(resolved, content, 'utf-8');
-        },
-        updateAgentAvatar: (agentId, url, source) => {
-          updateAgentAvatar(agentId, url, source);
-          if (agents[agentId]) {
-            agents[agentId].avatarUrl = url || undefined;
-            agents[agentId].avatarSource =
-              (source as Agent['avatarSource']) || undefined;
-          }
-        },
-        resolveChatImage: (chatJid) => resolveChatImageUrl(chatJid),
-        resolveDiscordGuildImage: (guildId, botId) =>
-          resolveDiscordGuildImageUrl(guildId, botId),
-      },
+      webState,
+      DISCOVERY_ENABLED ? createTrustStore() : undefined,
     );
     stopLogStream = startLogStream(webServer);
+  }
+
+  // --- Network Discovery (opt-in via DISCOVERY_ENABLED env var) ---
+  let discoveryHandle: DiscoveryHandle | undefined;
+  let trustStore: TrustStore | undefined;
+  if (DISCOVERY_ENABLED && webServer) {
+    trustStore = createTrustStore();
+    const instanceId = getOrCreateDiscoveryInstanceId();
+    const version = '1.0.0';
+
+    discoveryHandle = startDiscovery({
+      instanceId,
+      instanceName: INSTANCE_NAME,
+      port: webServer.port,
+      version,
+      onPeerFound: (peer) => {
+        // Track discovered peer in DB
+        trustStore!.upsertPeer(
+          peer.instanceId,
+          peer.name,
+          peer.host,
+          peer.port,
+        );
+        webServer!.broadcast({
+          type: 'peer_discovered',
+          data: peer,
+          timestamp: new Date().toISOString(),
+        });
+      },
+      onPeerLost: (peerInstanceId) => {
+        webServer!.broadcast({
+          type: 'peer_lost',
+          data: { instanceId: peerInstanceId },
+          timestamp: new Date().toISOString(),
+        });
+      },
+    });
+
+    // Wire discovery context into routes
+    setDiscoveryContext(
+      {
+        instanceId,
+        instanceName: INSTANCE_NAME,
+        version,
+        trustStore,
+        discovery: discoveryHandle,
+        state: webState,
+        broadcast: (event) => webServer!.broadcast(event as any),
+      },
+      () => ({
+        instanceId,
+        instanceName: INSTANCE_NAME,
+        discoveryEnabled: true,
+        peers: (() => {
+          const discovered = discoveryHandle!.getPeers();
+          const stored = trustStore!.getAllPeers();
+          const storedMap = new Map(stored.map((p) => [p.instanceId, p]));
+          const result: Array<{
+            instanceId: string;
+            name: string;
+            host: string;
+            port: number;
+            addresses: string[];
+            status: 'discovered' | 'pending' | 'trusted' | 'revoked';
+            online: boolean;
+            approvedAt: string | null;
+            lastSeen: string | null;
+          }> = [];
+
+          for (const [id, disc] of discovered) {
+            const st = storedMap.get(id);
+            result.push({
+              instanceId: id,
+              name: disc.name,
+              host: disc.host,
+              port: disc.port,
+              addresses: disc.addresses,
+              status: (st?.status as any) ?? 'discovered',
+              online: true,
+              approvedAt: st?.approvedAt ?? null,
+              lastSeen: st?.lastSeen ?? null,
+            });
+            storedMap.delete(id);
+          }
+
+          for (const st of storedMap.values()) {
+            if (st.status === 'revoked') continue;
+            result.push({
+              instanceId: st.instanceId,
+              name: st.name,
+              host: st.host ?? '',
+              port: st.port ?? 0,
+              addresses: [],
+              status: st.status as any,
+              online: false,
+              approvedAt: st.approvedAt,
+              lastSeen: st.lastSeen,
+            });
+          }
+
+          return result;
+        })(),
+        pendingRequests: trustStore!.getPendingRequests(),
+      }),
+    );
+
+    // Set the network page state getter on the web server
+    webServer.setNetworkPageState(() => ({
+      instanceId,
+      instanceName: INSTANCE_NAME,
+      discoveryEnabled: true,
+      peers: (() => {
+        const discovered = discoveryHandle!.getPeers();
+        const stored = trustStore!.getAllPeers();
+        const storedMap = new Map(stored.map((p) => [p.instanceId, p]));
+        const result: Array<any> = [];
+
+        for (const [id, disc] of discovered) {
+          const st = storedMap.get(id);
+          result.push({
+            instanceId: id,
+            name: disc.name,
+            host: disc.host,
+            port: disc.port,
+            addresses: disc.addresses,
+            status: st?.status ?? 'discovered',
+            online: true,
+            approvedAt: st?.approvedAt ?? null,
+            lastSeen: st?.lastSeen ?? null,
+          });
+          storedMap.delete(id);
+        }
+
+        for (const st of storedMap.values()) {
+          if (st.status === 'revoked') continue;
+          result.push({
+            instanceId: st.instanceId,
+            name: st.name,
+            host: st.host ?? '',
+            port: st.port ?? 0,
+            addresses: [],
+            status: st.status,
+            online: false,
+            approvedAt: st.approvedAt,
+            lastSeen: st.lastSeen,
+          });
+        }
+
+        return result;
+      })(),
+      pendingRequests: trustStore!.getPendingRequests(),
+    }));
+
+    logger.info(
+      { instanceId, instanceName: INSTANCE_NAME },
+      'Network discovery enabled',
+    );
   }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (discoveryHandle) discoveryHandle.stop();
     if (githubWebhookServer) {
       githubWebhookServer.stop();
       githubWebhookServer = null;

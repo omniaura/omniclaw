@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: '/conversations', label: 'Conversations', page: 'conversations' },
   { href: '/context', label: 'Context', page: 'context' },
   { href: '/ipc', label: 'IPC', page: 'ipc' },
+  { href: '/network', label: 'Network', page: 'network' },
 ];
 
 export function escapeHtml(str: string): string {

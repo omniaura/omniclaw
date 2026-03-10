@@ -10,6 +10,29 @@ import { renderConversations } from './conversations.js';
 import { renderContextViewer } from './context-viewer.js';
 import { renderDashboard } from './dashboard.js';
 import { renderIpcInspector } from './ipc-inspector.js';
+import {
+  handleDiscoveryRequest,
+  type DiscoveryRouteContext,
+} from '../discovery/routes.js';
+import { listLocalContextFiles } from './context-files.js';
+import {
+  renderNetworkPage,
+  renderNetworkContent,
+  type NetworkPageState,
+} from './network.js';
+
+/** Optional discovery context — set by the orchestrator when discovery is enabled. */
+let discoveryContext: DiscoveryRouteContext | null = null;
+let networkPageState: (() => NetworkPageState) | null = null;
+
+/** Called by the orchestrator to wire up discovery routes. */
+export function setDiscoveryContext(
+  ctx: DiscoveryRouteContext,
+  getPageState: () => NetworkPageState,
+): void {
+  discoveryContext = ctx;
+  networkPageState = getPageState;
+}
 
 /**
  * Handle an authenticated HTTP request and return a Response.
@@ -22,6 +45,26 @@ export function handleRequest(
   const url = new URL(req.url);
   const { pathname } = url;
   const method = req.method;
+
+  // --- Discovery API routes ---
+  if (pathname.startsWith('/api/discovery/') && discoveryContext) {
+    const result = handleDiscoveryRequest(req, url, discoveryContext);
+    if (result) return result;
+  }
+
+  // --- Network page ---
+  if (pathname === '/network') {
+    const pageState = networkPageState?.() ?? {
+      instanceId: '',
+      instanceName: '',
+      discoveryEnabled: false,
+      peers: [],
+      pendingRequests: [],
+    };
+    return new Response(renderNetworkPage(pageState), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+  }
 
   // --- API routes ---
   if (pathname === '/api/agents') return handleGetAgents(state);
@@ -47,6 +90,8 @@ export function handleRequest(
   }
 
   // Context file operations
+  if (pathname === '/api/context/files' && method === 'GET')
+    return handleListContextFiles();
   if (pathname === '/api/context/layers')
     return handleGetContextLayers(url, state);
   if (pathname === '/api/context/file') {
@@ -459,6 +504,10 @@ function handleGetStats(state: WebStateProvider): Response {
 }
 
 // ---- Context handlers ----
+
+function handleListContextFiles(): Response {
+  return json(listLocalContextFiles());
+}
 
 function handleGetContextLayers(url: URL, state: WebStateProvider): Response {
   const folder = url.searchParams.get('folder') || '';
