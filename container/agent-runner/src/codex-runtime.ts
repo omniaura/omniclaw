@@ -11,7 +11,11 @@
  * OPENAI_API_KEY / CODEX_API_KEY env vars.
  */
 
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import {
+  spawn,
+  spawnSync,
+  type ChildProcessWithoutNullStreams,
+} from 'node:child_process';
 import fs from 'fs';
 import path from 'path';
 import readline from 'node:readline';
@@ -35,6 +39,7 @@ interface ContainerInput {
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
+  networkMode?: 'full' | 'none';
   isScheduledTask?: boolean;
   discordGuildId?: string;
   serverFolder?: string;
@@ -144,9 +149,7 @@ function log(message: string): void {
 
 /** Resolve IPC input directory based on whether this is a scheduled task. */
 function resolveIpcInputDir(isScheduledTask?: boolean): string {
-  return isScheduledTask
-    ? '/workspace/ipc/input-task'
-    : '/workspace/ipc/input';
+  return isScheduledTask ? '/workspace/ipc/input-task' : '/workspace/ipc/input';
 }
 
 function asObject(value: unknown): Record<string, unknown> | undefined {
@@ -156,7 +159,10 @@ function asObject(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
-function readObject(value: unknown, key?: string): Record<string, unknown> | undefined {
+function readObject(
+  value: unknown,
+  key?: string,
+): Record<string, unknown> | undefined {
   const target =
     key === undefined
       ? value
@@ -180,10 +186,17 @@ function readBoolean(value: unknown, key: string): boolean | undefined {
   return typeof candidate === 'boolean' ? candidate : undefined;
 }
 
-function readRouteFields(params: unknown): { turnId?: string; itemId?: string } {
+function readRouteFields(params: unknown): {
+  turnId?: string;
+  itemId?: string;
+} {
   return {
-    turnId: readString(params, 'turnId') ?? readString(readObject(params, 'turn'), 'id'),
-    itemId: readString(params, 'itemId') ?? readString(readObject(params, 'item'), 'id'),
+    turnId:
+      readString(params, 'turnId') ??
+      readString(readObject(params, 'turn'), 'id'),
+    itemId:
+      readString(params, 'itemId') ??
+      readString(readObject(params, 'item'), 'id'),
   };
 }
 
@@ -191,22 +204,24 @@ function isServerRequest(value: unknown): value is JsonRpcRequest {
   const candidate = asObject(value);
   return Boolean(
     candidate &&
-      typeof candidate.method === 'string' &&
-      (typeof candidate.id === 'string' || typeof candidate.id === 'number'),
+    typeof candidate.method === 'string' &&
+    (typeof candidate.id === 'string' || typeof candidate.id === 'number'),
   );
 }
 
 function isServerNotification(value: unknown): value is JsonRpcNotification {
   const candidate = asObject(value);
-  return Boolean(candidate && typeof candidate.method === 'string' && !('id' in candidate));
+  return Boolean(
+    candidate && typeof candidate.method === 'string' && !('id' in candidate),
+  );
 }
 
 function isResponse(value: unknown): value is JsonRpcResponse {
   const candidate = asObject(value);
   return Boolean(
     candidate &&
-      (typeof candidate.id === 'string' || typeof candidate.id === 'number') &&
-      typeof candidate.method !== 'string',
+    (typeof candidate.id === 'string' || typeof candidate.id === 'number') &&
+    typeof candidate.method !== 'string',
   );
 }
 
@@ -259,7 +274,12 @@ export function extractAssistantTextFromItem(item: unknown): string | null {
   return extractTextFromCodexContent(record.content);
 }
 
-function upsertTurnItem(turnState: TurnState, itemId: string, text: string, append = false): void {
+function upsertTurnItem(
+  turnState: TurnState,
+  itemId: string,
+  text: string,
+  append = false,
+): void {
   if (!turnState.itemOrder.includes(itemId)) {
     turnState.itemOrder.push(itemId);
   }
@@ -274,7 +294,10 @@ function finalizeTurnText(turnState: TurnState): string | null {
   return parts.length > 0 ? parts.join('\n') : null;
 }
 
-function rejectPendingRequests(session: CodexAppServerSession, message: string): void {
+function rejectPendingRequests(
+  session: CodexAppServerSession,
+  message: string,
+): void {
   for (const pending of session.pending.values()) {
     clearTimeout(pending.timeout);
     pending.reject(new Error(message));
@@ -289,7 +312,10 @@ function failActiveTurn(session: CodexAppServerSession, message: string): void {
   turnState.reject(new Error(message));
 }
 
-function writeJsonRpcMessage(session: CodexAppServerSession, message: unknown): void {
+function writeJsonRpcMessage(
+  session: CodexAppServerSession,
+  message: unknown,
+): void {
   if (!session.child.stdin.writable) {
     throw new Error('Cannot write to codex app-server stdin.');
   }
@@ -327,7 +353,10 @@ function handleServerRequest(
   });
 }
 
-function handleResponse(session: CodexAppServerSession, response: JsonRpcResponse): void {
+function handleResponse(
+  session: CodexAppServerSession,
+  response: JsonRpcResponse,
+): void {
   const pending = session.pending.get(String(response.id));
   if (!pending) return;
 
@@ -335,7 +364,9 @@ function handleResponse(session: CodexAppServerSession, response: JsonRpcRespons
   session.pending.delete(String(response.id));
 
   if (response.error?.message) {
-    pending.reject(new Error(`${pending.method} failed: ${String(response.error.message)}`));
+    pending.reject(
+      new Error(`${pending.method} failed: ${String(response.error.message)}`),
+    );
     return;
   }
 
@@ -377,7 +408,9 @@ function handleNotification(
 
   if (notification.method === 'item/completed') {
     if (session.turnState && route.itemId) {
-      const text = extractAssistantTextFromItem(readObject(notification.params, 'item'));
+      const text = extractAssistantTextFromItem(
+        readObject(notification.params, 'item'),
+      );
       if (text) {
         const existing = session.turnState.textByItem.get(route.itemId) || '';
         if (!existing.trim()) {
@@ -593,6 +626,7 @@ export function buildCodexTurnStartParams(input: {
   threadId: string;
   prompt: string;
   model?: string;
+  networkMode?: 'full' | 'none';
 }) {
   return {
     threadId: input.threadId,
@@ -603,6 +637,11 @@ export function buildCodexTurnStartParams(input: {
         text_elements: [],
       },
     ],
+    approvalPolicy: 'never' as const,
+    sandboxPolicy: {
+      type: 'externalSandbox' as const,
+      networkAccess: input.networkMode === 'none' ? 'restricted' : 'enabled',
+    },
     ...(input.model ? { model: input.model } : {}),
   };
 }
@@ -618,7 +657,9 @@ function readThreadIdFromResponse(response: unknown, method: string): string {
 }
 
 export function isRecoverableThreadResumeError(error: unknown): boolean {
-  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  const message = (
+    error instanceof Error ? error.message : String(error)
+  ).toLowerCase();
   if (!message.includes('thread/resume')) {
     return false;
   }
@@ -641,7 +682,7 @@ async function startCodexAppServer(
 ): Promise<CodexAppServerSession> {
   assertCodexCliAvailable(cwd, env);
 
-  const child = spawn('codex', ['app-server'], {
+  const child = spawn('codex', buildCodexAppServerArgs(), {
     cwd,
     env: env as NodeJS.ProcessEnv,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -665,7 +706,10 @@ async function startCodexAppServer(
       'account/read',
       {},
     );
-    const accountType = readString(readObject(accountReadResponse, 'account'), 'type');
+    const accountType = readString(
+      readObject(accountReadResponse, 'account'),
+      'type',
+    );
     if (accountType) {
       log(`Codex account type: ${accountType}`);
     }
@@ -731,6 +775,7 @@ async function runCodexTurn(
     threadId: string;
     prompt: string;
     model?: string;
+    networkMode?: 'full' | 'none';
     timeoutMs: number;
   },
 ): Promise<CodexTurnResult> {
@@ -759,6 +804,7 @@ async function runCodexTurn(
         threadId: opts.threadId,
         prompt: opts.prompt,
         model: opts.model,
+        networkMode: opts.networkMode,
       }),
     );
     const responseTurnId = readString(readObject(response, 'turn'), 'id');
@@ -893,9 +939,7 @@ function buildSystemContext(containerInput: ContainerInput): string | null {
   ) {
     const identityParts = [`You are **${containerInput.agentName}**.`];
     if (containerInput.agentTrigger) {
-      identityParts.push(
-        `Your trigger is \`${containerInput.agentTrigger}\`.`,
-      );
+      identityParts.push(`Your trigger is \`${containerInput.agentTrigger}\`.`);
     }
     if (containerInput.discordBotId) {
       identityParts.push(
@@ -956,6 +1000,10 @@ export function buildCodexEnv(
   return env;
 }
 
+export function buildCodexAppServerArgs(): string[] {
+  return ['--dangerously-bypass-approvals-and-sandbox', 'app-server'];
+}
+
 // ---------------------------------------------------------------------------
 // Main runtime entry point
 // ---------------------------------------------------------------------------
@@ -1014,7 +1062,9 @@ export async function runCodexRuntime(
 
     const pending = drainIpcInput();
     if (pending.length > 0) {
-      log(`Draining ${pending.length} pending IPC messages into initial prompt`);
+      log(
+        `Draining ${pending.length} pending IPC messages into initial prompt`,
+      );
       prompt += '\n' + formatIpcMessages(pending);
     }
 
@@ -1024,11 +1074,14 @@ export async function runCodexRuntime(
         break;
       }
 
-      log(`Running Codex turn (${prompt.length} chars) on thread ${threadId}...`);
+      log(
+        `Running Codex turn (${prompt.length} chars) on thread ${threadId}...`,
+      );
       const turn = await runCodexTurn(session, {
         threadId,
         prompt,
         model,
+        networkMode: containerInput.networkMode,
         timeoutMs: TURN_TIMEOUT_MS,
       });
 

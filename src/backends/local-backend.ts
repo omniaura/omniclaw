@@ -154,10 +154,14 @@ export function buildVolumeMounts(
     categoryFolder?: string;
     agentContextFolder?: string;
   },
+  pathOverrides?: {
+    homeDir?: string;
+    projectRoot?: string;
+  },
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
-  const homeDir = getHomeDir();
-  const projectRoot = process.cwd();
+  const homeDir = pathOverrides?.homeDir || getHomeDir();
+  const projectRoot = pathOverrides?.projectRoot || process.cwd();
 
   const folder = getFolder(group);
   const runtimeFolderName = runtimeFolder || folder;
@@ -570,11 +574,13 @@ export class LocalBackend implements AgentBackend {
       },
     );
     const containerName = makeContainerName(folder, runtimeFolder);
+    const effectiveNetwork =
+      containerCfg?.networkMode ?? (input.isMain ? 'full' : 'none');
     const containerArgs = buildContainerArgs({
       mounts,
       containerName,
       isMain: input.isMain,
-      networkMode: containerCfg?.networkMode,
+      networkMode: effectiveNetwork,
     });
     const configTimeout = containerCfg?.timeout || CONTAINER_TIMEOUT;
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
@@ -625,7 +631,12 @@ export class LocalBackend implements AgentBackend {
     if (typeof container.stdin === 'number' || !container.stdin) {
       throw new Error('Container stdin is not a writable stream');
     }
-    container.stdin.write(JSON.stringify(input));
+    container.stdin.write(
+      JSON.stringify({
+        ...input,
+        networkMode: effectiveNetwork,
+      }),
+    );
     container.stdin.end();
 
     const killOnTimeout = () => {

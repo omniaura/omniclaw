@@ -89,18 +89,18 @@ A multi-channel agent orchestration framework powered by Claude, with persistent
 
 ### Technology Stack
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| Runtime | Bun 1.x | Host process and build tool |
-| WhatsApp | @whiskeysockets/baileys | WhatsApp Web protocol |
-| Discord | discord.js | Discord bot integration |
-| Telegram | grammy | Telegram Bot API |
-| Slack | @slack/bolt + @slack/web-api | Slack Socket Mode integration |
-| Message Storage | SQLite (bun:sqlite) | Store messages, groups, tasks, sessions |
-| Agent SDK | @anthropic-ai/claude-agent-sdk | Run Claude with tools and MCP servers |
-| Browser | agent-browser + Chromium | Web interaction and screenshots |
-| Effect System | Effect | Structured error handling and observability |
-| Logging | Pino (structured JSON) | Runtime logging |
+| Component       | Technology                     | Purpose                                     |
+| --------------- | ------------------------------ | ------------------------------------------- |
+| Runtime         | Bun 1.x                        | Host process and build tool                 |
+| WhatsApp        | @whiskeysockets/baileys        | WhatsApp Web protocol                       |
+| Discord         | discord.js                     | Discord bot integration                     |
+| Telegram        | grammy                         | Telegram Bot API                            |
+| Slack           | @slack/bolt + @slack/web-api   | Slack Socket Mode integration               |
+| Message Storage | SQLite (bun:sqlite)            | Store messages, groups, tasks, sessions     |
+| Agent SDK       | @anthropic-ai/claude-agent-sdk | Run Claude with tools and MCP servers       |
+| Browser         | agent-browser + Chromium       | Web interaction and screenshots             |
+| Effect System   | Effect                         | Structured error handling and observability |
+| Logging         | Pino (structured JSON)         | Runtime logging                             |
 
 ---
 
@@ -215,40 +215,40 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 
 ### Core Settings
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `ASSISTANT_NAME` | `Omni` | Bot name and trigger pattern |
-| `POLL_INTERVAL` | `2000` | Message polling interval (ms) |
-| `SCHEDULER_POLL_INTERVAL` | `60000` | Task scheduler check interval (ms) |
-| `IPC_POLL_INTERVAL` | `30000` | IPC watcher polling interval (ms) |
-| `CONTAINER_TIMEOUT` | `1800000` | Container execution timeout (30min) |
-| `CONTAINER_STARTUP_TIMEOUT` | `120000` | Container startup timeout (2min) |
-| `IDLE_TIMEOUT` | `1800000` | Keep container alive after last result (30min) |
-| `SESSION_MAX_AGE` | `14400000` | Rotate sessions after 4 hours |
-| `MAX_CONCURRENT_CONTAINERS` | `8` | Global container concurrency limit |
-| `MAX_TASK_CONTAINERS` | `MAX_CONCURRENT_CONTAINERS - 1` | Containers reserved for scheduled tasks |
-| `CONTAINER_IMAGE` | `omniclaw-agent:latest` | Container image name |
-| `CONTAINER_MEMORY` | `4G` | Container memory limit |
-| `TZ` | System timezone | Timezone for scheduled tasks |
+| Variable                    | Default                         | Purpose                                        |
+| --------------------------- | ------------------------------- | ---------------------------------------------- |
+| `ASSISTANT_NAME`            | `Omni`                          | Bot name and trigger pattern                   |
+| `POLL_INTERVAL`             | `2000`                          | Message polling interval (ms)                  |
+| `SCHEDULER_POLL_INTERVAL`   | `60000`                         | Task scheduler check interval (ms)             |
+| `IPC_POLL_INTERVAL`         | `30000`                         | IPC watcher polling interval (ms)              |
+| `CONTAINER_TIMEOUT`         | `1800000`                       | Container execution timeout (30min)            |
+| `CONTAINER_STARTUP_TIMEOUT` | `120000`                        | Container startup timeout (2min)               |
+| `IDLE_TIMEOUT`              | `1800000`                       | Keep container alive after last result (30min) |
+| `SESSION_MAX_AGE`           | `14400000`                      | Rotate sessions after 4 hours                  |
+| `MAX_CONCURRENT_CONTAINERS` | `8`                             | Global container concurrency limit             |
+| `MAX_TASK_CONTAINERS`       | `MAX_CONCURRENT_CONTAINERS - 1` | Containers reserved for scheduled tasks        |
+| `CONTAINER_IMAGE`           | `omniclaw-agent:latest`         | Container image name                           |
+| `CONTAINER_MEMORY`          | `4G`                            | Container memory limit                         |
+| `TZ`                        | System timezone                 | Timezone for scheduled tasks                   |
 
 ### Channel Credentials
 
-| Variable | Required For | Purpose |
-|----------|-------------|---------|
-| `DISCORD_BOT_TOKEN` | Discord | Single bot token (backward compatible) |
-| `DISCORD_BOT_IDS` | Discord | Ordered bot IDs for prefixed multi-bot config (e.g. `CLAUDE,OPENCODE`) |
-| `DISCORD_BOT_<ID>_TOKEN` | Discord | Token for a specific Discord bot ID |
-| `DISCORD_BOT_<ID>_RUNTIME` | Discord | Default runtime for that bot ID (`claude-agent-sdk`, `opencode`, or `codex`) |
-| `DISCORD_BOT_DEFAULT` | Discord | Default bot ID for unassigned Discord channels |
-| `TELEGRAM_BOT_TOKENS` | Telegram | Comma/newline-separated bot tokens for multi-bot mode |
-| `TELEGRAM_BOT_TOKEN` | Telegram | Legacy single bot token (backward compatible) |
-| `TELEGRAM_ONLY` | Telegram | Run Telegram-only mode (no WhatsApp) |
-| `SLACK_BOT_IDS` | Slack | Ordered bot IDs for prefixed multi-bot config (e.g. `OPS,SUPPORT`) |
-| `SLACK_BOT_<ID>_TOKEN` | Slack | Bot token (xoxb-...) for a specific Slack bot ID |
-| `SLACK_BOT_<ID>_APP_TOKEN` | Slack | App token (xapp-...) for a specific Slack bot ID |
-| `SLACK_BOT_DEFAULT` | Slack | Default Slack bot ID for legacy/unscoped Slack routes in multi-bot mode |
-| `SLACK_BOT_TOKEN` | Slack | Bot token (xoxb-...) |
-| `SLACK_APP_TOKEN` | Slack | Legacy app token for single-bot Socket Mode |
+| Variable                   | Required For | Purpose                                                                      |
+| -------------------------- | ------------ | ---------------------------------------------------------------------------- |
+| `DISCORD_BOT_TOKEN`        | Discord      | Single bot token (backward compatible)                                       |
+| `DISCORD_BOT_IDS`          | Discord      | Ordered bot IDs for prefixed multi-bot config (e.g. `CLAUDE,OPENCODE`)       |
+| `DISCORD_BOT_<ID>_TOKEN`   | Discord      | Token for a specific Discord bot ID                                          |
+| `DISCORD_BOT_<ID>_RUNTIME` | Discord      | Default runtime for that bot ID (`claude-agent-sdk`, `opencode`, or `codex`) |
+| `DISCORD_BOT_DEFAULT`      | Discord      | Default bot ID for unassigned Discord channels                               |
+| `TELEGRAM_BOT_TOKENS`      | Telegram     | Comma/newline-separated bot tokens for multi-bot mode                        |
+| `TELEGRAM_BOT_TOKEN`       | Telegram     | Legacy single bot token (backward compatible)                                |
+| `TELEGRAM_ONLY`            | Telegram     | Run Telegram-only mode (no WhatsApp)                                         |
+| `SLACK_BOT_IDS`            | Slack        | Ordered bot IDs for prefixed multi-bot config (e.g. `OPS,SUPPORT`)           |
+| `SLACK_BOT_<ID>_TOKEN`     | Slack        | Bot token (xoxb-...) for a specific Slack bot ID                             |
+| `SLACK_BOT_<ID>_APP_TOKEN` | Slack        | App token (xapp-...) for a specific Slack bot ID                             |
+| `SLACK_BOT_DEFAULT`        | Slack        | Default Slack bot ID for legacy/unscoped Slack routes in multi-bot mode      |
+| `SLACK_BOT_TOKEN`          | Slack        | Bot token (xoxb-...)                                                         |
+| `SLACK_APP_TOKEN`          | Slack        | Legacy app token for single-bot Socket Mode                                  |
 
 Discord multi-bot examples:
 
@@ -303,20 +303,23 @@ SLACK_BOT_DEFAULT=OPS
 ### Backend Credentials
 
 | Variable | Backend | Purpose |
-|----------|---------|---------|
+| -------- | ------- | ------- |
 
 ### Claude Authentication
 
 Configure in `.env` (project root):
 
 **Option 1: Claude Subscription (OAuth)**
+
 ```bash
 # Option 1: Claude Subscription (OAuth token)
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
 ```
 
 # Option 2: Pay-per-use API Key
+
 ANTHROPIC_API_KEY=sk-ant-api03-...
+
 ```
 
 Only auth and selected runtime variables are extracted to per-runtime files under
@@ -347,7 +350,7 @@ CODEX_API_KEY=your_openai_api_key
 CODEX_MODEL=gpt-5.3-codex
 ```
 
-The Codex runtime starts `codex app-server` inside the container and talks to it over JSON-RPC/stdio. Threads use `workspace-write` sandboxing with `never` approval, and OmniClaw persists the provider thread id as the session id for explicit `thread/resume` on follow-up turns.
+The Codex runtime starts `codex --dangerously-bypass-approvals-and-sandbox app-server` inside the container and talks to it over JSON-RPC/stdio. Thread configuration keeps `never` approval, and each turn declares the container as an `externalSandbox` so Codex does not try to apply its native sandbox inside OmniClaw's container sandbox. OmniClaw persists the provider thread id as the session id for explicit `thread/resume` on follow-up turns.
 
 ### Container Configuration
 
@@ -379,7 +382,11 @@ OmniClaw supports 4 messaging platforms simultaneously. Channels are abstracted 
 interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string, replyToMessageId?: string): Promise<string | void>;
+  sendMessage(
+    jid: string,
+    text: string,
+    replyToMessageId?: string,
+  ): Promise<string | void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
@@ -394,12 +401,12 @@ interface Channel {
 
 ### Supported Channels
 
-| Channel | Library | JID Format | Features |
-|---------|---------|------------|----------|
-| WhatsApp | baileys | `123@s.whatsapp.net`, `123@g.us` | Messages, reactions, typing, groups |
-| Discord | discord.js | `dc:channel_id` | Messages, reactions, typing, threads, guild context |
-| Telegram | grammy | `tg:bot_id:chat_id` (legacy `tg:chat_id` compat) | Messages, reactions, typing, groups, DMs |
-| Slack | @slack/bolt | `slack:channel_id` | Messages, typing, Socket Mode, threads |
+| Channel  | Library     | JID Format                                       | Features                                            |
+| -------- | ----------- | ------------------------------------------------ | --------------------------------------------------- |
+| WhatsApp | baileys     | `123@s.whatsapp.net`, `123@g.us`                 | Messages, reactions, typing, groups                 |
+| Discord  | discord.js  | `dc:channel_id`                                  | Messages, reactions, typing, threads, guild context |
+| Telegram | grammy      | `tg:bot_id:chat_id` (legacy `tg:chat_id` compat) | Messages, reactions, typing, groups, DMs            |
+| Slack    | @slack/bolt | `slack:channel_id`                               | Messages, typing, Socket Mode, threads              |
 
 ### Trigger Behavior
 
@@ -429,10 +436,10 @@ interface Backend {
 
 ### Supported Backends
 
-| Backend | Type | Environment | Use Case |
-|---------|------|-------------|----------|
-| Apple Container | `apple-container` | macOS (local) | Development, local agents |
-| Docker | `docker` | Any (local) | Cross-platform local execution |
+| Backend         | Type              | Environment   | Use Case                       |
+| --------------- | ----------------- | ------------- | ------------------------------ |
+| Apple Container | `apple-container` | macOS (local) | Development, local agents      |
+| Docker          | `docker`          | Any (local)   | Cross-platform local execution |
 
 ### Backend Selection
 
@@ -441,7 +448,7 @@ Each agent has a `backend` field that determines where it runs:
 ```typescript
 interface Agent {
   id: string;
-  backend: BackendType;  // 'apple-container' | 'docker'
+  backend: BackendType; // 'apple-container' | 'docker'
   // ...
 }
 ```
@@ -458,15 +465,15 @@ OmniClaw decouples **agents** from **channels** via a routing layer. One agent c
 
 ```typescript
 interface Agent {
-  id: string;                // "main", "omniaura-discord"
+  id: string; // "main", "omniaura-discord"
   name: string;
-  folder: string;            // Workspace folder
+  folder: string; // Workspace folder
   backend: BackendType;
   containerConfig?: ContainerConfig;
   heartbeat?: HeartbeatConfig;
-  isAdmin: boolean;          // Main agent = true
-  isLocal: boolean;          // Runs on local machine
-  serverFolder?: string;     // Shared server context
+  isAdmin: boolean; // Main agent = true
+  isLocal: boolean; // Runs on local machine
+  serverFolder?: string; // Shared server context
 }
 ```
 
@@ -474,8 +481,8 @@ interface Agent {
 
 ```typescript
 interface ChannelRoute {
-  channelJid: string;        // "dc:123", "tg:-100...", "123@g.us"
-  agentId: string;           // FK to Agent.id
+  channelJid: string; // "dc:123", "tg:-100...", "123@g.us"
+  agentId: string; // FK to Agent.id
   trigger: string;
   requiresTrigger: boolean;
   discordGuildId?: string;
@@ -492,12 +499,12 @@ OmniClaw uses a hierarchical memory system based on CLAUDE.md files.
 
 ### Memory Hierarchy
 
-| Level | Location | Read By | Written By | Purpose |
-|-------|----------|---------|------------|---------|
-| **Global** | `groups/CLAUDE.md` | All agents | Main only | Shared preferences, facts, context |
-| **Agent** | `groups/{folder}/CLAUDE.md` | That agent | That agent | Agent-specific context and memory |
-| **Files** | `groups/{folder}/*.md` | That agent | That agent | Notes, research, documents |
-| **Server** | `groups/servers/{guild}/` | Guild agents | Guild agents | Shared Discord server context |
+| Level      | Location                    | Read By      | Written By   | Purpose                            |
+| ---------- | --------------------------- | ------------ | ------------ | ---------------------------------- |
+| **Global** | `groups/CLAUDE.md`          | All agents   | Main only    | Shared preferences, facts, context |
+| **Agent**  | `groups/{folder}/CLAUDE.md` | That agent   | That agent   | Agent-specific context and memory  |
+| **Files**  | `groups/{folder}/*.md`      | That agent   | That agent   | Notes, research, documents         |
+| **Server** | `groups/servers/{guild}/`   | Guild agents | Guild agents | Shared Discord server context      |
 
 ### How Memory Works
 
@@ -607,11 +614,11 @@ When a triggered message arrives, the agent receives all messages since its last
 
 ### Schedule Types
 
-| Type | Value Format | Example |
-|------|--------------|---------|
-| `cron` | Cron expression (local time) | `0 9 * * 1` (Mondays at 9am) |
-| `interval` | Milliseconds | `3600000` (every hour) |
-| `once` | Local ISO timestamp (no Z suffix) | `2026-12-25T09:00:00` |
+| Type       | Value Format                      | Example                      |
+| ---------- | --------------------------------- | ---------------------------- |
+| `cron`     | Cron expression (local time)      | `0 9 * * 1` (Mondays at 9am) |
+| `interval` | Milliseconds                      | `3600000` (every hour)       |
+| `once`     | Local ISO timestamp (no Z suffix) | `2026-12-25T09:00:00`        |
 
 ### Heartbeat System
 
@@ -635,36 +642,36 @@ The `omniclaw` MCP server runs inside each container via stdio, providing 16 too
 
 ### Task Management
 
-| Tool | Purpose |
-|------|---------|
-| `send_message` | Send a message to the group (supports multi-channel routing) |
-| `schedule_task` | Schedule a recurring or one-time task |
-| `list_tasks` | Show tasks (group's tasks, or all if main) |
-| `pause_task` | Pause a task |
-| `resume_task` | Resume a paused task |
-| `cancel_task` | Delete a task |
+| Tool            | Purpose                                                      |
+| --------------- | ------------------------------------------------------------ |
+| `send_message`  | Send a message to the group (supports multi-channel routing) |
+| `schedule_task` | Schedule a recurring or one-time task                        |
+| `list_tasks`    | Show tasks (group's tasks, or all if main)                   |
+| `pause_task`    | Pause a task                                                 |
+| `resume_task`   | Resume a paused task                                         |
+| `cancel_task`   | Delete a task                                                |
 
 ### Messaging & Reactions
 
-| Tool | Purpose |
-|------|---------|
-| `send_message` | Send a message to the current channel |
-| `react_to_message` | Add/remove emoji reaction on a message |
-| `format_mention` | Format an @mention for the current platform |
+| Tool               | Purpose                                     |
+| ------------------ | ------------------------------------------- |
+| `send_message`     | Send a message to the current channel       |
+| `react_to_message` | Add/remove emoji reaction on a message      |
+| `format_mention`   | Format an @mention for the current platform |
 
 ### Heartbeat & Groups
 
-| Tool | Purpose |
-|------|---------|
+| Tool                  | Purpose                              |
+| --------------------- | ------------------------------------ |
 | `configure_heartbeat` | Enable/disable heartbeat for a group |
-| `register_group` | Register a new group/channel |
+| `register_group`      | Register a new group/channel         |
 
 ### Inter-Agent Communication
 
-| Tool | Purpose |
-|------|---------|
+| Tool                         | Purpose                                    |
+| ---------------------------- | ------------------------------------------ |
 | `send_message` (cross-agent) | Send a direct message to another agent/JID |
-| `list_agents` | List all registered agents |
+| `list_agents`                | List all registered agents                 |
 
 ---
 
@@ -754,6 +761,7 @@ See [SECURITY.md](./SECURITY.md) for the complete security model. Key points:
 ### Container Isolation (Primary Boundary)
 
 All agents run in isolated containers (Apple Container or Docker):
+
 - **Filesystem isolation** — Only mounted directories visible
 - **Process isolation** — Container processes cannot affect host
 - **Non-root execution** — Runs as unprivileged `bun` user
@@ -789,6 +797,7 @@ Main group's project root mounted read-only at `/workspace/project`. Prevents co
 ### Path Traversal Prevention
 
 Multi-layer defense across:
+
 - IPC handlers (`ipc-file-security.ts`)
 - File transfer (`file-transfer.ts`)
 - All backends (`path-security.ts`)
@@ -801,13 +810,13 @@ Multi-layer defense across:
 
 ### Common Issues
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| No response to messages | Service not running | Check `launchctl list \| grep omniclaw` |
-| Agent timeout | Container startup stuck | Check `CONTAINER_STARTUP_TIMEOUT` (default 2min) |
-| Slow session resume | Large session transcript | `resumeAt` should be persisted; check session age |
-| Session not continuing | Session expired | Sessions rotate after `SESSION_MAX_AGE` (4 hours) |
-| "QR code expired" | WhatsApp session expired | Delete `store/auth/` and restart |
+| Issue                              | Cause                         | Solution                                                      |
+| ---------------------------------- | ----------------------------- | ------------------------------------------------------------- |
+| No response to messages            | Service not running           | Check `launchctl list \| grep omniclaw`                       |
+| Agent timeout                      | Container startup stuck       | Check `CONTAINER_STARTUP_TIMEOUT` (default 2min)              |
+| Slow session resume                | Large session transcript      | `resumeAt` should be persisted; check session age             |
+| Session not continuing             | Session expired               | Sessions rotate after `SESSION_MAX_AGE` (4 hours)             |
+| "QR code expired"                  | WhatsApp session expired      | Delete `store/auth/` and restart                              |
 | Multiple containers for same agent | Multi-channel duplicate spawn | Fixed by agent-channel model (one container per agent folder) |
 
 ### Log Location

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
 import {
+  buildCodexAppServerArgs,
   buildCodexEnv,
   buildCodexThreadResumeParams,
   buildCodexThreadStartParams,
@@ -62,6 +63,15 @@ describe('buildCodexEnv', () => {
   });
 });
 
+describe('buildCodexAppServerArgs', () => {
+  it('bypasses Codex native sandboxing when already inside a container sandbox', () => {
+    expect(buildCodexAppServerArgs()).toEqual([
+      '--dangerously-bypass-approvals-and-sandbox',
+      'app-server',
+    ]);
+  });
+});
+
 describe('buildCodexThreadStartParams', () => {
   it('uses workspace-write with never approval and developer instructions', () => {
     expect(
@@ -100,12 +110,13 @@ describe('buildCodexThreadResumeParams', () => {
 });
 
 describe('buildCodexTurnStartParams', () => {
-  it('wraps prompt text in app-server turn input format', () => {
+  it('wraps prompt text in app-server turn input format and marks the container as the external sandbox', () => {
     expect(
       buildCodexTurnStartParams({
         threadId: 'thread_123',
         prompt: 'hello',
         model: 'gpt-5.4',
+        networkMode: 'full',
       }),
     ).toEqual({
       threadId: 'thread_123',
@@ -117,6 +128,35 @@ describe('buildCodexTurnStartParams', () => {
           text_elements: [],
         },
       ],
+      approvalPolicy: 'never',
+      sandboxPolicy: {
+        type: 'externalSandbox',
+        networkAccess: 'enabled',
+      },
+    });
+  });
+
+  it('marks no-network containers as restricted external sandboxes', () => {
+    expect(
+      buildCodexTurnStartParams({
+        threadId: 'thread_123',
+        prompt: 'hello',
+        networkMode: 'none',
+      }),
+    ).toEqual({
+      threadId: 'thread_123',
+      input: [
+        {
+          type: 'text',
+          text: 'hello',
+          text_elements: [],
+        },
+      ],
+      approvalPolicy: 'never',
+      sandboxPolicy: {
+        type: 'externalSandbox',
+        networkAccess: 'restricted',
+      },
     });
   });
 });
