@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import fs from 'fs';
 import path from 'path';
 
@@ -50,12 +50,21 @@ function makeState(agent: Agent): WebStateProvider {
 
 const realFetch = globalThis.fetch;
 
-afterEach(() => {
-  globalThis.fetch = realFetch;
+function clearImageCache(): void {
   fs.rmSync(path.join(DATA_DIR, 'image-cache'), {
     recursive: true,
     force: true,
   });
+}
+
+beforeEach(() => {
+  globalThis.fetch = realFetch;
+  clearImageCache();
+});
+
+afterEach(() => {
+  globalThis.fetch = realFetch;
+  clearImageCache();
 });
 
 describe('handleRequest avatar image proxy', () => {

@@ -25,6 +25,7 @@ import {
   ROSTER_REFRESH_INTERVAL,
   SESSION_MAX_AGE,
   SLACK_BOTS,
+  SLACK_DEFAULT_BOT_ID,
   TELEGRAM_BOT_TOKENS,
   TRIGGER_PATTERN,
   WEB_UI_PORT,
@@ -380,10 +381,12 @@ function getPreferredChannelBotId(
   discordBotId?: string,
 ): string | undefined {
   if (jid.startsWith('dc:')) return discordBotId || getDiscordBotIdForJid(jid);
+  if (jid.startsWith('slack:')) {
+    const scopedSlack = parseScopedSlackJid(jid);
+    return scopedSlack?.botId || SLACK_DEFAULT_BOT_ID;
+  }
   const scopedTelegram = parseScopedTelegramJid(jid);
   if (scopedTelegram) return scopedTelegram.botId;
-  const scopedSlack = parseScopedSlackJid(jid);
-  if (scopedSlack) return scopedSlack.botId;
   return undefined;
 }
 
@@ -2634,7 +2637,8 @@ async function main(): Promise<void> {
                 token: bot.token,
                 appToken: bot.appToken,
                 multiBotMode: SLACK_BOTS.length > 1,
-                allowLegacyJidRouting: SLACK_BOTS.length <= 1,
+                allowLegacyJidRouting:
+                  SLACK_BOTS.length <= 1 || bot.id === SLACK_DEFAULT_BOT_ID,
                 onMessage: (chatJid, msg) => storeMessage(msg),
                 onChatMetadata: (chatJid, timestamp, name) =>
                   storeChatMetadata(chatJid, timestamp, name),

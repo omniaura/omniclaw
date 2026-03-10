@@ -246,7 +246,7 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 | `SLACK_BOT_IDS` | Slack | Ordered bot IDs for prefixed multi-bot config (e.g. `OPS,SUPPORT`) |
 | `SLACK_BOT_<ID>_TOKEN` | Slack | Bot token (xoxb-...) for a specific Slack bot ID |
 | `SLACK_BOT_<ID>_APP_TOKEN` | Slack | App token (xapp-...) for a specific Slack bot ID |
-| `SLACK_BOT_DEFAULT` | Slack | Default Slack bot ID when needed |
+| `SLACK_BOT_DEFAULT` | Slack | Default Slack bot ID for legacy/unscoped Slack routes in multi-bot mode |
 | `SLACK_BOT_TOKEN` | Slack | Bot token (xoxb-...) |
 | `SLACK_APP_TOKEN` | Slack | Legacy app token for single-bot Socket Mode |
 
