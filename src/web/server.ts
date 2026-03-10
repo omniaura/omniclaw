@@ -17,6 +17,7 @@ import {
 } from './network.js';
 import { checkPeerAuth } from '../discovery/routes.js';
 import type { TrustStore } from '../discovery/trust-store.js';
+import { renderSystemContent } from './system.js';
 
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
@@ -196,6 +197,11 @@ export function startWebServer(
                 },
               ),
           },
+          system: {
+            path: '/system',
+            title: 'System',
+            render: () => renderSystemContent(state, sseClients.size),
+          },
         };
 
         const page = pageRenderers[pageName];
@@ -233,7 +239,7 @@ export function startWebServer(
         });
       }
 
-      const result = handleRequest(req, state);
+      const result = handleRequest(req, state, sseClients.size);
       // handleRequest may return a Promise (for POST/PATCH with body parsing)
       const addCors = (response: Response) => {
         if (corsOrigin && url.pathname.startsWith('/api/')) {

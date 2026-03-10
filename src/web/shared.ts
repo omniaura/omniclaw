@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: '/context', label: 'Context', page: 'context' },
   { href: '/ipc', label: 'IPC', page: 'ipc' },
   { href: '/network', label: 'Network', page: 'network' },
+  { href: '/system', label: 'System', page: 'system' },
 ];
 
 export function escapeHtml(str: string): string {
@@ -435,8 +436,24 @@ function shellCSS(): string {
     `tr.event-warn td.event-summary{color:var(--yellow)}`,
     `.ipc-empty{padding:2rem;text-align:center;color:var(--text-dim);font-size:12px}`,
 
+    // --- System Health Page ---
+    `.system-page{padding:1.5rem;overflow:auto;flex:1}`,
+    `.system-header{display:flex;align-items:center;gap:.75rem;margin-bottom:1.5rem}`,
+    `.system-header h2{font-size:14px;font-weight:600;color:var(--text-bright);letter-spacing:.03em}`,
+    `.health-badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:3px;color:var(--green);background:rgba(52,211,153,.1);letter-spacing:.03em}`,
+    `.system-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem}`,
+    `.metric-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:1rem;display:flex;flex-direction:column;gap:.5rem}`,
+    `.metric-card-title{font-size:11px;font-weight:600;color:var(--accent);text-transform:lowercase;letter-spacing:.05em;padding-bottom:.5rem;border-bottom:1px solid var(--border)}`,
+    `.metric-row{display:flex;justify-content:space-between;align-items:center;padding:3px 0}`,
+    `.metric-label{font-size:11px;color:var(--text-dim)}`,
+    `.metric-value{font-size:12px;color:var(--text-bright);font-weight:500;font-variant-numeric:tabular-nums}`,
+    `.metric-sub{font-size:10px;color:var(--text-dim);margin-top:.5rem;padding-top:.5rem;border-top:1px solid var(--border);letter-spacing:.03em}`,
+    `.breakdown-item{display:flex;justify-content:space-between;align-items:center;padding:2px 0 2px .5rem}`,
+    `.breakdown-key{font-size:11px;color:var(--text)}`,
+    `.breakdown-val{font-size:11px;color:var(--text-bright);font-weight:500;font-variant-numeric:tabular-nums}`,
+
     // --- Responsive ---
-    `@media(max-width:900px){.stats-grid{grid-template-columns:repeat(2,1fr)}.tables-grid{grid-template-columns:1fr}}`,
+    `@media(max-width:900px){.stats-grid{grid-template-columns:repeat(2,1fr)}.tables-grid{grid-template-columns:1fr}.system-grid{grid-template-columns:1fr}}`,
     `@media(max-width:600px){.stats-grid{grid-template-columns:1fr}}`,
   ].join('\n');
 }

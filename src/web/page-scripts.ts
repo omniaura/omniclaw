@@ -13,6 +13,7 @@ export function allPageScripts(): Record<string, string> {
     context: contextScript(),
     ipc: ipcScript(),
     network: networkScript(),
+    system: systemScript(),
   };
 }
 
@@ -1145,4 +1146,37 @@ refreshRequests();
 pollTimer=setInterval(function(){refreshPeers();refreshRequests();},${DISCOVERY_POLL_INTERVAL});
 window.__cleanup=function(){if(pollTimer)clearInterval(pollTimer);};
 `;
+}
+
+function systemScript(): string {
+  return [
+    '(function(){',
+    'function fmtUptime(s){',
+    '  var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60),sec=s%60;',
+    '  var parts=[];if(d>0)parts.push(d+"d");if(h>0)parts.push(h+"h");if(m>0)parts.push(m+"m");parts.push(sec+"s");',
+    '  return parts.join(" ");',
+    '}',
+    '',
+    'var pollTimer=setInterval(function(){',
+    '  fetch("/api/health").then(function(r){return r.json();}).then(function(h){',
+    '    var el;',
+    '    el=document.getElementById("sys-uptime");if(el)el.textContent=fmtUptime(h.uptime_seconds);',
+    '    el=document.getElementById("sys-rss");if(el)el.textContent=h.memory.rss_mb+" MB";',
+    '    el=document.getElementById("sys-heap-used");if(el)el.textContent=h.memory.heap_used_mb+" MB";',
+    '    el=document.getElementById("sys-heap-total");if(el)el.textContent=h.memory.heap_total_mb+" MB";',
+    '    el=document.getElementById("sys-sse");if(el)el.textContent=String(h.sse_clients);',
+    '    el=document.getElementById("sys-agents-total");if(el)el.textContent=String(h.agents.total);',
+    '    el=document.getElementById("sys-containers-active");if(el)el.textContent=h.containers.active+"/"+h.containers.max_active;',
+    '    el=document.getElementById("sys-containers-idle");if(el)el.textContent=h.containers.idle+"/"+h.containers.max_idle;',
+    '    el=document.getElementById("sys-tasks-active");if(el)el.textContent=String(h.tasks.active);',
+    '    el=document.getElementById("sys-tasks-paused");if(el)el.textContent=String(h.tasks.paused);',
+    '    el=document.getElementById("sys-tasks-completed");if(el)el.textContent=String(h.tasks.completed);',
+    '    el=document.getElementById("sys-tasks-total");if(el)el.textContent=String(h.tasks.total);',
+    '    el=document.getElementById("health-status");if(el)el.textContent=h.status;',
+    '  }).catch(function(){});',
+    '},5000);',
+    '',
+    'window.__cleanup=function(){clearInterval(pollTimer);};',
+    '})();',
+  ].join('\n');
 }
