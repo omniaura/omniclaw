@@ -1,7 +1,12 @@
 # OmniClaw commands
-# See CLAUDE.md for setup (launchctl plist in ~/Library/LaunchAgents/com.omniclaw.plist)
+# macOS: launchctl plist in ~/Library/LaunchAgents/com.omniclaw.plist
+# Linux: systemd user unit (systemctl --user)
+
+# Cross-platform: detect Apple Container CLI vs Docker
+_container_cmd := if `command -v container 2>/dev/null || true` != "" { "container" } else { "docker" }
 
 # Default: start or restart OmniClaw. Bootstraps service if not yet loaded.
+[macos]
 default:
     #!/usr/bin/env bash
     set -e
@@ -14,6 +19,19 @@ default:
         echo "OmniClaw restarted"
     else
         launchctl bootstrap gui/$(id -u) "$PLIST"
+        echo "OmniClaw started"
+    fi
+
+# Default: start or restart OmniClaw
+[linux]
+default:
+    #!/usr/bin/env bash
+    set -e
+    if systemctl --user is-active omniclaw &>/dev/null; then
+        systemctl --user restart omniclaw
+        echo "OmniClaw restarted"
+    else
+        systemctl --user start omniclaw
         echo "OmniClaw started"
     fi
 
@@ -34,8 +52,13 @@ install:
     echo "OmniClaw started"
 
 # Restart OmniClaw (stop + start) — use after container rebuild or config changes
+[macos]
 restart:
     launchctl kickstart -k gui/$(id -u)/com.omniclaw
+
+[linux]
+restart:
+    systemctl --user restart omniclaw
 
 # Build the host/orchestrator (dist/index.js)
 build:
@@ -71,11 +94,17 @@ tail-raw:
 
 # Build the agent container image. Usage: just build-container [tag]  (default tag: latest)
 build-container tag="latest":
-    ./container/build.sh {{tag}}
+    CONTAINER_CMD={{_container_cmd}} ./container/build.sh {{tag}}
 
-# Stop OmniClaw (unload launchd service)
+# Stop OmniClaw
+[macos]
 stop:
     launchctl bootout gui/$(id -u)/com.omniclaw
+    echo "OmniClaw stopped"
+
+[linux]
+stop:
+    systemctl --user stop omniclaw
     echo "OmniClaw stopped"
 
 
