@@ -6,6 +6,7 @@ import { createHash, createHmac, randomUUID } from 'crypto';
 
 import type {
   ContextFileEntry,
+  PairApprovalCallback,
   PairRequestBody,
   PairResponse,
   PeerInfoResponse,
@@ -47,21 +48,11 @@ export class PeerClient {
   }
 
   /** POST /api/discovery/complete-pairing — sends approval callback */
-  async completePairing(
-    sharedSecret: string,
-    localInstanceId: string,
-    localName: string,
-    callbackToken: string,
-  ): Promise<void> {
+  async completePairing(payload: PairApprovalCallback): Promise<void> {
     await this.fetch('/api/discovery/complete-pairing', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sharedSecret,
-        instanceId: localInstanceId,
-        name: localName,
-        callbackToken,
-      }),
+      body: JSON.stringify(payload),
     });
   }
 
