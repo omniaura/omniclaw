@@ -31,6 +31,7 @@ export interface PairRequest {
   fromName: string;
   fromHost: string;
   fromPort: number;
+  callbackToken: string | null;
   status: 'pending' | 'approved' | 'rejected';
   sharedSecret: string | null;
   createdAt: string;
@@ -64,13 +65,13 @@ export interface PairRequestBody {
   name: string;
   host: string;
   port: number;
+  callbackToken: string;
 }
 
 /** Response from POST /api/discovery/pair when a request is accepted for review */
 export interface PairResponse {
   status: 'pending' | 'already_trusted';
   requestId?: string;
-  sharedSecret?: string;
 }
 
 /** Response when admin approves a pair request (sent back to requester via callback) */
@@ -79,6 +80,7 @@ export interface PairApprovalCallback {
   sharedSecret: string;
   instanceId: string;
   name: string;
+  callbackToken: string;
 }
 
 export interface DiscoveryConfig {

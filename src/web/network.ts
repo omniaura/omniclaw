@@ -16,13 +16,8 @@ export interface NetworkPageState {
 
 /** Render just the network page content (no shell wrapper). */
 export function renderNetworkContent(pageState: NetworkPageState): string {
-  const {
-    instanceId,
-    instanceName,
-    discoveryEnabled,
-    peers,
-    pendingRequests,
-  } = pageState;
+  const { instanceId, instanceName, discoveryEnabled, peers, pendingRequests } =
+    pageState;
 
   const trustedCount = peers.filter((p) => p.status === 'trusted').length;
   const onlineCount = peers.filter((p) => p.online).length;
@@ -71,22 +66,7 @@ function renderPeersTable(peers: PeerView[]): string {
     return `<div style="padding:2rem;text-align:center;color:var(--text-muted)">No peers discovered yet. Ensure DISCOVERY_ENABLED=true on all instances.</div>`;
   }
 
-  const rows = peers
-    .map((peer) => {
-      const statusBadge = renderStatusBadge(peer.status, peer.online);
-      const actions = renderPeerActions(peer);
-
-      return (
-        `<tr data-instance-id="${escapeHtml(peer.instanceId)}">` +
-        `<td><strong>${escapeHtml(peer.name)}</strong></td>` +
-        `<td><code>${escapeHtml(peer.host)}:${peer.port}</code></td>` +
-        `<td>${statusBadge}</td>` +
-        `<td>${peer.online ? '<span style="color:var(--green)">●</span>' : '<span style="color:var(--text-muted)">○</span>'}</td>` +
-        `<td>${actions}</td>` +
-        `</tr>`
-      );
-    })
-    .join('\n');
+  const rows = renderPeerRows(peers);
 
   return (
     `<table class="data-table"><thead><tr>` +
@@ -101,6 +81,8 @@ function renderStatusBadge(
   online: boolean,
 ): string {
   switch (status) {
+    case 'discovered':
+      return '<span class="badge">discovered</span>';
     case 'trusted':
       return '<span class="badge badge-admin">trusted</span>';
     case 'pending':
@@ -115,21 +97,21 @@ function renderStatusBadge(
 function renderPeerActions(peer: PeerView): string {
   if (peer.status === 'trusted') {
     return (
-      `<button class="btn btn-sm" onclick="networkAction('browse','${escapeHtml(peer.instanceId)}')">Browse</button> ` +
-      `<button class="btn btn-sm btn-primary" onclick="networkAction('sync','${escapeHtml(peer.instanceId)}')">Sync</button> ` +
-      `<button class="btn btn-sm btn-danger" onclick="networkAction('revoke','${escapeHtml(peer.instanceId)}')">Revoke</button>`
+      `<button class="btn btn-sm" data-network-action="browse" data-network-id="${escapeHtml(peer.instanceId)}">Browse</button> ` +
+      `<button class="btn btn-sm btn-primary" data-network-action="sync" data-network-id="${escapeHtml(peer.instanceId)}">Sync</button> ` +
+      `<button class="btn btn-sm btn-danger" data-network-action="revoke" data-network-id="${escapeHtml(peer.instanceId)}">Revoke</button>`
     );
   }
   if (peer.status === 'pending') {
     return `<span style="color:var(--text-muted);font-size:0.8rem">awaiting approval...</span>`;
   }
   if (peer.online) {
-    return `<button class="btn btn-sm btn-primary" onclick="networkAction('request','${escapeHtml(peer.instanceId)}')">Request Access</button>`;
+    return `<button class="btn btn-sm btn-primary" data-network-action="request" data-network-id="${escapeHtml(peer.instanceId)}">Request Access</button>`;
   }
   return `<span style="color:var(--text-muted);font-size:0.8rem">offline</span>`;
 }
 
-function renderPendingRequests(requests: PairRequest[]): string {
+export function renderPendingRequests(requests: PairRequest[]): string {
   if (requests.length === 0) {
     return `<div style="padding:1.5rem;text-align:center;color:var(--text-muted);font-size:0.85rem">No pending requests</div>`;
   }
@@ -144,10 +126,29 @@ function renderPendingRequests(requests: PairRequest[]): string {
         `ID: <code>${escapeHtml(req.fromInstanceId.slice(0, 8))}...</code>` +
         `</div>` +
         `<div style="display:flex;gap:0.5rem">` +
-        `<button class="btn btn-sm btn-primary" onclick="networkAction('approve','${escapeHtml(req.id)}')">Approve</button>` +
-        `<button class="btn btn-sm btn-danger" onclick="networkAction('reject','${escapeHtml(req.id)}')">Reject</button>` +
+        `<button class="btn btn-sm btn-primary" data-network-action="approve" data-network-id="${escapeHtml(req.id)}">Approve</button>` +
+        `<button class="btn btn-sm btn-danger" data-network-action="reject" data-network-id="${escapeHtml(req.id)}">Reject</button>` +
         `</div></div>`,
     )
+    .join('\n');
+}
+
+export function renderPeerRows(peers: PeerView[]): string {
+  return peers
+    .map((peer) => {
+      const statusBadge = renderStatusBadge(peer.status, peer.online);
+      const actions = renderPeerActions(peer);
+
+      return (
+        `<tr data-instance-id="${escapeHtml(peer.instanceId)}">` +
+        `<td><strong>${escapeHtml(peer.name)}</strong></td>` +
+        `<td><code>${escapeHtml(peer.host)}:${peer.port}</code></td>` +
+        `<td>${statusBadge}</td>` +
+        `<td>${peer.online ? '<span style="color:var(--green)">●</span>' : '<span style="color:var(--text-muted)">○</span>'}</td>` +
+        `<td>${actions}</td>` +
+        `</tr>`
+      );
+    })
     .join('\n');
 }
 

@@ -1,7 +1,9 @@
 /**
  * HTTP client for communicating with remote OmniClaw instances.
- * Uses native fetch() with peer authentication headers.
+ * Uses native fetch() with signed peer authentication headers.
  */
+import { createHash, createHmac, randomUUID } from 'crypto';
+
 import type {
   ContextFileEntry,
   PairRequestBody,
@@ -21,8 +23,9 @@ export class PeerClient {
     port: number,
     instanceId: string,
     sharedSecret: string | null = null,
+    scheme: 'http' | 'https' = 'http',
   ) {
-    this.baseUrl = `http://${host}:${port}`;
+    this.baseUrl = `${scheme}://${host}:${port}`;
     this.instanceId = instanceId;
     this.sharedSecret = sharedSecret;
   }
@@ -48,6 +51,7 @@ export class PeerClient {
     sharedSecret: string,
     localInstanceId: string,
     localName: string,
+    callbackToken: string,
   ): Promise<void> {
     await this.fetch('/api/discovery/complete-pairing', {
       method: 'POST',
@@ -56,6 +60,7 @@ export class PeerClient {
         sharedSecret,
         instanceId: localInstanceId,
         name: localName,
+        callbackToken,
       }),
     });
   }
@@ -75,9 +80,7 @@ export class PeerClient {
   /** GET /api/context/layers — requires auth */
   async getContextLayers(params: Record<string, string>): Promise<unknown> {
     const query = new URLSearchParams(params).toString();
-    const res = await this.authenticatedFetch(
-      `/api/context/layers?${query}`,
-    );
+    const res = await this.authenticatedFetch(`/api/context/layers?${query}`);
     return res.json();
   }
 
@@ -108,19 +111,31 @@ export class PeerClient {
       throw new Error('Cannot make authenticated request: not paired');
     }
 
+    const method = (init?.method || 'GET').toUpperCase();
+    const nonce = randomUUID();
+    const timestamp = Date.now().toString();
+    const bodyHash = sha256Hex(getBodyString(init?.body));
+    const signature = signRequest(
+      this.sharedSecret,
+      method,
+      path,
+      timestamp,
+      nonce,
+      bodyHash,
+    );
     const headers = new Headers(init?.headers);
     headers.set('X-OmniClaw-Instance', this.instanceId);
-    headers.set('Authorization', `Bearer ${this.sharedSecret}`);
+    headers.set('X-OmniClaw-Timestamp', timestamp);
+    headers.set('X-OmniClaw-Nonce', nonce);
+    headers.set('X-OmniClaw-Body-SHA256', bodyHash);
+    headers.set('X-OmniClaw-Signature', signature);
 
-    return this.fetch(path, { ...init, headers });
+    return this.fetch(path, { ...init, method, headers });
   }
 
   private async fetch(path: string, init?: RequestInit): Promise<Response> {
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      DEFAULT_TIMEOUT_MS,
-    );
+    const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
@@ -140,4 +155,47 @@ export class PeerClient {
       clearTimeout(timeout);
     }
   }
+}
+
+function getBodyString(body: RequestInit['body']): string {
+  if (!body) return '';
+  if (typeof body === 'string') return body;
+  throw new Error('PeerClient only supports string request bodies');
+}
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function signRequest(
+  sharedSecret: string,
+  method: string,
+  path: string,
+  timestamp: string,
+  nonce: string,
+  bodyHash: string,
+): string {
+  return createHmac('sha256', sharedSecret)
+    .update([method, path, timestamp, nonce, bodyHash].join('\n'))
+    .digest('hex');
+}
+
+export function verifyPeerRequestSignature(params: {
+  sharedSecret: string;
+  method: string;
+  path: string;
+  timestamp: string;
+  nonce: string;
+  bodyHash: string;
+  signature: string;
+}): boolean {
+  const expected = signRequest(
+    params.sharedSecret,
+    params.method,
+    params.path,
+    params.timestamp,
+    params.nonce,
+    params.bodyHash,
+  );
+  return expected === params.signature;
 }

@@ -13,6 +13,7 @@ interface PeerRow {
   instance_id: string;
   name: string;
   shared_secret: string | null;
+  pairing_token: string | null;
   status: string;
   host: string | null;
   port: number | null;
@@ -28,6 +29,7 @@ interface PairRequestRow {
   from_name: string;
   from_host: string;
   from_port: number;
+  callback_token: string | null;
   status: string;
   shared_secret: string | null;
   created_at: string;
@@ -55,6 +57,7 @@ function mapRowToPairRequest(row: PairRequestRow): PairRequest {
     fromName: row.from_name,
     fromHost: row.from_host,
     fromPort: row.from_port,
+    callbackToken: row.callback_token,
     status: row.status as PairRequest['status'],
     sharedSecret: row.shared_secret,
     createdAt: row.created_at,
@@ -87,6 +90,39 @@ export class TrustStore {
       .run(instanceId, name, host, port, now, now);
 
     return this.getPeer(instanceId)!;
+  }
+
+  markPeerPending(
+    instanceId: string,
+    name: string,
+    host: string | null,
+    port: number | null,
+    pairingToken: string,
+  ): StoredPeer {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO discovery_peers (instance_id, name, host, port, status, pairing_token, created_at, last_seen)
+         VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+         ON CONFLICT(instance_id) DO UPDATE SET
+           name = excluded.name,
+           host = excluded.host,
+           port = excluded.port,
+           status = 'pending',
+           pairing_token = excluded.pairing_token,
+           last_seen = excluded.last_seen`,
+      )
+      .run(instanceId, name, host, port, pairingToken, now, now);
+
+    return this.getPeer(instanceId)!;
+  }
+
+  resetPeerToDiscovered(instanceId: string): void {
+    this.db
+      .prepare(
+        "UPDATE discovery_peers SET status = 'discovered', pairing_token = NULL WHERE instance_id = ?",
+      )
+      .run(instanceId);
   }
 
   getPeer(instanceId: string): StoredPeer | null {
@@ -134,9 +170,7 @@ export class TrustStore {
 
   updatePeerLastSeen(instanceId: string): void {
     this.db
-      .prepare(
-        'UPDATE discovery_peers SET last_seen = ? WHERE instance_id = ?',
-      )
+      .prepare('UPDATE discovery_peers SET last_seen = ? WHERE instance_id = ?')
       .run(new Date().toISOString(), instanceId);
   }
 
@@ -162,6 +196,7 @@ export class TrustStore {
     fromName: string,
     fromHost: string,
     fromPort: number,
+    callbackToken: string,
   ): PairRequest {
     // Check for existing pending request from same instance
     const existing = this.db
@@ -174,14 +209,22 @@ export class TrustStore {
       // Update existing request
       this.db
         .prepare(
-          'UPDATE pair_requests SET from_name = ?, from_host = ?, from_port = ?, created_at = ? WHERE id = ?',
+          'UPDATE pair_requests SET from_name = ?, from_host = ?, from_port = ?, callback_token = ?, created_at = ? WHERE id = ?',
         )
-        .run(fromName, fromHost, fromPort, new Date().toISOString(), existing.id);
+        .run(
+          fromName,
+          fromHost,
+          fromPort,
+          callbackToken,
+          new Date().toISOString(),
+          existing.id,
+        );
       return mapRowToPairRequest({
         ...existing,
         from_name: fromName,
         from_host: fromHost,
         from_port: fromPort,
+        callback_token: callbackToken,
       });
     }
 
@@ -193,6 +236,9 @@ export class TrustStore {
          VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
       )
       .run(id, fromInstanceId, fromName, fromHost, fromPort, now);
+    this.db
+      .prepare('UPDATE pair_requests SET callback_token = ? WHERE id = ?')
+      .run(callbackToken, id);
 
     logger.info(
       { requestId: id, fromInstanceId, fromName },
@@ -205,6 +251,7 @@ export class TrustStore {
       fromName,
       fromHost,
       fromPort,
+      callbackToken,
       status: 'pending',
       sharedSecret: null,
       createdAt: now,
@@ -245,37 +292,38 @@ export class TrustStore {
     const sharedSecret = randomBytes(32).toString('hex');
     const now = new Date().toISOString();
 
-    // Update request
-    this.db
-      .prepare(
-        "UPDATE pair_requests SET status = 'approved', shared_secret = ?, resolved_at = ? WHERE id = ?",
-      )
-      .run(sharedSecret, now, requestId);
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          "UPDATE pair_requests SET status = 'approved', shared_secret = ?, resolved_at = ? WHERE id = ?",
+        )
+        .run(sharedSecret, now, requestId);
 
-    // Upsert peer as trusted
-    this.db
-      .prepare(
-        `INSERT INTO discovery_peers (instance_id, name, host, port, status, shared_secret, approved_at, last_seen, created_at)
-         VALUES (?, ?, ?, ?, 'trusted', ?, ?, ?, ?)
-         ON CONFLICT(instance_id) DO UPDATE SET
-           name = excluded.name,
-           host = excluded.host,
-           port = excluded.port,
-           status = 'trusted',
-           shared_secret = excluded.shared_secret,
-           approved_at = excluded.approved_at,
-           last_seen = excluded.last_seen`,
-      )
-      .run(
-        request.fromInstanceId,
-        request.fromName,
-        request.fromHost,
-        request.fromPort,
-        sharedSecret,
-        now,
-        now,
-        now,
-      );
+      this.db
+        .prepare(
+          `INSERT INTO discovery_peers (instance_id, name, host, port, status, shared_secret, approved_at, last_seen, created_at, pairing_token)
+           VALUES (?, ?, ?, ?, 'trusted', ?, ?, ?, ?, NULL)
+           ON CONFLICT(instance_id) DO UPDATE SET
+              name = excluded.name,
+              host = excluded.host,
+              port = excluded.port,
+              status = 'trusted',
+              shared_secret = excluded.shared_secret,
+              approved_at = excluded.approved_at,
+              last_seen = excluded.last_seen,
+              pairing_token = NULL`,
+        )
+        .run(
+          request.fromInstanceId,
+          request.fromName,
+          request.fromHost,
+          request.fromPort,
+          sharedSecret,
+          now,
+          now,
+          now,
+        );
+    })();
 
     logger.info(
       { requestId, instanceId: request.fromInstanceId },
@@ -284,18 +332,46 @@ export class TrustStore {
 
     return {
       sharedSecret,
-      request: { ...request, status: 'approved', sharedSecret, resolvedAt: now },
+      request: {
+        ...request,
+        status: 'approved',
+        sharedSecret,
+        resolvedAt: now,
+      },
     };
   }
 
   rejectPairRequest(requestId: string): void {
     const now = new Date().toISOString();
-    this.db
+    const result = this.db
       .prepare(
-        "UPDATE pair_requests SET status = 'rejected', resolved_at = ? WHERE id = ?",
+        "UPDATE pair_requests SET status = 'rejected', resolved_at = ? WHERE id = ? AND status = 'pending'",
       )
       .run(now, requestId);
+    if (result.changes !== 1) {
+      throw new Error(`Request not pending or not found: ${requestId}`);
+    }
     logger.info({ requestId }, 'Pair request rejected');
+  }
+
+  completePendingPairing(
+    instanceId: string,
+    name: string,
+    sharedSecret: string,
+    callbackToken: string,
+  ): void {
+    const now = new Date().toISOString();
+    const result = this.db
+      .prepare(
+        `UPDATE discovery_peers
+         SET name = ?, status = 'trusted', shared_secret = ?, approved_at = ?, last_seen = ?, pairing_token = NULL
+         WHERE instance_id = ? AND status = 'pending' AND pairing_token = ?`,
+      )
+      .run(name, sharedSecret, now, now, instanceId, callbackToken);
+
+    if (result.changes !== 1) {
+      throw new Error(`No pending pairing found for peer: ${instanceId}`);
+    }
   }
 
   // --- Instance ID Management ---

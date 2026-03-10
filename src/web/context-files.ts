@@ -28,7 +28,10 @@ export function listLocalContextFiles(): ContextFileEntry[] {
         // Skip hidden dirs and node_modules
         if (entry.name.startsWith('.') || entry.name === 'node_modules')
           continue;
-        scanDir(fullPath, relPrefix ? `${relPrefix}/${entry.name}` : entry.name);
+        scanDir(
+          fullPath,
+          relPrefix ? `${relPrefix}/${entry.name}` : entry.name,
+        );
       } else if (entry.name === 'CLAUDE.md') {
         try {
           assertPathWithin(fullPath, GROUPS_DIR, 'listContextFiles');

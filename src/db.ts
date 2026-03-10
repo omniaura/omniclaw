@@ -1,8 +1,10 @@
 import { Database } from 'bun:sqlite';
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, STORE_DIR } from './config.js';
+import { TrustStore } from './discovery/trust-store.js';
 import { logger } from './logger.js';
 import {
   Agent,
@@ -501,6 +503,9 @@ export function createSchema(database: Database): void {
     );
   `);
 
+  addColumnIfNotExists(database, 'discovery_peers', 'pairing_token', 'TEXT');
+  addColumnIfNotExists(database, 'pair_requests', 'callback_token', 'TEXT');
+
   // Auto-migrate from registered_groups → agents + channel_routes
   migrateRegisteredGroupsToAgents(database);
   migrateRoutesToSubscriptions(database);
@@ -532,9 +537,25 @@ function applyDiscordRequiresTriggerFix(database: Database): void {
   );
 }
 
-/** Get the raw database instance (for discovery trust store, etc.). */
-export function getDatabase(): Database {
-  return db;
+export function createTrustStore(): TrustStore {
+  return new TrustStore(db);
+}
+
+export function getOrCreateDiscoveryInstanceId(): string {
+  const row = db
+    .prepare(
+      "SELECT value FROM router_state WHERE key = 'discovery_instance_id'",
+    )
+    .get() as { value: string } | null;
+
+  if (row) return row.value;
+
+  const instanceId = randomUUID();
+  db.prepare(
+    'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
+  ).run('discovery_instance_id', instanceId);
+  logger.info({ instanceId }, 'Generated new discovery instance ID');
+  return instanceId;
 }
 
 export function initDatabase(): void {

@@ -84,7 +84,8 @@ import {
   storeMessage,
   getSubscriptionsForAgent,
   updateAgentAvatar,
-  getDatabase,
+  createTrustStore,
+  getOrCreateDiscoveryInstanceId,
 } from './db.js';
 import { buildAgentToChannelsMapFromSubscriptions } from './channel-routes.js';
 import { resolveContextLayers } from './context-layers.js';
@@ -125,6 +126,7 @@ import {
   type IpcEventKind,
   type WebServerHandle,
 } from './web/index.js';
+import type { WebStateProvider } from './web/types.js';
 import {
   startDiscovery,
   TrustStore,
@@ -2128,6 +2130,54 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  const webState: WebStateProvider = {
+    getAgents: () => agents,
+    getChannelSubscriptions: () => channelSubscriptions,
+    getTasks: () => getAllTasks(),
+    getTaskById: (id) => getTaskById(id),
+    getMessages: (chatJid, since, limit) => {
+      const msgs = getMessagesSince(chatJid, since);
+      return limit ? msgs.slice(0, limit) : msgs;
+    },
+    getChats: () => getAllChats(),
+    getQueueStats: () => queue.getStats(),
+    getQueueDetails: () => queue.getDetailedStats(),
+    getIpcEvents: (count) => ipcEvents.recent(count),
+    createTask: (task) => dbCreateTask(task),
+    updateTask: (id, updates) => dbUpdateTask(id, updates),
+    deleteTask: (id) => dbDeleteTask(id),
+    calculateNextRun: (type, value) => calculateNextRun(type, value),
+    readContextFile: (layerPath) => {
+      const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
+      const resolved = path.resolve(filePath);
+      try {
+        assertPathWithin(resolved, GROUPS_DIR, 'readContextFile');
+        return fs.readFileSync(resolved, 'utf-8');
+      } catch {
+        return null;
+      }
+    },
+    writeContextFile: (layerPath, content) => {
+      const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
+      const resolved = path.resolve(filePath);
+      assertPathWithin(resolved, GROUPS_DIR, 'writeContextFile');
+      const dir = path.dirname(resolved);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(resolved, content, 'utf-8');
+    },
+    updateAgentAvatar: (agentId, url, source) => {
+      updateAgentAvatar(agentId, url, source);
+      if (agents[agentId]) {
+        agents[agentId].avatarUrl = url || undefined;
+        agents[agentId].avatarSource =
+          (source as Agent['avatarSource']) || undefined;
+      }
+    },
+    resolveChatImage: (chatJid) => resolveChatImageUrl(chatJid),
+    resolveDiscordGuildImage: (guildId, botId) =>
+      resolveDiscordGuildImageUrl(guildId, botId),
+  };
+
   // Expire stale sessions on startup to prevent unbounded context growth
   const expired = expireStaleSessions(SESSION_MAX_AGE);
   if (expired.length > 0) {
@@ -2160,54 +2210,8 @@ async function main(): Promise<void> {
         hostname: WEB_UI_HOST,
         corsOrigin: WEB_UI_CORS_ORIGIN,
       },
-      {
-        getAgents: () => agents,
-        getChannelSubscriptions: () => channelSubscriptions,
-        getTasks: () => getAllTasks(),
-        getTaskById: (id) => getTaskById(id),
-        getMessages: (chatJid, since, limit) => {
-          const msgs = getMessagesSince(chatJid, since);
-          return limit ? msgs.slice(0, limit) : msgs;
-        },
-        getChats: () => getAllChats(),
-        getQueueStats: () => queue.getStats(),
-        getQueueDetails: () => queue.getDetailedStats(),
-        getIpcEvents: (count) => ipcEvents.recent(count),
-        createTask: (task) => dbCreateTask(task),
-        updateTask: (id, updates) => dbUpdateTask(id, updates),
-        deleteTask: (id) => dbDeleteTask(id),
-        calculateNextRun: (type, value) => calculateNextRun(type, value),
-        readContextFile: (layerPath) => {
-          const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
-          const resolved = path.resolve(filePath);
-          try {
-            assertPathWithin(resolved, GROUPS_DIR, 'readContextFile');
-            return fs.readFileSync(resolved, 'utf-8');
-          } catch {
-            return null;
-          }
-        },
-        writeContextFile: (layerPath, content) => {
-          const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
-          const resolved = path.resolve(filePath);
-          assertPathWithin(resolved, GROUPS_DIR, 'writeContextFile');
-          const dir = path.dirname(resolved);
-          fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(resolved, content, 'utf-8');
-        },
-        updateAgentAvatar: (agentId, url, source) => {
-          updateAgentAvatar(agentId, url, source);
-          if (agents[agentId]) {
-            agents[agentId].avatarUrl = url || undefined;
-            agents[agentId].avatarSource =
-              (source as Agent['avatarSource']) || undefined;
-          }
-        },
-        resolveChatImage: (chatJid) => resolveChatImageUrl(chatJid),
-        resolveDiscordGuildImage: (guildId, botId) =>
-          resolveDiscordGuildImageUrl(guildId, botId),
-      },
-      DISCOVERY_ENABLED ? new TrustStore(getDatabase()) : undefined,
+      webState,
+      DISCOVERY_ENABLED ? createTrustStore() : undefined,
     );
     stopLogStream = startLogStream(webServer);
   }
@@ -2216,8 +2220,8 @@ async function main(): Promise<void> {
   let discoveryHandle: DiscoveryHandle | undefined;
   let trustStore: TrustStore | undefined;
   if (DISCOVERY_ENABLED && webServer) {
-    trustStore = new TrustStore(getDatabase());
-    const instanceId = trustStore.getOrCreateInstanceId(getDatabase());
+    trustStore = createTrustStore();
+    const instanceId = getOrCreateDiscoveryInstanceId();
     const version = '1.0.0';
 
     discoveryHandle = startDiscovery({
@@ -2256,24 +2260,7 @@ async function main(): Promise<void> {
         version,
         trustStore,
         discovery: discoveryHandle,
-        state: {
-          getAgents: () => agents,
-          getChannelSubscriptions: () => channelSubscriptions,
-          getTasks: () => getAllTasks(),
-          getTaskById: (id) => getTaskById(id),
-          getMessages: () => [],
-          getChats: () => [],
-          getQueueStats: () => queue.getStats(),
-          getQueueDetails: () => queue.getDetailedStats(),
-          getIpcEvents: (count) => ipcEvents.recent(count),
-          createTask: (task) => dbCreateTask(task),
-          updateTask: (id, updates) => dbUpdateTask(id, updates),
-          deleteTask: (id) => dbDeleteTask(id),
-          calculateNextRun: (type, value) => calculateNextRun(type, value),
-          readContextFile: () => null,
-          writeContextFile: () => {},
-          updateAgentAvatar: () => {},
-        },
+        state: webState,
         broadcast: (event) => webServer!.broadcast(event as any),
       },
       () => ({
