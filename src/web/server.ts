@@ -69,11 +69,27 @@ export function startWebServer(
         }
         // Peer is authenticated — skip Basic Auth, fall through to routing
       } else if (auth && !checkBasicAuth(req, auth)) {
-        // --- Basic auth for HTTP (optional on trusted local setups) ---
+        // --- Basic auth for HTTP ---
         return new Response('Unauthorized', {
           status: 401,
           headers: { 'WWW-Authenticate': 'Basic realm="OmniClaw"' },
         });
+      } else if (
+        !auth &&
+        url.pathname.startsWith('/api/discovery/') &&
+        !isUnauthDiscoveryRoute(url.pathname)
+      ) {
+        // Discovery admin routes MUST have auth — reject if credentials not configured
+        return new Response(
+          JSON.stringify({
+            error:
+              'Discovery admin routes require WEB_UI_USER/WEB_UI_PASS to be configured',
+          }),
+          {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
       }
 
       // --- SSE stream ---
@@ -414,6 +430,15 @@ function isPeerRoute(pathname: string): boolean {
     pathname === '/api/context/files' ||
     pathname === '/api/context/layers' ||
     pathname === '/api/context/file'
+  );
+}
+
+/** Discovery routes that intentionally allow unauthenticated access. */
+function isUnauthDiscoveryRoute(pathname: string): boolean {
+  return (
+    pathname === '/api/discovery/info' ||
+    pathname === '/api/discovery/pair' ||
+    pathname === '/api/discovery/complete-pairing'
   );
 }
 

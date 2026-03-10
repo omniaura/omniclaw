@@ -2,7 +2,7 @@
  * HTTP client for communicating with remote OmniClaw instances.
  * Uses native fetch() with signed peer authentication headers.
  */
-import { createHash, createHmac, randomUUID } from 'crypto';
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'crypto';
 
 import type {
   ContextFileEntry,
@@ -188,5 +188,6 @@ export function verifyPeerRequestSignature(params: {
     params.nonce,
     params.bodyHash,
   );
-  return expected === params.signature;
+  if (expected.length !== params.signature.length) return false;
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(params.signature));
 }
