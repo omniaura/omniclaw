@@ -9,7 +9,12 @@ import { renderDashboardContent } from './dashboard.js';
 import { renderConversationsContent } from './conversations.js';
 import { renderContextViewerContent } from './context-viewer.js';
 import { renderIpcInspectorContent } from './ipc-inspector.js';
-import { renderNetworkContent, type NetworkPageState } from './network.js';
+import {
+  renderNetworkContent,
+  renderPeersTable,
+  renderPendingRequests,
+  type NetworkPageState,
+} from './network.js';
 import { checkPeerAuth } from '../discovery/routes.js';
 import type { TrustStore } from '../discovery/trust-store.js';
 
@@ -52,8 +57,12 @@ export function startWebServer(
       }
 
       // --- Peer auth: trusted remote OmniClaw instances bypass Basic Auth ---
+      const isPublicDiscoveryRoute = isUnauthenticatedDiscoveryRoute(
+        url.pathname,
+        req.method,
+      );
       const isPeerRequest =
-        url.pathname.startsWith('/api/') &&
+        isPeerAuthenticatedRoute(url.pathname) &&
         req.headers.has('X-OmniClaw-Instance');
       if (isPeerRequest && trustStore) {
         if (!checkPeerAuth(req, trustStore)) {
@@ -62,8 +71,11 @@ export function startWebServer(
             headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
           });
         }
-        // Peer is authenticated — skip Basic Auth, fall through to routing
-      } else if (auth && !checkBasicAuth(req, auth)) {
+      } else if (
+        !isPublicDiscoveryRoute &&
+        auth &&
+        !checkBasicAuth(req, auth)
+      ) {
         // --- Basic auth for HTTP (optional on trusted local setups) ---
         return new Response('Unauthorized', {
           status: 401,
@@ -295,6 +307,11 @@ export function startWebServer(
             patchStats(client, state);
             continue;
           }
+
+          if (channel === 'network') {
+            patchNetwork(client);
+            continue;
+          }
         } catch {
           client.close();
           sseClients.delete(client);
@@ -392,10 +409,32 @@ function eventChannel(event: WsEvent): string {
   return event.type;
 }
 
+function isUnauthenticatedDiscoveryRoute(
+  pathname: string,
+  method: string,
+): boolean {
+  return (
+    (pathname === '/api/discovery/info' && method === 'GET') ||
+    (pathname === '/api/discovery/pair' && method === 'POST') ||
+    (pathname.startsWith('/api/discovery/pairing-status/') && method === 'GET')
+  );
+}
+
+function isPeerAuthenticatedRoute(pathname: string): boolean {
+  return new Set([
+    '/api/agents',
+    '/api/stats',
+    '/api/context/files',
+    '/api/context/layers',
+    '/api/context/file',
+  ]).has(pathname);
+}
+
 function patchSnapshot(client: SseClient, state: WebStateProvider): void {
   patchStats(client, state);
   patchAgents(client, state);
   patchTasks(client, state);
+  patchNetwork(client);
 }
 
 function patchStats(client: SseClient, state: WebStateProvider): void {
@@ -441,6 +480,38 @@ function patchTasks(client: SseClient, state: WebStateProvider): void {
     selector: '#sidebar-tasks',
     mode: 'inner',
   });
+}
+
+function patchNetwork(client: SseClient): void {
+  if (!client.subscriptions.has('network') || !networkPageStateGetter) return;
+
+  const pageState = networkPageStateGetter();
+  const trustedCount = pageState.peers.filter(
+    (peer) => peer.status === 'trusted',
+  ).length;
+  const onlineCount = pageState.peers.filter((peer) => peer.online).length;
+
+  client.stream.patchElements(
+    `<div class="value" id="stat-peers-online">${onlineCount}</div>`,
+  );
+  client.stream.patchElements(
+    `<div class="value" id="stat-peers-trusted">${trustedCount}</div>`,
+  );
+  client.stream.patchElements(renderPeersTable(pageState.peers), {
+    selector: '#peers-container',
+    mode: 'inner',
+  });
+  client.stream.patchElements(String(pageState.pendingRequests.length), {
+    selector: '#pending-count',
+    mode: 'inner',
+  });
+  client.stream.patchElements(
+    renderPendingRequests(pageState.pendingRequests),
+    {
+      selector: '#pending-requests',
+      mode: 'inner',
+    },
+  );
 }
 
 function renderStatusBadge(

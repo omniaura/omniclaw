@@ -22,11 +22,16 @@ export interface DiscoveryRouteContext {
   instanceId: string;
   instanceName: string;
   version: string;
+  webUiPort: number;
   trustStore: TrustStore;
   discovery: DiscoveryHandle | null;
   state: WebStateProvider;
   /** Callback to broadcast SSE events */
-  broadcast?: (event: { type: string; data: unknown; timestamp: string }) => void;
+  broadcast?: (event: {
+    type: string;
+    data: unknown;
+    timestamp: string;
+  }) => void;
 }
 
 // Rate limiting for /api/discovery/pair
@@ -70,8 +75,14 @@ export function handleDiscoveryRequest(
     return handlePairRequest(req, ctx);
   }
 
-  if (pathname === '/api/discovery/complete-pairing' && method === 'POST') {
-    return handleCompletePairing(req, ctx);
+  if (
+    pathname.startsWith('/api/discovery/pairing-status/') &&
+    method === 'GET'
+  ) {
+    const requestId = decodeURIComponent(
+      pathname.slice('/api/discovery/pairing-status/'.length),
+    );
+    return handleGetPairingStatus(requestId, url, ctx);
   }
 
   // --- Locally authenticated endpoints (protected by Basic Auth in server.ts) ---
@@ -117,10 +128,7 @@ export function handleDiscoveryRequest(
     method === 'POST'
   ) {
     const instanceId = decodeURIComponent(
-      pathname.slice(
-        '/api/discovery/peers/'.length,
-        -'/request-access'.length,
-      ),
+      pathname.slice('/api/discovery/peers/'.length, -'/request-access'.length),
     );
     return handleRequestAccess(instanceId, ctx);
   }
@@ -168,10 +176,7 @@ export function handleDiscoveryRequest(
     method === 'GET'
   ) {
     const instanceId = decodeURIComponent(
-      pathname.slice(
-        '/api/discovery/peers/'.length,
-        -'/context/layers'.length,
-      ),
+      pathname.slice('/api/discovery/peers/'.length, -'/context/layers'.length),
     );
     return handleProxyContextLayers(instanceId, url, ctx);
   }
@@ -183,10 +188,7 @@ export function handleDiscoveryRequest(
     method === 'PUT'
   ) {
     const instanceId = decodeURIComponent(
-      pathname.slice(
-        '/api/discovery/peers/'.length,
-        -'/context/file'.length,
-      ),
+      pathname.slice('/api/discovery/peers/'.length, -'/context/file'.length),
     );
     return handleProxyContextWrite(instanceId, req, ctx);
   }
@@ -213,10 +215,7 @@ export function handleDiscoveryRequest(
     method === 'POST'
   ) {
     const instanceId = decodeURIComponent(
-      pathname.slice(
-        '/api/discovery/peers/'.length,
-        -'/context/push'.length,
-      ),
+      pathname.slice('/api/discovery/peers/'.length, -'/context/push'.length),
     );
     return handleContextPush(instanceId, req, ctx);
   }
@@ -228,10 +227,7 @@ export function handleDiscoveryRequest(
     method === 'POST'
   ) {
     const instanceId = decodeURIComponent(
-      pathname.slice(
-        '/api/discovery/peers/'.length,
-        -'/context/pull'.length,
-      ),
+      pathname.slice('/api/discovery/peers/'.length, -'/context/pull'.length),
     );
     return handleContextPull(instanceId, req, ctx);
   }
@@ -278,10 +274,8 @@ async function handlePairRequest(
 
   // Check if already trusted
   if (ctx.trustStore.isPeerTrusted(body.instanceId)) {
-    const secret = ctx.trustStore.getPeerSecret(body.instanceId);
     return json({
       status: 'already_trusted',
-      sharedSecret: secret,
     });
   }
 
@@ -306,51 +300,30 @@ async function handlePairRequest(
   });
 }
 
-async function handleCompletePairing(
-  req: Request,
+function handleGetPairingStatus(
+  requestId: string,
+  url: URL,
   ctx: DiscoveryRouteContext,
-): Promise<Response> {
-  let body: { sharedSecret: string; instanceId: string; name: string };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return json({ error: 'Invalid JSON body' }, 400);
+): Response {
+  const requesterInstanceId = url.searchParams.get('instanceId');
+  if (!requesterInstanceId) {
+    return json({ error: 'Missing instanceId query parameter' }, 400);
   }
 
-  if (!body.sharedSecret || !body.instanceId || !body.name) {
-    return json(
-      { error: 'Missing required fields: sharedSecret, instanceId, name' },
-      400,
-    );
-  }
-
-  // The remote instance is telling us they approved our request.
-  // Store them as a trusted peer with the shared secret.
-  const now = new Date().toISOString();
-  const db = ctx.trustStore['db']; // Access internal db for direct SQL
-  db.prepare(
-    `INSERT INTO discovery_peers (instance_id, name, status, shared_secret, approved_at, last_seen, created_at)
-     VALUES (?, ?, 'trusted', ?, ?, ?, ?)
-     ON CONFLICT(instance_id) DO UPDATE SET
-       name = excluded.name,
-       status = 'trusted',
-       shared_secret = excluded.shared_secret,
-       approved_at = excluded.approved_at,
-       last_seen = excluded.last_seen`,
-  ).run(body.instanceId, body.name, body.sharedSecret, now, now, now);
-
-  logger.info(
-    { instanceId: body.instanceId, name: body.name },
-    'Pairing completed — remote instance trusted',
+  const status = ctx.trustStore.getPairingStatus(
+    requestId,
+    requesterInstanceId,
   );
+  if (!status) {
+    return json({ error: 'Pairing request not found' }, 404);
+  }
 
-  ctx.broadcast?.({
-    type: 'pair_approved',
-    data: { instanceId: body.instanceId, name: body.name },
-    timestamp: now,
+  return json({
+    status: status.status,
+    sharedSecret: status.sharedSecret,
+    instanceId: ctx.instanceId,
+    name: ctx.instanceName,
   });
-
-  return json({ ok: true });
 }
 
 function handleGetPeers(ctx: DiscoveryRouteContext): Response {
@@ -405,30 +378,7 @@ async function handleApproveRequest(
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
   try {
-    const { sharedSecret, request } =
-      ctx.trustStore.approvePairRequest(requestId);
-
-    // Send the shared secret back to the requester via callback
-    try {
-      const client = new PeerClient(
-        request.fromHost,
-        request.fromPort,
-        ctx.instanceId,
-      );
-      await client.completePairing(
-        sharedSecret,
-        ctx.instanceId,
-        ctx.instanceName,
-      );
-    } catch (err) {
-      logger.warn(
-        {
-          requestId,
-          err: err instanceof Error ? err.message : String(err),
-        },
-        'Failed to send pairing callback to requester — they can re-request',
-      );
-    }
+    const { request } = ctx.trustStore.approvePairRequest(requestId);
 
     ctx.broadcast?.({
       type: 'pair_approved',
@@ -439,7 +389,7 @@ async function handleApproveRequest(
       timestamp: new Date().toISOString(),
     });
 
-    return json({ approved: true, sharedSecret });
+    return json({ approved: true, requestId });
   } catch (err) {
     return json(
       { error: err instanceof Error ? err.message : String(err) },
@@ -478,48 +428,79 @@ async function handleRequestAccess(
     return json({ status: 'already_trusted' });
   }
 
-  // Send pair request to the remote instance
+  const storedPeer = ctx.trustStore.getPeer(instanceId);
+
   try {
     const client = new PeerClient(
       discovered.host,
       discovered.port,
       ctx.instanceId,
     );
+
+    if (storedPeer?.status === 'pending' && storedPeer.pairRequestId) {
+      try {
+        const status = await client.getPairingStatus(
+          storedPeer.pairRequestId,
+          ctx.instanceId,
+        );
+        if (status.status === 'approved' && status.sharedSecret) {
+          ctx.trustStore.trustPeer(
+            instanceId,
+            discovered.name,
+            discovered.host,
+            discovered.port,
+            status.sharedSecret,
+          );
+          ctx.broadcast?.({
+            type: 'pair_approved',
+            data: { instanceId, name: discovered.name },
+            timestamp: new Date().toISOString(),
+          });
+          return json({ status: 'trusted' });
+        }
+
+        return json({ status: 'pending', requestId: storedPeer.pairRequestId });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('404')) {
+          throw err;
+        }
+
+        ctx.trustStore.upsertPeer(
+          instanceId,
+          discovered.name,
+          discovered.host,
+          discovered.port,
+        );
+      }
+    }
+
     const response = await client.requestPairing({
       instanceId: ctx.instanceId,
       name: ctx.instanceName,
       host: getLocalAddress(),
-      port: ctx.state.getQueueStats().maxActive > 0 ? 6001 : 6001, // use configured port
+      port: ctx.webUiPort,
     });
 
-    if (response.status === 'already_trusted' && response.sharedSecret) {
-      // They already trust us, store the secret
-      const now = new Date().toISOString();
-      ctx.trustStore.upsertPeer(
-        instanceId,
-        discovered.name,
-        discovered.host,
-        discovered.port,
+    if (response.status === 'already_trusted') {
+      logger.warn(
+        { instanceId },
+        'Remote peer reported already_trusted without exposing a shared secret',
       );
-      const db = ctx.trustStore['db'];
-      db.prepare(
-        "UPDATE discovery_peers SET status = 'trusted', shared_secret = ?, approved_at = ? WHERE instance_id = ?",
-      ).run(response.sharedSecret, now, instanceId);
-
-      return json({ status: 'trusted' });
+      return json({ status: 'pending' });
     }
 
-    // Update peer status to pending
-    ctx.trustStore.upsertPeer(
+    if (!response.requestId) {
+      return json({ error: 'Peer did not return a pairing request ID' }, 502);
+    }
+
+    ctx.trustStore.markPeerPending(
       instanceId,
       discovered.name,
       discovered.host,
       discovered.port,
+      response.requestId,
     );
-    const db = ctx.trustStore['db'];
-    db.prepare(
-      "UPDATE discovery_peers SET status = 'pending' WHERE instance_id = ?",
-    ).run(instanceId);
 
     return json({ status: 'pending', requestId: response.requestId });
   } catch (err) {
@@ -740,10 +721,7 @@ async function handleContextPush(
 
   try {
     await client.writeContextFile(body.path, content);
-    logger.info(
-      { instanceId, path: body.path },
-      'Context file pushed to peer',
-    );
+    logger.info({ instanceId, path: body.path }, 'Context file pushed to peer');
     return json({ ok: true, direction: 'push', path: body.path });
   } catch (err) {
     return json(
@@ -838,10 +816,7 @@ function getLocalAddress(): string {
  * Check if an incoming API request is from a trusted peer.
  * Used by the web server to authenticate peer-to-peer API calls.
  */
-export function checkPeerAuth(
-  req: Request,
-  trustStore: TrustStore,
-): boolean {
+export function checkPeerAuth(req: Request, trustStore: TrustStore): boolean {
   const instanceId = req.headers.get('X-OmniClaw-Instance');
   const authHeader = req.headers.get('Authorization');
 

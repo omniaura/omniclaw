@@ -15,6 +15,7 @@ export interface StoredPeer {
   name: string;
   sharedSecret: string | null;
   status: PeerStatus;
+  pairRequestId?: string | null;
   host: string | null;
   port: number | null;
   approvedAt: string | null;
@@ -70,15 +71,14 @@ export interface PairRequestBody {
 export interface PairResponse {
   status: 'pending' | 'already_trusted';
   requestId?: string;
-  sharedSecret?: string;
 }
 
-/** Response when admin approves a pair request (sent back to requester via callback) */
-export interface PairApprovalCallback {
-  approved: true;
-  sharedSecret: string;
-  instanceId: string;
-  name: string;
+/** Response from GET /api/discovery/pairing-status/:requestId */
+export interface PairingStatusResponse {
+  status: 'pending' | 'approved';
+  sharedSecret?: string;
+  instanceId?: string;
+  name?: string;
 }
 
 export interface DiscoveryConfig {
@@ -97,7 +97,7 @@ export interface DiscoveryHandle {
 
 /** A context file entry with its content hash for sync comparison. */
 export interface ContextFileEntry {
-  /** Relative path from groups dir (e.g. "my-group/CLAUDE.md") */
+  /** Relative folder path from groups dir (e.g. "my-group" or "server/infra") */
   path: string;
   /** SHA-256 hex hash of the content */
   hash: string;

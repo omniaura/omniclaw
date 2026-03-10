@@ -4,6 +4,7 @@
  */
 import type {
   ContextFileEntry,
+  PairingStatusResponse,
   PairRequestBody,
   PairResponse,
   PeerInfoResponse,
@@ -43,21 +44,15 @@ export class PeerClient {
     return res.json() as Promise<PairResponse>;
   }
 
-  /** POST /api/discovery/complete-pairing — sends approval callback */
-  async completePairing(
-    sharedSecret: string,
-    localInstanceId: string,
-    localName: string,
-  ): Promise<void> {
-    await this.fetch('/api/discovery/complete-pairing', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sharedSecret,
-        instanceId: localInstanceId,
-        name: localName,
-      }),
-    });
+  /** GET /api/discovery/pairing-status/:requestId — no auth required */
+  async getPairingStatus(
+    requestId: string,
+    requesterInstanceId: string,
+  ): Promise<PairingStatusResponse> {
+    const res = await this.fetch(
+      `/api/discovery/pairing-status/${encodeURIComponent(requestId)}?instanceId=${encodeURIComponent(requesterInstanceId)}`,
+    );
+    return res.json() as Promise<PairingStatusResponse>;
   }
 
   /** GET /api/agents — requires auth */
@@ -75,9 +70,7 @@ export class PeerClient {
   /** GET /api/context/layers — requires auth */
   async getContextLayers(params: Record<string, string>): Promise<unknown> {
     const query = new URLSearchParams(params).toString();
-    const res = await this.authenticatedFetch(
-      `/api/context/layers?${query}`,
-    );
+    const res = await this.authenticatedFetch(`/api/context/layers?${query}`);
     return res.json();
   }
 
@@ -117,10 +110,7 @@ export class PeerClient {
 
   private async fetch(path: string, init?: RequestInit): Promise<Response> {
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      DEFAULT_TIMEOUT_MS,
-    );
+    const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {

@@ -481,6 +481,7 @@ export function createSchema(database: Database): void {
       name TEXT NOT NULL,
       shared_secret TEXT,
       status TEXT NOT NULL DEFAULT 'discovered',
+      pair_request_id TEXT,
       host TEXT,
       port INTEGER,
       approved_at TEXT,
@@ -500,6 +501,7 @@ export function createSchema(database: Database): void {
       resolved_at TEXT
     );
   `);
+  addColumnIfNotExists(database, 'discovery_peers', 'pair_request_id', 'TEXT');
 
   // Auto-migrate from registered_groups → agents + channel_routes
   migrateRegisteredGroupsToAgents(database);

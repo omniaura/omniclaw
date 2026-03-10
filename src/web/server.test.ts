@@ -173,6 +173,15 @@ function url(path: string): string {
   return `http://localhost:${handle!.port}${path}`;
 }
 
+function makeTrustStore(secret = 'peer-secret-123') {
+  return {
+    getPeerSecret(instanceId: string) {
+      return instanceId === 'peer-1' ? secret : null;
+    },
+    updatePeerLastSeen() {},
+  };
+}
+
 interface StreamReadResult {
   done: boolean;
   value?: Uint8Array;
@@ -299,6 +308,27 @@ describe('basic auth', () => {
 
     const apiRes = await fetch(url('/api/agents'));
     expect(apiRes.status).toBe(200);
+  });
+
+  it('keeps discovery handshake routes outside basic auth', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await fetch(url('/api/discovery/info'));
+    expect(res.status).toBe(404);
+  });
+
+  it('allows trusted peers on allowlisted routes only', async () => {
+    handle = startWebServer(testConfig(), makeState(), makeTrustStore() as any);
+
+    const peerHeaders = {
+      'X-OmniClaw-Instance': 'peer-1',
+      Authorization: 'Bearer peer-secret-123',
+    };
+
+    const agentsRes = await fetch(url('/api/agents'), { headers: peerHeaders });
+    expect(agentsRes.status).toBe(200);
+
+    const tasksRes = await fetch(url('/api/tasks'), { headers: peerHeaders });
+    expect(tasksRes.status).toBe(401);
   });
 });
 

@@ -16,13 +16,8 @@ export interface NetworkPageState {
 
 /** Render just the network page content (no shell wrapper). */
 export function renderNetworkContent(pageState: NetworkPageState): string {
-  const {
-    instanceId,
-    instanceName,
-    discoveryEnabled,
-    peers,
-    pendingRequests,
-  } = pageState;
+  const { instanceId, instanceName, discoveryEnabled, peers, pendingRequests } =
+    pageState;
 
   const trustedCount = peers.filter((p) => p.status === 'trusted').length;
   const onlineCount = peers.filter((p) => p.online).length;
@@ -66,7 +61,7 @@ export function renderNetworkContent(pageState: NetworkPageState): string {
   );
 }
 
-function renderPeersTable(peers: PeerView[]): string {
+export function renderPeersTable(peers: PeerView[]): string {
   if (peers.length === 0) {
     return `<div style="padding:2rem;text-align:center;color:var(--text-muted)">No peers discovered yet. Ensure DISCOVERY_ENABLED=true on all instances.</div>`;
   }
@@ -101,6 +96,8 @@ function renderStatusBadge(
   online: boolean,
 ): string {
   switch (status) {
+    case 'discovered':
+      return '<span class="badge">discovered</span>';
     case 'trusted':
       return '<span class="badge badge-admin">trusted</span>';
     case 'pending':
@@ -115,21 +112,21 @@ function renderStatusBadge(
 function renderPeerActions(peer: PeerView): string {
   if (peer.status === 'trusted') {
     return (
-      `<button class="btn btn-sm" onclick="networkAction('browse','${escapeHtml(peer.instanceId)}')">Browse</button> ` +
-      `<button class="btn btn-sm btn-primary" onclick="networkAction('sync','${escapeHtml(peer.instanceId)}')">Sync</button> ` +
-      `<button class="btn btn-sm btn-danger" onclick="networkAction('revoke','${escapeHtml(peer.instanceId)}')">Revoke</button>`
+      `<button class="btn btn-sm" data-instance-id="${escapeHtml(peer.instanceId)}" onclick="networkAction('browse', this.dataset.instanceId || '')">Browse</button> ` +
+      `<button class="btn btn-sm btn-primary" data-instance-id="${escapeHtml(peer.instanceId)}" onclick="networkAction('sync', this.dataset.instanceId || '')">Sync</button> ` +
+      `<button class="btn btn-sm btn-danger" data-instance-id="${escapeHtml(peer.instanceId)}" onclick="networkAction('revoke', this.dataset.instanceId || '')">Revoke</button>`
     );
   }
   if (peer.status === 'pending') {
-    return `<span style="color:var(--text-muted);font-size:0.8rem">awaiting approval...</span>`;
+    return `<button class="btn btn-sm" data-instance-id="${escapeHtml(peer.instanceId)}" onclick="networkAction('request', this.dataset.instanceId || '')">Check Approval</button>`;
   }
   if (peer.online) {
-    return `<button class="btn btn-sm btn-primary" onclick="networkAction('request','${escapeHtml(peer.instanceId)}')">Request Access</button>`;
+    return `<button class="btn btn-sm btn-primary" data-instance-id="${escapeHtml(peer.instanceId)}" onclick="networkAction('request', this.dataset.instanceId || '')">Request Access</button>`;
   }
   return `<span style="color:var(--text-muted);font-size:0.8rem">offline</span>`;
 }
 
-function renderPendingRequests(requests: PairRequest[]): string {
+export function renderPendingRequests(requests: PairRequest[]): string {
   if (requests.length === 0) {
     return `<div style="padding:1.5rem;text-align:center;color:var(--text-muted);font-size:0.85rem">No pending requests</div>`;
   }
@@ -144,8 +141,8 @@ function renderPendingRequests(requests: PairRequest[]): string {
         `ID: <code>${escapeHtml(req.fromInstanceId.slice(0, 8))}...</code>` +
         `</div>` +
         `<div style="display:flex;gap:0.5rem">` +
-        `<button class="btn btn-sm btn-primary" onclick="networkAction('approve','${escapeHtml(req.id)}')">Approve</button>` +
-        `<button class="btn btn-sm btn-danger" onclick="networkAction('reject','${escapeHtml(req.id)}')">Reject</button>` +
+        `<button class="btn btn-sm btn-primary" data-request-id="${escapeHtml(req.id)}" onclick="networkAction('approve', this.dataset.requestId || '')">Approve</button>` +
+        `<button class="btn btn-sm btn-danger" data-request-id="${escapeHtml(req.id)}" onclick="networkAction('reject', this.dataset.requestId || '')">Reject</button>` +
         `</div></div>`,
     )
     .join('\n');

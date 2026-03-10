@@ -2140,6 +2140,63 @@ async function main(): Promise<void> {
   // --- Web UI (opt-in via WEB_UI_PORT env var) ---
   let webServer: WebServerHandle | undefined;
   let stopLogStream: (() => void) | undefined;
+  const webStateProvider = {
+    getAgents: () => agents,
+    getChannelSubscriptions: () => channelSubscriptions,
+    getTasks: () => getAllTasks(),
+    getTaskById: (id: string) => getTaskById(id),
+    getMessages: (chatJid: string, since: string, limit?: number) => {
+      const msgs = getMessagesSince(chatJid, since);
+      return limit ? msgs.slice(0, limit) : msgs;
+    },
+    getChats: () => getAllChats(),
+    getQueueStats: () => queue.getStats(),
+    getQueueDetails: () => queue.getDetailedStats(),
+    getIpcEvents: (count?: number) => ipcEvents.recent(count),
+    createTask: (task: Parameters<typeof dbCreateTask>[0]) =>
+      dbCreateTask(task),
+    updateTask: (id: string, updates: Parameters<typeof dbUpdateTask>[1]) =>
+      dbUpdateTask(id, updates),
+    deleteTask: (id: string) => dbDeleteTask(id),
+    calculateNextRun: (type: 'cron' | 'interval' | 'once', value: string) =>
+      calculateNextRun(type, value),
+    readContextFile: (layerPath: string) => {
+      const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
+      const resolved = path.resolve(filePath);
+      try {
+        assertPathWithin(resolved, GROUPS_DIR, 'readContextFile');
+        return fs.readFileSync(resolved, 'utf-8');
+      } catch {
+        return null;
+      }
+    },
+    writeContextFile: (layerPath: string, content: string) => {
+      const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
+      const resolved = path.resolve(filePath);
+      assertPathWithin(resolved, GROUPS_DIR, 'writeContextFile');
+      const dir = path.dirname(resolved);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(resolved, content, 'utf-8');
+    },
+    updateAgentAvatar: (
+      agentId: string,
+      url: string | null,
+      source: string | null,
+    ) => {
+      updateAgentAvatar(agentId, url, source);
+      if (agents[agentId]) {
+        agents[agentId].avatarUrl = url || undefined;
+        agents[agentId].avatarSource =
+          (source as Agent['avatarSource']) || undefined;
+      }
+    },
+    resolveChatImage: (chatJid: string) => resolveChatImageUrl(chatJid),
+    resolveDiscordGuildImage: (guildId: string, botId?: string) =>
+      resolveDiscordGuildImageUrl(guildId, botId),
+  };
+  let trustStore: TrustStore | undefined = DISCOVERY_ENABLED
+    ? new TrustStore(getDatabase())
+    : undefined;
   if (WEB_UI_PORT) {
     const isPublic = WEB_UI_HOST !== '127.0.0.1' && WEB_UI_HOST !== 'localhost';
     if (isPublic && (!WEB_UI_USER || !WEB_UI_PASS)) {
@@ -2160,64 +2217,16 @@ async function main(): Promise<void> {
         hostname: WEB_UI_HOST,
         corsOrigin: WEB_UI_CORS_ORIGIN,
       },
-      {
-        getAgents: () => agents,
-        getChannelSubscriptions: () => channelSubscriptions,
-        getTasks: () => getAllTasks(),
-        getTaskById: (id) => getTaskById(id),
-        getMessages: (chatJid, since, limit) => {
-          const msgs = getMessagesSince(chatJid, since);
-          return limit ? msgs.slice(0, limit) : msgs;
-        },
-        getChats: () => getAllChats(),
-        getQueueStats: () => queue.getStats(),
-        getQueueDetails: () => queue.getDetailedStats(),
-        getIpcEvents: (count) => ipcEvents.recent(count),
-        createTask: (task) => dbCreateTask(task),
-        updateTask: (id, updates) => dbUpdateTask(id, updates),
-        deleteTask: (id) => dbDeleteTask(id),
-        calculateNextRun: (type, value) => calculateNextRun(type, value),
-        readContextFile: (layerPath) => {
-          const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
-          const resolved = path.resolve(filePath);
-          try {
-            assertPathWithin(resolved, GROUPS_DIR, 'readContextFile');
-            return fs.readFileSync(resolved, 'utf-8');
-          } catch {
-            return null;
-          }
-        },
-        writeContextFile: (layerPath, content) => {
-          const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
-          const resolved = path.resolve(filePath);
-          assertPathWithin(resolved, GROUPS_DIR, 'writeContextFile');
-          const dir = path.dirname(resolved);
-          fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(resolved, content, 'utf-8');
-        },
-        updateAgentAvatar: (agentId, url, source) => {
-          updateAgentAvatar(agentId, url, source);
-          if (agents[agentId]) {
-            agents[agentId].avatarUrl = url || undefined;
-            agents[agentId].avatarSource =
-              (source as Agent['avatarSource']) || undefined;
-          }
-        },
-        resolveChatImage: (chatJid) => resolveChatImageUrl(chatJid),
-        resolveDiscordGuildImage: (guildId, botId) =>
-          resolveDiscordGuildImageUrl(guildId, botId),
-      },
-      DISCOVERY_ENABLED ? new TrustStore(getDatabase()) : undefined,
+      webStateProvider,
+      trustStore,
     );
     stopLogStream = startLogStream(webServer);
   }
 
   // --- Network Discovery (opt-in via DISCOVERY_ENABLED env var) ---
   let discoveryHandle: DiscoveryHandle | undefined;
-  let trustStore: TrustStore | undefined;
-  if (DISCOVERY_ENABLED && webServer) {
-    trustStore = new TrustStore(getDatabase());
-    const instanceId = trustStore.getOrCreateInstanceId(getDatabase());
+  if (DISCOVERY_ENABLED && webServer && trustStore) {
+    const instanceId = trustStore.getOrCreateInstanceId();
     const version = '1.0.0';
 
     discoveryHandle = startDiscovery({
@@ -2254,26 +2263,10 @@ async function main(): Promise<void> {
         instanceId,
         instanceName: INSTANCE_NAME,
         version,
+        webUiPort: webServer.port,
         trustStore,
         discovery: discoveryHandle,
-        state: {
-          getAgents: () => agents,
-          getChannelSubscriptions: () => channelSubscriptions,
-          getTasks: () => getAllTasks(),
-          getTaskById: (id) => getTaskById(id),
-          getMessages: () => [],
-          getChats: () => [],
-          getQueueStats: () => queue.getStats(),
-          getQueueDetails: () => queue.getDetailedStats(),
-          getIpcEvents: (count) => ipcEvents.recent(count),
-          createTask: (task) => dbCreateTask(task),
-          updateTask: (id, updates) => dbUpdateTask(id, updates),
-          deleteTask: (id) => dbDeleteTask(id),
-          calculateNextRun: (type, value) => calculateNextRun(type, value),
-          readContextFile: () => null,
-          writeContextFile: () => {},
-          updateAgentAvatar: () => {},
-        },
+        state: webStateProvider,
         broadcast: (event) => webServer!.broadcast(event as any),
       },
       () => ({

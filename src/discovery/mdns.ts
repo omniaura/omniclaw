@@ -5,7 +5,11 @@
 import Bonjour from 'bonjour-service';
 
 import { logger } from '../logger.js';
-import type { DiscoveredPeer, DiscoveryConfig, DiscoveryHandle } from './types.js';
+import type {
+  DiscoveredPeer,
+  DiscoveryConfig,
+  DiscoveryHandle,
+} from './types.js';
 
 const SERVICE_TYPE = 'omniclaw';
 const OMNICLAW_SERVICE = '_omniclaw._tcp';

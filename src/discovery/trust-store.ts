@@ -14,6 +14,7 @@ interface PeerRow {
   name: string;
   shared_secret: string | null;
   status: string;
+  pair_request_id: string | null;
   host: string | null;
   port: number | null;
   approved_at: string | null;
@@ -40,6 +41,7 @@ function mapRowToPeer(row: PeerRow): StoredPeer {
     name: row.name,
     sharedSecret: row.shared_secret,
     status: row.status as StoredPeer['status'],
+    pairRequestId: row.pair_request_id,
     host: row.host,
     port: row.port,
     approvedAt: row.approved_at,
@@ -134,16 +136,66 @@ export class TrustStore {
 
   updatePeerLastSeen(instanceId: string): void {
     this.db
-      .prepare(
-        'UPDATE discovery_peers SET last_seen = ? WHERE instance_id = ?',
-      )
+      .prepare('UPDATE discovery_peers SET last_seen = ? WHERE instance_id = ?')
       .run(new Date().toISOString(), instanceId);
+  }
+
+  markPeerPending(
+    instanceId: string,
+    name: string,
+    host: string | null,
+    port: number | null,
+    requestId: string,
+  ): StoredPeer {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO discovery_peers (instance_id, name, host, port, status, pair_request_id, created_at, last_seen)
+         VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+         ON CONFLICT(instance_id) DO UPDATE SET
+           name = excluded.name,
+           host = excluded.host,
+           port = excluded.port,
+           status = 'pending',
+           pair_request_id = excluded.pair_request_id,
+           last_seen = excluded.last_seen`,
+      )
+      .run(instanceId, name, host, port, requestId, now, now);
+
+    return this.getPeer(instanceId)!;
+  }
+
+  trustPeer(
+    instanceId: string,
+    name: string,
+    host: string | null,
+    port: number | null,
+    sharedSecret: string,
+  ): StoredPeer {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO discovery_peers (instance_id, name, host, port, status, shared_secret, pair_request_id, approved_at, last_seen, created_at)
+         VALUES (?, ?, ?, ?, 'trusted', ?, NULL, ?, ?, ?)
+         ON CONFLICT(instance_id) DO UPDATE SET
+           name = excluded.name,
+           host = excluded.host,
+           port = excluded.port,
+           status = 'trusted',
+           shared_secret = excluded.shared_secret,
+           pair_request_id = NULL,
+           approved_at = excluded.approved_at,
+           last_seen = excluded.last_seen`,
+      )
+      .run(instanceId, name, host, port, sharedSecret, now, now, now);
+
+    return this.getPeer(instanceId)!;
   }
 
   revokePeer(instanceId: string): void {
     this.db
       .prepare(
-        "UPDATE discovery_peers SET status = 'revoked', shared_secret = NULL WHERE instance_id = ?",
+        "UPDATE discovery_peers SET status = 'revoked', shared_secret = NULL, pair_request_id = NULL WHERE instance_id = ?",
       )
       .run(instanceId);
     logger.info({ instanceId }, 'Trust revoked for peer');
@@ -176,7 +228,13 @@ export class TrustStore {
         .prepare(
           'UPDATE pair_requests SET from_name = ?, from_host = ?, from_port = ?, created_at = ? WHERE id = ?',
         )
-        .run(fromName, fromHost, fromPort, new Date().toISOString(), existing.id);
+        .run(
+          fromName,
+          fromHost,
+          fromPort,
+          new Date().toISOString(),
+          existing.id,
+        );
       return mapRowToPairRequest({
         ...existing,
         from_name: fromName,
@@ -245,37 +303,38 @@ export class TrustStore {
     const sharedSecret = randomBytes(32).toString('hex');
     const now = new Date().toISOString();
 
-    // Update request
-    this.db
-      .prepare(
-        "UPDATE pair_requests SET status = 'approved', shared_secret = ?, resolved_at = ? WHERE id = ?",
-      )
-      .run(sharedSecret, now, requestId);
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          "UPDATE pair_requests SET status = 'approved', shared_secret = ?, resolved_at = ? WHERE id = ?",
+        )
+        .run(sharedSecret, now, requestId);
 
-    // Upsert peer as trusted
-    this.db
-      .prepare(
-        `INSERT INTO discovery_peers (instance_id, name, host, port, status, shared_secret, approved_at, last_seen, created_at)
-         VALUES (?, ?, ?, ?, 'trusted', ?, ?, ?, ?)
-         ON CONFLICT(instance_id) DO UPDATE SET
-           name = excluded.name,
-           host = excluded.host,
-           port = excluded.port,
-           status = 'trusted',
-           shared_secret = excluded.shared_secret,
-           approved_at = excluded.approved_at,
-           last_seen = excluded.last_seen`,
-      )
-      .run(
-        request.fromInstanceId,
-        request.fromName,
-        request.fromHost,
-        request.fromPort,
-        sharedSecret,
-        now,
-        now,
-        now,
-      );
+      this.db
+        .prepare(
+          `INSERT INTO discovery_peers (instance_id, name, host, port, status, shared_secret, pair_request_id, approved_at, last_seen, created_at)
+           VALUES (?, ?, ?, ?, 'trusted', ?, NULL, ?, ?, ?)
+           ON CONFLICT(instance_id) DO UPDATE SET
+             name = excluded.name,
+             host = excluded.host,
+             port = excluded.port,
+             status = 'trusted',
+             shared_secret = excluded.shared_secret,
+             pair_request_id = NULL,
+             approved_at = excluded.approved_at,
+             last_seen = excluded.last_seen`,
+        )
+        .run(
+          request.fromInstanceId,
+          request.fromName,
+          request.fromHost,
+          request.fromPort,
+          sharedSecret,
+          now,
+          now,
+          now,
+        );
+    })();
 
     logger.info(
       { requestId, instanceId: request.fromInstanceId },
@@ -284,24 +343,60 @@ export class TrustStore {
 
     return {
       sharedSecret,
-      request: { ...request, status: 'approved', sharedSecret, resolvedAt: now },
+      request: {
+        ...request,
+        status: 'approved',
+        sharedSecret,
+        resolvedAt: now,
+      },
     };
   }
 
   rejectPairRequest(requestId: string): void {
     const now = new Date().toISOString();
-    this.db
+    const result = this.db
       .prepare(
-        "UPDATE pair_requests SET status = 'rejected', resolved_at = ? WHERE id = ?",
+        "UPDATE pair_requests SET status = 'rejected', resolved_at = ? WHERE id = ? AND status = 'pending'",
       )
       .run(now, requestId);
+    if (result.changes !== 1) {
+      const request = this.getRequestById(requestId);
+      if (!request) throw new Error(`Pair request not found: ${requestId}`);
+      throw new Error(`Request already ${request.status}`);
+    }
     logger.info({ requestId }, 'Pair request rejected');
+  }
+
+  getPairingStatus(
+    requestId: string,
+    requesterInstanceId: string,
+  ): {
+    status: 'pending' | 'approved';
+    sharedSecret?: string;
+    name?: string;
+  } | null {
+    const request = this.getRequestById(requestId);
+    if (!request || request.fromInstanceId !== requesterInstanceId) return null;
+
+    if (request.status === 'approved' && request.sharedSecret) {
+      return {
+        status: 'approved',
+        sharedSecret: request.sharedSecret,
+        name: request.fromName,
+      };
+    }
+
+    if (request.status === 'pending') {
+      return { status: 'pending' };
+    }
+
+    return null;
   }
 
   // --- Instance ID Management ---
 
-  getOrCreateInstanceId(db: Database): string {
-    const row = db
+  getOrCreateInstanceId(): string {
+    const row = this.db
       .prepare(
         "SELECT value FROM router_state WHERE key = 'discovery_instance_id'",
       )
@@ -310,9 +405,9 @@ export class TrustStore {
     if (row) return row.value;
 
     const instanceId = randomUUID();
-    db.prepare(
-      'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
-    ).run('discovery_instance_id', instanceId);
+    this.db
+      .prepare('INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)')
+      .run('discovery_instance_id', instanceId);
 
     logger.info({ instanceId }, 'Generated new discovery instance ID');
     return instanceId;
