@@ -1,3 +1,5 @@
+import { parseScopedSlackJid } from './slack-jid.js';
+
 export interface ContextLayerInput {
   channelJid: string;
   discordGuildId?: string;
@@ -40,6 +42,16 @@ export function resolveContextLayers(
     const chatSegment = telegram.chatId.replace(/^-/, 'm');
     const channelFolder =
       input.channelFolder || `${categoryFolder}/${chatSegment}`;
+    return { serverFolder, categoryFolder, channelFolder };
+  }
+
+  const slack = parseScopedSlackJid(input.channelJid);
+  if (slack) {
+    const serverFolder = input.serverFolder || `servers/slack-${slack.botId}`;
+    const categoryFolder = input.categoryFolder || `${serverFolder}/channels`;
+    const channelSegment = slack.channelId.replace(/[^a-zA-Z0-9_-]/g, '-');
+    const channelFolder =
+      input.channelFolder || `${categoryFolder}/${channelSegment}`;
     return { serverFolder, categoryFolder, channelFolder };
   }
 

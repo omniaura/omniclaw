@@ -9,6 +9,12 @@ export interface DiscordBotConfig {
   runtime?: AgentRuntime;
 }
 
+export interface SlackBotConfig {
+  id: string;
+  token: string;
+  appToken: string;
+}
+
 export function parseEnvList(value: string | undefined): string[] {
   if (!value) return [];
   return value
@@ -80,6 +86,43 @@ export function buildTelegramBotTokensFromEnv(
   return legacyToken ? [legacyToken] : [];
 }
 
+export function buildSlackBotConfigFromEnv(env: NodeJS.ProcessEnv): {
+  bots: SlackBotConfig[];
+  defaultBotId?: string;
+} {
+  const ids = [
+    ...new Set(
+      parseEnvList(env.SLACK_BOT_IDS)
+        .map(sanitizeBotId)
+        .filter((id) => id.length > 0),
+    ),
+  ];
+
+  if (ids.length > 0) {
+    const bots: SlackBotConfig[] = [];
+    for (const id of ids) {
+      const token = env[`SLACK_BOT_${id}_TOKEN`]?.trim();
+      const appToken = env[`SLACK_BOT_${id}_APP_TOKEN`]?.trim();
+      if (!token || !appToken) continue;
+      bots.push({ id, token, appToken });
+    }
+    if (bots.length === 0) return { bots: [] };
+    const preferredDefault = sanitizeBotId(env.SLACK_BOT_DEFAULT || '');
+    const defaultBotId = bots.some((b) => b.id === preferredDefault)
+      ? preferredDefault
+      : bots[0].id;
+    return { bots, defaultBotId };
+  }
+
+  const token = (env.SLACK_BOT_TOKEN || '').trim();
+  const appToken = (env.SLACK_APP_TOKEN || '').trim();
+  const bots = token && appToken ? [{ id: 'PRIMARY', token, appToken }] : [];
+  return {
+    bots,
+    defaultBotId: bots[0]?.id,
+  };
+}
+
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Omni';
 const discordEnv = buildDiscordBotConfigFromEnv(process.env);
 export const DISCORD_BOTS = discordEnv.bots;
@@ -88,9 +131,12 @@ export const DISCORD_BOT_IDS = DISCORD_BOTS.map((b) => b.id);
 export const DISCORD_BOT_TOKEN = DISCORD_BOTS[0]?.token || '';
 export const TELEGRAM_BOT_TOKENS = buildTelegramBotTokensFromEnv(process.env);
 export const TELEGRAM_BOT_TOKEN = TELEGRAM_BOT_TOKENS[0] || '';
-// Slack: bot token (xoxb-...) + app-level token for Socket Mode (xapp-...)
-export const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
-export const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN || '';
+const slackEnv = buildSlackBotConfigFromEnv(process.env);
+export const SLACK_BOTS = slackEnv.bots;
+export const SLACK_DEFAULT_BOT_ID = slackEnv.defaultBotId;
+// Legacy compatibility exports (first configured bot).
+export const SLACK_BOT_TOKEN = SLACK_BOTS[0]?.token || '';
+export const SLACK_APP_TOKEN = SLACK_BOTS[0]?.appToken || '';
 export const POLL_INTERVAL = 2000;
 export const DISCOVERY_POLL_INTERVAL = 10000;
 
