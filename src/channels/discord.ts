@@ -38,6 +38,22 @@ import { assertPathWithin } from '../path-security.js';
 import { Channel, RegisteredGroup } from '../types.js';
 import { splitMessage } from './utils.js';
 
+export function getAttachmentWorkspaceFolder(
+  group: Pick<RegisteredGroup, 'folder' | 'channelFolder'>,
+): string {
+  const preferredFolder = group.channelFolder?.trim();
+  const workspaceFolder = preferredFolder ? preferredFolder : group.folder;
+  const mediaDir = path.join(GROUPS_DIR, workspaceFolder, 'media');
+  assertPathWithin(mediaDir, GROUPS_DIR, 'Discord attachment workspace');
+  return workspaceFolder;
+}
+
+function getAttachmentMediaDir(
+  group: Pick<RegisteredGroup, 'folder' | 'channelFolder'>,
+): string {
+  return path.join(GROUPS_DIR, getAttachmentWorkspaceFolder(group), 'media');
+}
+
 /**
  * Merge Discord user mention data into the shared user registry JSON.
  * Keyed by lowercase display name so the format_mention MCP tool can look users up.
@@ -292,6 +308,30 @@ export class DiscordChannel implements Channel {
       return lastMessageId;
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Discord message');
+    }
+  }
+
+  async getAvatarUrl(): Promise<string | null> {
+    if (!this.connected || !this.client.user) return null;
+    try {
+      return this.client.user.displayAvatarURL({ size: 256, extension: 'png' });
+    } catch (err) {
+      logger.warn({ err, botId: this.botId }, 'Failed to get Discord avatar');
+      return null;
+    }
+  }
+
+  async getServerIconUrl(guildId: string): Promise<string | null> {
+    if (!this.connected) return null;
+    try {
+      const guild = await this.client.guilds.fetch(guildId);
+      return guild?.iconURL({ size: 256, extension: 'png' }) || null;
+    } catch (err) {
+      logger.warn(
+        { err, botId: this.botId, guildId },
+        'Failed to get Discord guild icon',
+      );
+      return null;
     }
   }
 
@@ -630,6 +670,9 @@ export class DiscordChannel implements Channel {
       discordBotId: preferredSub.discordBotId,
       discordGuildId: preferredSub.discordGuildId,
       serverFolder: agent.serverFolder,
+      channelFolder: preferredSub.channelFolder,
+      categoryFolder: preferredSub.categoryFolder,
+      agentContextFolder: agent.agentContextFolder,
       backend: agent.backend,
       agentRuntime: agent.agentRuntime,
       description: agent.description,
@@ -840,7 +883,7 @@ export class DiscordChannel implements Channel {
       for (const [, a] of message.attachments) {
         if (a.contentType?.startsWith('image/')) {
           try {
-            const mediaDir = path.join(GROUPS_DIR, group.folder, 'media');
+            const mediaDir = getAttachmentMediaDir(group);
             fs.mkdirSync(mediaDir, { recursive: true });
             // Layer 1: Strip directory components to prevent path traversal
             // (e.g. "../../etc/cron.d/evil.png" → "evil.png")
@@ -975,7 +1018,7 @@ export class DiscordChannel implements Channel {
     }
 
     // Clean up media files older than 24 hours
-    this.cleanupOldMedia(group.folder);
+    this.cleanupOldMedia(group);
 
     // Mark this JID as owned by this bot only after we accept/process the message.
     this.ownedJids.add(chatJid);
@@ -1038,9 +1081,11 @@ export class DiscordChannel implements Channel {
     this.opts.onReaction?.(chatJid, reaction.message.id, emoji, userName);
   }
 
-  private cleanupOldMedia(folder: string): void {
+  private cleanupOldMedia(
+    group: Pick<RegisteredGroup, 'folder' | 'channelFolder'>,
+  ): void {
     try {
-      const mediaDir = path.join(GROUPS_DIR, folder, 'media');
+      const mediaDir = getAttachmentMediaDir(group);
       if (!fs.existsSync(mediaDir)) return;
       const now = Date.now();
       const maxAge = 24 * 60 * 60 * 1000; // 24 hours

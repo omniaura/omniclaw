@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'bun:test';
 
-import { jidToChannelId, DiscordChannel } from './discord.js';
+import {
+  jidToChannelId,
+  DiscordChannel,
+  getAttachmentWorkspaceFolder,
+} from './discord.js';
 import type { RegisteredGroup } from '../types.js';
 
 // --- jidToChannelId ---
@@ -54,6 +58,21 @@ describe('DiscordChannel.ownsJid', () => {
     expect(channel.ownsJid('slack:C123')).toBe(false);
     expect(channel.ownsJid('tg:123')).toBe(false);
     expect(channel.ownsJid('main@g.us')).toBe(false);
+  });
+});
+
+describe('getAttachmentWorkspaceFolder', () => {
+  it('uses channelFolder when available', () => {
+    expect(
+      getAttachmentWorkspaceFolder({
+        folder: 'rind',
+        channelFolder: 'servers/123/channels/456',
+      }),
+    ).toBe('servers/123/channels/456');
+  });
+
+  it('falls back to agent folder when channelFolder is missing', () => {
+    expect(getAttachmentWorkspaceFolder({ folder: 'rind' })).toBe('rind');
   });
 });
 

@@ -243,8 +243,12 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 | `TELEGRAM_BOT_TOKENS` | Telegram | Comma/newline-separated bot tokens for multi-bot mode |
 | `TELEGRAM_BOT_TOKEN` | Telegram | Legacy single bot token (backward compatible) |
 | `TELEGRAM_ONLY` | Telegram | Run Telegram-only mode (no WhatsApp) |
+| `SLACK_BOT_IDS` | Slack | Ordered bot IDs for prefixed multi-bot config (e.g. `OPS,SUPPORT`) |
+| `SLACK_BOT_<ID>_TOKEN` | Slack | Bot token (xoxb-...) for a specific Slack bot ID |
+| `SLACK_BOT_<ID>_APP_TOKEN` | Slack | App token (xapp-...) for a specific Slack bot ID |
+| `SLACK_BOT_DEFAULT` | Slack | Default Slack bot ID for legacy/unscoped Slack routes in multi-bot mode |
 | `SLACK_BOT_TOKEN` | Slack | Bot token (xoxb-...) |
-| `SLACK_APP_TOKEN` | Slack | App-level token for Socket Mode (xapp-...) |
+| `SLACK_APP_TOKEN` | Slack | Legacy app token for single-bot Socket Mode |
 
 Discord multi-bot examples:
 
@@ -280,6 +284,22 @@ TELEGRAM_BOT_TOKEN=telegram_token_a
 TELEGRAM_BOT_TOKENS=telegram_token_a,telegram_token_b
 ```
 
+Slack multi-bot examples:
+
+```bash
+# Single bot (existing behavior)
+SLACK_BOT_TOKEN=xoxb-legacy
+SLACK_APP_TOKEN=xapp-legacy
+
+# Prefix mode (recommended)
+SLACK_BOT_IDS=OPS,SUPPORT
+SLACK_BOT_OPS_TOKEN=xoxb-ops
+SLACK_BOT_OPS_APP_TOKEN=xapp-ops
+SLACK_BOT_SUPPORT_TOKEN=xoxb-support
+SLACK_BOT_SUPPORT_APP_TOKEN=xapp-support
+SLACK_BOT_DEFAULT=OPS
+```
+
 ### Backend Credentials
 
 | Variable | Backend | Purpose |
@@ -299,7 +319,9 @@ CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
 ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-Only auth and selected runtime variables are extracted to `data/env/env` and mounted into containers at `/workspace/env-dir/env`. Other `.env` variables are not exposed to agents.
+Only auth and selected runtime variables are extracted to per-runtime files under
+`data/env/<runtime-folder>/env` and mounted into containers at
+`/workspace/env-dir/env`. Other `.env` variables are not exposed to agents.
 
 ### Codex CLI Authentication
 
@@ -762,7 +784,7 @@ Main group's project root mounted read-only at `/workspace/project`. Prevents co
 - `.env` mounted as `/dev/null` overlay in containers
 - Bash hook blocks `/proc/*/environ` access
 - Read hook blocks `.env` file access
-- Only auth tokens extracted to `data/env/env`
+- Only allowlisted runtime variables extracted to `data/env/<runtime-folder>/env`
 
 ### Path Traversal Prevention
 

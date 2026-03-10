@@ -47,4 +47,24 @@ describe('resolveContextLayers', () => {
     expect(layers.categoryFolder).toBeUndefined();
     expect(layers.channelFolder).toBeUndefined();
   });
+
+  it('derives Slack bot/channel layers from scoped JID', () => {
+    const layers = resolveContextLayers({
+      channelJid: 'slack:OPS:C123ABC',
+    });
+
+    expect(layers.serverFolder).toBe('servers/slack-OPS');
+    expect(layers.categoryFolder).toBe('servers/slack-OPS/channels');
+    expect(layers.channelFolder).toBe('servers/slack-OPS/channels/C123ABC');
+  });
+
+  it('does not auto-derive layers for legacy Slack JID', () => {
+    const layers = resolveContextLayers({
+      channelJid: 'slack:C123ABC',
+    });
+
+    expect(layers.serverFolder).toBeUndefined();
+    expect(layers.categoryFolder).toBeUndefined();
+    expect(layers.channelFolder).toBeUndefined();
+  });
 });

@@ -58,6 +58,21 @@ export interface WebStateProvider {
   readContextFile(layerPath: string): string | null;
   /** Write a context file (CLAUDE.md) for a given layer path. Creates directories as needed. */
   writeContextFile(layerPath: string, content: string): void;
+
+  // ---- Avatar operations ----
+  /** Update an agent's avatar URL and source. */
+  updateAgentAvatar(
+    agentId: string,
+    url: string | null,
+    source: string | null,
+  ): void;
+  /** Resolve a platform-backed icon for a specific chat/channel JID. */
+  resolveChatImage?(chatJid: string): Promise<string | null>;
+  /** Resolve a Discord guild/server icon, optionally through a specific bot. */
+  resolveDiscordGuildImage?(
+    guildId: string,
+    botId?: string,
+  ): Promise<string | null>;
 }
 
 export interface QueueStats {
@@ -69,17 +84,23 @@ export interface QueueStats {
 
 export interface WebServerConfig {
   port: number;
-  /** Basic auth credentials. If unset, auth is disabled (dev mode). */
+  /** Basic auth credentials. If unset, HTTP auth is disabled. */
   auth?: { username: string; password: string };
+  /** Bind hostname. Defaults to '127.0.0.1' (loopback only). */
+  hostname?: string;
+  /** Allowed CORS origin. If unset, no CORS headers are sent. */
+  corsOrigin?: string;
 }
 
-/** Shape of a WebSocket data attachment. */
-export interface WsData {
-  /** Channels the client is subscribed to for live events. */
-  subscriptions: Set<string>;
-}
-
-export type WsEventType = 'agent_status' | 'task_update' | 'log' | 'ipc_event';
+export type WsEventType =
+  | 'agent_status'
+  | 'task_update'
+  | 'log'
+  | 'ipc_event'
+  | 'peer_discovered'
+  | 'peer_lost'
+  | 'pair_request'
+  | 'pair_approved';
 
 export interface WsEvent {
   type: WsEventType;

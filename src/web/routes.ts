@@ -1,9 +1,39 @@
+import fs from 'fs';
+import path from 'path';
+
+import { GROUPS_DIR } from '../config.js';
+import { assertPathWithin } from '../path-security.js';
 import type { ScheduledTask } from '../types.js';
 import type { WebStateProvider } from './types.js';
+import { serveCachedRemoteImage } from './image-cache.js';
 import { renderConversations } from './conversations.js';
 import { renderContextViewer } from './context-viewer.js';
 import { renderDashboard } from './dashboard.js';
 import { renderIpcInspector } from './ipc-inspector.js';
+import {
+  handleDiscoveryRequest,
+  type DiscoveryRouteContext,
+} from '../discovery/routes.js';
+import { listLocalContextFiles } from './context-files.js';
+import {
+  renderNetworkPage,
+  renderNetworkContent,
+  type NetworkPageState,
+} from './network.js';
+import { buildHealthData, renderSystem } from './system.js';
+
+/** Optional discovery context — set by the orchestrator when discovery is enabled. */
+let discoveryContext: DiscoveryRouteContext | null = null;
+let networkPageState: (() => NetworkPageState) | null = null;
+
+/** Called by the orchestrator to wire up discovery routes. */
+export function setDiscoveryContext(
+  ctx: DiscoveryRouteContext,
+  getPageState: () => NetworkPageState,
+): void {
+  discoveryContext = ctx;
+  networkPageState = getPageState;
+}
 
 /**
  * Handle an authenticated HTTP request and return a Response.
@@ -12,12 +42,35 @@ import { renderIpcInspector } from './ipc-inspector.js';
 export function handleRequest(
   req: Request,
   state: WebStateProvider,
+  sseClientCount?: number,
 ): Response | Promise<Response> {
   const url = new URL(req.url);
   const { pathname } = url;
   const method = req.method;
 
+  // --- Discovery API routes ---
+  if (pathname.startsWith('/api/discovery/') && discoveryContext) {
+    const result = handleDiscoveryRequest(req, url, discoveryContext);
+    if (result) return result;
+  }
+
+  // --- Network page ---
+  if (pathname === '/network') {
+    const pageState = networkPageState?.() ?? {
+      instanceId: '',
+      instanceName: '',
+      discoveryEnabled: false,
+      peers: [],
+      pendingRequests: [],
+    };
+    return new Response(renderNetworkPage(pageState), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+  }
+
   // --- API routes ---
+  if (pathname === '/api/health')
+    return json(buildHealthData(state, sseClientCount ?? 0));
   if (pathname === '/api/agents') return handleGetAgents(state);
 
   // Tasks — CRUD
@@ -41,6 +94,8 @@ export function handleRequest(
   }
 
   // Context file operations
+  if (pathname === '/api/context/files' && method === 'GET')
+    return handleListContextFiles();
   if (pathname === '/api/context/layers')
     return handleGetContextLayers(url, state);
   if (pathname === '/api/context/file') {
@@ -80,6 +135,63 @@ export function handleRequest(
     return new Response(renderIpcInspector(state), {
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
+
+  // --- System Health ---
+  if (pathname === '/system')
+    return new Response(renderSystem(state, sseClientCount ?? 0), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+
+  // --- Agent avatar endpoints ---
+  if (pathname.startsWith('/api/agents/') && pathname.endsWith('/avatar')) {
+    const agentId = decodeURIComponent(
+      pathname.slice('/api/agents/'.length, -'/avatar'.length),
+    );
+    if (!agentId) return json({ error: 'Missing agent ID' }, 400);
+    if (method === 'GET') return handleGetAgentAvatar(agentId, state);
+    if (method === 'POST') return handleSetAgentAvatar(agentId, req, state);
+    return json({ error: 'Method not allowed' }, 405);
+  }
+  if (
+    pathname.startsWith('/api/agents/') &&
+    pathname.endsWith('/avatar/image')
+  ) {
+    const agentId = decodeURIComponent(
+      pathname.slice('/api/agents/'.length, -'/avatar/image'.length),
+    );
+    if (!agentId) return json({ error: 'Missing agent ID' }, 400);
+    if (method === 'GET') return handleGetAgentAvatarImage(agentId, state);
+    return json({ error: 'Method not allowed' }, 405);
+  }
+  if (pathname.startsWith('/api/chats/') && pathname.endsWith('/icon')) {
+    const chatJid = decodeURIComponent(
+      pathname.slice('/api/chats/'.length, -'/icon'.length),
+    );
+    if (!chatJid) return json({ error: 'Missing chat JID' }, 400);
+    if (method === 'GET') return handleGetChatIcon(chatJid, state);
+    return json({ error: 'Method not allowed' }, 405);
+  }
+  if (
+    pathname.startsWith('/api/discord/guilds/') &&
+    pathname.endsWith('/icon')
+  ) {
+    const guildId = decodeURIComponent(
+      pathname.slice('/api/discord/guilds/'.length, -'/icon'.length),
+    );
+    if (!guildId) return json({ error: 'Missing guild ID' }, 400);
+    if (method === 'GET')
+      return handleGetDiscordGuildIcon(
+        guildId,
+        url.searchParams.get('botId'),
+        state,
+      );
+    return json({ error: 'Method not allowed' }, 405);
+  }
+
+  // Serve locally-stored avatar files
+  if (pathname.startsWith('/avatars/')) {
+    return handleServeAvatar(pathname);
+  }
 
   return json({ error: 'Not found' }, 404);
 }
@@ -403,6 +515,10 @@ function handleGetStats(state: WebStateProvider): Response {
 
 // ---- Context handlers ----
 
+function handleListContextFiles(): Response {
+  return json(listLocalContextFiles());
+}
+
 function handleGetContextLayers(url: URL, state: WebStateProvider): Response {
   const folder = url.searchParams.get('folder') || '';
   const serverFolder = url.searchParams.get('server_folder') || '';
@@ -498,6 +614,139 @@ function handleGetIpcEvents(url: URL, state: WebStateProvider): Response {
     ? Math.min(Math.max(1, parseInt(countParam, 10) || 50), 200)
     : 50;
   return json(state.getIpcEvents(count));
+}
+
+// ---- Avatar handlers ----
+
+function handleGetAgentAvatar(
+  agentId: string,
+  state: WebStateProvider,
+): Response {
+  const agents = state.getAgents();
+  const agent = agents[agentId];
+  if (!agent) return json({ error: 'Agent not found' }, 404);
+  return json({
+    avatarUrl: agent.avatarUrl || null,
+    avatarSource: agent.avatarSource || null,
+  });
+}
+
+async function handleGetAgentAvatarImage(
+  agentId: string,
+  state: WebStateProvider,
+): Promise<Response> {
+  const agents = state.getAgents();
+  const agent = agents[agentId];
+  if (!agent) return json({ error: 'Agent not found' }, 404);
+  if (!agent.avatarUrl) return json({ error: 'Avatar not found' }, 404);
+
+  if (agent.avatarUrl.startsWith('/avatars/')) {
+    const response = handleServeAvatar(agent.avatarUrl);
+    response.headers.set('Cache-Control', 'private, max-age=86400');
+    return response;
+  }
+
+  const response = await serveCachedRemoteImage(
+    `agent:${agentId}:${agent.avatarUrl}`,
+    async () => agent.avatarUrl || null,
+  );
+  return response || json({ error: 'Failed to fetch avatar' }, 502);
+}
+
+async function handleGetChatIcon(
+  chatJid: string,
+  state: WebStateProvider,
+): Promise<Response> {
+  if (!state.resolveChatImage) return json({ error: 'Not supported' }, 404);
+  const response = await serveCachedRemoteImage(`chat:${chatJid}`, async () =>
+    state.resolveChatImage!(chatJid),
+  );
+  return response || json({ error: 'Icon not found' }, 404);
+}
+
+async function handleGetDiscordGuildIcon(
+  guildId: string,
+  botId: string | null,
+  state: WebStateProvider,
+): Promise<Response> {
+  if (!state.resolveDiscordGuildImage) {
+    return json({ error: 'Not supported' }, 404);
+  }
+  const response = await serveCachedRemoteImage(
+    `discord-guild:${guildId}:${botId || ''}`,
+    async () => state.resolveDiscordGuildImage!(guildId, botId || undefined),
+  );
+  return response || json({ error: 'Icon not found' }, 404);
+}
+
+const VALID_AVATAR_SOURCES = new Set([
+  'discord',
+  'telegram',
+  'slack',
+  'custom',
+]);
+
+async function handleSetAgentAvatar(
+  agentId: string,
+  req: Request,
+  state: WebStateProvider,
+): Promise<Response> {
+  const agents = state.getAgents();
+  const agent = agents[agentId];
+  if (!agent) return json({ error: 'Agent not found' }, 404);
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { source, url } = body;
+  if (source && !VALID_AVATAR_SOURCES.has(source as string)) {
+    return json(
+      { error: '"source" must be discord | telegram | slack | custom' },
+      400,
+    );
+  }
+
+  state.updateAgentAvatar(
+    agentId,
+    (url as string) || null,
+    (source as string) || null,
+  );
+
+  return json({
+    success: true,
+    agentId,
+    avatarUrl: (url as string) || null,
+    avatarSource: (source as string) || null,
+  });
+}
+
+/** Folder name pattern (same validation as db.ts). */
+const VALID_FOLDER_RE = /^[a-z0-9][a-z0-9_-]*$/i;
+
+function handleServeAvatar(pathname: string): Response {
+  // Expected format: /avatars/{folder}/avatar.png
+  const rest = pathname.slice('/avatars/'.length);
+  const parts = rest.split('/');
+  if (parts.length !== 2) return json({ error: 'Not found' }, 404);
+
+  const [folder, filename] = parts;
+  if (!VALID_FOLDER_RE.test(folder)) {
+    return json({ error: 'Invalid folder' }, 400);
+  }
+  if (filename !== 'avatar.png') return json({ error: 'Not found' }, 404);
+
+  const filePath = path.join(GROUPS_DIR, folder, 'avatar.png');
+  assertPathWithin(filePath, GROUPS_DIR, 'avatar file');
+
+  if (!fs.existsSync(filePath)) return json({ error: 'Not found' }, 404);
+
+  return new Response(Bun.file(filePath), {
+    headers: { 'Content-Type': 'image/png', 'Cache-Control': 'max-age=3600' },
+  });
 }
 
 // ---- Helpers ----

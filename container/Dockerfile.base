@@ -1,0 +1,121 @@
+# OmniClaw Agent Base Image
+# Shared toolchain/browser/runtime layer for all agent images.
+
+FROM oven/bun:slim
+
+# Install Node.js (agents expect node/npm/npx to be available alongside bun)
+# and essential system tools including Go and Rust (cargo/rustc)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nodejs \
+    npm \
+    curl \
+    git \
+    wget \
+    openssh-client \
+    jq \
+    ripgrep \
+    build-essential \
+    cargo \
+    rustc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install yq (YAML processor, like jq for YAML)
+RUN ARCH="$(dpkg --print-architecture)" \
+    && wget -q "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}" -O /usr/bin/yq \
+    && chmod +x /usr/bin/yq
+
+# Install Go (latest stable version) - cross-platform support
+ARG GO_VERSION=1.25.0
+RUN ARCH="$(dpkg --print-architecture)" \
+    && wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" \
+    && tar -C /usr/local -xzf "go${GO_VERSION}.linux-${ARCH}.tar.gz" \
+    && rm "go${GO_VERSION}.linux-${ARCH}.tar.gz"
+
+# Set Go environment variables
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOPATH="/home/bun/go"
+ENV PATH="${GOPATH}/bin:${PATH}"
+ENV CGO_ENABLED=1
+
+# Install just command runner (required for ditto backend development)
+ARG JUST_VERSION=1.46.0
+RUN ARCH="$(dpkg --print-architecture)" \
+    && JUST_ARCH=$([ "$ARCH" = "amd64" ] && echo "x86_64" || echo "aarch64") \
+    && wget -q "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${JUST_ARCH}-unknown-linux-musl.tar.gz" \
+    && tar -xzf "just-${JUST_VERSION}-${JUST_ARCH}-unknown-linux-musl.tar.gz" \
+    && mv just /usr/local/bin/just \
+    && chmod +x /usr/local/bin/just \
+    && rm "just-${JUST_VERSION}-${JUST_ARCH}-unknown-linux-musl.tar.gz"
+
+# Install GitHub CLI for PR creation and git authentication
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Graphite CLI for stacked PRs workflow (pinned to stable version)
+ARG GRAPHITE_VERSION=1.7.16
+RUN npm install -g @withgraphite/graphite-cli@${GRAPHITE_VERSION}
+
+# Install claude-code globally (default agent runtime)
+RUN bun install -g @anthropic-ai/claude-code
+
+# Pre-install agent-browser with Chromium for browser automation
+# Store browsers in a shared location accessible to both root and bun user.
+# bun blocks postinstall scripts by default (security policy). We must add agent-browser
+# to trustedDependencies in bunfig.toml BEFORE installing so bun runs its postinstall,
+# which downloads the platform-specific native binary (e.g. agent-browser-linux-arm64).
+# Without this, the binary is never downloaded and `agent-browser` silently does nothing.
+# `agent-browser install --with-deps` calls sudo internally which doesn't exist, so we
+# run `npx playwright install-deps` directly as root instead (no sudo needed).
+# The JS wrapper at /usr/local/bin/agent-browser uses Node's existsSync() which returns
+# false for paths under /root/.bun/ due to EACCES on access() in the container sandbox,
+# so we symlink the native binary directly to /usr/local/bin/agent-browser.
+ARG AGENT_BROWSER_VERSION=0.15.1
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN echo 'trustedDependencies = ["agent-browser"]' >> /root/.bunfig.toml \
+    && bun install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
+    && agent-browser install \
+    && npx playwright install-deps \
+    && chmod -R 755 $PLAYWRIGHT_BROWSERS_PATH \
+    && ln -sf $(find /root/.bun -name 'agent-browser-linux-*' -type f | head -1) /usr/local/bin/agent-browser
+
+# Install OpenCode CLI (alternative agent runtime)
+# Pin version to prevent supply-chain attacks via unsigned curl|bash.
+# The installer always writes to ~/.opencode/bin/ regardless of OPENCODE_INSTALL_DIR,
+# so we copy the binary to /usr/local/bin/ (the symlink to /root/ fails for non-root users).
+ARG OPENCODE_VERSION=1.2.24
+RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash \
+    && cp /root/.opencode/bin/opencode /usr/local/bin/opencode \
+    && chmod +x /usr/local/bin/opencode
+
+# Install Codex CLI (alternative agent runtime)
+# Pin version to avoid silent CLI contract changes breaking the container runtime.
+ARG CODEX_VERSION=0.112.0
+RUN npm install -g "@openai/codex@${CODEX_VERSION}"
+
+# Create app directory used by derived images.
+WORKDIR /app
+
+# Create workspace directories once in the shared base image.
+RUN mkdir -p /workspace/group /workspace/global /workspace/server /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+
+# Set ownership to bun user (non-root) for writable directories
+# Pre-create /home/bun/.local so Docker bind mounts (e.g. opencode data at
+# /home/bun/.local/share/opencode) don't create it as root, which blocks
+# OpenCode from writing to /home/bun/.local/state/.
+# Make /etc/passwd group-writable so --user can add a dynamic entry at runtime
+RUN chown -R bun:bun /workspace && chmod 777 /home/bun \
+    && mkdir -p /home/bun/.local/state /home/bun/.local/share \
+    && chown -R bun:bun /home/bun/.local \
+    && chmod 664 /etc/passwd
+
+# Pre-warm tsgo (native TypeScript checker) so `npx tsgo` / `bunx tsgo` works.
+# Host-mounted projects may have platform-specific binaries; npm global install
+# puts the correct linux binary in /usr/local/bin where all users can access it.
+RUN ARCH="$(dpkg --print-architecture)" \
+    && TSGO_ARCH=$([ "$ARCH" = "amd64" ] && echo "x64" || echo "$ARCH") \
+    && npm install -g @typescript/native-preview "@typescript/native-preview-linux-${TSGO_ARCH}"

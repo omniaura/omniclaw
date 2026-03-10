@@ -9,6 +9,12 @@ export interface DiscordBotConfig {
   runtime?: AgentRuntime;
 }
 
+export interface SlackBotConfig {
+  id: string;
+  token: string;
+  appToken: string;
+}
+
 export function parseEnvList(value: string | undefined): string[] {
   if (!value) return [];
   return value
@@ -80,6 +86,43 @@ export function buildTelegramBotTokensFromEnv(
   return legacyToken ? [legacyToken] : [];
 }
 
+export function buildSlackBotConfigFromEnv(env: NodeJS.ProcessEnv): {
+  bots: SlackBotConfig[];
+  defaultBotId?: string;
+} {
+  const ids = [
+    ...new Set(
+      parseEnvList(env.SLACK_BOT_IDS)
+        .map(sanitizeBotId)
+        .filter((id) => id.length > 0),
+    ),
+  ];
+
+  if (ids.length > 0) {
+    const bots: SlackBotConfig[] = [];
+    for (const id of ids) {
+      const token = env[`SLACK_BOT_${id}_TOKEN`]?.trim();
+      const appToken = env[`SLACK_BOT_${id}_APP_TOKEN`]?.trim();
+      if (!token || !appToken) continue;
+      bots.push({ id, token, appToken });
+    }
+    if (bots.length === 0) return { bots: [] };
+    const preferredDefault = sanitizeBotId(env.SLACK_BOT_DEFAULT || '');
+    const defaultBotId = bots.some((b) => b.id === preferredDefault)
+      ? preferredDefault
+      : bots[0].id;
+    return { bots, defaultBotId };
+  }
+
+  const token = (env.SLACK_BOT_TOKEN || '').trim();
+  const appToken = (env.SLACK_APP_TOKEN || '').trim();
+  const bots = token && appToken ? [{ id: 'PRIMARY', token, appToken }] : [];
+  return {
+    bots,
+    defaultBotId: bots[0]?.id,
+  };
+}
+
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Omni';
 const discordEnv = buildDiscordBotConfigFromEnv(process.env);
 export const DISCORD_BOTS = discordEnv.bots;
@@ -88,10 +131,14 @@ export const DISCORD_BOT_IDS = DISCORD_BOTS.map((b) => b.id);
 export const DISCORD_BOT_TOKEN = DISCORD_BOTS[0]?.token || '';
 export const TELEGRAM_BOT_TOKENS = buildTelegramBotTokensFromEnv(process.env);
 export const TELEGRAM_BOT_TOKEN = TELEGRAM_BOT_TOKENS[0] || '';
-// Slack: bot token (xoxb-...) + app-level token for Socket Mode (xapp-...)
-export const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
-export const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN || '';
+const slackEnv = buildSlackBotConfigFromEnv(process.env);
+export const SLACK_BOTS = slackEnv.bots;
+export const SLACK_DEFAULT_BOT_ID = slackEnv.defaultBotId;
+// Legacy compatibility exports (first configured bot).
+export const SLACK_BOT_TOKEN = SLACK_BOTS[0]?.token || '';
+export const SLACK_APP_TOKEN = SLACK_BOTS[0]?.appToken || '';
 export const POLL_INTERVAL = 2000;
+export const DISCOVERY_POLL_INTERVAL = 10000;
 
 /** Separator used in runtime group folders to isolate multi-agent dispatch state. */
 export const DISPATCH_RUNTIME_SEP = '__dispatch__';
@@ -221,6 +268,11 @@ export const GITHUB_WEBHOOK_PORT = parseInt(
 export const GITHUB_WEBHOOK_PATH =
   process.env.GITHUB_WEBHOOK_PATH || '/webhooks/github';
 
+// --- Network Discovery ---
+// Set DISCOVERY_ENABLED=true to advertise this instance on the LAN via mDNS.
+export const DISCOVERY_ENABLED = process.env.DISCOVERY_ENABLED === 'true';
+export const INSTANCE_NAME = process.env.INSTANCE_NAME || os.hostname();
+
 // --- Web UI ---
 // Set WEB_UI_PORT to enable the web dashboard. Unset = disabled.
 export const WEB_UI_PORT = process.env.WEB_UI_PORT
@@ -228,3 +280,9 @@ export const WEB_UI_PORT = process.env.WEB_UI_PORT
   : undefined;
 export const WEB_UI_USER = process.env.WEB_UI_USER || undefined;
 export const WEB_UI_PASS = process.env.WEB_UI_PASS || undefined;
+// Bind hostname: defaults to loopback (127.0.0.1) for security.
+// Set WEB_UI_HOST=0.0.0.0 to expose on all interfaces (e.g. behind a reverse proxy).
+export const WEB_UI_HOST = process.env.WEB_UI_HOST || '127.0.0.1';
+// CORS: explicit allowed origin. Defaults to empty (CORS disabled).
+// Set WEB_UI_CORS_ORIGIN to allow cross-origin requests from a specific origin.
+export const WEB_UI_CORS_ORIGIN = process.env.WEB_UI_CORS_ORIGIN || undefined;

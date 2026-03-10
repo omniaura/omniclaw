@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 
+import { syncAvatars } from './avatar-sync.js';
+
 import {
   ASSISTANT_NAME,
   buildTriggerPattern,
@@ -22,13 +24,17 @@ import {
   POLL_INTERVAL,
   ROSTER_REFRESH_INTERVAL,
   SESSION_MAX_AGE,
-  SLACK_APP_TOKEN,
-  SLACK_BOT_TOKEN,
+  SLACK_BOTS,
+  SLACK_DEFAULT_BOT_ID,
   TELEGRAM_BOT_TOKENS,
   TRIGGER_PATTERN,
   WEB_UI_PORT,
   WEB_UI_USER,
   WEB_UI_PASS,
+  WEB_UI_HOST,
+  WEB_UI_CORS_ORIGIN,
+  DISCOVERY_ENABLED,
+  INSTANCE_NAME,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
 import { SlackChannel } from './channels/slack.js';
@@ -76,9 +82,14 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  getSubscriptionsForAgent,
+  updateAgentAvatar,
+  createTrustStore,
+  getOrCreateDiscoveryInstanceId,
 } from './db.js';
 import { buildAgentToChannelsMapFromSubscriptions } from './channel-routes.js';
 import { resolveContextLayers } from './context-layers.js';
+import { parseScopedSlackJid } from './slack-jid.js';
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import {
@@ -108,6 +119,7 @@ import { logger } from './logger.js';
 import { createResumePositionStore } from './resume-position-store.js';
 import { assertPathWithin } from './path-security.js';
 import { redactSensitiveData } from './security/redaction.js';
+import { serveCachedRemoteImage } from './web/image-cache.js';
 import {
   startWebServer,
   startLogStream,
@@ -115,6 +127,13 @@ import {
   type IpcEventKind,
   type WebServerHandle,
 } from './web/index.js';
+import type { WebStateProvider } from './web/types.js';
+import {
+  startDiscovery,
+  TrustStore,
+  type DiscoveryHandle,
+} from './discovery/index.js';
+import { setDiscoveryContext } from './web/routes.js';
 import { Effect } from 'effect';
 
 // Global error handlers to prevent crashes from unhandled rejections/exceptions
@@ -342,11 +361,18 @@ function toLegacyTelegramJid(jid: string): string | undefined {
   return parsed ? `tg:${parsed.chatId}` : undefined;
 }
 
+function toLegacySlackJid(jid: string): string | undefined {
+  const parsed = parseScopedSlackJid(jid);
+  return parsed ? `slack:${parsed.channelId}` : undefined;
+}
+
 function getRegisteredGroupForJid(jid: string): RegisteredGroup | undefined {
   const exact = registeredGroups[jid];
   if (exact) return exact;
   const legacyTelegramJid = toLegacyTelegramJid(jid);
   if (legacyTelegramJid) return registeredGroups[legacyTelegramJid];
+  const legacySlackJid = toLegacySlackJid(jid);
+  if (legacySlackJid) return registeredGroups[legacySlackJid];
   return undefined;
 }
 
@@ -355,6 +381,10 @@ function getPreferredChannelBotId(
   discordBotId?: string,
 ): string | undefined {
   if (jid.startsWith('dc:')) return discordBotId || getDiscordBotIdForJid(jid);
+  if (jid.startsWith('slack:')) {
+    const scopedSlack = parseScopedSlackJid(jid);
+    return scopedSlack?.botId || SLACK_DEFAULT_BOT_ID;
+  }
   const scopedTelegram = parseScopedTelegramJid(jid);
   if (scopedTelegram) return scopedTelegram.botId;
   return undefined;
@@ -371,6 +401,13 @@ function findChannelForJid(
     if (preferredTelegram) return preferredTelegram;
   }
 
+  if (jid.startsWith('slack:') && preferredBotId) {
+    const preferredSlack = channels.find(
+      (c) => c.name === 'slack' && c.botId === preferredBotId,
+    );
+    if (preferredSlack) return preferredSlack;
+  }
+
   if (!jid.startsWith('dc:')) return findChannel(channels, jid);
 
   const botId = preferredBotId || getDiscordBotIdForJid(jid);
@@ -382,6 +419,61 @@ function findChannelForJid(
   }
 
   return findChannel(channels, jid);
+}
+
+async function resolveChatImageUrl(chatJid: string): Promise<string | null> {
+  const preferredBotId = getPreferredChannelBotId(chatJid);
+  const channel = findChannelForJid(chatJid, preferredBotId);
+  if (!channel?.getChatAvatarUrl) return null;
+  return channel.getChatAvatarUrl(chatJid);
+}
+
+async function resolveDiscordGuildImageUrl(
+  guildId: string,
+  botId?: string,
+): Promise<string | null> {
+  const preferred = botId
+    ? channels.find((c) => c.name === 'discord' && c.botId === botId)
+    : channels.find((c) => c.name === 'discord');
+  if (!preferred?.getServerIconUrl) return null;
+  return preferred.getServerIconUrl(guildId);
+}
+
+function isTelegramChatJid(jid: string): boolean {
+  return /^tg:(?:[^:]+:)?-?\d+$/.test(jid);
+}
+
+async function warmTopologyImageCache(): Promise<void> {
+  const guildTargets = new Map<string, { guildId: string; botId?: string }>();
+  const chatTargets = new Set<string>();
+
+  for (const subs of Object.values(channelSubscriptions)) {
+    for (const sub of subs) {
+      if (sub.discordGuildId) {
+        guildTargets.set(`${sub.discordGuildId}:${sub.discordBotId || ''}`, {
+          guildId: sub.discordGuildId,
+          botId: sub.discordBotId,
+        });
+      }
+      if (isTelegramChatJid(sub.channelJid)) {
+        chatTargets.add(sub.channelJid);
+      }
+    }
+  }
+
+  await Promise.allSettled([
+    ...Array.from(guildTargets.values()).map((target) =>
+      serveCachedRemoteImage(
+        `discord-guild:${target.guildId}:${target.botId || ''}`,
+        async () => resolveDiscordGuildImageUrl(target.guildId, target.botId),
+      ),
+    ),
+    ...Array.from(chatTargets).map((chatJid) =>
+      serveCachedRemoteImage(`chat:${chatJid}`, async () =>
+        resolveChatImageUrl(chatJid),
+      ),
+    ),
+  ]);
 }
 
 function backfillDiscordBotIds(): void {
@@ -2057,6 +2149,54 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  const webState: WebStateProvider = {
+    getAgents: () => agents,
+    getChannelSubscriptions: () => channelSubscriptions,
+    getTasks: () => getAllTasks(),
+    getTaskById: (id) => getTaskById(id),
+    getMessages: (chatJid, since, limit) => {
+      const msgs = getMessagesSince(chatJid, since);
+      return limit ? msgs.slice(0, limit) : msgs;
+    },
+    getChats: () => getAllChats(),
+    getQueueStats: () => queue.getStats(),
+    getQueueDetails: () => queue.getDetailedStats(),
+    getIpcEvents: (count) => ipcEvents.recent(count),
+    createTask: (task) => dbCreateTask(task),
+    updateTask: (id, updates) => dbUpdateTask(id, updates),
+    deleteTask: (id) => dbDeleteTask(id),
+    calculateNextRun: (type, value) => calculateNextRun(type, value),
+    readContextFile: (layerPath) => {
+      const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
+      const resolved = path.resolve(filePath);
+      try {
+        assertPathWithin(resolved, GROUPS_DIR, 'readContextFile');
+        return fs.readFileSync(resolved, 'utf-8');
+      } catch {
+        return null;
+      }
+    },
+    writeContextFile: (layerPath, content) => {
+      const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
+      const resolved = path.resolve(filePath);
+      assertPathWithin(resolved, GROUPS_DIR, 'writeContextFile');
+      const dir = path.dirname(resolved);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(resolved, content, 'utf-8');
+    },
+    updateAgentAvatar: (agentId, url, source) => {
+      updateAgentAvatar(agentId, url, source);
+      if (agents[agentId]) {
+        agents[agentId].avatarUrl = url || undefined;
+        agents[agentId].avatarSource =
+          (source as Agent['avatarSource']) || undefined;
+      }
+    },
+    resolveChatImage: (chatJid) => resolveChatImageUrl(chatJid),
+    resolveDiscordGuildImage: (guildId, botId) =>
+      resolveDiscordGuildImageUrl(guildId, botId),
+  };
+
   // Expire stale sessions on startup to prevent unbounded context growth
   const expired = expireStaleSessions(SESSION_MAX_AGE);
   if (expired.length > 0) {
@@ -2070,57 +2210,192 @@ async function main(): Promise<void> {
   let webServer: WebServerHandle | undefined;
   let stopLogStream: (() => void) | undefined;
   if (WEB_UI_PORT) {
+    const isPublic = WEB_UI_HOST !== '127.0.0.1' && WEB_UI_HOST !== 'localhost';
+    if (isPublic && (!WEB_UI_USER || !WEB_UI_PASS)) {
+      logger.error(
+        'WEB_UI_HOST is set to a public interface but WEB_UI_USER and/or WEB_UI_PASS are missing. ' +
+          'Refusing to start unauthenticated Web UI. Set both credentials or unset WEB_UI_PORT.',
+      );
+      process.exit(1);
+    }
+    const webAuth =
+      WEB_UI_USER && WEB_UI_PASS
+        ? { username: WEB_UI_USER, password: WEB_UI_PASS }
+        : undefined;
     webServer = startWebServer(
       {
         port: WEB_UI_PORT,
-        auth:
-          WEB_UI_USER && WEB_UI_PASS
-            ? { username: WEB_UI_USER, password: WEB_UI_PASS }
-            : undefined,
+        auth: webAuth,
+        hostname: WEB_UI_HOST,
+        corsOrigin: WEB_UI_CORS_ORIGIN,
       },
-      {
-        getAgents: () => agents,
-        getChannelSubscriptions: () => channelSubscriptions,
-        getTasks: () => getAllTasks(),
-        getTaskById: (id) => getTaskById(id),
-        getMessages: (chatJid, since, limit) => {
-          const msgs = getMessagesSince(chatJid, since);
-          return limit ? msgs.slice(0, limit) : msgs;
-        },
-        getChats: () => getAllChats(),
-        getQueueStats: () => queue.getStats(),
-        getQueueDetails: () => queue.getDetailedStats(),
-        getIpcEvents: (count) => ipcEvents.recent(count),
-        createTask: (task) => dbCreateTask(task),
-        updateTask: (id, updates) => dbUpdateTask(id, updates),
-        deleteTask: (id) => dbDeleteTask(id),
-        calculateNextRun: (type, value) => calculateNextRun(type, value),
-        readContextFile: (layerPath) => {
-          const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
-          const resolved = path.resolve(filePath);
-          try {
-            assertPathWithin(resolved, GROUPS_DIR, 'readContextFile');
-            return fs.readFileSync(resolved, 'utf-8');
-          } catch {
-            return null;
-          }
-        },
-        writeContextFile: (layerPath, content) => {
-          const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
-          const resolved = path.resolve(filePath);
-          assertPathWithin(resolved, GROUPS_DIR, 'writeContextFile');
-          const dir = path.dirname(resolved);
-          fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(resolved, content, 'utf-8');
-        },
-      },
+      webState,
+      DISCOVERY_ENABLED ? createTrustStore() : undefined,
     );
     stopLogStream = startLogStream(webServer);
+  }
+
+  // --- Network Discovery (opt-in via DISCOVERY_ENABLED env var) ---
+  let discoveryHandle: DiscoveryHandle | undefined;
+  let trustStore: TrustStore | undefined;
+  if (DISCOVERY_ENABLED && webServer) {
+    trustStore = createTrustStore();
+    const instanceId = getOrCreateDiscoveryInstanceId();
+    const version = '1.0.0';
+
+    discoveryHandle = startDiscovery({
+      instanceId,
+      instanceName: INSTANCE_NAME,
+      port: webServer.port,
+      version,
+      onPeerFound: (peer) => {
+        // Track discovered peer in DB
+        trustStore!.upsertPeer(
+          peer.instanceId,
+          peer.name,
+          peer.host,
+          peer.port,
+        );
+        webServer!.broadcast({
+          type: 'peer_discovered',
+          data: peer,
+          timestamp: new Date().toISOString(),
+        });
+      },
+      onPeerLost: (peerInstanceId) => {
+        webServer!.broadcast({
+          type: 'peer_lost',
+          data: { instanceId: peerInstanceId },
+          timestamp: new Date().toISOString(),
+        });
+      },
+    });
+
+    // Wire discovery context into routes
+    setDiscoveryContext(
+      {
+        instanceId,
+        instanceName: INSTANCE_NAME,
+        version,
+        trustStore,
+        discovery: discoveryHandle,
+        state: webState,
+        broadcast: (event) => webServer!.broadcast(event as any),
+      },
+      () => ({
+        instanceId,
+        instanceName: INSTANCE_NAME,
+        discoveryEnabled: true,
+        peers: (() => {
+          const discovered = discoveryHandle!.getPeers();
+          const stored = trustStore!.getAllPeers();
+          const storedMap = new Map(stored.map((p) => [p.instanceId, p]));
+          const result: Array<{
+            instanceId: string;
+            name: string;
+            host: string;
+            port: number;
+            addresses: string[];
+            status: 'discovered' | 'pending' | 'trusted' | 'revoked';
+            online: boolean;
+            approvedAt: string | null;
+            lastSeen: string | null;
+          }> = [];
+
+          for (const [id, disc] of discovered) {
+            const st = storedMap.get(id);
+            result.push({
+              instanceId: id,
+              name: disc.name,
+              host: disc.host,
+              port: disc.port,
+              addresses: disc.addresses,
+              status: (st?.status as any) ?? 'discovered',
+              online: true,
+              approvedAt: st?.approvedAt ?? null,
+              lastSeen: st?.lastSeen ?? null,
+            });
+            storedMap.delete(id);
+          }
+
+          for (const st of storedMap.values()) {
+            if (st.status === 'revoked') continue;
+            result.push({
+              instanceId: st.instanceId,
+              name: st.name,
+              host: st.host ?? '',
+              port: st.port ?? 0,
+              addresses: [],
+              status: st.status as any,
+              online: false,
+              approvedAt: st.approvedAt,
+              lastSeen: st.lastSeen,
+            });
+          }
+
+          return result;
+        })(),
+        pendingRequests: trustStore!.getPendingRequests(),
+      }),
+    );
+
+    // Set the network page state getter on the web server
+    webServer.setNetworkPageState(() => ({
+      instanceId,
+      instanceName: INSTANCE_NAME,
+      discoveryEnabled: true,
+      peers: (() => {
+        const discovered = discoveryHandle!.getPeers();
+        const stored = trustStore!.getAllPeers();
+        const storedMap = new Map(stored.map((p) => [p.instanceId, p]));
+        const result: Array<any> = [];
+
+        for (const [id, disc] of discovered) {
+          const st = storedMap.get(id);
+          result.push({
+            instanceId: id,
+            name: disc.name,
+            host: disc.host,
+            port: disc.port,
+            addresses: disc.addresses,
+            status: st?.status ?? 'discovered',
+            online: true,
+            approvedAt: st?.approvedAt ?? null,
+            lastSeen: st?.lastSeen ?? null,
+          });
+          storedMap.delete(id);
+        }
+
+        for (const st of storedMap.values()) {
+          if (st.status === 'revoked') continue;
+          result.push({
+            instanceId: st.instanceId,
+            name: st.name,
+            host: st.host ?? '',
+            port: st.port ?? 0,
+            addresses: [],
+            status: st.status,
+            online: false,
+            approvedAt: st.approvedAt,
+            lastSeen: st.lastSeen,
+          });
+        }
+
+        return result;
+      })(),
+      pendingRequests: trustStore!.getPendingRequests(),
+    }));
+
+    logger.info(
+      { instanceId, instanceName: INSTANCE_NAME },
+      'Network discovery enabled',
+    );
   }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (discoveryHandle) discoveryHandle.stop();
     if (githubWebhookServer) {
       githubWebhookServer.stop();
       githubWebhookServer = null;
@@ -2351,6 +2626,57 @@ async function main(): Promise<void> {
         )
       : Effect.succeed([] as TelegramChannel[]);
 
+  const connectSlack =
+    SLACK_BOTS.length > 0
+      ? Effect.forEach(
+          SLACK_BOTS,
+          (bot, idx) =>
+            Effect.gen(function* () {
+              const slack = new SlackChannel({
+                botId: bot.id,
+                token: bot.token,
+                appToken: bot.appToken,
+                multiBotMode: SLACK_BOTS.length > 1,
+                allowLegacyJidRouting:
+                  SLACK_BOTS.length <= 1 || bot.id === SLACK_DEFAULT_BOT_ID,
+                onMessage: (chatJid, msg) => storeMessage(msg),
+                onChatMetadata: (chatJid, timestamp, name) =>
+                  storeChatMetadata(chatJid, timestamp, name),
+                registeredGroups: () => registeredGroups,
+                onReaction: async (chatJid, messageId, emoji, userName) => {
+                  await handleReactionNotification(
+                    chatJid,
+                    messageId,
+                    emoji,
+                    userName,
+                    'Slack',
+                  );
+                },
+              });
+              yield* Effect.tryPromise(() => slack.connect());
+              return slack;
+            }).pipe(
+              Effect.catchAll((err) => {
+                logger.error(
+                  {
+                    err,
+                    index: idx + 1,
+                    total: SLACK_BOTS.length,
+                    botId: bot.id,
+                  },
+                  'Failed to connect Slack bot (continuing with remaining Slack bots)',
+                );
+                return Effect.succeed(null);
+              }),
+            ),
+          { concurrency: 'unbounded' },
+        ).pipe(
+          Effect.map((connected) =>
+            connected.filter((ch): ch is SlackChannel => ch !== null),
+          ),
+        )
+      : Effect.succeed([] as SlackChannel[]);
+
   // Start message loop BEFORE connecting channels — the loop polls the DB
   // and spawns containers, which only needs backends (initialized above).
   // Channel connections can take 30s+ (WhatsApp TLS handshake, Discord gateway)
@@ -2366,11 +2692,15 @@ async function main(): Promise<void> {
   // Channels are only needed for sending responses and typing indicators;
   // the message loop reads from the DB and works without them.
   const connectChannels = async () => {
-    const [wa, discordChannels, telegramChannels] = await Effect.runPromise(
-      Effect.all([connectWhatsApp, connectDiscord, connectTelegram], {
-        concurrency: 'unbounded',
-      }),
-    );
+    const [wa, discordChannels, telegramChannels, slackChannels] =
+      await Effect.runPromise(
+        Effect.all(
+          [connectWhatsApp, connectDiscord, connectTelegram, connectSlack],
+          {
+            concurrency: 'unbounded',
+          },
+        ),
+      );
 
     whatsapp = wa;
     if (whatsapp) channels.push(whatsapp);
@@ -2393,36 +2723,7 @@ async function main(): Promise<void> {
       }, ROSTER_REFRESH_INTERVAL);
     }
     channels.push(...telegramChannels);
-
-    // Conditionally connect Slack (requires both bot token and app-level socket-mode token)
-    if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
-      try {
-        const slack = new SlackChannel({
-          token: SLACK_BOT_TOKEN,
-          appToken: SLACK_APP_TOKEN,
-          onMessage: (chatJid, msg) => storeMessage(msg),
-          onChatMetadata: (chatJid, timestamp, name) =>
-            storeChatMetadata(chatJid, timestamp, name),
-          registeredGroups: () => registeredGroups,
-          onReaction: async (chatJid, messageId, emoji, userName) => {
-            await handleReactionNotification(
-              chatJid,
-              messageId,
-              emoji,
-              userName,
-              'Slack',
-            );
-          },
-        });
-        await slack.connect();
-        channels.push(slack);
-      } catch (err) {
-        logger.error(
-          { err },
-          'Failed to connect Slack bot (continuing without Slack)',
-        );
-      }
-    }
+    channels.push(...slackChannels);
 
     logger.info(
       {
@@ -2437,6 +2738,16 @@ async function main(): Promise<void> {
     // findChannel() can route recovered output to the correct channel.
     // (startMessageLoop already runs above for IPC/scheduled task responsiveness.)
     recoverPendingMessages();
+
+    // Sync agent avatars from platform APIs (non-blocking)
+    syncAvatars(agents, channels, (agentId) =>
+      getSubscriptionsForAgent(agentId),
+    ).catch((err) => {
+      logger.warn({ err }, 'Avatar sync failed (non-critical)');
+    });
+    warmTopologyImageCache().catch((err) => {
+      logger.warn({ err }, 'Topology image cache warmup failed (non-critical)');
+    });
   };
 
   // Fire-and-forget: channels connect in background while message loop already runs

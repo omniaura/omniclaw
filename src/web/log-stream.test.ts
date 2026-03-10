@@ -24,6 +24,7 @@ function makeMockServer(): WebServerHandle & { events: WsEvent[] } {
     get clientCount() {
       return 0;
     },
+    setNetworkPageState() {},
   };
 }
 

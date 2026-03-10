@@ -114,3 +114,49 @@ Without linger, systemd tears down all user services when the last session ends.
 ```
 
 Fix any failures per [guides/troubleshooting.md](guides/troubleshooting.md).
+
+---
+
+## OpenCode auth reset
+
+Use this when a local OpenCode agent creates fresh sessions but still returns empty assistant outputs, especially after auth/provider drift.
+
+Common symptom:
+```text
+[opencode-runtime] Created new session: ...
+[opencode-runtime] Injected system context
+[opencode-runtime] extractResponseText: 0 parts, types:
+```
+
+Known cause:
+- base OpenCode auth store for the agent contains mixed providers or stale auth state
+- fresh dispatch sessions inherit that bad base state
+
+Safe reset sequence for a local agent such as `ocpeyton-discord`:
+```bash
+# Stop service first
+launchctl bootout gui/$(id -u)/com.omniclaw          # macOS
+systemctl --user stop omniclaw                       # Linux
+
+# Clear persisted dispatch sessions
+sqlite3 store/messages.db "DELETE FROM sessions WHERE group_folder LIKE 'ocpeyton-discord__dispatch__%';"
+
+# Clear dispatch runtime stores
+find data/opencode-data -maxdepth 1 -type d -name 'ocpeyton-discord__dispatch__*' -exec rm -rf {} +
+
+# Clear base auth/database so agent rebuilds from fresh login
+rm -f data/opencode-data/ocpeyton-discord/auth.json \
+      data/opencode-data/ocpeyton-discord/mcp-auth.json \
+      data/opencode-data/ocpeyton-discord/opencode.db \
+      data/opencode-data/ocpeyton-discord/opencode.db-shm \
+      data/opencode-data/ocpeyton-discord/opencode.db-wal
+
+# Start service again
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.omniclaw.plist   # macOS
+systemctl --user start omniclaw                                              # Linux
+```
+
+After restart:
+- re-auth if needed
+- send a simple test message to the agent
+- confirm the next run no longer logs `extractResponseText: 0 parts`

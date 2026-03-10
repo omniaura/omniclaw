@@ -1,8 +1,10 @@
 import { Database } from 'bun:sqlite';
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, STORE_DIR } from './config.js';
+import { TrustStore } from './discovery/trust-store.js';
 import { logger } from './logger.js';
 import {
   Agent,
@@ -50,6 +52,8 @@ interface AgentRow {
   created_at: string;
   agent_context_folder: string | null;
   roster_role_filters: string | null;
+  avatar_url: string | null;
+  avatar_source: string | null;
 }
 
 /** Row type for channel_routes table SELECT * queries */
@@ -166,6 +170,8 @@ function mapRowToAgent(row: AgentRow): Agent {
     createdAt: row.created_at,
     agentContextFolder: row.agent_context_folder || undefined,
     rosterRoleFilters,
+    avatarUrl: row.avatar_url || undefined,
+    avatarSource: (row.avatar_source as Agent['avatarSource']) || undefined,
   };
 }
 
@@ -467,6 +473,52 @@ export function createSchema(database: Database): void {
     'TEXT',
   );
 
+  // Agent profile image columns
+  addColumnIfNotExists(database, 'agents', 'avatar_url', 'TEXT');
+  addColumnIfNotExists(database, 'agents', 'avatar_source', 'TEXT');
+
+  // --- Network Discovery tables ---
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS discovery_peers (
+      instance_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      shared_secret TEXT,
+      status TEXT NOT NULL DEFAULT 'discovered',
+      host TEXT,
+      port INTEGER,
+      approved_at TEXT,
+      last_seen TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS pair_requests (
+      id TEXT PRIMARY KEY,
+      from_instance_id TEXT NOT NULL,
+      from_name TEXT NOT NULL,
+      from_host TEXT NOT NULL,
+      from_port INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      shared_secret TEXT,
+      created_at TEXT NOT NULL,
+      resolved_at TEXT
+    );
+  `);
+
+  addColumnIfNotExists(database, 'discovery_peers', 'pairing_token', 'TEXT');
+  addColumnIfNotExists(
+    database,
+    'discovery_peers',
+    'pairing_private_key',
+    'TEXT',
+  );
+  addColumnIfNotExists(database, 'pair_requests', 'callback_token', 'TEXT');
+  addColumnIfNotExists(
+    database,
+    'pair_requests',
+    'key_agreement_public_key',
+    'TEXT',
+  );
+
   // Auto-migrate from registered_groups → agents + channel_routes
   migrateRegisteredGroupsToAgents(database);
   migrateRoutesToSubscriptions(database);
@@ -496,6 +548,27 @@ function applyDiscordRequiresTriggerFix(database: Database): void {
     { updatedCount: result.changes },
     'Migration: Discord server channels now require trigger',
   );
+}
+
+export function createTrustStore(): TrustStore {
+  return new TrustStore(db);
+}
+
+export function getOrCreateDiscoveryInstanceId(): string {
+  const row = db
+    .prepare(
+      "SELECT value FROM router_state WHERE key = 'discovery_instance_id'",
+    )
+    .get() as { value: string } | null;
+
+  if (row) return row.value;
+
+  const instanceId = randomUUID();
+  db.prepare(
+    'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
+  ).run('discovery_instance_id', instanceId);
+  logger.info({ instanceId }, 'Generated new discovery instance ID');
+  return instanceId;
 }
 
 export function initDatabase(): void {
@@ -1355,8 +1428,8 @@ export function getAllAgents(): Record<string, Agent> {
 export function setAgent(agent: Agent): void {
   db.query(
     `
-    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at, agent_context_folder, roster_role_filters)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at, agent_context_folder, roster_role_filters, avatar_url, avatar_source)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     agent.id,
@@ -1373,7 +1446,20 @@ export function setAgent(agent: Agent): void {
     agent.rosterRoleFilters === undefined
       ? null
       : agent.rosterRoleFilters.join(','),
+    agent.avatarUrl || null,
+    agent.avatarSource || null,
   );
+}
+
+/** Update only the avatar fields for an agent (lightweight, avoids full setAgent). */
+export function updateAgentAvatar(
+  agentId: string,
+  avatarUrl: string | null,
+  avatarSource: string | null,
+): void {
+  db.query(
+    'UPDATE agents SET avatar_url = ?, avatar_source = ? WHERE id = ?',
+  ).run(avatarUrl, avatarSource, agentId);
 }
 
 /** Look up a channel route by JID, returning undefined if not found. */
