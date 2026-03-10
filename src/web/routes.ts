@@ -20,6 +20,7 @@ import {
   renderNetworkContent,
   type NetworkPageState,
 } from './network.js';
+import { buildHealthData, renderSystem } from './system.js';
 
 /** Optional discovery context — set by the orchestrator when discovery is enabled. */
 let discoveryContext: DiscoveryRouteContext | null = null;
@@ -41,6 +42,7 @@ export function setDiscoveryContext(
 export function handleRequest(
   req: Request,
   state: WebStateProvider,
+  sseClientCount?: number,
 ): Response | Promise<Response> {
   const url = new URL(req.url);
   const { pathname } = url;
@@ -67,6 +69,8 @@ export function handleRequest(
   }
 
   // --- API routes ---
+  if (pathname === '/api/health')
+    return json(buildHealthData(state, sseClientCount ?? 0));
   if (pathname === '/api/agents') return handleGetAgents(state);
 
   // Tasks — CRUD
@@ -129,6 +133,12 @@ export function handleRequest(
   // --- IPC Inspector ---
   if (pathname === '/ipc')
     return new Response(renderIpcInspector(state), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+
+  // --- System Health ---
+  if (pathname === '/system')
+    return new Response(renderSystem(state, sseClientCount ?? 0), {
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
 
