@@ -21,6 +21,7 @@ import type {
   ContextSyncComparison,
   DiscoveredPeer,
   DiscoveryHandle,
+  PairRequest,
   PairRequestBody,
   PeerView,
 } from './types.js';
@@ -888,14 +889,15 @@ function toLayerPath(contextFilePath: string): string {
 }
 
 async function sendPairingSecretToPeer(
-  request: {
-    fromInstanceId: string;
-    fromHost: string;
-    fromPort: number;
-    fromName: string;
-    callbackToken: string | null;
-    keyAgreementPublicKey?: string | null;
-  },
+  request: Pick<
+    PairRequest,
+    | 'fromInstanceId'
+    | 'fromHost'
+    | 'fromPort'
+    | 'fromName'
+    | 'callbackToken'
+    | 'keyAgreementPublicKey'
+  >,
   sharedSecret: string,
   ctx: DiscoveryRouteContext,
 ): Promise<void> {
@@ -904,11 +906,6 @@ async function sendPairingSecretToPeer(
     request.fromPort,
     ctx.instanceId,
   );
-  if (!request.callbackToken || !request.keyAgreementPublicKey) {
-    throw new Error(
-      'Pair request missing callbackToken or keyAgreementPublicKey',
-    );
-  }
 
   await client.completePairing({
     approved: true,

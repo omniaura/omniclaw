@@ -31,8 +31,8 @@ export interface PairRequest {
   fromName: string;
   fromHost: string;
   fromPort: number;
-  callbackToken: string | null;
-  keyAgreementPublicKey?: string | null;
+  callbackToken: string;
+  keyAgreementPublicKey: string;
   status: 'pending' | 'approved' | 'rejected';
   sharedSecret: string | null;
   createdAt: string;

@@ -40,6 +40,15 @@ interface PairRequestRow {
   resolved_at: string | null;
 }
 
+function requirePairRequestField(
+  value: string | null,
+  field: 'callback_token' | 'key_agreement_public_key',
+  requestId: string,
+): string {
+  if (value) return value;
+  throw new Error(`Pair request ${requestId} is missing required ${field}`);
+}
+
 function mapRowToPeer(row: PeerRow): StoredPeer {
   return {
     instanceId: row.instance_id,
@@ -61,8 +70,16 @@ function mapRowToPairRequest(row: PairRequestRow): PairRequest {
     fromName: row.from_name,
     fromHost: row.from_host,
     fromPort: row.from_port,
-    callbackToken: row.callback_token,
-    keyAgreementPublicKey: row.key_agreement_public_key,
+    callbackToken: requirePairRequestField(
+      row.callback_token,
+      'callback_token',
+      row.id,
+    ),
+    keyAgreementPublicKey: requirePairRequestField(
+      row.key_agreement_public_key,
+      'key_agreement_public_key',
+      row.id,
+    ),
     status: row.status as PairRequest['status'],
     sharedSecret: row.shared_secret,
     createdAt: row.created_at,
@@ -208,7 +225,7 @@ export class TrustStore {
     fromHost: string,
     fromPort: number,
     callbackToken: string,
-    keyAgreementPublicKey?: string,
+    keyAgreementPublicKey: string,
   ): PairRequest {
     // Check for existing pending request from same instance
     const existing = this.db
@@ -228,7 +245,7 @@ export class TrustStore {
           fromHost,
           fromPort,
           callbackToken,
-          keyAgreementPublicKey ?? null,
+          keyAgreementPublicKey,
           new Date().toISOString(),
           existing.id,
         );
@@ -238,7 +255,7 @@ export class TrustStore {
         from_host: fromHost,
         from_port: fromPort,
         callback_token: callbackToken,
-        key_agreement_public_key: keyAgreementPublicKey ?? null,
+        key_agreement_public_key: keyAgreementPublicKey,
       });
     }
 
@@ -257,7 +274,7 @@ export class TrustStore {
         fromPort,
         now,
         callbackToken,
-        keyAgreementPublicKey ?? null,
+        keyAgreementPublicKey,
       );
 
     logger.info(
@@ -272,7 +289,7 @@ export class TrustStore {
       fromHost,
       fromPort,
       callbackToken,
-      keyAgreementPublicKey: keyAgreementPublicKey ?? null,
+      keyAgreementPublicKey,
       status: 'pending',
       sharedSecret: null,
       createdAt: now,
