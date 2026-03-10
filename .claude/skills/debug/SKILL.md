@@ -165,6 +165,72 @@ This persists across reboots. The setup script (step 10) enables this automatica
 
 If an MCP server fails to start, the agent may exit. Check the container logs for MCP initialization errors.
 
+### 8. OpenCode Session Looks Healthy But Replies Are Empty
+
+Symptom pattern in `logs/omniclaw.log`:
+```text
+[opencode-runtime] Created new session: ...
+[opencode-runtime] Injected system context
+[opencode-runtime] Sending prompt ...
+[opencode-runtime] extractResponseText: 0 parts, types:
+[opencode-runtime] waitForAssistantText: 3 messages, last role: assistant, last parts: 0, types:
+```
+
+Important: if this happens on a brand new session, the root cause is not stale session resume alone.
+
+Known real-world case:
+- Remote Linux OpenCode agent worked normally
+- Local macOS OpenCode agent created fresh sessions but still returned empty assistant parts
+- The local base OpenCode auth store contained mixed providers (`anthropic` + `openai`)
+- The working remote auth store contained only `openai`
+
+What to check:
+```bash
+# Session persistence
+sqlite3 store/messages.db "SELECT group_folder, session_id, created_at FROM sessions WHERE group_folder LIKE 'ocpeyton-discord__dispatch__%';"
+
+# Base OpenCode auth/data
+python3 - <<'PY'
+from pathlib import Path
+import json
+p = Path('data/opencode-data/ocpeyton-discord')
+for name in ['auth.json','mcp-auth.json','opencode.db']:
+    fp = p / name
+    print(name, fp.exists())
+    if fp.exists() and name.endswith('.json'):
+        print(sorted(json.loads(fp.read_text()).keys()))
+PY
+```
+
+Recovery order:
+```bash
+# 1. Stop omniclaw so files are not recreated mid-delete
+launchctl bootout gui/$(id -u)/com.omniclaw          # macOS
+systemctl --user stop omniclaw                       # Linux
+
+# 2. Clear persisted dispatch sessions for the broken agent
+sqlite3 store/messages.db "DELETE FROM sessions WHERE group_folder LIKE 'ocpeyton-discord__dispatch__%';"
+
+# 3. Clear all dispatch OpenCode runtime stores for that agent
+find data/opencode-data -maxdepth 1 -type d -name 'ocpeyton-discord__dispatch__*' -print -exec rm -rf {} +
+
+# 4. Clear the agent's base OpenCode store if auth/provider state looks wrong
+rm -f data/opencode-data/ocpeyton-discord/auth.json \
+      data/opencode-data/ocpeyton-discord/mcp-auth.json \
+      data/opencode-data/ocpeyton-discord/opencode.db \
+      data/opencode-data/ocpeyton-discord/opencode.db-shm \
+      data/opencode-data/ocpeyton-discord/opencode.db-wal
+
+# 5. Start omniclaw again
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.omniclaw.plist   # macOS
+systemctl --user start omniclaw                                              # Linux
+```
+
+Notes:
+- If the remote agent works and the local one does not, compare `auth.json` provider keys first.
+- Do not assume session corruption if the failure reproduces on a fresh session.
+- OpenCode reasoning should not be sent to users; only user-facing text parts should be forwarded.
+
 ## Service Management
 
 ```bash

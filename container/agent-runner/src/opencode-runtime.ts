@@ -13,7 +13,6 @@ import {
   createOpencode,
   OpencodeClient,
   type Part,
-  type ReasoningPart,
   type SessionMessagesResponse,
   type TextPart,
 } from '@opencode-ai/sdk';
@@ -267,10 +266,7 @@ type OpenCodePromptResult = Awaited<
 /** @internal exported for testing */
 export function extractTextFromParts(parts: Array<Part>): string | null {
   const texts = parts
-    .filter(
-      (p): p is TextPart | ReasoningPart =>
-        p.type === 'text' || p.type === 'reasoning',
-    )
+    .filter((p): p is TextPart => p.type === 'text')
     .map((p) => p.text);
   return texts.length > 0 ? texts.join('\n') : null;
 }
@@ -280,7 +276,16 @@ export function extractResponseText(
   result: OpenCodePromptResult | null,
 ): string | null {
   const parts = result?.data?.parts;
-  if (!parts) return null;
+  if (!parts) {
+    const rawData = result?.data;
+    console.error(
+      `[opencode-runtime] extractResponseText: no parts in result. data keys: ${rawData ? Object.keys(rawData).join(',') : 'null'}, raw: ${JSON.stringify(rawData)?.slice(0, 500) ?? 'null'}`,
+    );
+    return null;
+  }
+  console.error(
+    `[opencode-runtime] extractResponseText: ${parts.length} parts, types: ${parts.map((p) => p.type).join(',')}`,
+  );
   return extractTextFromParts(parts);
 }
 
@@ -309,12 +314,26 @@ async function waitForAssistantText(
   timeoutMs: number = 60000,
 ): Promise<string | null> {
   const start = Date.now();
+  let pollCount = 0;
   while (Date.now() - start < timeoutMs) {
     try {
       const messagesResponse = await client.session.messages({
         path: { id: sessionId },
       });
       const messages = getMessagesFromPayload(messagesResponse.data);
+      if (pollCount === 0) {
+        // Log first poll details
+        const lastMsg = messages[messages.length - 1];
+        log(
+          `waitForAssistantText: ${messages.length} messages, last role: ${lastMsg?.info?.role}, last parts: ${lastMsg?.parts?.length}, types: ${lastMsg?.parts?.map((p: Part) => p.type).join(',')}`,
+        );
+        if (lastMsg?.parts) {
+          for (const p of lastMsg.parts) {
+            log(`  part type=${p.type} keys=${Object.keys(p).join(',')}`);
+          }
+        }
+      }
+      pollCount++;
       const text = extractLatestAssistantFromSessionMessages(messages);
       if (text) return text;
     } catch (err) {
@@ -325,6 +344,82 @@ async function waitForAssistantText(
     await new Promise((r) => setTimeout(r, 500));
   }
   return null;
+}
+
+/** @internal exported for testing */
+export function classifyPromptResponse(
+  responseText: string | null,
+  isResumedSession: boolean,
+): {
+  retryFreshSession: boolean;
+  finalText: string | null;
+} {
+  if (responseText) {
+    return { retryFreshSession: false, finalText: responseText };
+  }
+
+  if (isResumedSession) {
+    return { retryFreshSession: true, finalText: null };
+  }
+
+  return {
+    retryFreshSession: false,
+    finalText: 'I processed your message but did not generate a text response.',
+  };
+}
+
+async function createSession(
+  client: OpencodeClient,
+  existingSessionId?: string,
+): Promise<{ sessionId: string; isResumedSession: boolean }> {
+  if (existingSessionId) {
+    try {
+      const existing = await client.session.get({
+        path: { id: existingSessionId },
+      });
+      const resolvedId = existing.data?.id || existingSessionId;
+      if (!resolvedId) {
+        throw new Error('Session exists but returned empty ID');
+      }
+      log(`Resumed session: ${resolvedId}`);
+      return { sessionId: resolvedId, isResumedSession: true };
+    } catch {
+      const fresh = await createSession(client);
+      log(`Previous session not found, created new: ${fresh.sessionId}`);
+      return fresh;
+    }
+  }
+
+  const newSession = await client.session.create({ body: {} });
+  if (!newSession.data?.id) {
+    throw new Error('Session created but returned no ID');
+  }
+  return { sessionId: newSession.data.id, isResumedSession: false };
+}
+
+async function injectSystemContext(
+  client: OpencodeClient,
+  sessionId: string,
+  containerInput: ContainerInput,
+  forcedModel?: { providerID: string; modelID: string },
+): Promise<void> {
+  const systemContext = buildSystemContext(containerInput);
+  if (!systemContext) return;
+  try {
+    await client.session.prompt({
+      path: { id: sessionId },
+      body: {
+        noReply: true,
+        parts: [{ type: 'text', text: systemContext }],
+        ...(forcedModel ? { model: forcedModel } : {}),
+      },
+    });
+    log('Injected system context');
+  } catch (err) {
+    log(
+      `Failed to inject system context (continuing): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +440,7 @@ async function runOpenCodePrompt(
   sessionId: string;
   closedDuringPrompt: boolean;
   promptSucceeded: boolean;
+  emptyResponse: boolean;
 }> {
   let closedDuringPrompt = false;
 
@@ -430,8 +526,13 @@ async function runOpenCodePrompt(
       responseText = await waitForAssistantText(client, sessionId);
     }
     if (!responseText) {
-      responseText =
-        'I processed your message but did not generate a text response.';
+      log('Prompt completed without assistant text');
+      return {
+        sessionId,
+        closedDuringPrompt,
+        promptSucceeded: true,
+        emptyResponse: true,
+      };
     }
     log(`Prompt completed, response: ${responseText.slice(0, 200)}...`);
 
@@ -447,12 +548,22 @@ async function runOpenCodePrompt(
     if (currentChatJid) output.chatJid = currentChatJid;
     writeOutput(output);
 
-    return { sessionId, closedDuringPrompt, promptSucceeded: true };
+    return {
+      sessionId,
+      closedDuringPrompt,
+      promptSucceeded: true,
+      emptyResponse: false,
+    };
   } catch (err) {
     ipcPolling = false;
 
     if (closedDuringPrompt) {
-      return { sessionId, closedDuringPrompt: true, promptSucceeded: false };
+      return {
+        sessionId,
+        closedDuringPrompt: true,
+        promptSucceeded: false,
+        emptyResponse: false,
+      };
     }
 
     const errorMessage = err instanceof Error ? err.message : String(err);
@@ -464,7 +575,12 @@ async function runOpenCodePrompt(
       error: `OpenCode prompt error: ${errorMessage}`,
     });
 
-    return { sessionId, closedDuringPrompt: false, promptSucceeded: false };
+    return {
+      sessionId,
+      closedDuringPrompt: false,
+      promptSucceeded: false,
+      emptyResponse: false,
+    };
   }
 }
 
@@ -641,32 +757,10 @@ export async function runOpenCodeRuntime(
   let sessionId: string;
   let isResumedSession = false;
   try {
-    if (containerInput.sessionId) {
-      try {
-        const existing = await client.session.get({
-          path: { id: containerInput.sessionId },
-        });
-        const resolvedId = existing.data?.id || containerInput.sessionId;
-        if (!resolvedId) {
-          throw new Error('Session exists but returned empty ID');
-        }
-        sessionId = resolvedId;
-        isResumedSession = true;
-        log(`Resumed session: ${sessionId}`);
-      } catch {
-        const newSession = await client.session.create({ body: {} });
-        if (!newSession.data?.id) {
-          throw new Error('Session created but returned no ID');
-        }
-        sessionId = newSession.data.id;
-        log(`Previous session not found, created new: ${sessionId}`);
-      }
-    } else {
-      const newSession = await client.session.create({ body: {} });
-      if (!newSession.data?.id) {
-        throw new Error('Session created but returned no ID');
-      }
-      sessionId = newSession.data.id;
+    const created = await createSession(client, containerInput.sessionId);
+    sessionId = created.sessionId;
+    isResumedSession = created.isResumedSession;
+    if (!isResumedSession) {
       log(`Created new session: ${sessionId}`);
     }
   } catch (err) {
@@ -685,24 +779,7 @@ export async function runOpenCodeRuntime(
   // Only inject on NEW sessions — resumed sessions already have context
   // from the original setup prompt. Re-injecting would duplicate CLAUDE.md.
   if (!isResumedSession) {
-    const systemContext = buildSystemContext(containerInput);
-    if (systemContext) {
-      try {
-        await client.session.prompt({
-          path: { id: sessionId },
-          body: {
-            noReply: true,
-            parts: [{ type: 'text', text: systemContext }],
-            ...(forcedModel ? { model: forcedModel } : {}),
-          },
-        });
-        log('Injected system context');
-      } catch (err) {
-        log(
-          `Failed to inject system context (continuing): ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
+    await injectSystemContext(client, sessionId, containerInput, forcedModel);
   } else {
     log('Skipping system context injection (resumed session)');
   }
@@ -742,6 +819,27 @@ export async function runOpenCodeRuntime(
       if (!result.promptSucceeded) {
         log('Prompt failed, exiting runtime loop');
         break;
+      }
+      if (result.emptyResponse) {
+        const responsePlan = classifyPromptResponse(null, isResumedSession);
+        if (responsePlan.retryFreshSession) {
+          log(
+            'Resumed session produced no assistant text; recreating fresh session and retrying prompt once',
+          );
+          const freshSession = await createSession(client);
+          sessionId = freshSession.sessionId;
+          isResumedSession = false;
+          log(`Created replacement session: ${sessionId}`);
+          await injectSystemContext(client, sessionId, containerInput, forcedModel);
+          continue;
+        }
+
+        writeOutput({
+          status: 'success',
+          result: responsePlan.finalText,
+          newSessionId: sessionId,
+          ...(currentChatJid ? { chatJid: currentChatJid } : {}),
+        });
       }
 
       // Emit session update so host can track it

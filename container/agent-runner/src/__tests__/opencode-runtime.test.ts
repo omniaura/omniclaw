@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  classifyPromptResponse,
   extractResponseText,
   extractTextFromParts,
 } from '../opencode-runtime.js';
@@ -20,14 +21,12 @@ describe('extractTextFromParts', () => {
     expect(extractTextFromParts(parts)).toBe('Hello\nWorld');
   });
 
-  it('extracts reasoning parts', () => {
+  it('ignores reasoning parts', () => {
     const parts = [
       { type: 'reasoning', text: 'Let me think...' },
       { type: 'text', text: 'The answer is 42.' },
     ];
-    expect(extractTextFromParts(parts)).toBe(
-      'Let me think...\nThe answer is 42.',
-    );
+    expect(extractTextFromParts(parts)).toBe('The answer is 42.');
   });
 
   it('ignores tool parts (no tool output in user-facing response)', () => {
@@ -86,6 +85,29 @@ describe('extractResponseText', () => {
       },
     };
     expect(extractResponseText(result as any)).toBe('response');
+  });
+});
+
+describe('classifyPromptResponse', () => {
+  it('retries fresh session when a resumed session returns no text', () => {
+    expect(classifyPromptResponse(null, true)).toEqual({
+      retryFreshSession: true,
+      finalText: null,
+    });
+  });
+
+  it('falls back to a synthetic reply for fresh empty responses', () => {
+    expect(classifyPromptResponse(null, false)).toEqual({
+      retryFreshSession: false,
+      finalText: 'I processed your message but did not generate a text response.',
+    });
+  });
+
+  it('passes through real text responses', () => {
+    expect(classifyPromptResponse('hello', true)).toEqual({
+      retryFreshSession: false,
+      finalText: 'hello',
+    });
   });
 });
 
