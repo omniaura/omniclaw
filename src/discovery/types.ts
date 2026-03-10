@@ -32,6 +32,7 @@ export interface PairRequest {
   fromHost: string;
   fromPort: number;
   callbackToken: string | null;
+  keyAgreementPublicKey?: string | null;
   status: 'pending' | 'approved' | 'rejected';
   sharedSecret: string | null;
   createdAt: string;
@@ -66,6 +67,7 @@ export interface PairRequestBody {
   host: string;
   port: number;
   callbackToken: string;
+  keyAgreementPublicKey: string;
 }
 
 /** Response from POST /api/discovery/pair when a request is accepted for review */
@@ -74,13 +76,21 @@ export interface PairResponse {
   requestId?: string;
 }
 
+export interface EncryptedPairingEnvelope {
+  algorithm: 'x25519-aes-256-gcm';
+  senderPublicKey: string;
+  iv: string;
+  ciphertext: string;
+  authTag: string;
+}
+
 /** Response when admin approves a pair request (sent back to requester via callback) */
 export interface PairApprovalCallback {
   approved: true;
-  sharedSecret: string;
   instanceId: string;
   name: string;
   callbackToken: string;
+  approval: EncryptedPairingEnvelope;
 }
 
 export interface DiscoveryConfig {

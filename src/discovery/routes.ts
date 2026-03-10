@@ -11,6 +11,10 @@ import { logger } from '../logger.js';
 import { listLocalContextFiles } from '../web/context-files.js';
 import type { WebStateProvider } from '../web/types.js';
 import { PeerClient, verifyPeerRequestSignature } from './peer-client.js';
+import {
+  encryptPairingSecret,
+  generatePairingKeyPair,
+} from './pairing-crypto.js';
 import type { TrustStore } from './trust-store.js';
 import type {
   ContextFileEntry,
@@ -269,12 +273,13 @@ async function handlePairRequest(
     !body.name ||
     !body.host ||
     !body.port ||
-    !body.callbackToken
+    !body.callbackToken ||
+    !body.keyAgreementPublicKey
   ) {
     return json(
       {
         error:
-          'Missing required fields: instanceId, name, host, port, callbackToken',
+          'Missing required fields: instanceId, name, host, port, callbackToken, keyAgreementPublicKey',
       },
       400,
     );
@@ -282,15 +287,10 @@ async function handlePairRequest(
 
   // Check if already trusted
   if (ctx.trustStore.isPeerTrusted(body.instanceId)) {
-    const sharedSecret = ctx.trustStore.getPeerSecret(body.instanceId);
-    if (sharedSecret) {
-      await sendPairingSecretToPeer(
-        body.instanceId,
-        sharedSecret,
-        body.callbackToken,
-        ctx,
-      );
-    }
+    logger.warn(
+      { peerInstanceId: body.instanceId },
+      'Refusing to replay stored pairing secret for an already trusted peer',
+    );
     return json({ status: 'already_trusted' });
   }
 
@@ -301,6 +301,7 @@ async function handlePairRequest(
     body.host,
     body.port,
     body.callbackToken,
+    body.keyAgreementPublicKey,
   );
 
   // Broadcast SSE event for the web UI
@@ -321,10 +322,16 @@ async function handleCompletePairing(
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
   let body: {
-    sharedSecret: string;
     instanceId: string;
     name: string;
     callbackToken: string;
+    approval: {
+      algorithm: 'x25519-aes-256-gcm';
+      senderPublicKey: string;
+      iv: string;
+      ciphertext: string;
+      authTag: string;
+    };
   };
   try {
     body = (await req.json()) as typeof body;
@@ -332,16 +339,11 @@ async function handleCompletePairing(
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
-  if (
-    !body.sharedSecret ||
-    !body.instanceId ||
-    !body.name ||
-    !body.callbackToken
-  ) {
+  if (!body.instanceId || !body.name || !body.callbackToken || !body.approval) {
     return json(
       {
         error:
-          'Missing required fields: sharedSecret, instanceId, name, callbackToken',
+          'Missing required fields: instanceId, name, callbackToken, approval',
       },
       400,
     );
@@ -349,10 +351,10 @@ async function handleCompletePairing(
 
   const now = new Date().toISOString();
   try {
-    ctx.trustStore.completePendingPairing(
+    ctx.trustStore.completePendingEncryptedPairing(
       body.instanceId,
       body.name,
-      body.sharedSecret,
+      body.approval,
       body.callbackToken,
     );
   } catch (error) {
@@ -432,12 +434,7 @@ async function handleApproveRequest(
       ctx.trustStore.approvePairRequest(requestId);
 
     try {
-      await sendPairingSecretToPeer(
-        request.fromInstanceId,
-        sharedSecret,
-        request.callbackToken ?? '',
-        ctx,
-      );
+      await sendPairingSecretToPeer(request, sharedSecret, ctx);
     } catch (err) {
       logger.warn(
         {
@@ -499,12 +496,14 @@ async function handleRequestAccess(
   // Send pair request to the remote instance
   try {
     const callbackToken = randomUUID();
+    const keyPair = generatePairingKeyPair();
     ctx.trustStore.markPeerPending(
       instanceId,
       discovered.name,
       discovered.host,
       discovered.port,
       callbackToken,
+      keyPair.privateKey,
     );
 
     const client = new PeerClient(
@@ -518,6 +517,7 @@ async function handleRequestAccess(
       host: getLocalAddress(),
       port: WEB_UI_PORT || 6001,
       callbackToken,
+      keyAgreementPublicKey: keyPair.publicKey,
     });
 
     return json({ status: 'pending', requestId: response.requestId });
@@ -888,25 +888,35 @@ function toLayerPath(contextFilePath: string): string {
 }
 
 async function sendPairingSecretToPeer(
-  peerInstanceId: string,
+  request: {
+    fromInstanceId: string;
+    fromHost: string;
+    fromPort: number;
+    fromName: string;
+    callbackToken: string | null;
+    keyAgreementPublicKey?: string | null;
+  },
   sharedSecret: string,
-  callbackToken: string,
   ctx: DiscoveryRouteContext,
 ): Promise<void> {
-  const discoveredPeer = ctx.discovery?.getPeers().get(peerInstanceId);
-  if (!discoveredPeer) {
-    throw new Error(`Peer ${peerInstanceId} is not currently discoverable`);
+  const client = new PeerClient(
+    request.fromHost,
+    request.fromPort,
+    ctx.instanceId,
+  );
+  if (!request.callbackToken || !request.keyAgreementPublicKey) {
+    throw new Error(
+      'Pair request missing callbackToken or keyAgreementPublicKey',
+    );
   }
 
-  const client = new PeerClient(
-    discoveredPeer.host,
-    discoveredPeer.port,
-    ctx.instanceId,
-  );
-  await client.completePairing(
-    sharedSecret,
-    ctx.instanceId,
-    ctx.instanceName,
-    callbackToken,
-  );
+  await client.completePairing({
+    approved: true,
+    instanceId: ctx.instanceId,
+    name: ctx.instanceName,
+    callbackToken: request.callbackToken,
+    approval: encryptPairingSecret(request.keyAgreementPublicKey, {
+      sharedSecret,
+    }),
+  });
 }

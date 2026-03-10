@@ -504,7 +504,19 @@ export function createSchema(database: Database): void {
   `);
 
   addColumnIfNotExists(database, 'discovery_peers', 'pairing_token', 'TEXT');
+  addColumnIfNotExists(
+    database,
+    'discovery_peers',
+    'pairing_private_key',
+    'TEXT',
+  );
   addColumnIfNotExists(database, 'pair_requests', 'callback_token', 'TEXT');
+  addColumnIfNotExists(
+    database,
+    'pair_requests',
+    'key_agreement_public_key',
+    'TEXT',
+  );
 
   // Auto-migrate from registered_groups → agents + channel_routes
   migrateRegisteredGroupsToAgents(database);
