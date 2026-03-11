@@ -36,9 +36,13 @@ export function startDiscovery(config: DiscoveryConfig): DiscoveryHandle {
 
   const bonjour = new Bonjour();
 
-  // Advertise this instance
+  // Advertise this instance.
+  // Use a distinct host to avoid conflicting with macOS's built-in
+  // mDNSResponder, which otherwise detects a duplicate hostname and
+  // keeps renaming the machine (e.g. Peyton-MBP-2, Peyton-MBP-3…).
   const service = bonjour.publish({
     name: `omniclaw-${instanceName}`,
+    host: `omniclaw-${instanceName}.local`,
     type: SERVICE_TYPE,
     port,
     txt: {
