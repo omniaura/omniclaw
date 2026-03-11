@@ -272,6 +272,9 @@ export const GITHUB_WEBHOOK_PATH =
 // Set DISCOVERY_ENABLED=true to advertise this instance on the LAN via mDNS.
 export const DISCOVERY_ENABLED = process.env.DISCOVERY_ENABLED === 'true';
 export const INSTANCE_NAME = process.env.INSTANCE_NAME || os.hostname();
+// Opt-in: allow discovery admin actions from loopback/private LAN without Web UI Basic Auth.
+export const DISCOVERY_TRUST_LAN_ADMIN =
+  process.env.DISCOVERY_TRUST_LAN_ADMIN === 'true';
 
 // --- Web UI ---
 // Set WEB_UI_PORT to enable the web dashboard. Unset = disabled.

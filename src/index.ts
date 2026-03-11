@@ -34,6 +34,7 @@ import {
   WEB_UI_HOST,
   WEB_UI_CORS_ORIGIN,
   DISCOVERY_ENABLED,
+  DISCOVERY_TRUST_LAN_ADMIN,
   INSTANCE_NAME,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
@@ -2228,6 +2229,7 @@ async function main(): Promise<void> {
         auth: webAuth,
         hostname: WEB_UI_HOST,
         corsOrigin: WEB_UI_CORS_ORIGIN,
+        trustLanDiscoveryAdmin: DISCOVERY_TRUST_LAN_ADMIN,
       },
       webState,
       DISCOVERY_ENABLED ? createTrustStore() : undefined,

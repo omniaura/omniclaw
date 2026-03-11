@@ -40,7 +40,7 @@ export function startWebServer(
   state: WebStateProvider,
   trustStore?: TrustStore,
 ): WebServerHandle {
-  const { port, auth, hostname, corsOrigin } = config;
+  const { port, auth, hostname, corsOrigin, trustLanDiscoveryAdmin } = config;
   const sseClients = new Set<SseClient>();
 
   const server = Bun.serve({
@@ -77,7 +77,13 @@ export function startWebServer(
       } else if (
         !auth &&
         url.pathname.startsWith('/api/discovery/') &&
-        !isUnauthDiscoveryRoute(url.pathname)
+        !isUnauthDiscoveryRoute(url.pathname) &&
+        !isTrustedLanDiscoveryAdminRequest(
+          req,
+          url.pathname,
+          url.hostname,
+          trustLanDiscoveryAdmin,
+        )
       ) {
         // Discovery admin routes MUST have auth — reject if credentials not configured
         return new Response(
@@ -440,6 +446,54 @@ function isUnauthDiscoveryRoute(pathname: string): boolean {
     pathname === '/api/discovery/pair' ||
     pathname === '/api/discovery/complete-pairing'
   );
+}
+
+function isTrustedLanDiscoveryAdminRequest(
+  req: Request,
+  pathname: string,
+  hostname: string,
+  enabled: boolean | undefined,
+): boolean {
+  if (!enabled || !pathname.startsWith('/api/discovery/')) return false;
+  if (isUnauthDiscoveryRoute(pathname)) return false;
+
+  const remoteAddress = (
+    req as unknown as { socket?: { remoteAddress?: string } }
+  ).socket?.remoteAddress;
+  const hostHeader = req.headers.get('host')?.split(':', 1)[0];
+
+  return (
+    isLoopbackOrPrivateAddress(remoteAddress) ||
+    isLoopbackOrPrivateAddress(hostname) ||
+    isLoopbackOrPrivateAddress(hostHeader)
+  );
+}
+
+function isLoopbackOrPrivateAddress(address?: string): boolean {
+  if (!address) return false;
+  const normalized = address.toLowerCase();
+
+  if (normalized === '::1' || normalized === '::ffff:127.0.0.1') return true;
+  if (normalized === 'localhost') return true;
+  if (normalized.startsWith('127.')) return true;
+
+  const ipv4 = normalized.startsWith('::ffff:')
+    ? normalized.slice('::ffff:'.length)
+    : normalized;
+
+  if (/^10\./.test(ipv4)) return true;
+  if (/^192\.168\./.test(ipv4)) return true;
+
+  const match172 = ipv4.match(/^172\.(\d{1,3})\./);
+  if (match172) {
+    const octet = Number.parseInt(match172[1], 10);
+    if (octet >= 16 && octet <= 31) return true;
+  }
+
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+  if (normalized.startsWith('fe80:')) return true;
+
+  return false;
 }
 
 function patchSnapshot(client: SseClient, state: WebStateProvider): void {

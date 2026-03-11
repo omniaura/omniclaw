@@ -90,6 +90,8 @@ export interface WebServerConfig {
   hostname?: string;
   /** Allowed CORS origin. If unset, no CORS headers are sent. */
   corsOrigin?: string;
+  /** Opt-in: allow discovery admin routes from loopback/private LAN without Basic Auth. */
+  trustLanDiscoveryAdmin?: boolean;
 }
 
 export type WsEventType =

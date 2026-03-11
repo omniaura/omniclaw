@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from 'bun:test';
 
 import { startWebServer, type WebServerHandle } from './server.js';
+import { setDiscoveryContext } from './routes.js';
 import type { WebStateProvider, QueueStats } from './types.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 
@@ -234,6 +235,28 @@ function testConfig(
   return { port: randomPort(), auth: testAuth, ...overrides };
 }
 
+function setTestDiscoveryContext(): void {
+  setDiscoveryContext(
+    {
+      instanceId: 'local-instance',
+      instanceName: 'local',
+      version: '1.0.0',
+      trustStore: {
+        getPendingRequests: () => [],
+      } as never,
+      discovery: null,
+      state: makeState(),
+    },
+    () => ({
+      instanceId: 'local-instance',
+      instanceName: 'local',
+      discoveryEnabled: true,
+      peers: [],
+      pendingRequests: [],
+    }),
+  );
+}
+
 // ---- Server startup ----
 
 describe('startWebServer', () => {
@@ -299,6 +322,30 @@ describe('basic auth', () => {
 
     const apiRes = await fetch(url('/api/agents'));
     expect(apiRes.status).toBe(200);
+  });
+
+  it('keeps discovery admin routes locked by default without credentials', async () => {
+    setTestDiscoveryContext();
+    handle = startWebServer(testConfig({ auth: undefined }), makeState());
+
+    const res = await fetch(url('/api/discovery/requests'));
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({
+      error:
+        'Discovery admin routes require WEB_UI_USER/WEB_UI_PASS to be configured',
+    });
+  });
+
+  it('allows discovery admin routes from loopback with trusted LAN mode enabled', async () => {
+    setTestDiscoveryContext();
+    handle = startWebServer(
+      testConfig({ auth: undefined, trustLanDiscoveryAdmin: true }),
+      makeState(),
+    );
+
+    const res = await fetch(url('/api/discovery/requests'));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual([]);
   });
 });
 
