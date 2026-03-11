@@ -2,7 +2,7 @@
  * mDNS service advertisement and browsing for LAN peer discovery.
  * Uses bonjour-service (pure JS mDNS implementation).
  */
-import Bonjour from 'bonjour-service';
+import { Bonjour } from 'bonjour-service';
 
 import { logger } from '../logger.js';
 import type {
