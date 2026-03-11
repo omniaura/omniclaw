@@ -30,10 +30,12 @@ import { StreamParser } from './stream-parser.js';
 import {
   AgentBackend,
   AgentOrGroup,
+  type AgentRuntime,
   ChannelInfo,
   ContainerInput,
   ContainerOutput,
   VolumeMount,
+  getAgentRuntime,
   getContainerConfig,
   getFolder,
   getName,
@@ -121,20 +123,45 @@ function syncAgentRunnerSource(
   return true;
 }
 
-function buildVolumeMounts(
+function syncOptionalFiles(
+  sourceDir: string,
+  targetDir: string,
+  filenames: readonly string[],
+): void {
+  for (const filename of filenames) {
+    const sourcePath = path.join(sourceDir, filename);
+    const targetPath = path.join(targetDir, filename);
+    if (fs.existsSync(sourcePath)) {
+      fs.copyFileSync(sourcePath, targetPath);
+    } else {
+      try {
+        fs.unlinkSync(targetPath);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+export function buildVolumeMounts(
   group: AgentOrGroup,
   isMain: boolean,
   isScheduledTask: boolean = false,
   runtimeFolder?: string,
+  agentRuntime?: AgentRuntime,
   contextFolders?: {
     channelFolder?: string;
     categoryFolder?: string;
     agentContextFolder?: string;
   },
+  pathOverrides?: {
+    homeDir?: string;
+    projectRoot?: string;
+  },
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
-  const homeDir = getHomeDir();
-  const projectRoot = process.cwd();
+  const homeDir = pathOverrides?.homeDir || getHomeDir();
+  const projectRoot = pathOverrides?.projectRoot || process.cwd();
 
   const folder = getFolder(group);
   const runtimeFolderName = runtimeFolder || folder;
@@ -295,15 +322,34 @@ function buildVolumeMounts(
       'opencode-data directory',
     );
     fs.mkdirSync(containerOcDir, { recursive: true });
-    for (const authFile of ['auth.json', 'mcp-auth.json']) {
-      const src = path.join(hostOpenCodeDir, authFile);
-      if (fs.existsSync(src)) {
-        fs.copyFileSync(src, path.join(containerOcDir, authFile));
-      }
-    }
+    syncOptionalFiles(hostOpenCodeDir, containerOcDir, [
+      'auth.json',
+      'mcp-auth.json',
+    ]);
     mounts.push({
       hostPath: containerOcDir,
       containerPath: '/home/bun/.local/share/opencode',
+      readonly: false,
+    });
+  }
+
+  if (agentRuntime === 'codex') {
+    // Optional shared Codex login seed from the host.
+    // We copy auth/config into a per-group isolated ~/.codex directory so the
+    // container can inherit ChatGPT/API-key login without sharing host session
+    // databases, history, or worktrees across agents.
+    const hostCodexDir = path.join(homeDir, '.codex');
+    const codexDataBase = path.join(DATA_DIR, 'codex-data');
+    const containerCodexDir = path.join(codexDataBase, runtimeFolderName);
+    assertPathWithin(containerCodexDir, codexDataBase, 'codex-data directory');
+    fs.mkdirSync(containerCodexDir, { recursive: true });
+    syncOptionalFiles(hostCodexDir, containerCodexDir, [
+      'auth.json',
+      'config.toml',
+    ]);
+    mounts.push({
+      hostPath: containerCodexDir,
+      containerPath: '/home/bun/.codex',
       readonly: false,
     });
   }
@@ -328,7 +374,9 @@ function buildVolumeMounts(
   });
 
   // Environment file
-  const envDir = path.join(DATA_DIR, 'env');
+  const envBase = path.join(DATA_DIR, 'env');
+  const envDir = path.join(envBase, runtimeFolderName);
+  assertPathWithin(envDir, envBase, 'env directory');
   fs.mkdirSync(envDir, { recursive: true });
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
@@ -345,6 +393,9 @@ function buildVolumeMounts(
       'OPENCODE_MODEL',
       'OPENCODE_PROVIDER',
       'OPENCODE_MODEL_ID',
+      ...(agentRuntime === 'codex'
+        ? ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_MODEL']
+        : []),
     ];
     const filteredLines = envContent.split('\n').filter((line) => {
       const trimmed = line.trim();
@@ -362,6 +413,12 @@ function buildVolumeMounts(
         containerPath: '/workspace/env-dir',
         readonly: true,
       });
+    } else {
+      try {
+        fs.unlinkSync(path.join(envDir, 'env'));
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -509,6 +566,7 @@ export class LocalBackend implements AgentBackend {
       input.isMain,
       input.isScheduledTask,
       runtimeFolder,
+      input.agentRuntime || getAgentRuntime(group),
       {
         channelFolder: input.channelFolder,
         categoryFolder: input.categoryFolder,
@@ -516,11 +574,13 @@ export class LocalBackend implements AgentBackend {
       },
     );
     const containerName = makeContainerName(folder, runtimeFolder);
+    const effectiveNetwork =
+      containerCfg?.networkMode ?? (input.isMain ? 'full' : 'none');
     const containerArgs = buildContainerArgs({
       mounts,
       containerName,
       isMain: input.isMain,
-      networkMode: containerCfg?.networkMode,
+      networkMode: effectiveNetwork,
     });
     const configTimeout = containerCfg?.timeout || CONTAINER_TIMEOUT;
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
@@ -571,7 +631,12 @@ export class LocalBackend implements AgentBackend {
     if (typeof container.stdin === 'number' || !container.stdin) {
       throw new Error('Container stdin is not a writable stream');
     }
-    container.stdin.write(JSON.stringify(input));
+    container.stdin.write(
+      JSON.stringify({
+        ...input,
+        networkMode: effectiveNetwork,
+      }),
+    );
     container.stdin.end();
 
     const killOnTimeout = () => {

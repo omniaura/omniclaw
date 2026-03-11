@@ -73,6 +73,8 @@ export interface ContainerInput {
   runtimeFolder?: string;
   chatJid: string;
   isMain: boolean;
+  /** Effective container network policy after backend defaults/overrides are applied. */
+  networkMode?: 'full' | 'none';
   isScheduledTask?: boolean;
   discordGuildId?: string;
   serverFolder?: string;

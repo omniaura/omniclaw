@@ -99,6 +99,7 @@ function safeJsonParse<T>(
 const VALID_AGENT_RUNTIMES = new Set<Agent['agentRuntime']>([
   'claude-agent-sdk',
   'opencode',
+  'codex',
 ]);
 
 function normalizeAgentRuntime(

@@ -77,7 +77,8 @@ Messages and task operations are verified against group identity:
 ### 6. Credential Handling
 
 **Mounted Credentials:**
-- Claude auth tokens (filtered from `.env`, read-only)
+- Runtime-specific auth/config variables from the filtered `.env` allowlist
+  (read-only)
 
 **NOT Mounted:**
 - WhatsApp session (`store/auth/`) - host only
@@ -85,16 +86,26 @@ Messages and task operations are verified against group identity:
 - Any credentials matching blocked patterns
 
 **Credential Filtering:**
-Only these environment variables are exposed to containers:
+Only the allowlisted environment variables needed by the selected runtime are
+exposed to containers. Claude/OpenCode runtimes receive their own subset, while
+Codex runtimes additionally receive the OpenAI/Codex entries:
 ```typescript
 // Authoritative source: allowedVars in src/backends/local-backend.ts
 const allowedVars = [
   'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_API_KEY',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_MODEL',
   'GITHUB_TOKEN',
   'GIT_AUTHOR_NAME',
   'GIT_AUTHOR_EMAIL',
   'CLAUDE_MODEL',
+  'OPENCODE_MODEL',
+  'OPENCODE_PROVIDER',
+  'OPENCODE_MODEL_ID',
+  ...(agentRuntime === 'codex'
+    ? ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_MODEL']
+    : []),
 ];
 ```
 
@@ -109,7 +120,13 @@ contains ALL secrets (not just `allowedVars`). Four layers prevent agent access:
 3. **Read hook** - Read tool access to `/workspace/project/.env` is blocked
 4. **Claude Code settings** - `deny: ["Read(path:.env)"]` in `.claude/settings.json`
 
-> **Note:** Anthropic credentials are delivered via the filtered env-dir mount (`allowedVars` only). The agent can discover these credentials via Bash or file operations on `/workspace/env-dir/`. Ideally, Claude Code would authenticate without exposing credentials to the agent's execution environment. **PRs welcome** if you have ideas for credential isolation.
+> **Note:** Allowlisted runtime credentials are delivered via the filtered
+> env-dir mount only. The mounted file is scoped per runtime folder, but the
+> running agent can still discover its own mounted credentials via Bash or file
+> operations on `/workspace/env-dir/`. Ideally, the agent CLIs would
+> authenticate without exposing credentials to the agent's execution
+> environment. **PRs welcome** if you have ideas for stronger credential
+> isolation.
 
 ## Privilege Comparison
 

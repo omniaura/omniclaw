@@ -4,10 +4,12 @@ import {
   _initTestDatabase,
   createTask,
   deleteTask,
+  getAllAgents,
   getAllChats,
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  setAgent,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -134,6 +136,24 @@ describe('storeMessage', () => {
     const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z');
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('updated');
+  });
+});
+
+describe('agent runtime persistence', () => {
+  it('preserves codex for agents loaded back from sqlite', () => {
+    setAgent({
+      id: 'codex-agent',
+      name: 'Codex Agent',
+      description: 'codex runtime',
+      folder: 'codex-agent',
+      backend: 'docker',
+      agentRuntime: 'codex',
+      isAdmin: false,
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+
+    const agents = getAllAgents();
+    expect(agents['codex-agent']?.agentRuntime).toBe('codex');
   });
 });
 
