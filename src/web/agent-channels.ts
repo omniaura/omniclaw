@@ -115,6 +115,9 @@ export function buildAgentChannelData(
         displayName: channel.displayName,
         channelFolder: channel.channelFolder,
         categoryFolder: channel.categoryFolder,
+        iconUrl: /^tg:/.test(channel.jid)
+          ? `/api/discovery/peers/${encodeURIComponent(peer.instanceId)}/chats/${encodeURIComponent(channel.jid)}/icon`
+          : undefined,
       })),
     })),
   );

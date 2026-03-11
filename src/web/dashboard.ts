@@ -38,7 +38,9 @@ export function renderDashboardContent(
       server: a.serverFolder || null,
       serverIconUrl: a.serverIconUrl || null,
       avatarUrl: a.avatarUrl
-        ? `/api/agents/${encodeURIComponent(a.id)}/avatar/image?rev=${imageRev(a.avatarUrl)}`
+        ? a.remoteInstanceId
+          ? `/api/discovery/peers/${encodeURIComponent(a.remoteInstanceId)}/agents/${encodeURIComponent(a.id.split(':').slice(1).join(':'))}/avatar/image?rev=${imageRev(a.avatarUrl)}`
+          : `/api/agents/${encodeURIComponent(a.id)}/avatar/image?rev=${imageRev(a.avatarUrl)}`
         : null,
       channels: a.channels.map((ch) => ({
         jid: ch.jid,

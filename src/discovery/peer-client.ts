@@ -63,6 +63,38 @@ export class PeerClient {
     return res.json() as Promise<RemoteAgentSummary[]>;
   }
 
+  /** GET /api/agents/:id/avatar/image — requires auth, returns image bytes */
+  async getAgentAvatarImage(
+    agentId: string,
+  ): Promise<{ data: ArrayBuffer; contentType: string } | null> {
+    try {
+      const res = await this.authenticatedFetch(
+        `/api/agents/${encodeURIComponent(agentId)}/avatar/image`,
+      );
+      const contentType = res.headers.get('content-type') || 'image/png';
+      const data = await res.arrayBuffer();
+      return { data, contentType };
+    } catch {
+      return null;
+    }
+  }
+
+  /** GET /api/chats/:jid/icon — requires auth, returns image bytes */
+  async getChatIcon(
+    jid: string,
+  ): Promise<{ data: ArrayBuffer; contentType: string } | null> {
+    try {
+      const res = await this.authenticatedFetch(
+        `/api/chats/${encodeURIComponent(jid)}/icon`,
+      );
+      const contentType = res.headers.get('content-type') || 'image/png';
+      const data = await res.arrayBuffer();
+      return { data, contentType };
+    } catch {
+      return null;
+    }
+  }
+
   /** GET /api/stats — requires auth */
   async getStats(): Promise<unknown> {
     const res = await this.authenticatedFetch('/api/stats');

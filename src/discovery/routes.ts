@@ -216,6 +216,30 @@ export function handleDiscoveryRequest(
     return handleProxyAgents(instanceId, ctx);
   }
 
+  // GET /api/discovery/peers/:id/agents/:agentId/avatar/image
+  {
+    const avatarMatch = pathname.match(
+      /^\/api\/discovery\/peers\/([^/]+)\/agents\/([^/]+)\/avatar\/image$/,
+    );
+    if (avatarMatch && method === 'GET') {
+      const instanceId = decodeURIComponent(avatarMatch[1]);
+      const agentId = decodeURIComponent(avatarMatch[2]);
+      return handleProxyAgentAvatar(instanceId, agentId, ctx);
+    }
+  }
+
+  // GET /api/discovery/peers/:id/chats/:jid/icon
+  {
+    const iconMatch = pathname.match(
+      /^\/api\/discovery\/peers\/([^/]+)\/chats\/([^/]+)\/icon$/,
+    );
+    if (iconMatch && method === 'GET') {
+      const instanceId = decodeURIComponent(iconMatch[1]);
+      const jid = decodeURIComponent(iconMatch[2]);
+      return handleProxyChatIcon(instanceId, jid, ctx);
+    }
+  }
+
   // GET /api/discovery/peers/:id/stats
   if (
     pathname.startsWith('/api/discovery/peers/') &&
@@ -740,6 +764,60 @@ async function handleProxyAgents(
   try {
     const agents = await client.getAgents();
     return json(agents);
+  } catch (err) {
+    return json(
+      {
+        error: `Proxy error: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      502,
+    );
+  }
+}
+
+async function handleProxyAgentAvatar(
+  instanceId: string,
+  agentId: string,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  const client = getPeerClient(instanceId, ctx);
+  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+
+  try {
+    const result = await client.getAgentAvatarImage(agentId);
+    if (!result) return new Response(null, { status: 404 });
+    return new Response(result.data, {
+      headers: {
+        'Content-Type': result.contentType,
+        'Cache-Control': 'public, max-age=3600',
+      },
+    });
+  } catch (err) {
+    return json(
+      {
+        error: `Proxy error: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      502,
+    );
+  }
+}
+
+async function handleProxyChatIcon(
+  instanceId: string,
+  jid: string,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  const client = getPeerClient(instanceId, ctx);
+  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+
+  try {
+    const result = await client.getChatIcon(jid);
+    if (!result) return new Response(null, { status: 404 });
+    return new Response(result.data, {
+      headers: {
+        'Content-Type': result.contentType,
+        'Cache-Control': 'public, max-age=3600',
+      },
+    });
   } catch (err) {
     return json(
       {

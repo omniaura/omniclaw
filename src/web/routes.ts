@@ -40,6 +40,13 @@ export function setDiscoveryContext(
   networkPageState = getPageState;
 }
 
+/** Fetch remote agents using the stored discovery context (if available). */
+export function getRemotePeers() {
+  return discoveryContext
+    ? fetchTrustedRemoteAgents(discoveryContext)
+    : Promise.resolve([]);
+}
+
 /**
  * Handle an authenticated HTTP request and return a Response.
  * Routing is prefix-based: /api/* for JSON, / for the dashboard HTML.
