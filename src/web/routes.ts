@@ -7,10 +7,14 @@ import type { ScheduledTask } from '../types.js';
 import type { WebStateProvider } from './types.js';
 import { serveCachedRemoteImage } from './image-cache.js';
 import { renderConversations } from './conversations.js';
-import { renderContextViewer } from './context-viewer.js';
-import { renderDashboard } from './dashboard.js';
+import {
+  renderContextViewerWithRemote,
+  renderContextViewer,
+} from './context-viewer.js';
+import { renderDashboardWithRemote, renderDashboard } from './dashboard.js';
 import { renderIpcInspector } from './ipc-inspector.js';
 import {
+  fetchTrustedRemoteAgents,
   handleDiscoveryRequest,
   type DiscoveryRouteContext,
 } from '../discovery/routes.js';
@@ -21,6 +25,7 @@ import {
   type NetworkPageState,
 } from './network.js';
 import { buildHealthData, renderSystem } from './system.js';
+import { buildAgentChannelData } from './agent-channels.js';
 
 /** Optional discovery context — set by the orchestrator when discovery is enabled. */
 let discoveryContext: DiscoveryRouteContext | null = null;
@@ -60,6 +65,12 @@ export function handleRequest(
       instanceId: '',
       instanceName: '',
       discoveryEnabled: false,
+      runtime: {
+        enabled: false,
+        active: false,
+        currentNetwork: null,
+        trustedNetworks: [],
+      },
       peers: [],
       pendingRequests: [],
     };
@@ -114,9 +125,7 @@ export function handleRequest(
 
   // --- Dashboard ---
   if (pathname === '/' || pathname === '/index.html')
-    return new Response(renderDashboard(state), {
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
-    });
+    return handleDashboardPage(state);
 
   // --- Conversations viewer ---
   if (pathname === '/conversations')
@@ -125,10 +134,7 @@ export function handleRequest(
     });
 
   // --- Context viewer ---
-  if (pathname === '/context')
-    return new Response(renderContextViewer(state), {
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
-    });
+  if (pathname === '/context') return handleContextPage(state);
 
   // --- IPC Inspector ---
   if (pathname === '/ipc')
@@ -196,24 +202,28 @@ export function handleRequest(
   return json({ error: 'Not found' }, 404);
 }
 
+async function handleDashboardPage(state: WebStateProvider): Promise<Response> {
+  const remotePeers = discoveryContext
+    ? await fetchTrustedRemoteAgents(discoveryContext)
+    : [];
+  return new Response(renderDashboardWithRemote(state, remotePeers), {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  });
+}
+
+async function handleContextPage(state: WebStateProvider): Promise<Response> {
+  const remotePeers = discoveryContext
+    ? await fetchTrustedRemoteAgents(discoveryContext)
+    : [];
+  return new Response(renderContextViewerWithRemote(state, remotePeers), {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  });
+}
+
 // ---- Handlers ----
 
 function handleGetAgents(state: WebStateProvider): Response {
-  const agents = state.getAgents();
-  const subscriptions = state.getChannelSubscriptions();
-
-  // Enrich each agent with its channel list
-  const agentList = Object.values(agents).map((agent) => {
-    const channels: string[] = [];
-    for (const [jid, subs] of Object.entries(subscriptions)) {
-      if (subs.some((s) => s.agentId === agent.id)) {
-        channels.push(jid);
-      }
-    }
-    return { ...agent, channels };
-  });
-
-  return json(agentList);
+  return json(buildAgentChannelData(state));
 }
 
 function handleGetTasks(req: Request, state: WebStateProvider): Response {

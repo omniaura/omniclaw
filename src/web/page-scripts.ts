@@ -150,7 +150,7 @@ function dashboardScript(): string {
   agents.forEach(function(a){
     var ak="a:"+a.id;
     var an={id:ak,type:"agent",label:a.name,sub:a.backend,
-      detail:a.runtime+(a.isAdmin?" (admin)":""),fullName:a.name,
+      detail:(a.remoteInstanceName?("remote:"+a.remoteInstanceName+" • "):"")+a.runtime+(a.isAdmin?" (admin)":""),fullName:a.name,
       x:0,y:0,vx:0,vy:0,r:22,color:COLORS.agent,glow:COLORS.agentGlow,jid:a.id,
       avatarUrl:a.avatarUrl||null,avatarImg:null};
     attachAvatar(an);
@@ -658,10 +658,11 @@ function contextScript(): string {
     '  });',
     '}).catch(function(e){console.error("Failed to load editor:",e);});',
     '',
-    'function updateUrl(agent,channel){',
+    'function updateUrl(agent,channel,remoteInstanceId){',
     '  var p=new URLSearchParams(location.search);',
     '  if(agent!==undefined)p.set("agent",agent);',
     '  if(channel!==undefined)p.set("channel",channel);',
+    '  if(remoteInstanceId)p.set("remote",remoteInstanceId);else if(remoteInstanceId!==undefined)p.delete("remote");',
     '  if(currentLayer&&currentLayer!=="channel")p.set("layer",currentLayer);else p.delete("layer");',
     '  if(currentView&&currentView!=="split")p.set("view",currentView);else p.delete("view");',
     '  history.replaceState(null,"","/context?"+p.toString());',
@@ -677,12 +678,14 @@ function contextScript(): string {
     '  el.classList.add("active");',
     '  var jid=el.getAttribute("data-jid");',
     '  var agentId=el.getAttribute("data-agent-id");',
+    '  var remoteInstanceId=el.getAttribute("data-remote-instance-id")||"";',
+    '  var remoteInstanceName=el.getAttribute("data-remote-instance-name")||"";',
     '  var chName=el.querySelector(".ch-name");',
     '  document.getElementById("ctx-title").textContent=chName?chName.textContent:agentId;',
-    '  document.getElementById("ctx-subtitle").textContent=agentId+" \\u2014 "+jid;',
+    '  document.getElementById("ctx-subtitle").textContent=(remoteInstanceName?(remoteInstanceName+" \\u2014 "):"")+agentId+" \\u2014 "+jid;',
     '  document.getElementById("ctx-empty").style.display="none";',
     '  document.getElementById("editor-view").style.display="flex";',
-    '  updateUrl(agentId,jid);',
+    '  updateUrl(agentId,jid,remoteInstanceId||undefined);',
     '  var qs="agent_id="+encodeURIComponent(agentId)',
     '    +"&jid="+encodeURIComponent(jid)',
     '    +"&folder="+encodeURIComponent(el.getAttribute("data-folder"))',
@@ -690,7 +693,8 @@ function contextScript(): string {
     '    +"&agent_context_folder="+encodeURIComponent(el.getAttribute("data-agent-context-folder"))',
     '    +"&channel_folder="+encodeURIComponent(el.getAttribute("data-channel-folder"))',
     '    +"&category_folder="+encodeURIComponent(el.getAttribute("data-category-folder"));',
-    '  fetch("/api/context/layers?"+qs).then(function(r){return r.json();}).then(function(data){',
+    '  var loadUrl=(remoteInstanceId?"/api/discovery/peers/"+encodeURIComponent(remoteInstanceId)+"/context/layers?":"/api/context/layers?")+qs;',
+    '  fetch(loadUrl).then(function(r){return r.json();}).then(function(data){',
     '    layerData=data;',
     '    ["channel","agent","category","server"].forEach(function(l){',
     '      var dot=document.getElementById("dot-"+l);',
@@ -760,7 +764,10 @@ function contextScript(): string {
     '  var content=editor?editor.getValue():"";',
     '  var s=document.getElementById("save-status"),sb=document.getElementById("btn-save");',
     '  if(s){s.textContent="Saving...";s.className="status saving";}if(sb)sb.disabled=true;',
-    '  fetch("/api/context/file",{method:"PUT",headers:{"Content-Type":"application/json"},',
+    '  var active=document.querySelector(".channel-item.active");',
+    '  var remoteInstanceId=active?active.getAttribute("data-remote-instance-id")||"":"";',
+    '  var saveUrl=remoteInstanceId?"/api/discovery/peers/"+encodeURIComponent(remoteInstanceId)+"/context/file":"/api/context/file";',
+    '  fetch(saveUrl,{method:"PUT",headers:{"Content-Type":"application/json"},',
     '    body:JSON.stringify({path:info.path,content:content})})',
     '  .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})',
     '  .then(function(){',
@@ -782,7 +789,7 @@ function contextScript(): string {
     '});',
     '',
     'var params=new URLSearchParams(location.search);',
-    'var initAgent=params.get("agent"),initChannel=params.get("channel");',
+    'var initAgent=params.get("agent"),initChannel=params.get("channel"),initRemote=params.get("remote");',
     'var initLayer=params.get("layer"),initView=params.get("view");',
     'if(initLayer&&["channel","category","server","agent"].indexOf(initLayer)!==-1)currentLayer=initLayer;',
     'if(initView&&["split","editor","preview"].indexOf(initView)!==-1){currentView=initView;',
@@ -797,7 +804,9 @@ function contextScript(): string {
     '  if(ag){',
     '    ag.querySelector(".chevron").classList.add("open");',
     '    ag.querySelector(".channel-list").classList.add("open");',
-    '    var ci=ag.querySelector(".channel-item[data-jid=\\""+CSS.escape(initChannel)+"\\"]");',
+    '    var selector=".channel-item[data-jid=\\""+CSS.escape(initChannel)+"\\"]";',
+    '    if(initRemote)selector+="[data-remote-instance-id=\\""+CSS.escape(initRemote)+"\\"]";',
+    '    var ci=ag.querySelector(selector);',
     '    if(ci)setTimeout(function(){selectChannel(ci);},0);',
     '  }',
     '}',
@@ -861,7 +870,53 @@ var pollTimer=null;
 var syncPeerId=null;
 var networkClicksBound=false;
 
+function renderDiscoveryRuntime(runtime){
+  var status=document.getElementById("discovery-runtime-status");
+  if(status)status.innerHTML=runtime.active?'<span style="color:var(--green)">active</span>':'<span style="color:var(--text-muted)">disabled</span>';
+  var toggle=document.getElementById("discovery-toggle");
+  if(toggle){
+    toggle.textContent=runtime.enabled?"Turn discovery off":"Turn discovery on";
+    toggle.className=runtime.enabled?"btn btn-sm btn-danger":"btn btn-sm btn-primary";
+    toggle.setAttribute("data-network-id",runtime.enabled?"off":"on");
+  }
+  var label=document.getElementById("current-network-label");
+  if(label)label.innerHTML=runtime.currentNetwork?('Current Wi-Fi: <strong>'+window.__esc(runtime.currentNetwork.label||"")+'</strong>'):'No Wi-Fi network detected';
+  var list=document.getElementById("trusted-networks-list");
+  if(list){
+    if(!runtime.trustedNetworks||runtime.trustedNetworks.length===0){
+      list.innerHTML='<div style="padding:1rem;border:1px dashed var(--border);border-radius:8px;color:var(--text-muted);font-size:0.85rem">No trusted Wi-Fi networks yet.</div>';
+    } else {
+      list.innerHTML=runtime.trustedNetworks.map(function(network){
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem 0;border-top:1px solid var(--border)">' +
+          '<div><div><strong>'+window.__esc(network.label||"")+'</strong></div><div style="font-size:0.75rem;color:var(--text-muted)">'+window.__esc(network.id||"")+'</div></div>' +
+          '<button class="btn btn-sm btn-danger" data-network-action="untrust-network" data-network-id="'+window.__esc(network.id||"")+'">Remove</button></div>';
+      }).join("");
+    }
+  }
+}
+
 function networkAction(action,id){
+  if(action==="toggle-discovery"){
+    fetch("/api/discovery/state",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:id==="on"})})
+      .then(function(r){return r.json();})
+      .then(function(runtime){renderDiscoveryRuntime(runtime);refreshPeers();window.__toast(id==="on"?"Discovery enabled":"Discovery disabled");})
+      .catch(function(e){window.__toast("Failed: "+e.message);});
+    return;
+  }
+  if(action==="trust-current-network"){
+    fetch("/api/discovery/trusted-networks/current",{method:"POST"})
+      .then(function(r){return r.json();})
+      .then(function(runtime){if(runtime.error)window.__toast("Error: "+runtime.error);else{renderDiscoveryRuntime(runtime);window.__toast("Current Wi-Fi trusted");refreshPeers();}})
+      .catch(function(e){window.__toast("Failed: "+e.message);});
+    return;
+  }
+  if(action==="untrust-network"){
+    fetch("/api/discovery/trusted-networks/"+encodeURIComponent(id),{method:"DELETE"})
+      .then(function(r){return r.json();})
+      .then(function(runtime){renderDiscoveryRuntime(runtime);window.__toast("Trusted network removed");refreshPeers();})
+      .catch(function(e){window.__toast("Failed: "+e.message);});
+    return;
+  }
   if(action==="request"){
     fetch("/api/discovery/peers/"+encodeURIComponent(id)+"/request-access",{method:"POST"})
       .then(function(r){return r.json();})
@@ -986,6 +1041,12 @@ function refreshRequests(){
     }).catch(function(){});
 }
 
+function refreshDiscoveryRuntime(){
+  fetch("/api/discovery/state").then(function(r){return r.json();})
+    .then(function(runtime){renderDiscoveryRuntime(runtime);})
+    .catch(function(){});
+}
+
 function browseRemoteAgents(instanceId){
   var container=document.getElementById("remote-agents");if(!container)return;
   container.innerHTML='<div class="card"><div class="section-header"><h2>loading remote agents...</h2></div></div>';
@@ -1001,7 +1062,7 @@ function browseRemoteAgents(instanceId){
           +'<td>'+window.__esc(a.name||"")+'</td>'
           +'<td><span class="badge">'+window.__esc(a.backend||"")+'</span></td>'
           +'<td>'+window.__esc(a.agentRuntime||"")+'</td>'
-          +'<td>'+(a.channels?a.channels.map(function(c){return window.__esc(c);}).join('<br>'):'-')+'</td></tr>';
+          +'<td>'+(a.channels?a.channels.map(function(c){return window.__esc(c.displayName||c.jid||"");}).join('<br>'):'-')+'</td></tr>';
       }).join("");
       container.innerHTML='<div class="card"><div class="section-header"><h2>remote agents ('+agents.length+')</h2></div>'
         +'<table class="data-table"><thead><tr><th>id</th><th>name</th><th>backend</th><th>runtime</th><th>channels</th></tr></thead>'
@@ -1141,9 +1202,10 @@ function bulkSync(direction,instanceId){
 function fmtBytes(b){if(b<1024)return b+" B";if(b<1048576)return(b/1024).toFixed(1)+" KB";return(b/1048576).toFixed(1)+" MB";}
 
 bindNetworkClicks();
+refreshDiscoveryRuntime();
 refreshPeers();
 refreshRequests();
-pollTimer=setInterval(function(){refreshPeers();refreshRequests();},${DISCOVERY_POLL_INTERVAL});
+pollTimer=setInterval(function(){refreshDiscoveryRuntime();refreshPeers();refreshRequests();},${DISCOVERY_POLL_INTERVAL});
 window.__cleanup=function(){if(pollTimer)clearInterval(pollTimer);};
 `;
 }

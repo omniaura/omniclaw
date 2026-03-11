@@ -1,5 +1,6 @@
 import type { WebStateProvider } from './types.js';
 import { escapeHtml } from './shared.js';
+import type { RemotePeerAgents } from '../discovery/types.js';
 
 export interface ChannelInfo {
   jid: string;
@@ -22,12 +23,17 @@ export interface AgentChannelData {
   agentContextFolder?: string;
   avatarUrl?: string;
   serverIconUrl?: string;
+  remoteInstanceId?: string;
+  remoteInstanceName?: string;
+  remoteHost?: string;
+  remotePort?: number;
   channels: ChannelInfo[];
 }
 
 /** Build enriched agent+channel data with human-readable channel names. */
 export function buildAgentChannelData(
   state: WebStateProvider,
+  remotePeers: RemotePeerAgents[] = [],
 ): AgentChannelData[] {
   const agents = Object.values(state.getAgents());
   const subs = state.getChannelSubscriptions();
@@ -47,7 +53,7 @@ export function buildAgentChannelData(
     return jid;
   }
 
-  return agents.map((a) => {
+  const localAgents = agents.map((a) => {
     const channels: ChannelInfo[] = [];
     let serverIconUrl: string | undefined;
     for (const [jid, subList] of Object.entries(subs)) {
@@ -88,6 +94,32 @@ export function buildAgentChannelData(
       channels,
     };
   });
+
+  const remoteAgents = remotePeers.flatMap((peer) =>
+    peer.agents.map((agent) => ({
+      id: `${peer.instanceId}:${agent.id}`,
+      name: agent.name,
+      folder: agent.folder,
+      backend: agent.backend,
+      agentRuntime: agent.agentRuntime,
+      isAdmin: !!agent.isAdmin,
+      serverFolder: agent.serverFolder,
+      agentContextFolder: agent.agentContextFolder,
+      avatarUrl: agent.avatarUrl,
+      remoteInstanceId: peer.instanceId,
+      remoteInstanceName: peer.instanceName,
+      remoteHost: peer.host,
+      remotePort: peer.port,
+      channels: agent.channels.map((channel) => ({
+        jid: channel.jid,
+        displayName: channel.displayName,
+        channelFolder: channel.channelFolder,
+        categoryFolder: channel.categoryFolder,
+      })),
+    })),
+  );
+
+  return [...localAgents, ...remoteAgents];
 }
 
 /**
@@ -119,6 +151,8 @@ export function renderAgentGroups(
               ` data-agent-context-folder="${esc(a.agentContextFolder || '')}"` +
               ` data-channel-folder="${esc(ch.channelFolder || '')}"` +
               ` data-category-folder="${esc(ch.categoryFolder || '')}"` +
+              ` data-remote-instance-id="${esc(a.remoteInstanceId || '')}"` +
+              ` data-remote-instance-name="${esc(a.remoteInstanceName || '')}"` +
               ` data-select-channel`
             : '';
 
@@ -143,6 +177,9 @@ export function renderAgentGroups(
         `<div class="agent-header" data-toggle-agent>` +
         `<span class="chevron">&#9654;</span>` +
         `<span class="agent-name">${esc(a.name)}</span>` +
+        (a.remoteInstanceName
+          ? `<span class="badge badge-sm">remote:${esc(a.remoteInstanceName)}</span>`
+          : '') +
         `<span class="badge badge-sm ${badgeClass}">${esc(a.backend)}</span>` +
         `<span class="badge badge-sm">${esc(a.agentRuntime)}</span>` +
         (a.isAdmin

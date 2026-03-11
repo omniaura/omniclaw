@@ -4,15 +4,19 @@ import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 import { buildAgentChannelData } from './agent-channels.js';
+import type { RemotePeerAgents } from '../discovery/types.js';
 
 function imageRev(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12);
 }
 
 /** Render the dashboard content (no shell wrapper). */
-export function renderDashboardContent(state: WebStateProvider): string {
+export function renderDashboardContent(
+  state: WebStateProvider,
+  remotePeers: RemotePeerAgents[] = [],
+): string {
   const stats = state.getQueueStats();
-  const agentData = buildAgentChannelData(state);
+  const agentData = buildAgentChannelData(state, remotePeers);
   const tasks = state.getTasks();
 
   const activeContainers = Math.max(
@@ -29,6 +33,8 @@ export function renderDashboardContent(state: WebStateProvider): string {
       backend: a.backend,
       runtime: a.agentRuntime,
       isAdmin: a.isAdmin,
+      remoteInstanceId: a.remoteInstanceId || null,
+      remoteInstanceName: a.remoteInstanceName || null,
       server: a.serverFolder || null,
       serverIconUrl: a.serverIconUrl || null,
       avatarUrl: a.avatarUrl
@@ -105,10 +111,17 @@ export function renderDashboardContent(state: WebStateProvider): string {
 
 /** Full dashboard page with SPA shell. */
 export function renderDashboard(state: WebStateProvider): string {
+  return renderDashboardWithRemote(state, []);
+}
+
+export function renderDashboardWithRemote(
+  state: WebStateProvider,
+  remotePeers: RemotePeerAgents[],
+): string {
   return renderShell(
     '/',
     'Dashboard',
-    renderDashboardContent(state),
+    renderDashboardContent(state, remotePeers),
     allPageScripts(),
   );
 }

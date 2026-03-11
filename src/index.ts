@@ -130,6 +130,8 @@ import {
 } from './web/index.js';
 import type { WebStateProvider } from './web/types.js';
 import {
+  detectCurrentNetwork,
+  DiscoveryRuntimeController,
   startDiscovery,
   TrustStore,
   type DiscoveryHandle,
@@ -2210,6 +2212,7 @@ async function main(): Promise<void> {
   // --- Web UI (opt-in via WEB_UI_PORT env var) ---
   let webServer: WebServerHandle | undefined;
   let stopLogStream: (() => void) | undefined;
+  let trustStore: TrustStore | undefined;
   if (WEB_UI_PORT) {
     const isPublic = WEB_UI_HOST !== '127.0.0.1' && WEB_UI_HOST !== 'localhost';
     const allowUnauthedPublicWebUiForTrustedLan =
@@ -2237,6 +2240,7 @@ async function main(): Promise<void> {
       WEB_UI_USER && WEB_UI_PASS
         ? { username: WEB_UI_USER, password: WEB_UI_PASS }
         : undefined;
+    trustStore = createTrustStore();
     webServer = startWebServer(
       {
         port: WEB_UI_PORT,
@@ -2246,171 +2250,168 @@ async function main(): Promise<void> {
         trustLanDiscoveryAdmin: DISCOVERY_TRUST_LAN_ADMIN,
       },
       webState,
-      DISCOVERY_ENABLED ? createTrustStore() : undefined,
+      trustStore,
     );
     stopLogStream = startLogStream(webServer);
   }
 
-  // --- Network Discovery (opt-in via DISCOVERY_ENABLED env var) ---
+  // --- Network Discovery (runtime toggle + trusted Wi-Fi support) ---
   let discoveryHandle: DiscoveryHandle | undefined;
-  let trustStore: TrustStore | undefined;
-  if (DISCOVERY_ENABLED && webServer) {
+  let discoveryRuntime: DiscoveryRuntimeController | undefined;
+  if (webServer) {
     trustStore = createTrustStore();
     const instanceId = getOrCreateDiscoveryInstanceId();
     const version = '1.0.0';
 
-    discoveryHandle = startDiscovery({
+    const buildPeers = () => {
+      const discovered = discoveryHandle?.getPeers() ?? new Map();
+      const stored = trustStore!.getAllPeers();
+      const storedMap = new Map(stored.map((p) => [p.instanceId, p]));
+      const result: Array<any> = [];
+
+      for (const [id, disc] of discovered) {
+        const st = storedMap.get(id);
+        result.push({
+          instanceId: id,
+          name: disc.name,
+          host: disc.host,
+          port: disc.port,
+          addresses: disc.addresses,
+          status: st?.status ?? 'discovered',
+          online: true,
+          approvedAt: st?.approvedAt ?? null,
+          lastSeen: st?.lastSeen ?? null,
+        });
+        storedMap.delete(id);
+      }
+
+      for (const st of storedMap.values()) {
+        if (st.status === 'revoked') continue;
+        result.push({
+          instanceId: st.instanceId,
+          name: st.name,
+          host: st.host ?? '',
+          port: st.port ?? 0,
+          addresses: [],
+          status: st.status,
+          online: false,
+          approvedAt: st.approvedAt,
+          lastSeen: st.lastSeen,
+        });
+      }
+
+      return result;
+    };
+
+    const buildNetworkPageState = () => {
+      const runtime = discoveryRuntime?.getSnapshot() ?? {
+        enabled: DISCOVERY_ENABLED,
+        active: false,
+        currentNetwork: null,
+        trustedNetworks: [],
+      };
+
+      return {
+        instanceId,
+        instanceName: INSTANCE_NAME,
+        discoveryEnabled: runtime.active,
+        runtime,
+        peers: buildPeers(),
+        pendingRequests: trustStore!.getPendingRequests(),
+      };
+    };
+
+    const discoveryContext = {
       instanceId,
       instanceName: INSTANCE_NAME,
-      port: webServer.port,
       version,
-      onPeerFound: (peer) => {
-        // Track discovered peer in DB
-        trustStore!.upsertPeer(
-          peer.instanceId,
-          peer.name,
-          peer.host,
-          peer.port,
-        );
-        webServer!.broadcast({
-          type: 'peer_discovered',
-          data: peer,
-          timestamp: new Date().toISOString(),
-        });
-      },
-      onPeerLost: (peerInstanceId) => {
+      trustStore,
+      discovery: null as DiscoveryHandle | null,
+      state: webState,
+      runtime: undefined as DiscoveryRuntimeController | undefined,
+      broadcast: (event: unknown) => webServer!.broadcast(event as any),
+    };
+
+    const startDiscoveryIfNeeded = () => {
+      if (discoveryHandle || !discoveryRuntime?.isRemoteAccessAllowed()) return;
+
+      discoveryHandle = startDiscovery({
+        instanceId,
+        instanceName: INSTANCE_NAME,
+        port: webServer.port,
+        version,
+        onPeerFound: (peer) => {
+          trustStore!.upsertPeer(
+            peer.instanceId,
+            peer.name,
+            peer.host,
+            peer.port,
+          );
+          webServer!.broadcast({
+            type: 'peer_discovered',
+            data: peer,
+            timestamp: new Date().toISOString(),
+          });
+        },
+        onPeerLost: (peerInstanceId) => {
+          webServer!.broadcast({
+            type: 'peer_lost',
+            data: { instanceId: peerInstanceId },
+            timestamp: new Date().toISOString(),
+          });
+        },
+      });
+
+      discoveryContext.discovery = discoveryHandle;
+      logger.info(
+        { instanceId, instanceName: INSTANCE_NAME },
+        'Network discovery enabled',
+      );
+    };
+
+    const stopDiscoveryIfRunning = () => {
+      if (!discoveryHandle) return;
+      discoveryHandle.stop();
+      discoveryHandle = undefined;
+      discoveryContext.discovery = null;
+      webServer.broadcast({
+        type: 'peer_lost',
+        data: { instanceId: '*' },
+        timestamp: new Date().toISOString(),
+      });
+      logger.info(
+        { instanceId, instanceName: INSTANCE_NAME },
+        'Network discovery disabled',
+      );
+    };
+
+    discoveryRuntime = new DiscoveryRuntimeController({
+      initialEnabled: DISCOVERY_ENABLED,
+      detectCurrentNetwork,
+      onActiveChange: (active) => {
+        if (active) startDiscoveryIfNeeded();
+        else stopDiscoveryIfRunning();
         webServer!.broadcast({
           type: 'peer_lost',
-          data: { instanceId: peerInstanceId },
+          data: { instanceId: '__runtime__' },
           timestamp: new Date().toISOString(),
         });
       },
     });
 
-    // Wire discovery context into routes
-    setDiscoveryContext(
-      {
-        instanceId,
-        instanceName: INSTANCE_NAME,
-        version,
-        trustStore,
-        discovery: discoveryHandle,
-        state: webState,
-        broadcast: (event) => webServer!.broadcast(event as any),
-      },
-      () => ({
-        instanceId,
-        instanceName: INSTANCE_NAME,
-        discoveryEnabled: true,
-        peers: (() => {
-          const discovered = discoveryHandle!.getPeers();
-          const stored = trustStore!.getAllPeers();
-          const storedMap = new Map(stored.map((p) => [p.instanceId, p]));
-          const result: Array<{
-            instanceId: string;
-            name: string;
-            host: string;
-            port: number;
-            addresses: string[];
-            status: 'discovered' | 'pending' | 'trusted' | 'revoked';
-            online: boolean;
-            approvedAt: string | null;
-            lastSeen: string | null;
-          }> = [];
+    discoveryContext.runtime = discoveryRuntime;
+    setDiscoveryContext(discoveryContext, buildNetworkPageState);
+    webServer.setNetworkPageState(buildNetworkPageState);
 
-          for (const [id, disc] of discovered) {
-            const st = storedMap.get(id);
-            result.push({
-              instanceId: id,
-              name: disc.name,
-              host: disc.host,
-              port: disc.port,
-              addresses: disc.addresses,
-              status: (st?.status as any) ?? 'discovered',
-              online: true,
-              approvedAt: st?.approvedAt ?? null,
-              lastSeen: st?.lastSeen ?? null,
-            });
-            storedMap.delete(id);
-          }
-
-          for (const st of storedMap.values()) {
-            if (st.status === 'revoked') continue;
-            result.push({
-              instanceId: st.instanceId,
-              name: st.name,
-              host: st.host ?? '',
-              port: st.port ?? 0,
-              addresses: [],
-              status: st.status as any,
-              online: false,
-              approvedAt: st.approvedAt,
-              lastSeen: st.lastSeen,
-            });
-          }
-
-          return result;
-        })(),
-        pendingRequests: trustStore!.getPendingRequests(),
-      }),
-    );
-
-    // Set the network page state getter on the web server
-    webServer.setNetworkPageState(() => ({
-      instanceId,
-      instanceName: INSTANCE_NAME,
-      discoveryEnabled: true,
-      peers: (() => {
-        const discovered = discoveryHandle!.getPeers();
-        const stored = trustStore!.getAllPeers();
-        const storedMap = new Map(stored.map((p) => [p.instanceId, p]));
-        const result: Array<any> = [];
-
-        for (const [id, disc] of discovered) {
-          const st = storedMap.get(id);
-          result.push({
-            instanceId: id,
-            name: disc.name,
-            host: disc.host,
-            port: disc.port,
-            addresses: disc.addresses,
-            status: st?.status ?? 'discovered',
-            online: true,
-            approvedAt: st?.approvedAt ?? null,
-            lastSeen: st?.lastSeen ?? null,
-          });
-          storedMap.delete(id);
-        }
-
-        for (const st of storedMap.values()) {
-          if (st.status === 'revoked') continue;
-          result.push({
-            instanceId: st.instanceId,
-            name: st.name,
-            host: st.host ?? '',
-            port: st.port ?? 0,
-            addresses: [],
-            status: st.status,
-            online: false,
-            approvedAt: st.approvedAt,
-            lastSeen: st.lastSeen,
-          });
-        }
-
-        return result;
-      })(),
-      pendingRequests: trustStore!.getPendingRequests(),
-    }));
-
-    logger.info(
-      { instanceId, instanceName: INSTANCE_NAME },
-      'Network discovery enabled',
-    );
+    const snapshot = await discoveryRuntime.refresh();
+    discoveryRuntime.start();
+    if (snapshot.active) startDiscoveryIfNeeded();
   }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (discoveryRuntime) discoveryRuntime.stop();
     if (discoveryHandle) discoveryHandle.stop();
     if (githubWebhookServer) {
       githubWebhookServer.stop();

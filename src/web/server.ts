@@ -214,6 +214,12 @@ export function startWebServer(
                   instanceId: '',
                   instanceName: '',
                   discoveryEnabled: false,
+                  runtime: {
+                    enabled: false,
+                    active: false,
+                    currentNetwork: null,
+                    trustedNetworks: [],
+                  },
                   peers: [],
                   pendingRequests: [],
                 },

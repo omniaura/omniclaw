@@ -16,13 +16,16 @@ import {
   generatePairingKeyPair,
 } from './pairing-crypto.js';
 import type { TrustStore } from './trust-store.js';
+import type { DiscoveryRuntimeController } from './runtime.js';
 import type {
   ContextFileEntry,
   ContextSyncComparison,
+  DiscoveryRuntimeSnapshot,
   DiscoveredPeer,
   DiscoveryHandle,
   PairRequestBody,
   PeerView,
+  RemotePeerAgents,
 } from './types.js';
 
 export interface DiscoveryRouteContext {
@@ -32,6 +35,7 @@ export interface DiscoveryRouteContext {
   trustStore: TrustStore;
   discovery: DiscoveryHandle | null;
   state: WebStateProvider;
+  runtime?: DiscoveryRuntimeController;
   /** Callback to broadcast SSE events */
   broadcast?: (event: {
     type: string;
@@ -97,14 +101,17 @@ export function handleDiscoveryRequest(
   // --- Unauthenticated endpoints ---
 
   if (pathname === '/api/discovery/info' && method === 'GET') {
+    if (!ensureRemoteAccessAllowed(req, ctx)) return serviceUnavailable();
     return handleGetInfo(ctx);
   }
 
   if (pathname === '/api/discovery/pair' && method === 'POST') {
+    if (!ensureRemoteAccessAllowed(req, ctx)) return serviceUnavailable();
     return handlePairRequest(req, ctx);
   }
 
   if (pathname === '/api/discovery/complete-pairing' && method === 'POST') {
+    if (!ensureRemoteAccessAllowed(req, ctx)) return serviceUnavailable();
     return handleCompletePairing(req, ctx);
   }
 
@@ -116,6 +123,35 @@ export function handleDiscoveryRequest(
 
   if (pathname === '/api/discovery/requests' && method === 'GET') {
     return handleGetRequests(ctx);
+  }
+
+  if (pathname === '/api/discovery/state' && method === 'GET') {
+    return handleGetDiscoveryState(ctx);
+  }
+
+  if (pathname === '/api/discovery/state' && method === 'POST') {
+    return handleUpdateDiscoveryState(req, ctx);
+  }
+
+  if (
+    pathname === '/api/discovery/trusted-networks/current' &&
+    method === 'POST'
+  ) {
+    return handleTrustCurrentNetwork(ctx);
+  }
+
+  if (
+    pathname.startsWith('/api/discovery/trusted-networks/') &&
+    method === 'DELETE'
+  ) {
+    const networkId = decodeURIComponent(
+      pathname.slice('/api/discovery/trusted-networks/'.length),
+    );
+    return handleUntrustNetwork(networkId, ctx);
+  }
+
+  if (pathname === '/api/discovery/remote-agents' && method === 'GET') {
+    return handleGetRemoteAgents(ctx);
   }
 
   // POST /api/discovery/requests/:id/approve
@@ -409,6 +445,112 @@ async function handleCompletePairing(
 }
 
 function handleGetPeers(ctx: DiscoveryRouteContext): Response {
+  return json(buildPeerViews(ctx));
+}
+
+function handleGetRequests(ctx: DiscoveryRouteContext): Response {
+  return json(ctx.trustStore.getPendingRequests());
+}
+
+function handleGetDiscoveryState(ctx: DiscoveryRouteContext): Response {
+  return json(getDiscoveryRuntimeSnapshot(ctx));
+}
+
+async function handleUpdateDiscoveryState(
+  req: Request,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  if (!ctx.runtime)
+    return json({ error: 'Discovery runtime unavailable' }, 503);
+
+  let body: { enabled?: unknown };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  if (typeof body.enabled !== 'boolean') {
+    return json({ error: 'Missing or invalid enabled flag' }, 400);
+  }
+
+  return json(ctx.runtime.setEnabled(body.enabled));
+}
+
+function handleTrustCurrentNetwork(ctx: DiscoveryRouteContext): Response {
+  if (!ctx.runtime)
+    return json({ error: 'Discovery runtime unavailable' }, 503);
+
+  try {
+    return json(ctx.runtime.trustCurrentNetwork());
+  } catch (err) {
+    return json(
+      { error: err instanceof Error ? err.message : String(err) },
+      400,
+    );
+  }
+}
+
+function handleUntrustNetwork(
+  networkId: string,
+  ctx: DiscoveryRouteContext,
+): Response {
+  if (!ctx.runtime)
+    return json({ error: 'Discovery runtime unavailable' }, 503);
+  if (!networkId) return json({ error: 'Missing network id' }, 400);
+  return json(ctx.runtime.untrustNetwork(networkId));
+}
+
+async function handleGetRemoteAgents(
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  return json(await fetchTrustedRemoteAgents(ctx));
+}
+
+export async function fetchTrustedRemoteAgents(
+  ctx: DiscoveryRouteContext,
+): Promise<RemotePeerAgents[]> {
+  if (typeof ctx.trustStore.getAllPeers !== 'function') return [];
+
+  const peers = buildPeerViews(ctx).filter(
+    (peer) => peer.status === 'trusted' && peer.online,
+  );
+
+  return Promise.all(
+    peers.map(async (peer): Promise<RemotePeerAgents> => {
+      try {
+        const client = getPeerClient(peer.instanceId, ctx);
+        if (!client) throw new Error('Peer not trusted or unreachable');
+        return {
+          instanceId: peer.instanceId,
+          instanceName: peer.name,
+          online: true,
+          host: peer.host,
+          port: peer.port,
+          agents: await client.getAgents(),
+        };
+      } catch (err) {
+        logger.warn(
+          {
+            instanceId: peer.instanceId,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'Failed to fetch remote agents for trusted peer',
+        );
+        return {
+          instanceId: peer.instanceId,
+          instanceName: peer.name,
+          online: false,
+          host: peer.host,
+          port: peer.port,
+          agents: [],
+        };
+      }
+    }),
+  );
+}
+
+function buildPeerViews(ctx: DiscoveryRouteContext): PeerView[] {
   const discoveredPeers = ctx.discovery?.getPeers() ?? new Map();
   const storedPeers = ctx.trustStore.getAllPeers();
   const storedMap = new Map(storedPeers.map((p) => [p.instanceId, p]));
@@ -448,11 +590,7 @@ function handleGetPeers(ctx: DiscoveryRouteContext): Response {
     });
   }
 
-  return json(peers);
-}
-
-function handleGetRequests(ctx: DiscoveryRouteContext): Response {
-  return json(ctx.trustStore.getPendingRequests());
+  return peers;
 }
 
 async function handleApproveRequest(
@@ -576,6 +714,8 @@ function getPeerClient(
   instanceId: string,
   ctx: DiscoveryRouteContext,
 ): PeerClient | null {
+  if (ctx.runtime && !ctx.runtime.isRemoteAccessAllowed()) return null;
+
   const peer = ctx.trustStore.getPeer(instanceId);
   if (!peer || peer.status !== 'trusted' || !peer.sharedSecret) return null;
 
@@ -856,6 +996,43 @@ function json(data: unknown, status = 200): Response {
       'Cache-Control': 'no-cache',
     },
   });
+}
+
+function serviceUnavailable(): Response {
+  return json(
+    { error: 'Remote discovery access is disabled on this network' },
+    503,
+  );
+}
+
+function ensureRemoteAccessAllowed(
+  req: Request,
+  ctx: DiscoveryRouteContext,
+): boolean {
+  if (ctx.runtime?.isRemoteAccessAllowed() ?? true) return true;
+  return isLoopbackAddress(getClientIp(req));
+}
+
+function getDiscoveryRuntimeSnapshot(
+  ctx: DiscoveryRouteContext,
+): DiscoveryRuntimeSnapshot {
+  return (
+    ctx.runtime?.getSnapshot() ?? {
+      enabled: !!ctx.discovery,
+      active: !!ctx.discovery,
+      currentNetwork: null,
+      trustedNetworks: [],
+    }
+  );
+}
+
+function isLoopbackAddress(ip: string): boolean {
+  return (
+    ip === '::1' ||
+    ip === '::ffff:127.0.0.1' ||
+    ip === 'localhost' ||
+    ip.startsWith('127.')
+  );
 }
 
 function getLocalAddress(): string {

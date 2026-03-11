@@ -10,6 +10,7 @@ import type {
   PairRequestBody,
   PairResponse,
   PeerInfoResponse,
+  RemoteAgentSummary,
 } from './types.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -57,9 +58,9 @@ export class PeerClient {
   }
 
   /** GET /api/agents — requires auth */
-  async getAgents(): Promise<unknown[]> {
+  async getAgents(): Promise<RemoteAgentSummary[]> {
     const res = await this.authenticatedFetch('/api/agents');
-    return res.json() as Promise<unknown[]>;
+    return res.json() as Promise<RemoteAgentSummary[]>;
   }
 
   /** GET /api/stats — requires auth */

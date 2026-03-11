@@ -93,6 +93,51 @@ export interface PairApprovalCallback {
   approval: EncryptedPairingEnvelope;
 }
 
+export interface RemoteAgentSummary {
+  id: string;
+  name: string;
+  folder: string;
+  backend: string;
+  agentRuntime: string;
+  isAdmin?: boolean;
+  serverFolder?: string;
+  agentContextFolder?: string;
+  avatarUrl?: string;
+  channels: Array<{
+    jid: string;
+    displayName: string;
+    channelFolder?: string;
+    categoryFolder?: string;
+  }>;
+}
+
+export interface RemotePeerAgents {
+  instanceId: string;
+  instanceName: string;
+  online: boolean;
+  host: string;
+  port: number;
+  agents: RemoteAgentSummary[];
+}
+
+export interface TrustedNetwork {
+  id: string;
+  label: string;
+  trustedAt: string;
+}
+
+export interface DiscoveryNetworkIdentity {
+  id: string;
+  label: string;
+}
+
+export interface DiscoveryRuntimeSnapshot {
+  enabled: boolean;
+  active: boolean;
+  currentNetwork: DiscoveryNetworkIdentity | null;
+  trustedNetworks: TrustedNetwork[];
+}
+
 export interface DiscoveryConfig {
   instanceId: string;
   instanceName: string;
