@@ -43,23 +43,43 @@ export interface DiscoveryRouteContext {
 const PEER_AUTH_MAX_SKEW_MS = 30_000;
 const seenPeerNonces = new Map<string, number>();
 
-// Rate limiting for /api/discovery/pair
+// Rate limiting for pairing endpoints
 const pairRateLimiter = new Map<string, { count: number; resetAt: number }>();
 const PAIR_RATE_LIMIT = 10;
 const PAIR_RATE_WINDOW_MS = 60_000;
+const RATE_LIMITER_MAX_ENTRIES = 10_000;
 
-function checkPairRateLimit(ip: string): boolean {
+function checkRateLimit(
+  ip: string,
+  limiter: Map<string, { count: number; resetAt: number }> = pairRateLimiter,
+): boolean {
   const now = Date.now();
-  const entry = pairRateLimiter.get(ip);
+  const entry = limiter.get(ip);
+
+  // Periodically prune expired entries to prevent unbounded growth
+  if (limiter.size > RATE_LIMITER_MAX_ENTRIES) {
+    for (const [key, val] of limiter.entries()) {
+      if (val.resetAt <= now) limiter.delete(key);
+    }
+  }
 
   if (!entry || now > entry.resetAt) {
-    pairRateLimiter.set(ip, { count: 1, resetAt: now + PAIR_RATE_WINDOW_MS });
+    limiter.set(ip, { count: 1, resetAt: now + PAIR_RATE_WINDOW_MS });
     return true;
   }
 
   if (entry.count >= PAIR_RATE_LIMIT) return false;
   entry.count++;
   return true;
+}
+
+/** Extract the real client IP from the request (socket address, not headers). */
+function getClientIp(req: Request): string {
+  // Bun exposes the socket address via the non-standard .socket property.
+  // We avoid trusting X-Forwarded-For which is user-controllable.
+  const socket = (req as unknown as { socket?: { remoteAddress?: string } })
+    .socket;
+  return socket?.remoteAddress || 'unknown';
 }
 
 /**
@@ -254,10 +274,9 @@ async function handlePairRequest(
   req: Request,
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
-  // Rate limit
-  const ip =
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
-  if (!checkPairRateLimit(ip)) {
+  // Rate limit using socket IP (not user-controllable headers)
+  const ip = getClientIp(req);
+  if (!checkRateLimit(ip)) {
     return json({ error: 'Rate limit exceeded' }, 429);
   }
 
@@ -317,10 +336,21 @@ async function handlePairRequest(
   });
 }
 
+const completePairingRateLimiter = new Map<
+  string,
+  { count: number; resetAt: number }
+>();
+
 async function handleCompletePairing(
   req: Request,
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
+  // Rate limit complete-pairing to prevent brute-force on callback tokens
+  const ip = getClientIp(req);
+  if (!checkRateLimit(ip, completePairingRateLimiter)) {
+    return json({ error: 'Rate limit exceeded' }, 429);
+  }
+
   let body: {
     instanceId: string;
     name: string;
@@ -644,6 +674,10 @@ async function handleProxyContextWrite(
     return json({ error: 'Missing path or content' }, 400);
   }
 
+  if (!isPathSafe(body.path)) {
+    return json({ error: 'Invalid path' }, 400);
+  }
+
   try {
     const result = await client.writeContextFile(body.path, body.content);
     return json(result);
@@ -732,6 +766,10 @@ async function handleContextPush(
     return json({ error: 'Missing path' }, 400);
   }
 
+  if (!isPathSafe(body.path)) {
+    return json({ error: 'Invalid path' }, 400);
+  }
+
   // Read local content
   const layerPath = toLayerPath(body.path);
   const content = ctx.state.readContextFile(layerPath);
@@ -770,6 +808,10 @@ async function handleContextPull(
 
   if (!body.path || typeof body.path !== 'string') {
     return json({ error: 'Missing path' }, 400);
+  }
+
+  if (!isPathSafe(body.path)) {
+    return json({ error: 'Invalid path' }, 400);
   }
 
   try {
@@ -857,6 +899,8 @@ export function checkPeerAuth(req: Request, trustStore: TrustStore): boolean {
   for (const [key, expiresAt] of seenPeerNonces.entries()) {
     if (expiresAt <= now) seenPeerNonces.delete(key);
   }
+  // Cap nonce cache size to prevent memory exhaustion
+  if (seenPeerNonces.size > RATE_LIMITER_MAX_ENTRIES) return false;
   const nonceKey = `${instanceId}:${nonce}`;
   if (seenPeerNonces.has(nonceKey)) return false;
 
@@ -885,6 +929,14 @@ export function checkPeerAuth(req: Request, trustStore: TrustStore): boolean {
 function toLayerPath(contextFilePath: string): string {
   const layerPath = path.dirname(contextFilePath);
   return layerPath === '.' ? '' : layerPath;
+}
+
+/** Reject paths containing traversal sequences or absolute paths. */
+function isPathSafe(p: string): boolean {
+  if (!p || p.startsWith('/') || p.startsWith('\\')) return false;
+  // Split on both Unix and Windows separators
+  const segments = p.split(/[/\\]/);
+  return !segments.some((s) => s === '..' || s === '.');
 }
 
 async function sendPairingSecretToPeer(
