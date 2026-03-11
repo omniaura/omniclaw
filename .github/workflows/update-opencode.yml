@@ -37,7 +37,8 @@ jobs:
           from pathlib import Path
 
           package = json.loads(Path('container/agent-runner/package.json').read_text())
-          print(package['dependencies']['@opencode-ai/sdk'].lstrip('^'))
+          version = package.get('dependencies', {}).get('@opencode-ai/sdk', '')
+          print(version.lstrip('^') if version else '')
           PY
           )
           echo "cli=$CLI" >> $GITHUB_OUTPUT
@@ -136,6 +137,7 @@ jobs:
           git push origin "$BRANCH"
 
           BODY_FILE=$(mktemp)
+          trap 'rm -f "$BODY_FILE"' EXIT
           printf '## OpenCode update\n\n' > "$BODY_FILE"
           if [ "${{ steps.check.outputs.cli_changed }}" == "true" ]; then
             printf -- '- **CLI**: `%s` → `%s` (Dockerfile `OPENCODE_VERSION`)\n' "${{ steps.current.outputs.cli }}" "${{ steps.latest.outputs.cli }}" >> "$BODY_FILE"
