@@ -8,6 +8,7 @@ import {
   getAllTasks,
   getDueTasks,
   getTaskById,
+  getTaskRunLogs,
   logTaskRun,
   updateTaskAfterRun,
 } from './db.js';
@@ -418,6 +419,107 @@ describe('DB task lifecycle', () => {
       // Should not throw (cascading delete of run logs)
       deleteTask('cleanup-task');
       expect(getTaskById('cleanup-task')).toBeNull();
+    });
+  });
+
+  describe('getTaskRunLogs', () => {
+    it('returns empty array for task with no runs', () => {
+      createTask({
+        id: 'no-runs',
+        group_folder: 'main',
+        chat_jid: 'g@g.us',
+        prompt: 'no runs yet',
+        schedule_type: 'cron',
+        schedule_value: '0 * * * *',
+        context_mode: 'isolated',
+        next_run: '2024-06-01T01:00:00.000Z',
+        status: 'active',
+        created_at: '2024-01-01T00:00:00.000Z',
+      });
+      expect(getTaskRunLogs('no-runs')).toEqual([]);
+    });
+
+    it('returns runs ordered by run_at descending', () => {
+      createTask({
+        id: 'multi-run',
+        group_folder: 'main',
+        chat_jid: 'g@g.us',
+        prompt: 'multiple runs',
+        schedule_type: 'cron',
+        schedule_value: '0 * * * *',
+        context_mode: 'isolated',
+        next_run: '2024-06-01T03:00:00.000Z',
+        status: 'active',
+        created_at: '2024-01-01T00:00:00.000Z',
+      });
+
+      logTaskRun({
+        task_id: 'multi-run',
+        run_at: '2024-06-01T00:00:00.000Z',
+        duration_ms: 1000,
+        status: 'success',
+        result: 'first',
+        error: null,
+      });
+      logTaskRun({
+        task_id: 'multi-run',
+        run_at: '2024-06-01T01:00:00.000Z',
+        duration_ms: 2000,
+        status: 'error',
+        result: null,
+        error: 'failed',
+      });
+      logTaskRun({
+        task_id: 'multi-run',
+        run_at: '2024-06-01T02:00:00.000Z',
+        duration_ms: 500,
+        status: 'success',
+        result: 'third',
+        error: null,
+      });
+
+      const runs = getTaskRunLogs('multi-run');
+      expect(runs).toHaveLength(3);
+      // Most recent first
+      expect(runs[0].run_at).toBe('2024-06-01T02:00:00.000Z');
+      expect(runs[0].result).toBe('third');
+      expect(runs[1].run_at).toBe('2024-06-01T01:00:00.000Z');
+      expect(runs[1].status).toBe('error');
+      expect(runs[2].run_at).toBe('2024-06-01T00:00:00.000Z');
+      expect(runs[2].result).toBe('first');
+    });
+
+    it('respects the limit parameter', () => {
+      createTask({
+        id: 'limited',
+        group_folder: 'main',
+        chat_jid: 'g@g.us',
+        prompt: 'limit test',
+        schedule_type: 'cron',
+        schedule_value: '0 * * * *',
+        context_mode: 'isolated',
+        next_run: null,
+        status: 'active',
+        created_at: '2024-01-01T00:00:00.000Z',
+      });
+
+      for (let i = 0; i < 5; i++) {
+        logTaskRun({
+          task_id: 'limited',
+          run_at: `2024-06-01T0${i}:00:00.000Z`,
+          duration_ms: 1000,
+          status: 'success',
+          result: `run-${i}`,
+          error: null,
+        });
+      }
+
+      expect(getTaskRunLogs('limited', 2)).toHaveLength(2);
+      expect(getTaskRunLogs('limited', 10)).toHaveLength(5);
+    });
+
+    it('returns empty array for nonexistent task', () => {
+      expect(getTaskRunLogs('does-not-exist')).toEqual([]);
     });
   });
 });

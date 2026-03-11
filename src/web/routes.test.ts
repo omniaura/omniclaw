@@ -3,7 +3,12 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR } from '../config.js';
-import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
+import type {
+  Agent,
+  ChannelSubscription,
+  ScheduledTask,
+  TaskRunLog,
+} from '../types.js';
 import { handleRequest } from './routes.js';
 import type { WebStateProvider } from './types.js';
 
@@ -96,6 +101,7 @@ function makeState(
     deleteTask: (id) => {
       tasks.delete(id);
     },
+    getTaskRunLogs: () => [],
     calculateNextRun: () => '2026-03-06T09:00:00.000Z',
     readContextFile: () => null,
     writeContextFile: () => {},
@@ -462,6 +468,134 @@ describe('web routes unit tests', () => {
       makeState(),
     );
 
+    expect(res.status).toBe(405);
+  });
+});
+
+describe('handleRequest task run logs', () => {
+  const sampleRuns: TaskRunLog[] = [
+    {
+      task_id: 'task-001',
+      run_at: '2026-03-10T12:00:00.000Z',
+      duration_ms: 5000,
+      status: 'success',
+      result: 'Completed successfully',
+      error: null,
+    },
+    {
+      task_id: 'task-001',
+      run_at: '2026-03-10T11:00:00.000Z',
+      duration_ms: 2000,
+      status: 'error',
+      result: null,
+      error: 'Something went wrong',
+    },
+  ];
+
+  it('returns 404 for unknown task', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/api/tasks/nonexistent/runs'),
+      makeState(makeAgent()),
+    );
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('Task not found');
+  });
+
+  it('returns run logs for existing task', async () => {
+    const state: WebStateProvider = {
+      ...makeState(makeAgent()),
+      getTaskById: (id) =>
+        id === 'task-001'
+          ? {
+              id: 'task-001',
+              group_folder: 'test',
+              chat_jid: 'dc:123',
+              prompt: 'do stuff',
+              schedule_type: 'cron',
+              schedule_value: '0 * * * *',
+              context_mode: 'isolated',
+              next_run: '2026-03-10T13:00:00.000Z',
+              last_run: '2026-03-10T12:00:00.000Z',
+              last_result: 'Completed successfully',
+              status: 'active',
+              created_at: '2026-03-01T00:00:00.000Z',
+            }
+          : undefined,
+      getTaskRunLogs: (taskId, limit) => {
+        if (taskId !== 'task-001') return [];
+        return sampleRuns.slice(0, limit ?? 20);
+      },
+    };
+
+    const res = await handleRequest(
+      new Request('http://localhost/api/tasks/task-001/runs'),
+      state,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TaskRunLog[];
+    expect(body).toHaveLength(2);
+    expect(body[0].status).toBe('success');
+    expect(body[1].status).toBe('error');
+  });
+
+  it('respects limit query param', async () => {
+    const state: WebStateProvider = {
+      ...makeState(makeAgent()),
+      getTaskById: (id) =>
+        id === 'task-001'
+          ? {
+              id: 'task-001',
+              group_folder: 'test',
+              chat_jid: 'dc:123',
+              prompt: 'do stuff',
+              schedule_type: 'cron',
+              schedule_value: '0 * * * *',
+              context_mode: 'isolated',
+              next_run: null,
+              last_run: null,
+              last_result: null,
+              status: 'active',
+              created_at: '2026-03-01T00:00:00.000Z',
+            }
+          : undefined,
+      getTaskRunLogs: (_taskId, limit) => sampleRuns.slice(0, limit ?? 20),
+    };
+
+    const res = await handleRequest(
+      new Request('http://localhost/api/tasks/task-001/runs?limit=1'),
+      state,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TaskRunLog[];
+    expect(body).toHaveLength(1);
+  });
+
+  it('rejects non-GET methods', async () => {
+    const state: WebStateProvider = {
+      ...makeState(makeAgent()),
+      getTaskById: () => ({
+        id: 'task-001',
+        group_folder: 'test',
+        chat_jid: 'dc:123',
+        prompt: 'do stuff',
+        schedule_type: 'cron' as const,
+        schedule_value: '0 * * * *',
+        context_mode: 'isolated' as const,
+        next_run: null,
+        last_run: null,
+        last_result: null,
+        status: 'active' as const,
+        created_at: '2026-03-01T00:00:00.000Z',
+      }),
+    };
+
+    const res = await handleRequest(
+      new Request('http://localhost/api/tasks/task-001/runs', {
+        method: 'POST',
+      }),
+      state,
+    );
     expect(res.status).toBe(405);
   });
 });

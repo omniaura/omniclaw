@@ -1,4 +1,9 @@
-import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
+import type {
+  Agent,
+  ChannelSubscription,
+  ScheduledTask,
+  TaskRunLog,
+} from '../types.js';
 import type { GroupQueueDetail } from '../group-queue.js';
 import type { IpcEvent } from './ipc-events.js';
 
@@ -34,6 +39,8 @@ export interface WebStateProvider {
   getQueueDetails(): GroupQueueDetail[];
   /** Recent IPC events from the event buffer. */
   getIpcEvents(count?: number): IpcEvent[];
+  /** Execution history for a specific task. */
+  getTaskRunLogs(taskId: string, limit?: number): TaskRunLog[];
 
   // ---- Task mutations ----
   createTask(task: Omit<ScheduledTask, 'last_run' | 'last_result'>): void;

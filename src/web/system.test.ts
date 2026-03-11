@@ -80,6 +80,7 @@ function makeState(agents: Agent[] = [makeAgent()]): WebStateProvider {
     }),
     getQueueDetails: () => [],
     getIpcEvents: () => [],
+    getTaskRunLogs: () => [],
     createTask: () => {},
     updateTask: () => {},
     deleteTask: () => {},

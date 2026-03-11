@@ -90,6 +90,7 @@ function makeState(
     getQueueStats: () => defaultStats,
     getQueueDetails: () => sampleQueueDetails,
     getIpcEvents: () => sampleEvents,
+    getTaskRunLogs: () => [],
     createTask: () => {},
     updateTask: () => {},
     deleteTask: () => {},

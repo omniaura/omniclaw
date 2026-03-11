@@ -277,8 +277,19 @@ function shellCSS(): string {
     `.task-agent{font-weight:600;font-size:10px;color:var(--text)}`,
     `.task-sched{margin-left:auto;font-size:9px;color:var(--text-dim);font-variant-numeric:tabular-nums}`,
     `.task-prompt{font-size:10px;color:var(--text-dim);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}`,
+    `.task-last-run-row{font-size:9px;color:var(--text-dim);margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}`,
     `.task-actions{display:flex;gap:4px}`,
     `.task-actions .btn{padding:1px 6px;font-size:9px}`,
+    `.task-runs{margin-top:6px;border-top:1px solid var(--border);padding-top:4px}`,
+    `.task-runs-loading,.task-runs-empty{font-size:10px;color:var(--text-dim);padding:4px 0}`,
+    `.task-run-row{display:grid;grid-template-columns:1fr auto auto;gap:4px;padding:3px 0;font-size:10px;border-bottom:1px solid var(--border)}`,
+    `.task-run-row:last-child{border-bottom:none}`,
+    `.run-ts{color:var(--text-dim);font-variant-numeric:tabular-nums}`,
+    `.run-dur{color:var(--text-dim);font-variant-numeric:tabular-nums;text-align:right}`,
+    `.run-status{font-weight:600;text-align:right}`,
+    `.run-success .run-status{color:var(--green,#4ade80)}`,
+    `.run-error .run-status{color:var(--red,#f87171)}`,
+    `.run-detail{grid-column:1/-1;font-size:9px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}`,
     `.agent-groups-wrap{border:1px solid var(--border);border-radius:4px;overflow:auto;flex:1}`,
     `.tables-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;flex:1;min-height:0;overflow:hidden}`,
     // Topology
@@ -770,6 +781,58 @@ function shellScript(pageScripts: Record<string, string>): string {
   );
   parts.push(
     '    .catch(function(err){window.__toast(err.message||"Failed","error");btn.disabled=false;});',
+  );
+  parts.push('  }');
+  // ---- Task run history toggle ----
+  parts.push('  if(action==="runs"){');
+  parts.push(
+    '    var runsEl=card.querySelector(".task-runs");if(!runsEl)return;',
+  );
+  parts.push(
+    '    if(runsEl.style.display!=="none"){runsEl.style.display="none";return;}',
+  );
+  parts.push(
+    '    runsEl.innerHTML="<div class=\\"task-runs-loading\\">Loading…</div>";',
+  );
+  parts.push('    runsEl.style.display="";');
+  parts.push(
+    '    fetch("/api/tasks/"+encodeURIComponent(taskId)+"/runs?limit=10")',
+  );
+  parts.push(
+    '    .then(function(r){if(!r.ok)throw new Error("Failed");return r.json();})',
+  );
+  parts.push('    .then(function(runs){');
+  parts.push(
+    '      if(!runs.length){runsEl.innerHTML="<div class=\\"task-runs-empty\\">No runs yet</div>";return;}',
+  );
+  parts.push('      runsEl.innerHTML=runs.map(function(r){');
+  parts.push('        var d=new Date(r.run_at);var ts=d.toLocaleString();');
+  parts.push(
+    '        var dur=r.duration_ms<1000?r.duration_ms+"ms":(r.duration_ms/1000).toFixed(1)+"s";',
+  );
+  parts.push('        var cls=r.status==="success"?"run-success":"run-error";');
+  parts.push(
+    '        var detail=r.status==="success"?(r.result||"ok"):("Error: "+(r.error||"unknown"));',
+  );
+  parts.push('        if(detail.length>60)detail=detail.slice(0,57)+"…";');
+  parts.push('        return "<div class=\\"task-run-row \\"+cls+"\\">"');
+  parts.push(
+    '          +"<span class=\\"run-ts\\">"+window.__esc(ts)+"</span>"',
+  );
+  parts.push(
+    '          +"<span class=\\"run-dur\\">"+window.__esc(dur)+"</span>"',
+  );
+  parts.push(
+    '          +"<span class=\\"run-status\\">"+window.__esc(r.status)+"</span>"',
+  );
+  parts.push(
+    '          +"<div class=\\"run-detail\\" title=\\""+window.__esc(r.result||r.error||"")+"\\">"+window.__esc(detail)+"</div>"',
+  );
+  parts.push('          +"</div>";');
+  parts.push('      }).join("");');
+  parts.push('    })');
+  parts.push(
+    '    .catch(function(){runsEl.innerHTML="<div class=\\"task-runs-empty\\">Failed to load runs</div>";});',
   );
   parts.push('  }');
   parts.push('});');

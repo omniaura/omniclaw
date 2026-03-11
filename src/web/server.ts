@@ -641,16 +641,25 @@ function renderTaskRows(tasks: ScheduledTask[]): string {
       const agentShort = task.group_folder.split('-')[0] || task.group_folder;
       const promptShort =
         task.prompt.slice(0, 40) + (task.prompt.length > 40 ? '…' : '');
+      const lastRunInfo = task.last_run
+        ? `<span class="task-last-run" title="Last run: ${escapeHtml(task.last_run)}">${escapeHtml(task.last_result ?? '—')}</span>`
+        : '';
       return (
         `<div class="task-card" data-task-id="${escapeHtml(task.id)}">` +
         `<div class="task-top"><span class="badge ${statusClass}">${escapeHtml(task.status)}</span>` +
         `<span class="task-agent">${escapeHtml(agentShort)}</span>` +
         `<span class="task-sched">${escapeHtml(task.schedule_value)}</span></div>` +
         `<div class="task-prompt" title="${escapeHtml(task.prompt)}">${escapeHtml(promptShort)}</div>` +
+        (lastRunInfo
+          ? `<div class="task-last-run-row">${lastRunInfo}</div>`
+          : '') +
         `<div class="task-actions">` +
         `<button class="btn btn-sm btn-toggle" data-action="toggle" data-status="${toggleStatus}">${toggleLabel}</button>` +
+        `<button class="btn btn-sm" data-action="runs">Runs</button>` +
         `<button class="btn btn-sm btn-danger" data-action="delete">Del</button>` +
-        `</div></div>`
+        `</div>` +
+        `<div class="task-runs" style="display:none"></div>` +
+        `</div>`
       );
     })
     .join('\n');
