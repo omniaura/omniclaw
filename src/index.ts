@@ -2324,7 +2324,7 @@ async function main(): Promise<void> {
       instanceId,
       instanceName: INSTANCE_NAME,
       version,
-      trustStore,
+      trustStore: trustStore!,
       discovery: null as DiscoveryHandle | null,
       state: webState,
       runtime: undefined as DiscoveryRuntimeController | undefined,
