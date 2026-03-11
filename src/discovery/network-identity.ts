@@ -70,6 +70,8 @@ async function detectLinuxWifiNetwork(): Promise<DiscoveryNetworkIdentity | null
   return { id: `wifi:${activeSsid}`, label: activeSsid };
 }
 
+const COMMAND_TIMEOUT_MS = 5_000;
+
 async function runCommand(cmd: string[], logErrors = true): Promise<string> {
   try {
     const proc = Bun.spawn(cmd, {
@@ -77,10 +79,21 @@ async function runCommand(cmd: string[], logErrors = true): Promise<string> {
       stderr: 'pipe',
       env: process.env,
     });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
+
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => {
+        proc.kill();
+        reject(new Error('Command timed out'));
+      }, COMMAND_TIMEOUT_MS),
+    );
+
+    const [stdout, stderr, exitCode] = await Promise.race([
+      Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]),
+      timeout,
     ]);
     if (exitCode !== 0) {
       if (logErrors) {

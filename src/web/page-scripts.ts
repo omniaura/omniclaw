@@ -895,24 +895,31 @@ function renderDiscoveryRuntime(runtime){
   }
 }
 
+function jsonOrThrow(r){
+  if(r.ok)return r.json();
+  return r.json().catch(function(){return {};}).then(function(d){
+    throw new Error(d.error||"Request failed");
+  });
+}
+
 function networkAction(action,id){
   if(action==="toggle-discovery"){
     fetch("/api/discovery/state",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:id==="on"})})
-      .then(function(r){return r.json();})
+      .then(jsonOrThrow)
       .then(function(runtime){renderDiscoveryRuntime(runtime);refreshPeers();window.__toast(id==="on"?"Discovery enabled":"Discovery disabled");})
       .catch(function(e){window.__toast("Failed: "+e.message);});
     return;
   }
   if(action==="trust-current-network"){
     fetch("/api/discovery/trusted-networks/current",{method:"POST"})
-      .then(function(r){return r.json();})
-      .then(function(runtime){if(runtime.error)window.__toast("Error: "+runtime.error);else{renderDiscoveryRuntime(runtime);window.__toast("Current Wi-Fi trusted");refreshPeers();}})
+      .then(jsonOrThrow)
+      .then(function(runtime){renderDiscoveryRuntime(runtime);window.__toast("Current Wi-Fi trusted");refreshPeers();})
       .catch(function(e){window.__toast("Failed: "+e.message);});
     return;
   }
   if(action==="untrust-network"){
     fetch("/api/discovery/trusted-networks/"+encodeURIComponent(id),{method:"DELETE"})
-      .then(function(r){return r.json();})
+      .then(jsonOrThrow)
       .then(function(runtime){renderDiscoveryRuntime(runtime);window.__toast("Trusted network removed");refreshPeers();})
       .catch(function(e){window.__toast("Failed: "+e.message);});
     return;
@@ -1042,7 +1049,7 @@ function refreshRequests(){
 }
 
 function refreshDiscoveryRuntime(){
-  fetch("/api/discovery/state").then(function(r){return r.json();})
+  fetch("/api/discovery/state").then(jsonOrThrow)
     .then(function(runtime){renderDiscoveryRuntime(runtime);})
     .catch(function(){});
 }

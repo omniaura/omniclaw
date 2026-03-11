@@ -2259,7 +2259,6 @@ async function main(): Promise<void> {
   let discoveryHandle: DiscoveryHandle | undefined;
   let discoveryRuntime: DiscoveryRuntimeController | undefined;
   if (webServer) {
-    trustStore = createTrustStore();
     const instanceId = getOrCreateDiscoveryInstanceId();
     const version = '1.0.0';
 

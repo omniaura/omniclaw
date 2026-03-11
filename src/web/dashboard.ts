@@ -52,7 +52,8 @@ export function renderDashboardContent(
     })),
   );
 
-  const agentOptions = agentData
+  const localAgentData = agentData.filter((a) => !a.remoteInstanceId);
+  const agentOptions = localAgentData
     .map((a) =>
       a.channels.map(
         (ch) =>
