@@ -23,8 +23,23 @@ jobs:
       - name: Get current versions
         id: current
         run: |
-          CLI=$(grep -oP 'ARG OPENCODE_VERSION=\K[^\s]+' container/Dockerfile)
-          SDK=$(grep -oP '"@opencode-ai/sdk": "\^\K[^"]+' container/agent-runner/package.json)
+          CLI=$(python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          text = Path('container/Dockerfile').read_text()
+          match = re.search(r'ARG OPENCODE_VERSION=([^\s]+)', text)
+          print(match.group(1) if match else '')
+          PY
+          )
+          SDK=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          package = json.loads(Path('container/agent-runner/package.json').read_text())
+          print(package['dependencies']['@opencode-ai/sdk'].lstrip('^'))
+          PY
+          )
           echo "cli=$CLI" >> $GITHUB_OUTPUT
           echo "sdk=$SDK" >> $GITHUB_OUTPUT
           echo "Current CLI: $CLI, SDK: $SDK"
@@ -45,23 +60,44 @@ jobs:
         run: |
           CLI_CHANGED=false
           SDK_CHANGED=false
-          if [ "${{ steps.current.outputs.cli }}" != "${{ steps.latest.outputs.cli }}" ]; then
+          CLI_TRACKED=false
+          if [ -n "${{ steps.current.outputs.cli }}" ]; then
+            CLI_TRACKED=true
+          fi
+          if [ "$CLI_TRACKED" == "true" ] && [ "${{ steps.current.outputs.cli }}" != "${{ steps.latest.outputs.cli }}" ]; then
             CLI_CHANGED=true
           fi
           if [ "${{ steps.current.outputs.sdk }}" != "${{ steps.latest.outputs.sdk }}" ]; then
             SDK_CHANGED=true
           fi
+
+          BRANCH_SUFFIX=""
+          COMMIT_TITLE=""
+          if [ "$CLI_CHANGED" == "true" ] && [ "$SDK_CHANGED" == "true" ]; then
+            BRANCH_SUFFIX="cli-${{ steps.latest.outputs.cli }}-sdk-${{ steps.latest.outputs.sdk }}"
+            COMMIT_TITLE="chore(container): bump opencode cli to ${{ steps.latest.outputs.cli }} and sdk to ${{ steps.latest.outputs.sdk }}"
+          elif [ "$CLI_CHANGED" == "true" ]; then
+            BRANCH_SUFFIX="cli-${{ steps.latest.outputs.cli }}"
+            COMMIT_TITLE="chore(container): bump opencode cli to ${{ steps.latest.outputs.cli }}"
+          elif [ "$SDK_CHANGED" == "true" ]; then
+            BRANCH_SUFFIX="sdk-${{ steps.latest.outputs.sdk }}"
+            COMMIT_TITLE="chore(container): bump opencode sdk to ${{ steps.latest.outputs.sdk }}"
+          fi
+
           CHANGED=$([[ "$CLI_CHANGED" == "true" || "$SDK_CHANGED" == "true" ]] && echo "true" || echo "false")
+          echo "cli_tracked=$CLI_TRACKED" >> $GITHUB_OUTPUT
           echo "cli_changed=$CLI_CHANGED" >> $GITHUB_OUTPUT
           echo "sdk_changed=$SDK_CHANGED" >> $GITHUB_OUTPUT
           echo "changed=$CHANGED" >> $GITHUB_OUTPUT
-          echo "CLI changed: $CLI_CHANGED, SDK changed: $SDK_CHANGED"
+          echo "branch_suffix=$BRANCH_SUFFIX" >> $GITHUB_OUTPUT
+          echo "commit_title=$COMMIT_TITLE" >> $GITHUB_OUTPUT
+          echo "CLI tracked: $CLI_TRACKED, CLI changed: $CLI_CHANGED, SDK changed: $SDK_CHANGED"
 
       - name: Check for existing PR
         id: existing_pr
         if: steps.check.outputs.changed == 'true'
         run: |
-          PR=$(gh pr list --repo omniaura/omniclaw --base main --head update/opencode-${{ steps.latest.outputs.cli }} --json number --jq '.[0].number // ""')
+          PR=$(gh pr list --repo omniaura/omniclaw --base main --head update/opencode-${{ steps.check.outputs.branch_suffix }} --json number --jq '.[0].number // ""')
           echo "pr=$PR" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -82,7 +118,7 @@ jobs:
       - name: Commit and open PR
         if: steps.check.outputs.changed == 'true' && steps.existing_pr.outputs.pr == ''
         run: |
-          BRANCH="update/opencode-${{ steps.latest.outputs.cli }}"
+          BRANCH="update/opencode-${{ steps.check.outputs.branch_suffix }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
@@ -96,23 +132,24 @@ jobs:
           fi
           CHANGED_FILES=$(echo $CHANGED_FILES | xargs)
           git add $CHANGED_FILES
-          git commit -m "chore(container): bump opencode to ${{ steps.latest.outputs.cli }}"
+          git commit -m "${{ steps.check.outputs.commit_title }}"
           git push origin "$BRANCH"
 
-          BODY="## OpenCode update\n\n"
+          BODY_FILE=$(mktemp)
+          printf '## OpenCode update\n\n' > "$BODY_FILE"
           if [ "${{ steps.check.outputs.cli_changed }}" == "true" ]; then
-            BODY="${BODY}- **CLI**: \`${{ steps.current.outputs.cli }}\` → \`${{ steps.latest.outputs.cli }}\` (Dockerfile \`OPENCODE_VERSION\`)\n"
+            printf -- '- **CLI**: `%s` → `%s` (Dockerfile `OPENCODE_VERSION`)\n' "${{ steps.current.outputs.cli }}" "${{ steps.latest.outputs.cli }}" >> "$BODY_FILE"
           fi
           if [ "${{ steps.check.outputs.sdk_changed }}" == "true" ]; then
-            BODY="${BODY}- **SDK**: \`${{ steps.current.outputs.sdk }}\` → \`${{ steps.latest.outputs.sdk }}\` (\`@opencode-ai/sdk\`)\n"
+            printf -- '- **SDK**: `%s` → `%s` (`@opencode-ai/sdk`)\n' "${{ steps.current.outputs.sdk }}" "${{ steps.latest.outputs.sdk }}" >> "$BODY_FILE"
           fi
-          BODY="${BODY}\nMerging will not auto-rebuild the container — run \`just update-container\` after merge."
+          printf '\nMerging will not auto-rebuild the container — run `just update-container` after merge.\n' >> "$BODY_FILE"
 
           gh pr create \
             --repo omniaura/omniclaw \
             --base main \
             --head "$BRANCH" \
-            --title "chore(container): bump opencode to ${{ steps.latest.outputs.cli }}" \
-            --body "$(printf "$BODY")"
+            --title "${{ steps.check.outputs.commit_title }}" \
+            --body-file "$BODY_FILE"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
