@@ -14,6 +14,21 @@ import type {
 const SERVICE_TYPE = 'omniclaw';
 const OMNICLAW_SERVICE = '_omniclaw._tcp';
 
+export function selectPeerHost(
+  host: string | undefined,
+  addresses: string[] | undefined,
+): string {
+  const preferredAddress = (addresses || []).find(
+    (address) =>
+      address &&
+      !address.startsWith('127.') &&
+      address !== '::1' &&
+      address !== '::ffff:127.0.0.1',
+  );
+
+  return preferredAddress || host || 'unknown';
+}
+
 export function startDiscovery(config: DiscoveryConfig): DiscoveryHandle {
   const { instanceId, instanceName, port, version, onPeerFound, onPeerLost } =
     config;
@@ -48,7 +63,7 @@ export function startDiscovery(config: DiscoveryConfig): DiscoveryHandle {
     const peer: DiscoveredPeer = {
       instanceId: peerId,
       name: svc.txt?.name || svc.name || 'unknown',
-      host: svc.host,
+      host: selectPeerHost(svc.host, svc.addresses),
       port: svc.port,
       addresses: svc.addresses || [],
       version: svc.txt?.version || 'unknown',
