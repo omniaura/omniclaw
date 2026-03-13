@@ -1257,7 +1257,7 @@ function systemScript(): string {
 }
 
 function agentDetailScript(): string {
-  return [
-    '// Agent detail page — SPA nav links handled by shell script',
-  ].join('\n');
+  return ['// Agent detail page — SPA nav links handled by shell script'].join(
+    '\n',
+  );
 }

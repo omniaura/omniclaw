@@ -88,6 +88,7 @@ function makeState(
     getQueueStats: () => defaultStats,
     getQueueDetails: () => [],
     getIpcEvents: () => [],
+    getTaskRunLogs: () => [],
     createTask: () => {},
     updateTask: () => {},
     deleteTask: () => {},
@@ -95,6 +96,8 @@ function makeState(
     readContextFile: () => null,
     writeContextFile: () => {},
     updateAgentAvatar: () => {},
+    resolveChatImage: async () => null,
+    resolveDiscordGuildImage: async () => null,
     ...overrides,
   };
 }

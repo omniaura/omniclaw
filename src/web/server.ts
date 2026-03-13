@@ -259,9 +259,7 @@ export function startWebServer(
           const agentId = url.searchParams.get('id') || '';
           const data = buildAgentDetailData(agentId, state);
           const title = data ? data.name : 'Agent Not Found';
-          const qs = agentId
-            ? `?id=${encodeURIComponent(agentId)}`
-            : '';
+          const qs = agentId ? `?id=${encodeURIComponent(agentId)}` : '';
           return new Response(
             JSON.stringify({
               html: renderAgentDetailContent(data, agentId),

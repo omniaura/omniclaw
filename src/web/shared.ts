@@ -710,7 +710,9 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push(
     '  if(window.__cleanup){window.__cleanup();window.__cleanup=null;}',
   );
-  parts.push('  var qp="";var qi=href.indexOf("?");if(qi!==-1)qp=href.slice(qi);');
+  parts.push(
+    '  var qp="";var qi=href.indexOf("?");if(qi!==-1)qp=href.slice(qi);',
+  );
   parts.push('  fetch("/api/page/"+encodeURIComponent(pageName)+qp)');
   parts.push(
     '  .then(function(r){if(!r.ok)throw new Error("nav failed");return r.json();})',

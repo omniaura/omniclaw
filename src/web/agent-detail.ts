@@ -217,9 +217,7 @@ export function renderAgentDetailContent(
     `<div class="ad-meta">` +
     `<span class="badge ${backendBadge}">${esc(data.backend)}</span>` +
     `<span class="badge">${esc(data.agentRuntime)}</span>` +
-    (data.isAdmin
-      ? `<span class="badge badge-admin">admin</span>`
-      : '') +
+    (data.isAdmin ? `<span class="badge badge-admin">admin</span>` : '') +
     `</div>` +
     (data.description
       ? `<div class="ad-desc">${esc(data.description)}</div>`
