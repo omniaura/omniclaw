@@ -1,75 +1,83 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
+
 import { IpcEventBuffer } from './ipc-events.js';
 
+const RealDate = Date;
+
+function installFixedDate(iso: string) {
+  const fixed = new RealDate(iso);
+
+  class FixedDate extends RealDate {
+    constructor(value?: string | number | Date) {
+      super(value ?? fixed.getTime());
+    }
+
+    static override now(): number {
+      return fixed.getTime();
+    }
+  }
+
+  globalThis.Date = FixedDate as unknown as DateConstructor;
+}
+
+afterEach(() => {
+  globalThis.Date = RealDate;
+});
+
 describe('IpcEventBuffer', () => {
-  it('pushes events and returns them via recent()', () => {
-    const buf = new IpcEventBuffer();
-    buf.push('message_sent', 'group-a', 'Sent to dc:123');
-    buf.push('task_created', 'group-b', 'Task created');
+  it('assigns incrementing ids and a deterministic timestamp', () => {
+    installFixedDate('2026-03-10T12:34:56.000Z');
+    const buffer = new IpcEventBuffer();
 
-    const events = buf.recent(10);
-    expect(events).toHaveLength(2);
-    // recent() returns newest first
-    expect(events[0].kind).toBe('task_created');
-    expect(events[1].kind).toBe('message_sent');
-  });
-
-  it('assigns incrementing IDs', () => {
-    const buf = new IpcEventBuffer();
-    const e1 = buf.push('message_sent', 'a', 'msg 1');
-    const e2 = buf.push('message_sent', 'a', 'msg 2');
-    expect(e2.id).toBe(e1.id + 1);
-  });
-
-  it('caps at maxEvents', () => {
-    const buf = new IpcEventBuffer(3);
-    buf.push('message_sent', 'a', '1');
-    buf.push('message_sent', 'a', '2');
-    buf.push('message_sent', 'a', '3');
-    buf.push('message_sent', 'a', '4');
-    expect(buf.size).toBe(3);
-    // Oldest event (id=1) should have been evicted
-    const events = buf.recent(10);
-    expect(events[2].summary).toBe('2');
-    expect(events[0].summary).toBe('4');
-  });
-
-  it('since() returns events after given ID', () => {
-    const buf = new IpcEventBuffer();
-    const e1 = buf.push('message_sent', 'a', '1');
-    buf.push('task_created', 'b', '2');
-    buf.push('task_edited', 'c', '3');
-
-    const after = buf.since(e1.id);
-    expect(after).toHaveLength(2);
-    expect(after[0].summary).toBe('2');
-    expect(after[1].summary).toBe('3');
-  });
-
-  it('stores details when provided', () => {
-    const buf = new IpcEventBuffer();
-    const ev = buf.push('task_created', 'a', 'Task created', {
-      taskId: 'task-123',
-      targetFolder: 'group-b',
+    const event = buffer.push('task_created', 'main', 'Created task', {
+      taskId: 'task-1',
     });
-    expect(ev.details).toEqual({
-      taskId: 'task-123',
-      targetFolder: 'group-b',
+
+    expect(event).toEqual({
+      id: 1,
+      kind: 'task_created',
+      timestamp: '2026-03-10T12:34:56.000Z',
+      sourceGroup: 'main',
+      summary: 'Created task',
+      details: { taskId: 'task-1' },
     });
   });
 
-  it('sets timestamp on events', () => {
-    const buf = new IpcEventBuffer();
-    const ev = buf.push('message_sent', 'a', 'test');
-    expect(ev.timestamp).toBeTruthy();
-    // Should be a valid ISO string
-    expect(new Date(ev.timestamp).toISOString()).toBe(ev.timestamp);
+  it('evicts the oldest events when the ring buffer reaches capacity', () => {
+    const buffer = new IpcEventBuffer(2);
+
+    buffer.push('message_sent', 'a', 'first');
+    buffer.push('message_sent', 'b', 'second');
+    buffer.push('task_cancelled', 'c', 'third');
+
+    expect(buffer.size).toBe(2);
+    expect(buffer.since(0).map((event) => event.summary)).toEqual([
+      'second',
+      'third',
+    ]);
   });
 
-  it('returns empty arrays when no events', () => {
-    const buf = new IpcEventBuffer();
-    expect(buf.recent()).toEqual([]);
-    expect(buf.since(0)).toEqual([]);
-    expect(buf.size).toBe(0);
+  it('returns recent events newest-first and respects the count', () => {
+    const buffer = new IpcEventBuffer();
+
+    buffer.push('message_sent', 'a', 'first');
+    buffer.push('message_blocked', 'b', 'second');
+    buffer.push('ipc_error', 'c', 'third');
+
+    expect(buffer.recent(2).map((event) => event.summary)).toEqual([
+      'third',
+      'second',
+    ]);
+  });
+
+  it('returns only events newer than the provided id', () => {
+    const buffer = new IpcEventBuffer();
+
+    buffer.push('message_sent', 'a', 'first');
+    buffer.push('task_edited', 'b', 'second');
+    buffer.push('task_error', 'c', 'third');
+
+    expect(buffer.since(1).map((event) => event.id)).toEqual([2, 3]);
+    expect(buffer.since(3)).toEqual([]);
   });
 });

@@ -1,73 +1,174 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
 
+import { _initTestDatabase } from './db.js';
+import { logger } from './logger.js';
 import {
   createResumePositionStore,
+  MemoryResumePositionStore,
   PersistentResumePositionStore,
+  type PersistentStateAdapter,
 } from './resume-position-store.js';
 
-describe('resume position store', () => {
-  it('keeps behavior inert when persistentTaskState is disabled', () => {
-    const existingState: Record<string, string> = {
-      main: 'cursor-1',
-    };
+describe('MemoryResumePositionStore', () => {
+  let store: MemoryResumePositionStore;
 
-    const store = createResumePositionStore({
-      persistentTaskState: false,
-      initialResumePositions: existingState,
+  beforeEach(() => {
+    store = new MemoryResumePositionStore({
+      alpha: '2026-03-01T00:00:00.000Z',
     });
-
-    expect(store.get('main')).toBe('cursor-1');
-
-    store.set('main', 'cursor-2');
-    expect(existingState.main).toBe('cursor-2');
   });
 
-  it('falls back to empty state when persisted resume positions are missing', () => {
-    const write = mock(() => {});
-    const store = new PersistentResumePositionStore({
+  it('reads and updates in-memory resume positions', () => {
+    expect(store.get('alpha')).toBe('2026-03-01T00:00:00.000Z');
+    expect(store.get('missing')).toBeUndefined();
+
+    store.set('beta', '2026-03-02T00:00:00.000Z');
+
+    expect(store.getAll()).toEqual({
+      alpha: '2026-03-01T00:00:00.000Z',
+      beta: '2026-03-02T00:00:00.000Z',
+    });
+  });
+
+  it('clears all tracked positions', () => {
+    store.set('beta', '2026-03-02T00:00:00.000Z');
+
+    store.clear();
+
+    expect(store.getAll()).toEqual({});
+  });
+});
+
+describe('PersistentResumePositionStore', () => {
+  it('loads only string resume positions from persisted state', () => {
+    const adapter: PersistentStateAdapter = {
+      read: <T>() =>
+        ({
+          alpha: '2026-03-01T00:00:00.000Z',
+          beta: 123,
+          gamma: null,
+        }) as T,
+      write: () => {},
+    };
+
+    const store = new PersistentResumePositionStore({ stateAdapter: adapter });
+
+    expect(store.getAll()).toEqual({
+      alpha: '2026-03-01T00:00:00.000Z',
+    });
+  });
+
+  it('falls back to an empty state when persisted data is not an object', () => {
+    const arrayStore = new PersistentResumePositionStore({
       stateAdapter: {
-        read: () => undefined,
-        write,
+        read: <T>() => ['bad'] as T,
+        write: () => {},
+      },
+    });
+    const nullStore = new PersistentResumePositionStore({
+      stateAdapter: {
+        read: <T>() => null as T,
+        write: () => {},
       },
     });
 
-    expect(store.getAll()).toEqual({});
-
-    store.set('group-a', 'cursor-a');
-    expect(write).toHaveBeenCalledTimes(1);
-    expect(store.get('group-a')).toBe('cursor-a');
+    expect(arrayStore.getAll()).toEqual({});
+    expect(nullStore.getAll()).toEqual({});
   });
 
-  it('falls back to empty state when persisted resume positions are unreadable', () => {
+  it('persists updates and clears through the adapter', () => {
+    const writes: Array<{ key: string; value: unknown }> = [];
+    const adapter: PersistentStateAdapter = {
+      read: <T>() => ({ alpha: '2026-03-01T00:00:00.000Z' }) as T,
+      write: (key, value) => {
+        writes.push({ key, value: structuredClone(value) });
+      },
+    };
+    const store = new PersistentResumePositionStore({ stateAdapter: adapter });
+
+    store.set('beta', '2026-03-02T00:00:00.000Z');
+    store.clear();
+
+    expect(writes).toEqual([
+      {
+        key: 'resume_positions',
+        value: {
+          alpha: '2026-03-01T00:00:00.000Z',
+          beta: '2026-03-02T00:00:00.000Z',
+        },
+      },
+      {
+        key: 'resume_positions',
+        value: {},
+      },
+    ]);
+  });
+
+  it('warns and continues when initial load fails', () => {
+    const warnSpy = spyOn(logger, 'warn');
     const store = new PersistentResumePositionStore({
       stateAdapter: {
         read: () => {
-          throw new Error('EACCES: permission denied');
+          throw new Error('boom');
         },
         write: () => {},
       },
     });
 
     expect(store.getAll()).toEqual({});
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]?.[1]).toBe(
+      'Failed to load persisted resume positions',
+    );
 
-    store.set('group-b', 'cursor-b');
-    expect(store.get('group-b')).toBe('cursor-b');
+    warnSpy.mockRestore();
   });
 
-  it('drops corrupted persisted entries and keeps valid values', () => {
+  it('warns and keeps in-memory state when persisting fails', () => {
+    const warnSpy = spyOn(logger, 'warn');
     const store = new PersistentResumePositionStore({
       stateAdapter: {
-        read: <T>() =>
-          ({
-            valid: 'cursor-valid',
-            invalid: 42,
-          }) as T,
-        write: () => {},
+        read: <T>() => ({}) as T,
+        write: () => {
+          throw new Error('disk full');
+        },
       },
     });
 
-    expect(store.getAll()).toEqual({
-      valid: 'cursor-valid',
+    expect(() => {
+      store.set('alpha', '2026-03-03T00:00:00.000Z');
+    }).not.toThrow();
+    expect(store.get('alpha')).toBe('2026-03-03T00:00:00.000Z');
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]?.[1]).toBe(
+      'Failed to persist resume positions',
+    );
+
+    warnSpy.mockRestore();
+  });
+});
+
+describe('createResumePositionStore', () => {
+  beforeEach(() => {
+    _initTestDatabase();
+  });
+
+  it('returns a memory-backed store when persistence is disabled', () => {
+    const store = createResumePositionStore({
+      persistentTaskState: false,
+      initialResumePositions: { alpha: '2026-03-01T00:00:00.000Z' },
     });
+
+    expect(store).toBeInstanceOf(MemoryResumePositionStore);
+    expect(store.get('alpha')).toBe('2026-03-01T00:00:00.000Z');
+  });
+
+  it('returns a persistent store when persistence is enabled', () => {
+    const store = createResumePositionStore({
+      persistentTaskState: true,
+      initialResumePositions: { alpha: 'ignored' },
+    });
+
+    expect(store).toBeInstanceOf(PersistentResumePositionStore);
   });
 });
