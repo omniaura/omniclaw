@@ -90,6 +90,7 @@ import {
   updateAgentAvatar,
   createTrustStore,
   getOrCreateDiscoveryInstanceId,
+  getTaskRunLogs,
 } from './db.js';
 import { buildAgentToChannelsMapFromSubscriptions } from './channel-routes.js';
 import { resolveContextLayers } from './context-layers.js';
@@ -2254,6 +2255,7 @@ async function main(): Promise<void> {
     getQueueStats: () => queue.getStats(),
     getQueueDetails: () => queue.getDetailedStats(),
     getIpcEvents: (count) => ipcEvents.recent(count),
+    getTaskRunLogs: (taskId, limit) => getTaskRunLogs(taskId, limit),
     createTask: (task) => dbCreateTask(task),
     updateTask: (id, updates) => dbUpdateTask(id, updates),
     deleteTask: (id) => dbDeleteTask(id),

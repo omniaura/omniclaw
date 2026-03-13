@@ -42,6 +42,7 @@ const state: WebStateProvider = {
   }),
   getQueueDetails: () => [],
   getIpcEvents: () => [],
+  getTaskRunLogs: () => [],
   createTask: () => {},
   updateTask: () => {},
   deleteTask: () => {},
@@ -49,6 +50,8 @@ const state: WebStateProvider = {
   readContextFile: () => null,
   writeContextFile: () => {},
   updateAgentAvatar: () => {},
+  resolveChatImage: async () => null,
+  resolveDiscordGuildImage: async () => null,
 };
 
 describe('buildAgentChannelData', () => {

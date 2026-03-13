@@ -98,9 +98,24 @@ export function handleRequest(
     return json({ error: 'Method not allowed' }, 405);
   }
   if (pathname.startsWith('/api/tasks/')) {
+    const rest = pathname.slice('/api/tasks/'.length);
+
+    // Task run logs: /api/tasks/{id}/runs
+    if (rest.endsWith('/runs')) {
+      let taskId: string;
+      try {
+        taskId = decodeURIComponent(rest.slice(0, -'/runs'.length));
+      } catch {
+        return json({ error: 'Invalid task ID encoding' }, 400);
+      }
+      if (!taskId) return json({ error: 'Missing task ID' }, 400);
+      if (method === 'GET') return handleGetTaskRuns(taskId, req, state);
+      return json({ error: 'Method not allowed' }, 405);
+    }
+
     let taskId: string;
     try {
-      taskId = decodeURIComponent(pathname.slice('/api/tasks/'.length));
+      taskId = decodeURIComponent(rest);
     } catch {
       return json({ error: 'Invalid task ID encoding' }, 400);
     }
@@ -250,6 +265,24 @@ function handleGetSingleTask(
   const task = state.getTaskById(taskId);
   if (!task) return json({ error: 'Task not found' }, 404);
   return json(task);
+}
+
+function handleGetTaskRuns(
+  taskId: string,
+  req: Request,
+  state: WebStateProvider,
+): Response {
+  const task = state.getTaskById(taskId);
+  if (!task) return json({ error: 'Task not found' }, 404);
+
+  const url = new URL(req.url);
+  const limitParam = url.searchParams.get('limit');
+  const limit = limitParam
+    ? Math.min(Math.max(1, parseInt(limitParam, 10) || 20), 100)
+    : 20;
+
+  const runs = state.getTaskRunLogs(taskId, limit);
+  return json(runs);
 }
 
 async function handleCreateTask(
