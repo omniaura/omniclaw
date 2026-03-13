@@ -56,6 +56,8 @@ import {
 import {
   expireStaleSessions,
   getAllAgents,
+  getAllAgentHealth,
+  getAgentHealth,
   getAllChannelSubscriptions,
   getAllChannelRoutes,
   getAllChats,
@@ -76,6 +78,7 @@ import {
   deleteTask as dbDeleteTask,
   initDatabase,
   setAgent,
+  setAgentHealth,
   setChannelSubscription,
   setChannelRoute,
   setRegisteredGroup,
@@ -102,6 +105,7 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import {
   Agent,
+  AgentHealth,
   AgentRuntime,
   BackendType,
   Channel,
@@ -1516,6 +1520,16 @@ function buildChannelsForAgent(agentId: string): ChannelInfo[] | undefined {
   });
 }
 
+function buildAgentDiscoveryCapabilities(agent: Agent): string[] {
+  const role = agent.isAdmin ? 'role:admin' : 'role:worker';
+  return [
+    `backend:${agent.backend}`,
+    `runtime:${agent.agentRuntime}`,
+    role,
+    'capability:read-only-roster',
+  ];
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
@@ -1556,6 +1570,17 @@ async function runAgent(
     (channelSubscriptions[chatJid] || [])[0]?.agentId ??
     Object.values(agents).find((a) => a.folder === group.folder)?.id ??
     group.folder;
+  const discoveryAgent = agents[agentId];
+  if (discoveryAgent) {
+    const nowIso = new Date().toISOString();
+    setAgentHealth({
+      agentId,
+      isOnline: true,
+      lastHeartbeatAt: nowIso,
+      updatedAt: nowIso,
+      capabilities: buildAgentDiscoveryCapabilities(discoveryAgent),
+    });
+  }
 
   // Update available groups snapshot
   // Non-main agents can see their subscribed channels; main sees all
@@ -1686,6 +1711,19 @@ async function runAgent(
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
   } finally {
+    if (discoveryAgent) {
+      const now = new Date().toISOString();
+      const existing = getAgentHealth(agentId);
+      setAgentHealth({
+        agentId,
+        isOnline: false,
+        lastHeartbeatAt: existing?.lastHeartbeatAt || now,
+        updatedAt: now,
+        capabilities:
+          existing?.capabilities ||
+          buildAgentDiscoveryCapabilities(discoveryAgent),
+      });
+    }
     activeRuntimeFolders.delete(runtimeGroupFolder);
   }
 }
@@ -2064,6 +2102,7 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
       isMain: agent.isAdmin,
       trigger,
       sendTo, // How to reach this agent via send_message
+      discoveryVersion: 1,
     };
   });
 
@@ -2084,11 +2123,34 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
           group.requiresTrigger !== false
             ? `target_jid="${jid}", text must start with "${group.trigger} "`
             : `target_jid="${jid}"`,
+        discoveryVersion: 1,
       });
     }
   }
 
   const registryJson = JSON.stringify(registry, null, 2);
+  const healthByAgent = getAllAgentHealth();
+  const health: AgentHealth[] = registry.map((entry) => {
+    const existing = healthByAgent[entry.id];
+    if (existing) return existing;
+    const baseline = new Date(0).toISOString();
+    return {
+      agentId: entry.id,
+      isOnline: false,
+      lastHeartbeatAt: baseline,
+      updatedAt: baseline,
+      capabilities: ['capability:read-only-roster'],
+    };
+  });
+  const discoveryJson = JSON.stringify(
+    {
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      health,
+    },
+    null,
+    2,
+  );
 
   // Write to ALL agents' IPC dirs
   const folders = new Set<string>();
@@ -2110,6 +2172,10 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
     fs.writeFileSync(
       path.join(groupIpcDir, 'agent_registry.json'),
       registryJson,
+    );
+    fs.writeFileSync(
+      path.join(groupIpcDir, 'agent_discovery.json'),
+      discoveryJson,
     );
   }
 }

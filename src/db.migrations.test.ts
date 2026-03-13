@@ -135,6 +135,9 @@ describe('db migrations (bun:sqlite)', () => {
       'channel_jid',
     );
     expect(getTableColumns(db, 'channel_subscriptions')).toContain('agent_id');
+    expect(getTableColumns(db, 'agent_health')).toContain('agent_id');
+    expect(getTableColumns(db, 'agent_health')).toContain('is_online');
+    expect(getTableColumns(db, 'agent_health')).toContain('capabilities');
 
     // Verify default values applied to existing rows
     const agents = db
@@ -165,6 +168,9 @@ describe('db migrations (bun:sqlite)', () => {
       'channel_jid',
     );
     expect(getTableColumns(db, 'channel_subscriptions')).toContain('agent_id');
+    expect(getTableColumns(db, 'agent_health')).toContain('agent_id');
+    expect(getTableColumns(db, 'agent_health')).toContain('is_online');
+    expect(getTableColumns(db, 'agent_health')).toContain('capabilities');
 
     // Write an agent with opencode runtime
     db.query(
