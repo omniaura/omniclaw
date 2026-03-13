@@ -1,6 +1,10 @@
 import { describe, it, expect, afterEach } from 'bun:test';
 
-import { startWebServer, type WebServerHandle } from './server.js';
+import {
+  isTrustedLanDiscoveryAdminRequest,
+  startWebServer,
+  type WebServerHandle,
+} from './server.js';
 import { setDiscoveryContext } from './routes.js';
 import type { WebStateProvider, QueueStats } from './types.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
@@ -353,6 +357,63 @@ describe('basic auth', () => {
     const res = await fetch(url('/api/discovery/requests'));
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual([]);
+  });
+});
+
+describe('isTrustedLanDiscoveryAdminRequest', () => {
+  it('rejects attacker-controlled Host headers when the socket peer is public', () => {
+    const req = Object.assign(
+      new Request('http://evil.example/api/discovery/requests', {
+        headers: { Host: '127.0.0.1' },
+      }),
+      {
+        socket: { remoteAddress: '8.8.8.8' },
+      },
+    ) as Request;
+
+    expect(
+      isTrustedLanDiscoveryAdminRequest(
+        req,
+        '/api/discovery/requests',
+        undefined,
+        true,
+      ),
+    ).toBe(false);
+  });
+
+  it('allows trusted LAN peers based on the socket remote address', () => {
+    const req = Object.assign(
+      new Request('http://evil.example/api/discovery/requests', {
+        headers: { Host: 'evil.example' },
+      }),
+      {
+        socket: { remoteAddress: '192.168.1.25' },
+      },
+    ) as Request;
+
+    expect(
+      isTrustedLanDiscoveryAdminRequest(
+        req,
+        '/api/discovery/requests',
+        undefined,
+        true,
+      ),
+    ).toBe(true);
+  });
+
+  it('allows loopback-bound servers when the socket address is unavailable', () => {
+    const req = new Request('http://evil.example/api/discovery/requests', {
+      headers: { Host: 'evil.example' },
+    });
+
+    expect(
+      isTrustedLanDiscoveryAdminRequest(
+        req,
+        '/api/discovery/requests',
+        '127.0.0.1',
+        true,
+      ),
+    ).toBe(true);
   });
 });
 
