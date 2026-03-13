@@ -6,10 +6,13 @@ import {
   deleteTask,
   getAllAgents,
   getAllChats,
+  getDeltaCursorFromDb,
   getMessagesSince,
   getNewMessages,
   getTaskById,
   setAgent,
+  loadAllDeltaCursors,
+  setDeltaCursorInDb,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -739,5 +742,47 @@ describe('mapMessageRow sender canonicalization', () => {
     // Verify dedup works: unique sender IDs should be 1
     const uniqueSenders = new Set(messages.map((m) => m.sender));
     expect(uniqueSenders.size).toBe(1);
+  });
+});
+
+// --- GitHub delta cursor persistence ---
+
+describe('delta cursor persistence', () => {
+  it('returns undefined for unknown channel', () => {
+    expect(getDeltaCursorFromDb('dc:unknown')).toBeUndefined();
+  });
+
+  it('stores and retrieves a cursor', () => {
+    setDeltaCursorInDb('dc:123', '2026-03-05T10:00:00.000Z');
+    expect(getDeltaCursorFromDb('dc:123')).toBe('2026-03-05T10:00:00.000Z');
+  });
+
+  it('updates cursor on subsequent write', () => {
+    setDeltaCursorInDb('dc:456', '2026-03-05T10:00:00.000Z');
+    setDeltaCursorInDb('dc:456', '2026-03-05T11:00:00.000Z');
+    expect(getDeltaCursorFromDb('dc:456')).toBe('2026-03-05T11:00:00.000Z');
+  });
+
+  it('stores cursors for multiple channels independently', () => {
+    setDeltaCursorInDb('dc:a', '2026-03-05T10:00:00.000Z');
+    setDeltaCursorInDb('dc:b', '2026-03-05T11:00:00.000Z');
+    expect(getDeltaCursorFromDb('dc:a')).toBe('2026-03-05T10:00:00.000Z');
+    expect(getDeltaCursorFromDb('dc:b')).toBe('2026-03-05T11:00:00.000Z');
+  });
+
+  it('loadAllDeltaCursors returns all stored cursors', () => {
+    setDeltaCursorInDb('dc:x', '2026-03-05T10:00:00.000Z');
+    setDeltaCursorInDb('dc:y', '2026-03-05T11:00:00.000Z');
+    const cursors = loadAllDeltaCursors();
+    expect(cursors.get('dc:x')).toBe('2026-03-05T10:00:00.000Z');
+    expect(cursors.get('dc:y')).toBe('2026-03-05T11:00:00.000Z');
+  });
+
+  it('loadAllDeltaCursors returns empty map when no cursors stored', () => {
+    const cursors = loadAllDeltaCursors();
+    // Only checking that delta cursors are empty (other router_state keys may exist)
+    const deltaKeys = [...cursors.keys()].filter((k) => k.startsWith('dc:'));
+    // Fresh DB should have no delta cursors
+    expect(deltaKeys.length).toBe(0);
   });
 });

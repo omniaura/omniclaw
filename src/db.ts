@@ -1634,3 +1634,43 @@ function migrateJsonState(): void {
     }
   }
 }
+
+// --- GitHub delta cursor persistence ---
+
+const DELTA_CURSOR_PREFIX = 'github_delta_cursor:';
+
+/** Get the persisted GitHub delta cursor for a channel. */
+export function getDeltaCursorFromDb(channelJid: string): string | undefined {
+  const row = db
+    .prepare('SELECT value FROM router_state WHERE key = ?')
+    .get(`${DELTA_CURSOR_PREFIX}${channelJid}`) as
+    | { value: string }
+    | undefined;
+  return row?.value;
+}
+
+/** Persist a GitHub delta cursor for a channel. */
+export function setDeltaCursorInDb(
+  channelJid: string,
+  timestamp: string,
+): void {
+  db.query(
+    'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
+  ).run(`${DELTA_CURSOR_PREFIX}${channelJid}`, timestamp);
+}
+
+/** Load all persisted delta cursors (used at startup to warm in-memory state). */
+export function loadAllDeltaCursors(): Map<string, string> {
+  const rows = db
+    .prepare(`SELECT key, value FROM router_state WHERE key LIKE ?`)
+    .all(`${DELTA_CURSOR_PREFIX}%`) as Array<{
+    key: string;
+    value: string;
+  }>;
+  const result = new Map<string, string>();
+  for (const row of rows) {
+    const channelJid = row.key.slice(DELTA_CURSOR_PREFIX.length);
+    result.set(channelJid, row.value);
+  }
+  return result;
+}

@@ -98,6 +98,8 @@ export interface ContainerInput {
   categoryFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant'
   /** Pre-fetched GitHub context markdown (open PRs, issues, review comments) for injection into system prompt. */
   githubContext?: string;
+  /** GitHub activity delta digest (events since last user message in this channel). */
+  githubActivityDelta?: string;
 }
 
 export interface ContainerOutput {
