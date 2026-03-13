@@ -17,6 +17,9 @@ groups/main/*
 groups/global/*
 !groups/main/CLAUDE.md.template
 !groups/global/CLAUDE.md.template
+!groups/ditto-desktop/
+groups/ditto-desktop/*
+!groups/ditto-desktop/CLAUDE.md
 
 # Secrets
 *.keys.json
