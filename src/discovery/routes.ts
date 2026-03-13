@@ -877,8 +877,16 @@ function getLocalAddress(): string {
 /**
  * Check if an incoming API request is from a trusted peer.
  * Used by the web server to authenticate peer-to-peer API calls.
+ *
+ * @param computedBodyHash - SHA-256 hex digest computed from the actual
+ *   received request body. When provided, it is compared against the
+ *   caller-supplied X-OmniClaw-Body-SHA256 header to detect body tampering.
  */
-export function checkPeerAuth(req: Request, trustStore: TrustStore): boolean {
+export function checkPeerAuth(
+  req: Request,
+  trustStore: TrustStore,
+  computedBodyHash?: string,
+): boolean {
   const instanceId = req.headers.get('X-OmniClaw-Instance');
   const timestamp = req.headers.get('X-OmniClaw-Timestamp');
   const nonce = req.headers.get('X-OmniClaw-Nonce');
@@ -886,6 +894,14 @@ export function checkPeerAuth(req: Request, trustStore: TrustStore): boolean {
   const signature = req.headers.get('X-OmniClaw-Signature');
 
   if (!instanceId || !timestamp || !nonce || !bodyHash || !signature) {
+    return false;
+  }
+
+  // Verify that the received body matches the claimed hash before checking
+  // the HMAC signature. Without this, an on-path attacker could tamper with
+  // the body while the signed headers (including the original hash) remain
+  // valid.
+  if (computedBodyHash !== undefined && computedBodyHash !== bodyHash) {
     return false;
   }
 

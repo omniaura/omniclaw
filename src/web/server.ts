@@ -1,3 +1,5 @@
+import { createHash } from 'crypto';
+
 import { ServerSentEventGenerator } from '@starfederation/datastar-sdk/web';
 
 import { logger } from '../logger.js';
@@ -48,7 +50,7 @@ export function startWebServer(
     hostname: hostname || '127.0.0.1',
     development: false,
 
-    fetch(req) {
+    async fetch(req) {
       const url = new URL(req.url);
       if (url.pathname === '/ws') {
         return new Response('WebSocket is deprecated for the web dashboard', {
@@ -61,7 +63,17 @@ export function startWebServer(
       const isPeerRequest =
         isPeerRoute(url.pathname) && req.headers.has('X-OmniClaw-Instance');
       if (isPeerRequest && trustStore) {
-        if (!checkPeerAuth(req, trustStore)) {
+        // Read the raw body and compute its SHA-256 so checkPeerAuth can
+        // verify the claimed X-OmniClaw-Body-SHA256 header matches the
+        // bytes actually received. This prevents body-tampering attacks
+        // where an on-path attacker modifies the body while keeping the
+        // signed headers intact.
+        const cloned = req.clone();
+        const rawBody = await cloned.text();
+        const computedBodyHash = createHash('sha256')
+          .update(rawBody)
+          .digest('hex');
+        if (!checkPeerAuth(req, trustStore, computedBodyHash)) {
           return new Response('Unauthorized peer', {
             status: 403,
             headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
