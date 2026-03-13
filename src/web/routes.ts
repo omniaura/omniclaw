@@ -6,6 +6,7 @@ import { assertPathWithin } from '../path-security.js';
 import type { ScheduledTask } from '../types.js';
 import type { WebStateProvider } from './types.js';
 import { serveCachedRemoteImage } from './image-cache.js';
+import { renderAgentDetail, buildAgentDetailData } from './agent-detail.js';
 import { renderConversations } from './conversations.js';
 import {
   renderContextViewerWithRemote,
@@ -145,6 +146,17 @@ export function handleRequest(
   if (pathname === '/api/ipc/queue') return handleGetQueueDetails(state);
   if (pathname === '/api/ipc/events') return handleGetIpcEvents(url, state);
 
+  // Agent detail API
+  if (pathname.startsWith('/api/agents/') && pathname.endsWith('/detail')) {
+    const agentId = decodeURIComponent(
+      pathname.slice('/api/agents/'.length, -'/detail'.length),
+    );
+    if (!agentId) return json({ error: 'Missing agent ID' }, 400);
+    const data = buildAgentDetailData(agentId, state);
+    if (!data) return json({ error: 'Agent not found' }, 404);
+    return json(data);
+  }
+
   // --- Dashboard ---
   if (pathname === '/' || pathname === '/index.html')
     return handleDashboardPage(state);
@@ -169,6 +181,14 @@ export function handleRequest(
     return new Response(renderSystem(state, sseClientCount ?? 0), {
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
+
+  // --- Agent Detail ---
+  if (pathname === '/agents') {
+    const agentId = url.searchParams.get('id') || '';
+    return new Response(renderAgentDetail(agentId, state), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+  }
 
   // --- Agent avatar endpoints ---
   if (pathname.startsWith('/api/agents/') && pathname.endsWith('/avatar')) {

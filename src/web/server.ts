@@ -7,6 +7,10 @@ import { handleRequest, getRemotePeers } from './routes.js';
 import type { ScheduledTask } from '../types.js';
 import { escapeHtml, renderNavLinks } from './shared.js';
 import type { WebServerConfig, WebStateProvider, WsEvent } from './types.js';
+import {
+  renderAgentDetailContent,
+  buildAgentDetailData,
+} from './agent-detail.js';
 import { renderDashboardContent } from './dashboard.js';
 import { renderConversationsContent } from './conversations.js';
 import { renderContextViewerContent } from './context-viewer.js';
@@ -249,6 +253,29 @@ export function startWebServer(
             render: () => renderSystemContent(state, sseClients.size),
           },
         };
+
+        // Handle parametric pages (e.g., agent-detail?id=xxx)
+        if (pageName === 'agent-detail') {
+          const agentId = url.searchParams.get('id') || '';
+          const data = buildAgentDetailData(agentId, state);
+          const title = data ? data.name : 'Agent Not Found';
+          const qs = agentId
+            ? `?id=${encodeURIComponent(agentId)}`
+            : '';
+          return new Response(
+            JSON.stringify({
+              html: renderAgentDetailContent(data, agentId),
+              title,
+              path: `/agents${qs}`,
+            }),
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+              },
+            },
+          );
+        }
 
         const page = pageRenderers[pageName];
         if (!page) {
