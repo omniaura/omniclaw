@@ -1,6 +1,7 @@
 import { describe, it, expect, mock } from 'bun:test';
 
 import type { ContainerOutput } from './backends/types.js';
+import type { Logger } from './logger.js';
 import type { ScheduledTask } from './types.js';
 
 const dueTasks: ScheduledTask[] = [
@@ -64,56 +65,31 @@ const resolveBackendMock = mock(() => ({
   },
 }));
 
-const loggerMock = {
+const childLoggerMock: Logger = {
+  level: 'debug',
+  trace: mock(() => {}),
   info: mock(() => {}),
   debug: mock(() => {}),
   warn: mock(() => {}),
   error: mock(() => {}),
   fatal: mock(() => {}),
-  child: mock(() => ({
-    info: mock(() => {}),
-    warn: mock(() => {}),
-    error: mock(() => {}),
-  })),
+  child: mock(() => childLoggerMock),
+  subscribe: mock(() => () => {}),
 };
 
-mock.module('./config.js', () => ({
-  GROUPS_DIR: '/tmp/omniclaw-scheduler-test',
-  MAIN_GROUP_FOLDER: 'main',
-  SCHEDULER_POLL_INTERVAL: 1111,
-  TIMEZONE: 'UTC',
-}));
-
-mock.module('./db.js', () => ({
-  createTask: mock(() => {}),
-  deleteTask: mock(() => {}),
-  getDueTasks: getDueTasksMock,
-  getTaskById: getTaskByIdMock,
-  getAllTasks: getAllTasksMock,
-  logTaskRun: logTaskRunMock,
-  updateTaskAfterRun: updateTaskAfterRunMock,
-  advanceTaskNextRun: advanceTaskNextRunMock,
-}));
-
-mock.module('./ipc-snapshots.js', () => ({
-  writeTasksSnapshot: writeTasksSnapshotMock,
-}));
-
-mock.module('./schedule-utils.js', () => ({
-  calculateNextRun: calculateNextRunMock,
-}));
-
-mock.module('./backends/index.js', () => ({
-  resolveBackend: resolveBackendMock,
-}));
-
-mock.module('./logger.js', () => ({
-  logger: loggerMock,
-}));
+const loggerMock: Logger = {
+  level: 'debug',
+  trace: mock(() => {}),
+  info: mock(() => {}),
+  debug: mock(() => {}),
+  warn: mock(() => {}),
+  error: mock(() => {}),
+  fatal: mock(() => {}),
+  child: mock(() => childLoggerMock),
+  subscribe: mock(() => () => {}),
+};
 
 import { startSchedulerLoop } from './task-scheduler.js';
-
-mock.restore();
 
 describe('startSchedulerLoop', () => {
   it('runs due tasks once, executes queued callbacks, and blocks duplicate loop startup', async () => {
@@ -146,6 +122,19 @@ describe('startSchedulerLoop', () => {
     }) as typeof clearTimeout;
 
     try {
+      const runtime = {
+        calculateNextRun: calculateNextRunMock,
+        resolveBackend: resolveBackendMock,
+        writeTasksSnapshot: writeTasksSnapshotMock,
+        advanceTaskNextRun: advanceTaskNextRunMock,
+        getAllTasks: getAllTasksMock,
+        getDueTasks: getDueTasksMock,
+        getTaskById: getTaskByIdMock,
+        logTaskRun: logTaskRunMock,
+        updateTaskAfterRun: updateTaskAfterRunMock,
+        logger: loggerMock,
+      };
+
       const deps = {
         registeredGroups: () => ({}),
         getGroupForTask: (chatJid: string) => {
@@ -185,8 +174,8 @@ describe('startSchedulerLoop', () => {
         findChannel: () => undefined,
       };
 
-      startSchedulerLoop(deps as any);
-      startSchedulerLoop(deps as any);
+      startSchedulerLoop(deps as any, runtime as any);
+      startSchedulerLoop(deps as any, runtime as any);
 
       await Promise.all(runPromises);
 
@@ -226,7 +215,7 @@ describe('startSchedulerLoop', () => {
         'final result',
       );
 
-      expect(timeoutCalls).toContain(1111);
+      expect(timeoutCalls).toContain(60000);
       expect(timeoutCalls).toContain(10000);
       expect(clearedTimeouts).toHaveLength(1);
       expect(loggerMock.debug).toHaveBeenCalledWith(

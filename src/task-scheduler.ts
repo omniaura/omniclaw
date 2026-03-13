@@ -9,6 +9,7 @@ import {
 } from './config.js';
 import { calculateNextRun } from './schedule-utils.js';
 import { resolveBackend } from './backends/index.js';
+import type { AgentBackend } from './backends/types.js';
 import type { ContainerOutput } from './backends/types.js';
 import { writeTasksSnapshot } from './ipc-snapshots.js';
 import {
@@ -31,6 +32,34 @@ import {
   RegisteredGroup,
   ScheduledTask,
 } from './types.js';
+
+interface SchedulerRuntime {
+  calculateNextRun: typeof calculateNextRun;
+  resolveBackend: (
+    group: RegisteredGroup,
+  ) => Pick<AgentBackend, 'runAgent'>;
+  writeTasksSnapshot: typeof writeTasksSnapshot;
+  advanceTaskNextRun: typeof advanceTaskNextRun;
+  getAllTasks: typeof getAllTasks;
+  getDueTasks: typeof getDueTasks;
+  getTaskById: typeof getTaskById;
+  logTaskRun: typeof logTaskRun;
+  updateTaskAfterRun: typeof updateTaskAfterRun;
+  logger: typeof logger;
+}
+
+const defaultSchedulerRuntime: SchedulerRuntime = {
+  calculateNextRun,
+  resolveBackend,
+  writeTasksSnapshot,
+  advanceTaskNextRun,
+  getAllTasks,
+  getDueTasks,
+  getTaskById,
+  logTaskRun,
+  updateTaskAfterRun,
+  logger,
+};
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -66,11 +95,12 @@ export interface SchedulerDependencies {
 async function runTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
+  runtime: SchedulerRuntime = defaultSchedulerRuntime,
 ): Promise<void> {
   // Re-check task status: may have been cancelled/paused while queued
-  const freshTask = getTaskById(task.id);
+  const freshTask = runtime.getTaskById(task.id);
   if (!freshTask || freshTask.status !== 'active') {
-    logger.info(
+    runtime.logger.info(
       { taskId: task.id, status: freshTask?.status ?? 'deleted' },
       'Task no longer active, skipping',
     );
@@ -81,7 +111,7 @@ async function runTask(
   const groupDir = path.join(GROUPS_DIR, task.group_folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const log = logger.child({
+  const log = runtime.logger.child({
     op: 'taskRun',
     taskId: task.id,
     group: task.group_folder,
@@ -92,7 +122,7 @@ async function runTask(
 
   if (!group) {
     log.error('Group not found for task');
-    logTaskRun({
+    runtime.logTaskRun({
       task_id: task.id,
       run_at: new Date().toISOString(),
       duration_ms: Date.now() - startTime,
@@ -107,8 +137,8 @@ async function runTask(
 
   // Update tasks snapshot for container to read (filtered by group)
   const isMain = task.group_folder === MAIN_GROUP_FOLDER;
-  const tasks = getAllTasks();
-  writeTasksSnapshot(
+  const tasks = runtime.getAllTasks();
+  runtime.writeTasksSnapshot(
     task.group_folder,
     isMain,
     tasks.map((t) => ({
@@ -144,13 +174,16 @@ async function runTask(
   const scheduleClose = () => {
     if (closeTimer) return; // already scheduled
     closeTimer = setTimeout(() => {
-      logger.debug({ taskId: task.id }, 'Closing task container after result');
+      runtime.logger.debug(
+        { taskId: task.id },
+        'Closing task container after result',
+      );
       deps.queue.closeStdin(task.chat_jid, 'task');
     }, TASK_CLOSE_DELAY_MS);
   };
 
   try {
-    const backend = resolveBackend(group);
+    const backend = runtime.resolveBackend(group);
     const output = await backend.runAgent(
       group,
       {
@@ -219,7 +252,7 @@ async function runTask(
 
   const durationMs = Date.now() - startTime;
 
-  logTaskRun({
+  runtime.logTaskRun({
     task_id: task.id,
     run_at: new Date().toISOString(),
     duration_ms: durationMs,
@@ -232,36 +265,39 @@ async function runTask(
   const nextRun =
     task.schedule_type === 'once'
       ? null
-      : calculateNextRun(task.schedule_type, task.schedule_value);
+      : runtime.calculateNextRun(task.schedule_type, task.schedule_value);
 
   const resultSummary = error
     ? `Error: ${error}`
     : result
       ? result.slice(0, 200)
       : 'Completed';
-  updateTaskAfterRun(task.id, nextRun, resultSummary);
+  runtime.updateTaskAfterRun(task.id, nextRun, resultSummary);
 }
 
 let schedulerRunning = false;
 
-export function startSchedulerLoop(deps: SchedulerDependencies): void {
+export function startSchedulerLoop(
+  deps: SchedulerDependencies,
+  runtime: SchedulerRuntime = defaultSchedulerRuntime,
+): void {
   if (schedulerRunning) {
-    logger.debug('Scheduler loop already running, skipping duplicate start');
+    runtime.logger.debug('Scheduler loop already running, skipping duplicate start');
     return;
   }
   schedulerRunning = true;
-  logger.info('Scheduler loop started');
+  runtime.logger.info('Scheduler loop started');
 
   const loop = async () => {
     try {
-      const dueTasks = getDueTasks();
+      const dueTasks = runtime.getDueTasks();
       if (dueTasks.length > 0) {
-        logger.info({ count: dueTasks.length }, 'Found due tasks');
+        runtime.logger.info({ count: dueTasks.length }, 'Found due tasks');
       }
 
       for (const task of dueTasks) {
         // Re-check task status in case it was paused/cancelled
-        const currentTask = getTaskById(task.id);
+        const currentTask = runtime.getTaskById(task.id);
         if (!currentTask || currentTask.status !== 'active') {
           continue;
         }
@@ -273,22 +309,22 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         const nextRun =
           currentTask.schedule_type === 'once'
             ? null
-            : calculateNextRun(
+            : runtime.calculateNextRun(
                 currentTask.schedule_type,
                 currentTask.schedule_value,
               );
-        advanceTaskNextRun(currentTask.id, nextRun);
+        runtime.advanceTaskNextRun(currentTask.id, nextRun);
 
         const promptPreview = currentTask.prompt.slice(0, 100);
         deps.queue.enqueueTask(
           currentTask.chat_jid,
           currentTask.id,
-          () => runTask(currentTask, deps),
+          () => runTask(currentTask, deps, runtime),
           promptPreview,
         );
       }
     } catch (err) {
-      logger.error({ err }, 'Error in scheduler loop');
+      runtime.logger.error({ err }, 'Error in scheduler loop');
     }
 
     setTimeout(loop, SCHEDULER_POLL_INTERVAL);
