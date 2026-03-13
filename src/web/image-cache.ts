@@ -56,9 +56,13 @@ function describeFetchError(err: unknown): Record<string, string> {
     return { errorName: 'UnknownError' };
   }
 
+  const errorMessage = err.message.replace(/https?:\/\/\S+/gi, (match) =>
+    describeImageUrl(match),
+  );
+
   return {
     errorName: err.name || 'Error',
-    errorMessage: describeImageUrl(err.message),
+    errorMessage,
   };
 }
 

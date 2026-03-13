@@ -35,9 +35,7 @@ import {
 
 interface SchedulerRuntime {
   calculateNextRun: typeof calculateNextRun;
-  resolveBackend: (
-    group: RegisteredGroup,
-  ) => Pick<AgentBackend, 'runAgent'>;
+  resolveBackend: (group: RegisteredGroup) => Pick<AgentBackend, 'runAgent'>;
   writeTasksSnapshot: typeof writeTasksSnapshot;
   advanceTaskNextRun: typeof advanceTaskNextRun;
   getAllTasks: typeof getAllTasks;
@@ -282,7 +280,9 @@ export function startSchedulerLoop(
   runtime: SchedulerRuntime = defaultSchedulerRuntime,
 ): void {
   if (schedulerRunning) {
-    runtime.logger.debug('Scheduler loop already running, skipping duplicate start');
+    runtime.logger.debug(
+      'Scheduler loop already running, skipping duplicate start',
+    );
     return;
   }
   schedulerRunning = true;
