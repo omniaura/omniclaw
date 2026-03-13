@@ -51,6 +51,17 @@ function buildCachedResponse(dataPath: string, contentType: string): Response {
   });
 }
 
+function describeFetchError(err: unknown): Record<string, string> {
+  if (!(err instanceof Error)) {
+    return { errorName: 'UnknownError' };
+  }
+
+  return {
+    errorName: err.name || 'Error',
+    errorMessage: describeImageUrl(err.message),
+  };
+}
+
 export async function serveCachedRemoteImage(
   cacheKey: string,
   resolveUrl: () => Promise<string | null>,
@@ -97,18 +108,13 @@ export async function serveCachedRemoteImage(
       'utf-8',
     );
 
-    return new Response(bytes, {
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': BROWSER_CACHE_CONTROL,
-      },
-    });
+    return buildCachedResponse(dataPath, contentType);
   } catch (err) {
     logger.warn(
       {
         cacheKey,
         imageUrl: describeImageUrl(url),
-        err,
+        ...describeFetchError(err),
       },
       'Failed to fetch image',
     );

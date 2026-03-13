@@ -1,13 +1,21 @@
-import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 
 import { _initTestDatabase } from './db.js';
-import { logger } from './logger.js';
+import { subscribeToLogs, type LogRecord } from './logger.js';
 import {
   createResumePositionStore,
   MemoryResumePositionStore,
   PersistentResumePositionStore,
   type PersistentStateAdapter,
 } from './resume-position-store.js';
+
+function captureLogs(): { records: LogRecord[]; stop: () => void } {
+  const records: LogRecord[] = [];
+  const stop = subscribeToLogs((record) => {
+    records.push(record);
+  });
+  return { records, stop };
+}
 
 describe('MemoryResumePositionStore', () => {
   let store: MemoryResumePositionStore;
@@ -105,7 +113,7 @@ describe('PersistentResumePositionStore', () => {
   });
 
   it('warns and continues when initial load fails', () => {
-    const warnSpy = spyOn(logger, 'warn');
+    const { records, stop } = captureLogs();
     const store = new PersistentResumePositionStore({
       stateAdapter: {
         read: () => {
@@ -116,16 +124,14 @@ describe('PersistentResumePositionStore', () => {
     });
 
     expect(store.getAll()).toEqual({});
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0]?.[1]).toBe(
-      'Failed to load persisted resume positions',
-    );
+    expect(records).toHaveLength(1);
+    expect(records[0]?.msg).toBe('Failed to load persisted resume positions');
 
-    warnSpy.mockRestore();
+    stop();
   });
 
   it('warns and keeps in-memory state when persisting fails', () => {
-    const warnSpy = spyOn(logger, 'warn');
+    const { records, stop } = captureLogs();
     const store = new PersistentResumePositionStore({
       stateAdapter: {
         read: <T>() => ({}) as T,
@@ -139,12 +145,10 @@ describe('PersistentResumePositionStore', () => {
       store.set('alpha', '2026-03-03T00:00:00.000Z');
     }).not.toThrow();
     expect(store.get('alpha')).toBe('2026-03-03T00:00:00.000Z');
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0]?.[1]).toBe(
-      'Failed to persist resume positions',
-    );
+    expect(records).toHaveLength(1);
+    expect(records[0]?.msg).toBe('Failed to persist resume positions');
 
-    warnSpy.mockRestore();
+    stop();
   });
 });
 

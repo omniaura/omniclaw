@@ -23,6 +23,8 @@ mockModule.module('fs', () => ({
 
 import { GroupQueue } from './group-queue.js';
 
+mock.restore();
+
 describe('GroupQueue', () => {
   let queue: GroupQueue;
 

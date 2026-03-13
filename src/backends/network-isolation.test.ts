@@ -45,6 +45,8 @@ mock.module('../config.js', () => mockConfig);
 // Import after mocking
 const { buildContainerArgs } = await import('./local-backend.js');
 
+mock.restore();
+
 describe('buildContainerArgs network isolation', () => {
   beforeEach(() => {
     mockConfig.LOCAL_RUNTIME = 'docker';

@@ -67,9 +67,12 @@ const resolveBackendMock = mock(() => ({
 const loggerMock = {
   info: mock(() => {}),
   debug: mock(() => {}),
+  warn: mock(() => {}),
   error: mock(() => {}),
+  fatal: mock(() => {}),
   child: mock(() => ({
     info: mock(() => {}),
+    warn: mock(() => {}),
     error: mock(() => {}),
   })),
 };
@@ -109,6 +112,8 @@ mock.module('./logger.js', () => ({
 }));
 
 import { startSchedulerLoop } from './task-scheduler.js';
+
+mock.restore();
 
 describe('startSchedulerLoop', () => {
   it('runs due tasks once, executes queued callbacks, and blocks duplicate loop startup', async () => {
