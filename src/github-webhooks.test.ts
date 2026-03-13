@@ -115,7 +115,8 @@ describe('github webhooks', () => {
         review: {
           state: 'APPROVED',
           body: 'Looks good to me.',
-          html_url: 'https://github.com/omniaura/omniclaw/pull/264#pullrequestreview-1',
+          html_url:
+            'https://github.com/omniaura/omniclaw/pull/264#pullrequestreview-1',
         },
       },
       config,
@@ -147,7 +148,8 @@ describe('github webhooks', () => {
         },
         comment: {
           body: longBody,
-          html_url: 'https://github.com/omniaura/omniclaw/issues/223#issuecomment-1',
+          html_url:
+            'https://github.com/omniaura/omniclaw/issues/223#issuecomment-1',
         },
       },
       config,
