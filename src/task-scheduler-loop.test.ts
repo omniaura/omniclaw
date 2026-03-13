@@ -13,6 +13,8 @@ const dueTasks: ScheduledTask[] = [
     schedule_value: '60000',
     context_mode: 'group',
     next_run: '2026-01-01T00:00:00.000Z',
+    last_run: null,
+    last_result: null,
     status: 'active',
     created_at: '2026-01-01T00:00:00.000Z',
   },
@@ -25,6 +27,8 @@ const dueTasks: ScheduledTask[] = [
     schedule_value: '2026-01-01T00:00:00.000Z',
     context_mode: 'isolated',
     next_run: '2026-01-01T00:00:00.000Z',
+    last_run: null,
+    last_result: null,
     status: 'active',
     created_at: '2026-01-01T00:00:00.000Z',
   },
@@ -118,21 +122,23 @@ describe('startSchedulerLoop', () => {
 
     const originalSetTimeout = globalThis.setTimeout;
     const originalClearTimeout = globalThis.clearTimeout;
+    type TimeoutHandler = Parameters<typeof setTimeout>[0];
 
-    (globalThis as { setTimeout: typeof setTimeout }).setTimeout = (
-      (_fn: TimerHandler, ms?: number) => {
-        timeoutCalls.push(ms ?? 0);
-        const token = timeoutTokens[timeoutIndex] ?? { id: timeoutIndex };
-        timeoutIndex += 1;
-        return token as unknown as ReturnType<typeof setTimeout>;
-      }
-    ) as typeof setTimeout;
+    (globalThis as { setTimeout: typeof setTimeout }).setTimeout = ((
+      _fn: TimeoutHandler,
+      ms?: number,
+    ) => {
+      timeoutCalls.push(ms ?? 0);
+      const token = timeoutTokens[timeoutIndex] ?? { id: timeoutIndex };
+      timeoutIndex += 1;
+      return token as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
 
-    (globalThis as { clearTimeout: typeof clearTimeout }).clearTimeout = (
-      (timeout: ReturnType<typeof setTimeout>) => {
-        clearedTimeouts.push(timeout);
-      }
-    ) as typeof clearTimeout;
+    (globalThis as { clearTimeout: typeof clearTimeout }).clearTimeout = ((
+      timeout: ReturnType<typeof setTimeout>,
+    ) => {
+      clearedTimeouts.push(timeout);
+    }) as typeof clearTimeout;
 
     try {
       const deps = {
