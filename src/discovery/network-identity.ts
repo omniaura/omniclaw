@@ -3,6 +3,8 @@ import os from 'os';
 import { logger } from '../logger.js';
 import type { DiscoveryNetworkIdentity } from './types.js';
 
+const MAC_NETWORKSETUP_PATH = '/usr/sbin/networksetup';
+
 export async function detectCurrentNetwork(): Promise<DiscoveryNetworkIdentity | null> {
   switch (process.platform) {
     case 'darwin':
@@ -23,7 +25,7 @@ async function detectMacWifiNetwork(): Promise<DiscoveryNetworkIdentity | null> 
   if (!device) return null;
 
   const output = await runCommand([
-    'networksetup',
+    ...getMacNetworksetupCommand(),
     '-getairportnetwork',
     device,
   ]);
@@ -39,7 +41,10 @@ async function detectMacWifiNetwork(): Promise<DiscoveryNetworkIdentity | null> 
 }
 
 async function getMacWifiDevice(): Promise<string | null> {
-  const output = await runCommand(['networksetup', '-listallhardwareports']);
+  const output = await runCommand([
+    ...getMacNetworksetupCommand(),
+    '-listallhardwareports',
+  ]);
   const blocks = output.split(/\n\n+/);
 
   for (const block of blocks) {
@@ -71,6 +76,10 @@ async function detectLinuxWifiNetwork(): Promise<DiscoveryNetworkIdentity | null
 }
 
 const COMMAND_TIMEOUT_MS = 5_000;
+
+export function getMacNetworksetupCommand(): string[] {
+  return [MAC_NETWORKSETUP_PATH];
+}
 
 async function runCommand(cmd: string[], logErrors = true): Promise<string> {
   try {
@@ -111,6 +120,14 @@ async function runCommand(cmd: string[], logErrors = true): Promise<string> {
     }
     return stdout;
   } catch (err) {
+    if (
+      process.platform === 'darwin' &&
+      cmd[0] === MAC_NETWORKSETUP_PATH &&
+      err instanceof Error &&
+      /Executable not found in \$PATH/i.test(err.message)
+    ) {
+      return runCommand(['networksetup', ...cmd.slice(1)], logErrors);
+    }
     if (logErrors) {
       logger.debug(
         { cmd: cmd.join(' '), err },

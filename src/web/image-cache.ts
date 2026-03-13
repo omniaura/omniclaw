@@ -14,6 +14,15 @@ interface CacheMetadata {
   fetchedAt: number;
 }
 
+export function describeImageUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
 function getCachePaths(cacheKey: string): {
   dataPath: string;
   metaPath: string;
@@ -61,29 +70,48 @@ export async function serveCachedRemoteImage(
   const url = await resolveUrl();
   if (!url) return null;
 
-  const upstream = await fetch(url);
-  if (!upstream.ok) {
-    logger.warn({ cacheKey, status: upstream.status }, 'Failed to fetch image');
+  try {
+    const upstream = await fetch(url);
+    if (!upstream.ok) {
+      logger.warn(
+        {
+          cacheKey,
+          status: upstream.status,
+          imageUrl: describeImageUrl(url),
+        },
+        'Failed to fetch image',
+      );
+      return null;
+    }
+
+    const contentType =
+      upstream.headers.get('content-type') || 'application/octet-stream';
+    const bytes = Buffer.from(await upstream.arrayBuffer());
+    fs.writeFileSync(dataPath, bytes);
+    fs.writeFileSync(
+      metaPath,
+      JSON.stringify({
+        contentType,
+        fetchedAt: Date.now(),
+      } satisfies CacheMetadata),
+      'utf-8',
+    );
+
+    return new Response(bytes, {
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': BROWSER_CACHE_CONTROL,
+      },
+    });
+  } catch (err) {
+    logger.warn(
+      {
+        cacheKey,
+        imageUrl: describeImageUrl(url),
+        err,
+      },
+      'Failed to fetch image',
+    );
     return null;
   }
-
-  const contentType =
-    upstream.headers.get('content-type') || 'application/octet-stream';
-  const bytes = Buffer.from(await upstream.arrayBuffer());
-  fs.writeFileSync(dataPath, bytes);
-  fs.writeFileSync(
-    metaPath,
-    JSON.stringify({
-      contentType,
-      fetchedAt: Date.now(),
-    } satisfies CacheMetadata),
-    'utf-8',
-  );
-
-  return new Response(bytes, {
-    headers: {
-      'Content-Type': contentType,
-      'Cache-Control': BROWSER_CACHE_CONTROL,
-    },
-  });
 }
