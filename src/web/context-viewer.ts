@@ -2,11 +2,21 @@ import type { WebStateProvider } from './types.js';
 import { renderShell } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 import { buildAgentChannelData, renderAgentGroups } from './agent-channels.js';
+import type { RemotePeerAgents } from '../discovery/types.js';
 
 /** Render context viewer content (no shell). */
-export function renderContextViewerContent(state: WebStateProvider): string {
-  const agentData = buildAgentChannelData(state);
+export function renderContextViewerContent(
+  state: WebStateProvider,
+  remotePeers: RemotePeerAgents[] = [],
+): string {
+  const agentData = buildAgentChannelData(state, remotePeers).filter(
+    (agent) => !!agent.remoteInstanceId,
+  );
+  const localAgentData = buildAgentChannelData(state);
   const sidebarHtml = renderAgentGroups(agentData, {
+    includeContextAttrs: true,
+  });
+  const localSidebarHtml = renderAgentGroups(localAgentData, {
     includeContextAttrs: true,
   });
 
@@ -15,7 +25,12 @@ export function renderContextViewerContent(state: WebStateProvider): string {
     '<div class="ctx-layout">' +
     '<aside class="ctx-sidebar">' +
     '<div class="ctx-sidebar-title">agents &amp; channels</div>' +
-    sidebarHtml +
+    localSidebarHtml +
+    '<div class="ctx-sidebar-title" style="margin-top:1rem">remote agents</div>' +
+    '<div id="remote-agent-groups" style="display:flex;flex-direction:column;gap:0.5rem">' +
+    (sidebarHtml ||
+      '<div class="empty-state" style="padding:1rem;font-size:0.85rem">Trusted remote agents will appear here.</div>') +
+    '</div>' +
     '</aside>' +
     '<div class="ctx-content">' +
     '<div id="ctx-empty" class="empty-state">' +
@@ -55,10 +70,17 @@ export function renderContextViewerContent(state: WebStateProvider): string {
 
 /** Full context viewer page with shell. */
 export function renderContextViewer(state: WebStateProvider): string {
+  return renderContextViewerWithRemote(state, []);
+}
+
+export function renderContextViewerWithRemote(
+  state: WebStateProvider,
+  remotePeers: RemotePeerAgents[],
+): string {
   return renderShell(
     '/context',
     'Context',
-    renderContextViewerContent(state),
+    renderContextViewerContent(state, remotePeers),
     allPageScripts(),
   );
 }

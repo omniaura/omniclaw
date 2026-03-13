@@ -4,20 +4,31 @@
  */
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
-import type { PeerView, PairRequest } from '../discovery/types.js';
+import type {
+  DiscoveryRuntimeSnapshot,
+  PairRequest,
+  PeerView,
+} from '../discovery/types.js';
 
 export interface NetworkPageState {
   instanceId: string;
   instanceName: string;
   discoveryEnabled: boolean;
+  runtime: DiscoveryRuntimeSnapshot;
   peers: PeerView[];
   pendingRequests: PairRequest[];
 }
 
 /** Render just the network page content (no shell wrapper). */
 export function renderNetworkContent(pageState: NetworkPageState): string {
-  const { instanceId, instanceName, discoveryEnabled, peers, pendingRequests } =
-    pageState;
+  const {
+    instanceId,
+    instanceName,
+    discoveryEnabled,
+    peers,
+    pendingRequests,
+    runtime,
+  } = pageState;
 
   const trustedCount = peers.filter((p) => p.status === 'trusted').length;
   const onlineCount = peers.filter((p) => p.online).length;
@@ -27,7 +38,7 @@ export function renderNetworkContent(pageState: NetworkPageState): string {
     // Instance info card
     `<div class="stats-grid" style="margin-bottom:1.5rem">` +
     `<div class="stat-card"><div class="label">instance</div><div class="value" style="font-size:0.85rem">${escapeHtml(instanceName)}</div></div>` +
-    `<div class="stat-card"><div class="label">discovery</div><div class="value">${discoveryEnabled ? '<span style="color:var(--green)">active</span>' : '<span style="color:var(--text-muted)">disabled</span>'}</div></div>` +
+    `<div class="stat-card"><div class="label">discovery</div><div class="value" id="discovery-runtime-status">${discoveryEnabled ? '<span style="color:var(--green)">active</span>' : '<span style="color:var(--text-muted)">disabled</span>'}</div></div>` +
     `<div class="stat-card"><div class="label">peers online</div><div class="value" id="stat-peers-online">${onlineCount}</div></div>` +
     `<div class="stat-card"><div class="label">trusted</div><div class="value" id="stat-peers-trusted">${trustedCount}</div></div>` +
     `</div>` +
@@ -35,6 +46,16 @@ export function renderNetworkContent(pageState: NetworkPageState): string {
     `<div style="margin-bottom:1.5rem;padding:0.75rem 1rem;background:var(--surface);border-radius:8px;border:1px solid var(--border)">` +
     `<span style="color:var(--text-muted);font-size:0.8rem">instance id:</span> ` +
     `<code style="color:var(--text);font-size:0.8rem">${escapeHtml(instanceId)}</code>` +
+    `</div>` +
+    `<div class="card" style="margin-bottom:1.5rem">` +
+    `<div class="section-header"><h2>discovery controls</h2></div>` +
+    `<div style="display:flex;flex-wrap:wrap;gap:0.75rem;align-items:center;margin-bottom:1rem">` +
+    `<button class="btn btn-sm ${runtime.enabled ? 'btn-danger' : 'btn-primary'}" id="discovery-toggle" data-network-action="toggle-discovery" data-network-id="${runtime.enabled ? 'off' : 'on'}">${runtime.enabled ? 'Turn discovery off' : 'Turn discovery on'}</button>` +
+    `<button class="btn btn-sm" id="trust-current-network" data-network-action="trust-current-network" data-network-id="current">Trust Wi-Fi</button>` +
+    `<span style="color:var(--text-muted);font-size:0.85rem" id="current-network-label">${runtime.currentNetwork ? `Current Wi-Fi: <strong>${escapeHtml(runtime.currentNetwork.label)}</strong>` : 'No Wi-Fi network detected'}</span>` +
+    `</div>` +
+    `<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.75rem">Trusted networks gate discovery when present. Leave the list empty to allow discovery anywhere the toggle is on.</div>` +
+    `<div id="trusted-networks-list">${renderTrustedNetworks(runtime)}</div>` +
     `</div>` +
     // Main layout: peers + pending
     `<div style="display:grid;grid-template-columns:1fr 320px;gap:1.5rem;align-items:start">` +
@@ -59,6 +80,22 @@ export function renderNetworkContent(pageState: NetworkPageState): string {
     `<div id="sync-panel" style="margin-top:1.5rem"></div>` +
     `</div>`
   );
+}
+
+function renderTrustedNetworks(runtime: DiscoveryRuntimeSnapshot): string {
+  if (runtime.trustedNetworks.length === 0) {
+    return `<div style="padding:1rem;border:1px dashed var(--border);border-radius:8px;color:var(--text-muted);font-size:0.85rem">No trusted Wi-Fi networks yet.</div>`;
+  }
+
+  return runtime.trustedNetworks
+    .map(
+      (network) =>
+        `<div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem 0;border-top:1px solid var(--border)">` +
+        `<div><div><strong>${escapeHtml(network.label)}</strong></div><div style="font-size:0.75rem;color:var(--text-muted)">${escapeHtml(network.id)}</div></div>` +
+        `<button class="btn btn-sm btn-danger" data-network-action="untrust-network" data-network-id="${escapeHtml(network.id)}">Remove</button>` +
+        `</div>`,
+    )
+    .join('');
 }
 
 function renderPeersTable(peers: PeerView[]): string {

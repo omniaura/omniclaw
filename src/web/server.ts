@@ -3,7 +3,7 @@ import { createHash } from 'crypto';
 import { ServerSentEventGenerator } from '@starfederation/datastar-sdk/web';
 
 import { logger } from '../logger.js';
-import { handleRequest } from './routes.js';
+import { handleRequest, getRemotePeers } from './routes.js';
 import type { ScheduledTask } from '../types.js';
 import { escapeHtml, renderNavLinks } from './shared.js';
 import type { WebServerConfig, WebStateProvider, WsEvent } from './types.js';
@@ -195,12 +195,17 @@ export function startWebServer(
         const pageName = url.pathname.slice('/api/page/'.length);
         const pageRenderers: Record<
           string,
-          { path: string; title: string; render: () => string }
+          {
+            path: string;
+            title: string;
+            render: () => string | Promise<string>;
+          }
         > = {
           dashboard: {
             path: '/',
             title: 'Dashboard',
-            render: () => renderDashboardContent(state),
+            render: async () =>
+              renderDashboardContent(state, await getRemotePeers()),
           },
           conversations: {
             path: '/conversations',
@@ -210,7 +215,8 @@ export function startWebServer(
           context: {
             path: '/context',
             title: 'Context',
-            render: () => renderContextViewerContent(state),
+            render: async () =>
+              renderContextViewerContent(state, await getRemotePeers()),
           },
           ipc: {
             path: '/ipc',
@@ -226,6 +232,12 @@ export function startWebServer(
                   instanceId: '',
                   instanceName: '',
                   discoveryEnabled: false,
+                  runtime: {
+                    enabled: false,
+                    active: false,
+                    currentNetwork: null,
+                    trustedNetworks: [],
+                  },
                   peers: [],
                   pendingRequests: [],
                 },
@@ -250,9 +262,10 @@ export function startWebServer(
         }
 
         // JSON response for shell-script SPA navigation
+        const html = await page.render();
         return new Response(
           JSON.stringify({
-            html: page.render(),
+            html,
             title: page.title,
             path: page.path,
           }),

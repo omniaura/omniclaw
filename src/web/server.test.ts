@@ -251,6 +251,12 @@ function setTestDiscoveryContext(): void {
       instanceId: 'local-instance',
       instanceName: 'local',
       discoveryEnabled: true,
+      runtime: {
+        enabled: true,
+        active: true,
+        currentNetwork: null,
+        trustedNetworks: [],
+      },
       peers: [],
       pendingRequests: [],
     }),
@@ -356,11 +362,13 @@ describe('GET /api/agents', () => {
     handle = startWebServer(testConfig(), makeState());
     const res = await authedFetch('/api/agents');
     expect(res.status).toBe(200);
-    const data = (await res.json()) as Array<Agent & { channels: string[] }>;
+    const data = (await res.json()) as Array<
+      Agent & { channels: Array<{ jid: string; displayName: string }> }
+    >;
     expect(data.length).toBe(2);
     const testAgent = data.find((a) => a.id === 'test-agent');
     expect(testAgent).toBeDefined();
-    expect(testAgent!.channels).toContain('dc:123');
+    expect(testAgent!.channels[0]).toMatchObject({ jid: 'dc:123' });
   });
 });
 

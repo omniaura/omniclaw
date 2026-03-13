@@ -10,6 +10,7 @@ import type {
   PairRequestBody,
   PairResponse,
   PeerInfoResponse,
+  RemoteAgentSummary,
 } from './types.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -57,9 +58,41 @@ export class PeerClient {
   }
 
   /** GET /api/agents — requires auth */
-  async getAgents(): Promise<unknown[]> {
+  async getAgents(): Promise<RemoteAgentSummary[]> {
     const res = await this.authenticatedFetch('/api/agents');
-    return res.json() as Promise<unknown[]>;
+    return res.json() as Promise<RemoteAgentSummary[]>;
+  }
+
+  /** GET /api/agents/:id/avatar/image — requires auth, returns image bytes */
+  async getAgentAvatarImage(
+    agentId: string,
+  ): Promise<{ data: ArrayBuffer; contentType: string } | null> {
+    try {
+      const res = await this.authenticatedFetch(
+        `/api/agents/${encodeURIComponent(agentId)}/avatar/image`,
+      );
+      const contentType = res.headers.get('content-type') || 'image/png';
+      const data = await res.arrayBuffer();
+      return { data, contentType };
+    } catch {
+      return null;
+    }
+  }
+
+  /** GET /api/chats/:jid/icon — requires auth, returns image bytes */
+  async getChatIcon(
+    jid: string,
+  ): Promise<{ data: ArrayBuffer; contentType: string } | null> {
+    try {
+      const res = await this.authenticatedFetch(
+        `/api/chats/${encodeURIComponent(jid)}/icon`,
+      );
+      const contentType = res.headers.get('content-type') || 'image/png';
+      const data = await res.arrayBuffer();
+      return { data, contentType };
+    } catch {
+      return null;
+    }
   }
 
   /** GET /api/stats — requires auth */
