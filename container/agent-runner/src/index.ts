@@ -875,7 +875,9 @@ async function runQuery(
   // Append GitHub activity delta (events since last user message)
   if (containerInput.githubActivityDelta) {
     const deltaBlock = `\n\n${containerInput.githubActivityDelta}`;
-    globalClaudeMd = globalClaudeMd ? globalClaudeMd + deltaBlock : containerInput.githubActivityDelta;
+    globalClaudeMd = globalClaudeMd
+      ? globalClaudeMd + deltaBlock
+      : containerInput.githubActivityDelta;
   }
 
   // Discover additional directories for CLAUDE.md auto-loading:

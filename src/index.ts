@@ -1612,12 +1612,18 @@ async function runAgent(
       if (snapshotResult.status === 'fulfilled') {
         githubContext = snapshotResult.value ?? undefined;
       } else {
-        logger.warn({ err: snapshotResult.reason, agentId }, 'Failed to fetch GitHub context');
+        logger.warn(
+          { err: snapshotResult.reason, agentId },
+          'Failed to fetch GitHub context',
+        );
       }
       if (deltaResult.status === 'fulfilled') {
         githubActivityDelta = deltaResult.value ?? undefined;
       } else {
-        logger.warn({ err: deltaResult.reason, chatJid }, 'Failed to fetch GitHub delta context');
+        logger.warn(
+          { err: deltaResult.reason, chatJid },
+          'Failed to fetch GitHub delta context',
+        );
       }
     } catch (err) {
       logger.warn({ err, agentId }, 'Failed to fetch GitHub context');

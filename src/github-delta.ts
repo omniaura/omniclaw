@@ -9,10 +9,7 @@
  */
 
 import { logger } from './logger.js';
-import type {
-  GitHubChannelWatch,
-  GitHubWatchesConfig,
-} from './types.js';
+import type { GitHubChannelWatch, GitHubWatchesConfig } from './types.js';
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
 
@@ -270,8 +267,7 @@ async function collectPrDelta(
               subject: `PR #${pr.number}: ${pr.title}`,
               url: pr.html_url,
               occurredAt:
-                newCommits[newCommits.length - 1].commit.author?.date ||
-                until,
+                newCommits[newCommits.length - 1].commit.author?.date || until,
               summary: `${newCommits.length} new commit${newCommits.length > 1 ? 's' : ''} on PR #${pr.number}`,
             });
           }
@@ -461,9 +457,7 @@ export function getChannelWatches(
   return config.channelWatches?.find((w) => w.channelJid === channelJid);
 }
 
-export function isDeltaEnabled(
-  config: GitHubWatchesConfig,
-): boolean {
+export function isDeltaEnabled(config: GitHubWatchesConfig): boolean {
   return config.githubDeltaContextEnabled === true;
 }
 
@@ -489,8 +483,7 @@ export async function fetchGitHubDelta(
   let config: GitHubWatchesConfig;
   try {
     const { loadGitHubWatchesConfig } = await import('./github.js');
-    config =
-      (loadGitHubWatchesConfig() as GitHubWatchesConfig) ?? null;
+    config = (loadGitHubWatchesConfig() as GitHubWatchesConfig) ?? null;
     if (!config) return null;
   } catch {
     return null;
@@ -511,10 +504,7 @@ export async function fetchGitHubDelta(
   const until = currentMessageTimestamp;
 
   // Don't fetch if window is too narrow (< 5 seconds)
-  if (
-    new Date(until).getTime() - new Date(since).getTime() <
-    5_000
-  ) {
+  if (new Date(until).getTime() - new Date(since).getTime() < 5_000) {
     setDeltaCursor(channelJid, until);
     return null;
   }
@@ -636,10 +626,7 @@ function groupEvents(events: DeltaEvent[]): string[] {
   >();
 
   for (const event of events) {
-    if (
-      event.type === 'pr_review_comment' ||
-      event.type === 'issue_comment'
-    ) {
+    if (event.type === 'pr_review_comment' || event.type === 'issue_comment') {
       const key = event.subject;
       const entry = commentCounts.get(key) || {
         count: 0,
@@ -663,9 +650,7 @@ function groupEvents(events: DeltaEvent[]): string[] {
   for (const [key, entry] of commentCounts) {
     if (entry.count > 1) {
       const actors = Array.from(entry.actors).join(', ');
-      lines.push(
-        `${entry.count} comments on ${entry.subject} by ${actors}`,
-      );
+      lines.push(`${entry.count} comments on ${entry.subject} by ${actors}`);
     }
   }
 

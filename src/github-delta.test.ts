@@ -202,7 +202,9 @@ describe('github-delta', () => {
       const digest = formatDeltaDigest(events);
       // First comment shown inline, then grouped summary
       expect(digest).toContain('Fix this');
-      expect(digest).toContain('3 comments on PR #10: Big refactor by alice, bob');
+      expect(digest).toContain(
+        '3 comments on PR #10: Big refactor by alice, bob',
+      );
     });
 
     it('handles all event types', () => {
