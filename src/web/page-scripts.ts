@@ -14,6 +14,7 @@ export function allPageScripts(): Record<string, string> {
     ipc: ipcScript(),
     network: networkScript(),
     system: systemScript(),
+    'agent-detail': agentDetailScript(),
   };
 }
 
@@ -476,7 +477,12 @@ function dashboardScript(): string {
   canvas.addEventListener("click",function(e){
     if(isPanning)return;
     var m=mousePos(e);var n=getNode(m.x,m.y);
-    if(n&&n.jid){
+    if(n&&n.type==="agent"&&n.jid){
+      // Navigate to agent detail page
+      var href="/agents?id="+encodeURIComponent(n.jid);
+      if(typeof navigateTo==="function"){navigateTo("agent-detail",href);}
+      else{location.href=href;}
+    } else if(n&&n.jid){
       navigator.clipboard.writeText(n.jid).then(function(){
         window.__toast("Copied: "+n.jid);
       });
@@ -1248,4 +1254,10 @@ function systemScript(): string {
     'window.__cleanup=function(){clearInterval(pollTimer);};',
     '})();',
   ].join('\n');
+}
+
+function agentDetailScript(): string {
+  return ['// Agent detail page — SPA nav links handled by shell script'].join(
+    '\n',
+  );
 }
