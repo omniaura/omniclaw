@@ -2173,7 +2173,10 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
       path.join(groupIpcDir, 'agent_registry.json'),
       registryJson,
     );
-    fs.writeFileSync(path.join(groupIpcDir, 'agent_discovery.json'), discoveryJson);
+    fs.writeFileSync(
+      path.join(groupIpcDir, 'agent_discovery.json'),
+      discoveryJson,
+    );
   }
 }
 

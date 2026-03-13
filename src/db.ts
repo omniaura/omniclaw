@@ -190,11 +190,12 @@ function mapRowToAgentHealth(row: AgentHealthRow): AgentHealth {
     isOnline: row.is_online === 1,
     lastHeartbeatAt: row.last_heartbeat_at || row.updated_at,
     updatedAt: row.updated_at,
-    capabilities: safeJsonParse<string[]>(
-      row.capabilities,
-      { agentId: row.agent_id },
-      'agent health capabilities',
-    ) || [],
+    capabilities:
+      safeJsonParse<string[]>(
+        row.capabilities,
+        { agentId: row.agent_id },
+        'agent health capabilities',
+      ) || [],
   };
 }
 
@@ -1504,7 +1505,9 @@ export function getAgentHealth(agentId: string): AgentHealth | undefined {
 }
 
 export function getAllAgentHealth(): Record<string, AgentHealth> {
-  const rows = db.prepare('SELECT * FROM agent_health').all() as AgentHealthRow[];
+  const rows = db
+    .prepare('SELECT * FROM agent_health')
+    .all() as AgentHealthRow[];
   const result: Record<string, AgentHealth> = {};
   for (const row of rows) {
     const mapped = mapRowToAgentHealth(row);
