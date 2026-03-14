@@ -68,6 +68,11 @@ export class PeerClient {
     return res.json();
   }
 
+  /** GET /api/logs/stream — requires auth */
+  async streamLogs(): Promise<Response> {
+    return this.authenticatedFetch('/api/logs/stream', undefined, null);
+  }
+
   /** GET /api/context/layers — requires auth */
   async getContextLayers(params: Record<string, string>): Promise<unknown> {
     const query = new URLSearchParams(params).toString();
@@ -97,6 +102,7 @@ export class PeerClient {
   private async authenticatedFetch(
     path: string,
     init?: RequestInit,
+    timeoutMs: number | null = DEFAULT_TIMEOUT_MS,
   ): Promise<Response> {
     if (!this.sharedSecret) {
       throw new Error('Cannot make authenticated request: not paired');
@@ -121,12 +127,17 @@ export class PeerClient {
     headers.set('X-OmniClaw-Body-SHA256', bodyHash);
     headers.set('X-OmniClaw-Signature', signature);
 
-    return this.fetch(path, { ...init, method, headers });
+    return this.fetch(path, { ...init, method, headers }, timeoutMs);
   }
 
-  private async fetch(path: string, init?: RequestInit): Promise<Response> {
+  private async fetch(
+    path: string,
+    init?: RequestInit,
+    timeoutMs: number | null = DEFAULT_TIMEOUT_MS,
+  ): Promise<Response> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    const timeout =
+      timeoutMs == null ? null : setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
@@ -143,7 +154,7 @@ export class PeerClient {
 
       return res;
     } finally {
-      clearTimeout(timeout);
+      if (timeout != null) clearTimeout(timeout);
     }
   }
 }

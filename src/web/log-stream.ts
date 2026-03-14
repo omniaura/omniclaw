@@ -2,6 +2,20 @@ import { logger, type Logger, type LogRecord } from '../logger.js';
 import type { WebServerHandle } from './server.js';
 import type { WsEvent } from './types.js';
 
+export function serializeLogRecord(record: LogRecord): Record<string, unknown> {
+  return {
+    ts: record.ts,
+    level: record.level,
+    msg: record.msg,
+    ...(record.op ? { op: record.op } : {}),
+    ...(record.container ? { container: record.container } : {}),
+    ...(record.group ? { group: record.group } : {}),
+    ...(record.err ? { err: record.err } : {}),
+    ...(record.durationMs != null ? { durationMs: record.durationMs } : {}),
+    ...(record.costUsd != null ? { costUsd: record.costUsd } : {}),
+  };
+}
+
 /**
  * Bridge between the structured logger and WebSocket clients.
  * Subscribes to log events and broadcasts them to connected clients
@@ -22,18 +36,7 @@ export function startLogStream(
 
     const event: WsEvent = {
       type: 'log',
-      data: {
-        ts: record.ts,
-        level: record.level,
-        msg: record.msg,
-        // Include useful context fields for the dashboard
-        ...(record.op ? { op: record.op } : {}),
-        ...(record.container ? { container: record.container } : {}),
-        ...(record.group ? { group: record.group } : {}),
-        ...(record.err ? { err: record.err } : {}),
-        ...(record.durationMs != null ? { durationMs: record.durationMs } : {}),
-        ...(record.costUsd != null ? { costUsd: record.costUsd } : {}),
-      },
+      data: serializeLogRecord(record),
       timestamp: new Date(record.ts as number).toISOString(),
     };
 

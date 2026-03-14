@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach } from 'bun:test';
 import { startWebServer, type WebServerHandle } from './server.js';
 import type { WebStateProvider, QueueStats } from './types.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
+import { logger } from '../logger.js';
 
 // ---- Test fixtures ----
 
@@ -829,6 +830,47 @@ describe('WebSocket', () => {
 // ---- SSE ----
 
 describe('SSE', () => {
+  it('streams raw log events for proxy consumers', async () => {
+    handle = startWebServer(testConfig(), makeState());
+
+    const res = await authedFetch('/api/logs/stream', {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/event-stream');
+    expect(res.body).toBeTruthy();
+
+    const reader = res.body!.getReader();
+    const message = `raw-log-${Date.now()}`;
+    logger.info(message);
+
+    const payload = await readUntilContains(reader, message);
+    expect(payload).toContain('event: log');
+    expect(payload).toContain(message);
+    reader.releaseLock();
+  });
+
+  it('enforces the MAX_SSE_CLIENTS limit for raw log streams', async () => {
+    handle = startWebServer(testConfig(), makeState());
+
+    const readers: CancellableReader[] = [];
+    for (let i = 0; i < 100; i++) {
+      const res = await authedFetch('/api/logs/stream', {
+        headers: { Accept: 'text/event-stream' },
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).toBeTruthy();
+      readers.push(res.body!.getReader() as unknown as CancellableReader);
+    }
+
+    const overflow = await authedFetch('/api/logs/stream', {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(overflow.status).toBe(429);
+
+    await Promise.all(readers.map(async (reader) => reader.cancel()));
+  });
+
   it('connects and receives broadcast events', async () => {
     handle = startWebServer(testConfig(), makeState());
 
