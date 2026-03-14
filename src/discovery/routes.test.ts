@@ -185,7 +185,11 @@ describe('handleDiscoveryRequest', () => {
       }),
     });
 
-    const res = await handleDiscoveryRequest(req, new URL(req.url), makeContext());
+    const res = await handleDiscoveryRequest(
+      req,
+      new URL(req.url),
+      makeContext(),
+    );
     expect(res).not.toBeNull();
     expect((await (res as Response).json()) as { error: string }).toEqual({
       error: 'Unable to determine requester address',
@@ -210,7 +214,11 @@ describe('handleDiscoveryRequest', () => {
       '10.0.0.22',
     );
 
-    const res = await handleDiscoveryRequest(req, new URL(req.url), makeContext());
+    const res = await handleDiscoveryRequest(
+      req,
+      new URL(req.url),
+      makeContext(),
+    );
     expect(res).not.toBeNull();
     expect((await (res as Response).json()) as { error: string }).toEqual({
       error: 'Invalid port',
