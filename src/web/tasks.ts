@@ -135,8 +135,12 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
         task.schedule_type,
         task.schedule_value,
       );
-      const nextRun = task.next_run ? formatRelativeTime(task.next_run) : '\u2014';
-      const lastRun = task.last_run ? formatRelativeTime(task.last_run) : '\u2014';
+      const nextRun = task.next_run
+        ? formatRelativeTime(task.next_run)
+        : '\u2014';
+      const lastRun = task.last_run
+        ? formatRelativeTime(task.last_run)
+        : '\u2014';
       const lastResultClass =
         task.last_result === 'success'
           ? 'run-success'
@@ -166,7 +170,10 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
     .join('\n');
 }
 
-function renderTaskModal(mode: 'create' | 'edit', agentOptions: string): string {
+function renderTaskModal(
+  mode: 'create' | 'edit',
+  agentOptions: string,
+): string {
   const prefix = mode === 'create' ? 'tmc' : 'tme';
   const title = mode === 'create' ? 'Create Scheduled Task' : 'Edit Task';
   const submitLabel = mode === 'create' ? 'Create' : 'Save Changes';
@@ -202,10 +209,7 @@ function renderTaskModal(mode: 'create' | 'edit', agentOptions: string): string 
 }
 
 /** Format a schedule value into a human-readable label. */
-function formatScheduleLabel(
-  type: string,
-  value: string,
-): string {
+function formatScheduleLabel(type: string, value: string): string {
   if (type === 'interval') {
     const ms = parseInt(value, 10);
     if (isNaN(ms)) return value;

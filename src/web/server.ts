@@ -29,12 +29,31 @@ import { renderTasksContent } from './tasks.js';
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
 const SNAPSHOT_INTERVAL_MS = 5000;
+const PORT_ZERO_RETRY_ATTEMPTS = 10;
+const PORT_ZERO_FALLBACK_START = 40000;
+const PORT_ZERO_FALLBACK_SPAN = 20000;
 
 interface SseClient {
   subscriptions: Set<string>;
   stream: ServerSentEventGenerator;
   logs: string[];
   close(): void;
+}
+
+function isAddrInUseError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: unknown }).code === 'EADDRINUSE'
+  );
+}
+
+function randomFallbackPort(): number {
+  return (
+    PORT_ZERO_FALLBACK_START +
+    Math.floor(Math.random() * PORT_ZERO_FALLBACK_SPAN)
+  );
 }
 
 /**
@@ -48,257 +67,221 @@ export function startWebServer(
   trustStore?: TrustStore,
 ): WebServerHandle {
   const { port, auth, hostname, corsOrigin, trustLanDiscoveryAdmin } = config;
+  const bindHostname = hostname || '127.0.0.1';
   const sseClients = new Set<SseClient>();
+  const fetchHandler = async (req: Request) => {
+    const url = new URL(req.url);
+    if (url.pathname === '/ws') {
+      return new Response('WebSocket is deprecated for the web dashboard', {
+        status: 410,
+        headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
+      });
+    }
 
-  const server = Bun.serve({
-    port,
-    hostname: hostname || '127.0.0.1',
-    development: false,
+    // --- Peer auth: trusted remote OmniClaw instances bypass Basic Auth ---
+    const isPeerRequest =
+      isPeerRoute(url.pathname) && req.headers.has('X-OmniClaw-Instance');
+    if (isPeerRequest && trustStore) {
+      // Read the raw body and compute its SHA-256 so checkPeerAuth can
+      // verify the claimed X-OmniClaw-Body-SHA256 header matches the
+      // bytes actually received. This prevents body-tampering attacks
+      // where an on-path attacker modifies the body while keeping the
+      // signed headers intact.
+      const cloned = req.clone();
+      const rawBody = await cloned.text();
+      const computedBodyHash = createHash('sha256')
+        .update(rawBody)
+        .digest('hex');
+      if (!checkPeerAuth(req, trustStore, computedBodyHash)) {
+        return new Response('Unauthorized peer', {
+          status: 403,
+          headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
+        });
+      }
+      // Peer is authenticated — skip Basic Auth, fall through to routing
+    } else if (auth && !checkBasicAuth(req, auth)) {
+      // --- Basic auth for HTTP ---
+      return new Response('Unauthorized', {
+        status: 401,
+        headers: { 'WWW-Authenticate': 'Basic realm="OmniClaw"' },
+      });
+    } else if (
+      !auth &&
+      url.pathname.startsWith('/api/discovery/') &&
+      !isUnauthDiscoveryRoute(url.pathname) &&
+      !isTrustedLanDiscoveryAdminRequest(
+        req,
+        url.pathname,
+        url.hostname,
+        trustLanDiscoveryAdmin,
+      )
+    ) {
+      // Discovery admin routes MUST have auth — reject if credentials not configured
+      return new Response(
+        JSON.stringify({
+          error:
+            'Discovery admin routes require WEB_UI_USER/WEB_UI_PASS to be configured',
+        }),
+        {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }
 
-    async fetch(req) {
-      const url = new URL(req.url);
-      if (url.pathname === '/ws') {
-        return new Response('WebSocket is deprecated for the web dashboard', {
-          status: 410,
+    // --- SSE stream ---
+    if (url.pathname === '/api/events') {
+      if (req.method !== 'GET') {
+        return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+          status: 405,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+          },
+        });
+      }
+      if (sseClients.size >= MAX_SSE_CLIENTS) {
+        return new Response('Too many SSE connections', {
+          status: 429,
           headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
         });
       }
 
-      // --- Peer auth: trusted remote OmniClaw instances bypass Basic Auth ---
-      const isPeerRequest =
-        isPeerRoute(url.pathname) && req.headers.has('X-OmniClaw-Instance');
-      if (isPeerRequest && trustStore) {
-        // Read the raw body and compute its SHA-256 so checkPeerAuth can
-        // verify the claimed X-OmniClaw-Body-SHA256 header matches the
-        // bytes actually received. This prevents body-tampering attacks
-        // where an on-path attacker modifies the body while keeping the
-        // signed headers intact.
-        const cloned = req.clone();
-        const rawBody = await cloned.text();
-        const computedBodyHash = createHash('sha256')
-          .update(rawBody)
-          .digest('hex');
-        if (!checkPeerAuth(req, trustStore, computedBodyHash)) {
-          return new Response('Unauthorized peer', {
-            status: 403,
-            headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
-          });
-        }
-        // Peer is authenticated — skip Basic Auth, fall through to routing
-      } else if (auth && !checkBasicAuth(req, auth)) {
-        // --- Basic auth for HTTP ---
-        return new Response('Unauthorized', {
-          status: 401,
-          headers: { 'WWW-Authenticate': 'Basic realm="OmniClaw"' },
-        });
-      } else if (
-        !auth &&
-        url.pathname.startsWith('/api/discovery/') &&
-        !isUnauthDiscoveryRoute(url.pathname) &&
-        !isTrustedLanDiscoveryAdminRequest(
-          req,
-          url.pathname,
-          url.hostname,
-          trustLanDiscoveryAdmin,
-        )
-      ) {
-        // Discovery admin routes MUST have auth — reject if credentials not configured
-        return new Response(
-          JSON.stringify({
-            error:
-              'Discovery admin routes require WEB_UI_USER/WEB_UI_PASS to be configured',
-          }),
-          {
-            status: 403,
-            headers: { 'Content-Type': 'application/json' },
-          },
-        );
-      }
+      const queryChannels =
+        url.searchParams
+          .get('channels')
+          ?.split(',')
+          .map((ch) => ch.trim())
+          .filter((ch) => ch.length > 0) ?? [];
+      const subscriptions = new Set<string>(
+        queryChannels.length > 0 ? queryChannels : ['logs', 'stats'],
+      );
 
-      // --- SSE stream ---
-      if (url.pathname === '/api/events') {
-        if (req.method !== 'GET') {
-          return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-            status: 405,
-            headers: {
-              'Content-Type': 'application/json',
-              ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
-            },
-          });
-        }
-        if (sseClients.size >= MAX_SSE_CLIENTS) {
-          return new Response('Too many SSE connections', {
-            status: 429,
-            headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
-          });
-        }
-
-        const queryChannels =
-          url.searchParams
-            .get('channels')
-            ?.split(',')
-            .map((ch) => ch.trim())
-            .filter((ch) => ch.length > 0) ?? [];
-        const subscriptions = new Set<string>(
-          queryChannels.length > 0 ? queryChannels : ['logs', 'stats'],
-        );
-
-        let client: SseClient | undefined;
-        const cleanup = () => {
-          if (!client) return;
-          const removed = sseClients.delete(client);
-          if (removed) {
-            logger.debug(
-              { sseClients: sseClients.size },
-              'SSE client disconnected',
-            );
-          }
-          client = undefined;
-        };
-
-        const responseInit = {
-          headers: {
-            ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
-            'Cache-Control': 'no-cache, no-transform',
-            'X-Accel-Buffering': 'no',
-          },
-        };
-
-        return ServerSentEventGenerator.stream(
-          (stream) => {
-            const nextClient: SseClient = {
-              subscriptions,
-              stream,
-              logs: [],
-              close() {
-                stream.close();
-              },
-            };
-
-            client = nextClient;
-            sseClients.add(nextClient);
-            logger.debug(
-              { sseClients: sseClients.size },
-              'SSE client connected',
-            );
-
-            stream.patchElements(
-              renderStatusBadge('connected (datastar)', 'connected'),
-            );
-            patchSnapshot(nextClient, state);
-          },
-          {
-            keepalive: true,
-            onAbort: cleanup,
-            responseInit,
-          },
-        );
-      }
-
-      // --- SPA page navigation via SSE ---
-      if (url.pathname.startsWith('/api/page/')) {
-        const pageName = url.pathname.slice('/api/page/'.length);
-        const pageRenderers: Record<
-          string,
-          {
-            path: string;
-            title: string;
-            render: () => string | Promise<string>;
-          }
-        > = {
-          dashboard: {
-            path: '/',
-            title: 'Dashboard',
-            render: async () =>
-              renderDashboardContent(state, await getRemotePeers()),
-          },
-          conversations: {
-            path: '/conversations',
-            title: 'Conversations',
-            render: () => renderConversationsContent(state),
-          },
-          context: {
-            path: '/context',
-            title: 'Context',
-            render: async () =>
-              renderContextViewerContent(state, await getRemotePeers()),
-          },
-          ipc: {
-            path: '/ipc',
-            title: 'IPC Inspector',
-            render: () => renderIpcInspectorContent(state),
-          },
-          network: {
-            path: '/network',
-            title: 'Network',
-            render: () =>
-              renderNetworkContent(
-                networkPageStateGetter?.() ?? {
-                  instanceId: '',
-                  instanceName: '',
-                  discoveryEnabled: false,
-                  runtime: {
-                    enabled: false,
-                    active: false,
-                    currentNetwork: null,
-                    trustedNetworks: [],
-                  },
-                  peers: [],
-                  pendingRequests: [],
-                },
-              ),
-          },
-          tasks: {
-            path: '/tasks',
-            title: 'Tasks',
-            render: () => renderTasksContent(state),
-          },
-          system: {
-            path: '/system',
-            title: 'System',
-            render: () => renderSystemContent(state, sseClients.size),
-          },
-        };
-
-        // Handle parametric pages (e.g., agent-detail?id=xxx)
-        if (pageName === 'agent-detail') {
-          const agentId = url.searchParams.get('id') || '';
-          const data = buildAgentDetailData(agentId, state);
-          const title = data ? data.name : 'Agent Not Found';
-          const qs = agentId ? `?id=${encodeURIComponent(agentId)}` : '';
-          return new Response(
-            JSON.stringify({
-              html: renderAgentDetailContent(data, agentId),
-              title,
-              path: `/agents${qs}`,
-            }),
-            {
-              headers: {
-                'Content-Type': 'application/json',
-                ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
-              },
-            },
+      let client: SseClient | undefined;
+      const cleanup = () => {
+        if (!client) return;
+        const removed = sseClients.delete(client);
+        if (removed) {
+          logger.debug(
+            { sseClients: sseClients.size },
+            'SSE client disconnected',
           );
         }
+        client = undefined;
+      };
 
-        const page = pageRenderers[pageName];
-        if (!page) {
-          return new Response(JSON.stringify({ error: 'Unknown page' }), {
-            status: 404,
-            headers: {
-              'Content-Type': 'application/json',
-              ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+      const responseInit = {
+        headers: {
+          ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+          'Cache-Control': 'no-cache, no-transform',
+          'X-Accel-Buffering': 'no',
+        },
+      };
+
+      return ServerSentEventGenerator.stream(
+        (stream) => {
+          const nextClient: SseClient = {
+            subscriptions,
+            stream,
+            logs: [],
+            close() {
+              stream.close();
             },
-          });
-        }
+          };
 
-        // JSON response for shell-script SPA navigation
-        const html = await page.render();
+          client = nextClient;
+          sseClients.add(nextClient);
+          logger.debug({ sseClients: sseClients.size }, 'SSE client connected');
+
+          stream.patchElements(
+            renderStatusBadge('connected (datastar)', 'connected'),
+          );
+          patchSnapshot(nextClient, state);
+        },
+        {
+          keepalive: true,
+          onAbort: cleanup,
+          responseInit,
+        },
+      );
+    }
+
+    // --- SPA page navigation via SSE ---
+    if (url.pathname.startsWith('/api/page/')) {
+      const pageName = url.pathname.slice('/api/page/'.length);
+      const pageRenderers: Record<
+        string,
+        {
+          path: string;
+          title: string;
+          render: () => string | Promise<string>;
+        }
+      > = {
+        dashboard: {
+          path: '/',
+          title: 'Dashboard',
+          render: async () =>
+            renderDashboardContent(state, await getRemotePeers()),
+        },
+        conversations: {
+          path: '/conversations',
+          title: 'Conversations',
+          render: () => renderConversationsContent(state),
+        },
+        context: {
+          path: '/context',
+          title: 'Context',
+          render: async () =>
+            renderContextViewerContent(state, await getRemotePeers()),
+        },
+        ipc: {
+          path: '/ipc',
+          title: 'IPC Inspector',
+          render: () => renderIpcInspectorContent(state),
+        },
+        network: {
+          path: '/network',
+          title: 'Network',
+          render: () =>
+            renderNetworkContent(
+              networkPageStateGetter?.() ?? {
+                instanceId: '',
+                instanceName: '',
+                discoveryEnabled: false,
+                runtime: {
+                  enabled: false,
+                  active: false,
+                  currentNetwork: null,
+                  trustedNetworks: [],
+                },
+                peers: [],
+                pendingRequests: [],
+              },
+            ),
+        },
+        tasks: {
+          path: '/tasks',
+          title: 'Tasks',
+          render: () => renderTasksContent(state),
+        },
+        system: {
+          path: '/system',
+          title: 'System',
+          render: () => renderSystemContent(state, sseClients.size),
+        },
+      };
+
+      // Handle parametric pages (e.g., agent-detail?id=xxx)
+      if (pageName === 'agent-detail') {
+        const agentId = url.searchParams.get('id') || '';
+        const data = buildAgentDetailData(agentId, state);
+        const title = data ? data.name : 'Agent Not Found';
+        const qs = agentId ? `?id=${encodeURIComponent(agentId)}` : '';
         return new Response(
           JSON.stringify({
-            html,
-            title: page.title,
-            path: page.path,
+            html: renderAgentDetailContent(data, agentId),
+            title,
+            path: `/agents${qs}`,
           }),
           {
             headers: {
@@ -309,30 +292,82 @@ export function startWebServer(
         );
       }
 
-      // --- CORS preflight (only when corsOrigin is configured) ---
-      if (req.method === 'OPTIONS' && corsOrigin) {
-        return new Response(null, {
-          status: 204,
-          headers: makeCorsHeaders(corsOrigin),
+      const page = pageRenderers[pageName];
+      if (!page) {
+        return new Response(JSON.stringify({ error: 'Unknown page' }), {
+          status: 404,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+          },
         });
       }
 
-      const result = handleRequest(req, state, sseClients.size);
-      // handleRequest may return a Promise (for POST/PATCH with body parsing)
-      const addCors = (response: Response) => {
-        if (corsOrigin && url.pathname.startsWith('/api/')) {
-          for (const [k, v] of Object.entries(makeCorsHeaders(corsOrigin))) {
-            response.headers.set(k, v);
-          }
+      // JSON response for shell-script SPA navigation
+      const html = await page.render();
+      return new Response(
+        JSON.stringify({
+          html,
+          title: page.title,
+          path: page.path,
+        }),
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+          },
+        },
+      );
+    }
+
+    // --- CORS preflight (only when corsOrigin is configured) ---
+    if (req.method === 'OPTIONS' && corsOrigin) {
+      return new Response(null, {
+        status: 204,
+        headers: makeCorsHeaders(corsOrigin),
+      });
+    }
+
+    const result = handleRequest(req, state, sseClients.size);
+    // handleRequest may return a Promise (for POST/PATCH with body parsing)
+    const addCors = (response: Response) => {
+      if (corsOrigin && url.pathname.startsWith('/api/')) {
+        for (const [k, v] of Object.entries(makeCorsHeaders(corsOrigin))) {
+          response.headers.set(k, v);
         }
-        return response;
-      };
-      if (result instanceof Promise) {
-        return result.then(addCors);
       }
-      return addCors(result);
-    },
-  });
+      return response;
+    };
+    if (result instanceof Promise) {
+      return result.then(addCors);
+    }
+    return addCors(result);
+  };
+
+  let server: Bun.Server<unknown>;
+  let requestedPort = port;
+  let attempts = 0;
+  while (true) {
+    try {
+      server = Bun.serve({
+        port: requestedPort,
+        hostname: bindHostname,
+        development: false,
+        fetch: fetchHandler,
+      });
+      break;
+    } catch (err) {
+      attempts += 1;
+      if (
+        port !== 0 ||
+        !isAddrInUseError(err) ||
+        attempts >= PORT_ZERO_RETRY_ATTEMPTS
+      ) {
+        throw err;
+      }
+      requestedPort = randomFallbackPort();
+    }
+  }
 
   const snapshotTicker = setInterval(() => {
     for (const client of sseClients) {
@@ -346,7 +381,11 @@ export function startWebServer(
   }, SNAPSHOT_INTERVAL_MS);
 
   logger.info(
-    { port, hostname: hostname || '127.0.0.1', cors: corsOrigin || 'disabled' },
+    {
+      port: server.port!,
+      hostname: bindHostname,
+      cors: corsOrigin || 'disabled',
+    },
     'Web UI server started',
   );
 

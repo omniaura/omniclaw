@@ -182,6 +182,30 @@ function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
 }
 
+// Heartbeat: emit a keepalive output marker every 5 minutes so the host's
+// inactivity timeout doesn't kill long-running containers that are waiting
+// on API calls or sub-agents.
+const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+function startHeartbeat(): void {
+  heartbeatTimer = setInterval(() => {
+    writeOutput({
+      status: 'success',
+      result: null,
+      intermediate: true,
+    } as ContainerOutput);
+    log('heartbeat');
+  }, HEARTBEAT_INTERVAL_MS);
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
 const IMAGE_MARKER_RE = /\[attachment:image file=([^\]]+)\]/g;
 
 const EXT_TO_MEDIA_TYPE: Record<string, string> = {
@@ -905,6 +929,8 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  startHeartbeat();
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -1218,6 +1244,7 @@ async function runQuery(
   }
 
   ipcPolling = false;
+  stopHeartbeat();
   log(
     `Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`,
   );

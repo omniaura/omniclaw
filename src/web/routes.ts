@@ -49,6 +49,11 @@ export function getRemotePeers() {
     : Promise.resolve([]);
 }
 
+export function resetDiscoveryContextForTests(): void {
+  discoveryContext = null;
+  networkPageState = null;
+}
+
 /**
  * Handle an authenticated HTTP request and return a Response.
  * Routing is prefix-based: /api/* for JSON, / for the dashboard HTML.
@@ -726,6 +731,10 @@ async function handleGetAgentAvatarImage(
   const response = await serveCachedRemoteImage(
     `agent:${agentId}:${agent.avatarUrl}`,
     async () => agent.avatarUrl || null,
+    {
+      cacheDir: state.remoteImageCacheDir,
+      fetchImpl: state.fetchRemoteImage,
+    },
   );
   return response || json({ error: 'Failed to fetch avatar' }, 502);
 }
@@ -735,8 +744,13 @@ async function handleGetChatIcon(
   state: WebStateProvider,
 ): Promise<Response> {
   if (!state.resolveChatImage) return json({ error: 'Not supported' }, 404);
-  const response = await serveCachedRemoteImage(`chat:${chatJid}`, async () =>
-    state.resolveChatImage!(chatJid),
+  const response = await serveCachedRemoteImage(
+    `chat:${chatJid}`,
+    async () => state.resolveChatImage!(chatJid),
+    {
+      cacheDir: state.remoteImageCacheDir,
+      fetchImpl: state.fetchRemoteImage,
+    },
   );
   return response || json({ error: 'Icon not found' }, 404);
 }
@@ -752,6 +766,10 @@ async function handleGetDiscordGuildIcon(
   const response = await serveCachedRemoteImage(
     `discord-guild:${guildId}:${botId || ''}`,
     async () => state.resolveDiscordGuildImage!(guildId, botId || undefined),
+    {
+      cacheDir: state.remoteImageCacheDir,
+      fetchImpl: state.fetchRemoteImage,
+    },
   );
   return response || json({ error: 'Icon not found' }, 404);
 }
