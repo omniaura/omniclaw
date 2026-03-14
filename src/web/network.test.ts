@@ -6,7 +6,11 @@ import {
   renderPeerRows,
   renderPendingRequests,
 } from './network.js';
-import type { PairRequest, PeerView } from '../discovery/types.js';
+import type {
+  DiscoveryRuntimeSnapshot,
+  PairRequest,
+  PeerView,
+} from '../discovery/types.js';
 
 function makePeer(overrides: Partial<PeerView> = {}): PeerView {
   return {
@@ -39,12 +43,25 @@ function makeRequest(overrides: Partial<PairRequest> = {}): PairRequest {
   };
 }
 
+function makeRuntime(
+  overrides: Partial<DiscoveryRuntimeSnapshot> = {},
+): DiscoveryRuntimeSnapshot {
+  return {
+    enabled: true,
+    active: true,
+    currentNetwork: null,
+    trustedNetworks: [],
+    ...overrides,
+  };
+}
+
 describe('renderNetworkContent', () => {
   it('renders escaped instance metadata and computed stats', () => {
     const html = renderNetworkContent({
       instanceId: 'local<id>',
       instanceName: 'Main <Node> & "Ops"',
       discoveryEnabled: true,
+      runtime: makeRuntime(),
       peers: [
         makePeer({ status: 'trusted', online: true }),
         makePeer({ instanceId: 'peer-2', status: 'pending', online: false }),
@@ -53,7 +70,9 @@ describe('renderNetworkContent', () => {
     });
 
     expect(html).toContain('Main &lt;Node&gt; &amp; &quot;Ops&quot;');
-    expect(html).toContain('<code style="color:var(--text);font-size:0.8rem">local&lt;id&gt;</code>');
+    expect(html).toContain(
+      '<code style="color:var(--text);font-size:0.8rem">local&lt;id&gt;</code>',
+    );
     expect(html).toContain('<span style="color:var(--green)">active</span>');
     expect(html).toContain('id="stat-peers-online">1<');
     expect(html).toContain('id="stat-peers-trusted">1<');
@@ -67,12 +86,17 @@ describe('renderNetworkContent', () => {
       instanceId: 'local-id',
       instanceName: 'Main Node',
       discoveryEnabled: false,
+      runtime: makeRuntime({ enabled: false, active: false }),
       peers: [],
       pendingRequests: [],
     });
 
-    expect(html).toContain('<span style="color:var(--text-muted)">disabled</span>');
-    expect(html).toContain('No peers discovered yet. Ensure DISCOVERY_ENABLED=true on all instances.');
+    expect(html).toContain(
+      '<span style="color:var(--text-muted)">disabled</span>',
+    );
+    expect(html).toContain(
+      'No peers discovered yet. Ensure DISCOVERY_ENABLED=true on all instances.',
+    );
     expect(html).toContain('No pending requests');
     expect(html).toContain('id="pending-count">0<');
   });
@@ -124,15 +148,21 @@ describe('renderPeerRows', () => {
   });
 
   it('renders pending peers as awaiting approval', () => {
-    const html = renderPeerRows([makePeer({ status: 'pending', online: false })]);
+    const html = renderPeerRows([
+      makePeer({ status: 'pending', online: false }),
+    ]);
 
-    expect(html).toContain('<span class="badge" style="background:var(--warning);color:#000">pending</span>');
+    expect(html).toContain(
+      '<span class="badge" style="background:var(--warning);color:#000">pending</span>',
+    );
     expect(html).toContain('awaiting approval...');
     expect(html).toContain('<span style="color:var(--text-muted)">○</span>');
   });
 
   it('renders discovered online peers with access request actions', () => {
-    const html = renderPeerRows([makePeer({ status: 'discovered', online: true })]);
+    const html = renderPeerRows([
+      makePeer({ status: 'discovered', online: true }),
+    ]);
 
     expect(html).toContain('<span class="badge">discovered</span>');
     expect(html).toContain('data-network-action="request"');
@@ -149,7 +179,9 @@ describe('renderPeerRows', () => {
       }),
     ]);
 
-    expect(html).toContain('<span class="badge" style="background:var(--red);color:#fff">revoked</span>');
+    expect(html).toContain(
+      '<span class="badge" style="background:var(--red);color:#fff">revoked</span>',
+    );
     expect(html).toContain('<span class="badge">unknown</span>');
     expect(html).toContain('offline</span>');
   });
@@ -161,6 +193,7 @@ describe('renderNetworkPage', () => {
       instanceId: 'instance-1',
       instanceName: 'Main Node',
       discoveryEnabled: true,
+      runtime: makeRuntime(),
       peers: [makePeer()],
       pendingRequests: [makeRequest()],
     });
@@ -169,6 +202,8 @@ describe('renderNetworkPage', () => {
     expect(html).toContain('<title>OmniClaw — Network</title>');
     expect(html).toContain('class="nav-link active">Network</a>');
     expect(html).toContain("window.__initPage && window.__initPage('network')");
-    expect(html).toContain('https://cdn.jsdelivr.net/gh/starfederation/datastar');
+    expect(html).toContain(
+      'https://cdn.jsdelivr.net/gh/starfederation/datastar',
+    );
   });
 });
