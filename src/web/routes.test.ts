@@ -249,7 +249,9 @@ describe('handleRequest avatar image proxy', () => {
           ...makeState(makeAgent()),
           remoteImageCacheDir: testImageCacheDir,
           fetchRemoteImage: async (input: string | URL | Request) => {
-            expect(String(input)).toBe('https://example.test/discord-guild.png');
+            expect(String(input)).toBe(
+              'https://example.test/discord-guild.png',
+            );
             return new Response('guild-icon', {
               status: 200,
               headers: { 'Content-Type': 'image/png' },

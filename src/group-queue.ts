@@ -104,7 +104,10 @@ export class GroupQueue {
   private readonly maxActiveContainers: number;
   private readonly maxIdleContainers: number;
   private readonly maxTaskContainers: number;
-  private readonly fsImpl: Pick<typeof fs, 'mkdirSync' | 'writeFileSync' | 'renameSync'>;
+  private readonly fsImpl: Pick<
+    typeof fs,
+    'mkdirSync' | 'writeFileSync' | 'renameSync'
+  >;
 
   // JID→folder mapping: multiple JIDs can share one folder (agent)
   private jidToFolder = new Map<string, string>();

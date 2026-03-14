@@ -206,7 +206,9 @@ describe('startSchedulerLoop', () => {
 
       expect(resolveBackendMock).toHaveBeenCalledTimes(1);
       expect(writeTasksSnapshotMock).toHaveBeenCalledTimes(1);
-      expect(sentMessages).toEqual([{ jid: 'main@g.us', text: 'stream result' }]);
+      expect(sentMessages).toEqual([
+        { jid: 'main@g.us', text: 'stream result' },
+      ]);
       expect(lastBackendInput?.resumeAt).toBe('resume-marker');
       expect(lastBackendInput?.isScheduledTask).toBe(true);
       expect(lastBackendInput?.chatJid).toBe('main@g.us');
