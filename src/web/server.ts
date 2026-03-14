@@ -288,12 +288,22 @@ export function startWebServer(
           });
         }
 
-        return new Response(renderPagePatch(page.path, page.title, page.render()), {
-          headers: {
-            'Content-Type': 'text/html; charset=utf-8',
-            ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+        return ServerSentEventGenerator.stream(
+          (stream) => {
+            stream.patchElements(
+              renderPagePatch(page.path, page.title, page.render()),
+            );
           },
-        });
+          {
+            responseInit: {
+              headers: {
+                ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+                'Cache-Control': 'no-cache, no-transform',
+                'X-Accel-Buffering': 'no',
+              },
+            },
+          },
+        );
       }
 
       // --- CORS preflight (only when corsOrigin is configured) ---

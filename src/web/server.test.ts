@@ -1061,10 +1061,14 @@ describe('dashboard', () => {
   it('returns datastar morph html for page navigation endpoints', async () => {
     handle = startWebServer(testConfig(), makeState());
     const res = await authedFetch('/api/page/network');
-    const html = await res.text();
-    expect(res.headers.get('Content-Type')).toContain('text/html');
+    expect(res.headers.get('Content-Type')).toContain('text/event-stream');
+    expect(res.body).toBeTruthy();
+    const reader = res.body!.getReader();
+    const html = await readUntilContains(reader, '<title id="page-title">OmniClaw \u2014 Network</title>');
+    expect(html).toContain('event: datastar-patch-elements');
     expect(html).toContain('<nav id="nav-links">');
     expect(html).toContain('<main id="content">');
     expect(html).toContain('<title id="page-title">OmniClaw \u2014 Network</title>');
+    reader.releaseLock();
   });
 });
