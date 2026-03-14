@@ -214,7 +214,8 @@ export function buildGitHubWebhookNotification(
   const parsed = parseWebhookPayload(event, payload);
   if (!parsed) return null;
 
-  const config = configOverride ?? loadGitHubWatchesConfig();
+  const config =
+    configOverride === undefined ? loadGitHubWatchesConfig() : configOverride;
   if (!config) return null;
 
   const agentIds = getWatchingAgentsForRepo(config, parsed.owner, parsed.repo);

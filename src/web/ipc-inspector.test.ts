@@ -9,7 +9,7 @@ import { renderIpcInspector } from './ipc-inspector.js';
 // ---- Helpers ----
 
 function randomPort(): number {
-  return 30000 + Math.floor(Math.random() * 20000);
+  return 0;
 }
 
 const defaultStats: QueueStats = {

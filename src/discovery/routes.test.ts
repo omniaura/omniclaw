@@ -7,6 +7,8 @@ import {
   type DiscoveryRouteContext,
 } from './routes.js';
 
+const realFetch = globalThis.fetch;
+
 const defaultState = {
   getAgents: () => ({}),
   getChannelSubscriptions: () => ({}),
@@ -64,6 +66,7 @@ function makeContext(
 
 afterEach(() => {
   mock.restore();
+  globalThis.fetch = realFetch;
 });
 
 describe('handleDiscoveryRequest', () => {

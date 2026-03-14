@@ -5,7 +5,10 @@ import {
   startWebServer,
   type WebServerHandle,
 } from './server.js';
-import { setDiscoveryContext } from './routes.js';
+import {
+  resetDiscoveryContextForTests,
+  setDiscoveryContext,
+} from './routes.js';
 import type { WebStateProvider, QueueStats } from './types.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 
@@ -173,6 +176,7 @@ afterEach(async () => {
     await handle.stop();
     handle = null;
   }
+  resetDiscoveryContextForTests();
 });
 
 function url(path: string): string {
