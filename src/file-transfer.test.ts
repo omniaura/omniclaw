@@ -72,6 +72,8 @@ mock.module('./backends/index.js', () => ({
 // Import after mocks
 import { transferFiles } from './file-transfer.js';
 
+mock.restore();
+
 // ---- Test data ----
 
 const sourceGroup: RegisteredGroup = {
