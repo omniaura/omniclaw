@@ -40,6 +40,19 @@ describe('MemoryResumePositionStore', () => {
 });
 
 describe('PersistentResumePositionStore', () => {
+  function captureWarnMessages(): {
+    messages: string[];
+    unsubscribe: () => void;
+  } {
+    const messages: string[] = [];
+    const unsubscribe = logger.subscribe((record) => {
+      if (record.level === 'warn' && typeof record.msg === 'string') {
+        messages.push(record.msg);
+      }
+    });
+    return { messages, unsubscribe };
+  }
+
   it('loads only string resume positions from persisted state', () => {
     const adapter: PersistentStateAdapter = {
       read: <T>() =>
@@ -105,7 +118,7 @@ describe('PersistentResumePositionStore', () => {
   });
 
   it('warns and continues when initial load fails', () => {
-    const warnSpy = spyOn(logger, 'warn');
+    const { messages, unsubscribe } = captureWarnMessages();
     const store = new PersistentResumePositionStore({
       stateAdapter: {
         read: () => {
@@ -116,16 +129,13 @@ describe('PersistentResumePositionStore', () => {
     });
 
     expect(store.getAll()).toEqual({});
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0]?.[1]).toBe(
-      'Failed to load persisted resume positions',
-    );
+    expect(messages).toEqual(['Failed to load persisted resume positions']);
 
-    warnSpy.mockRestore();
+    unsubscribe();
   });
 
   it('warns and keeps in-memory state when persisting fails', () => {
-    const warnSpy = spyOn(logger, 'warn');
+    const { messages, unsubscribe } = captureWarnMessages();
     const store = new PersistentResumePositionStore({
       stateAdapter: {
         read: <T>() => ({}) as T,
@@ -139,12 +149,9 @@ describe('PersistentResumePositionStore', () => {
       store.set('alpha', '2026-03-03T00:00:00.000Z');
     }).not.toThrow();
     expect(store.get('alpha')).toBe('2026-03-03T00:00:00.000Z');
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0]?.[1]).toBe(
-      'Failed to persist resume positions',
-    );
+    expect(messages).toEqual(['Failed to persist resume positions']);
 
-    warnSpy.mockRestore();
+    unsubscribe();
   });
 });
 

@@ -6,6 +6,19 @@ import { logger } from './logger.js';
 import { readPersistentJson, writePersistentJson } from './persistent-state.js';
 
 describe('persistent-state', () => {
+  function captureWarnMessages(): {
+    messages: string[];
+    unsubscribe: () => void;
+  } {
+    const messages: string[] = [];
+    const unsubscribe = logger.subscribe((record) => {
+      if (record.level === 'warn' && typeof record.msg === 'string') {
+        messages.push(record.msg);
+      }
+    });
+    return { messages, unsubscribe };
+  }
+
   beforeEach(() => {
     _initTestDatabase();
   });
@@ -24,7 +37,7 @@ describe('persistent-state', () => {
   });
 
   it('returns undefined and warns when db read throws', () => {
-    const warnSpy = spyOn(logger, 'warn');
+    const { messages, unsubscribe } = captureWarnMessages();
     const readSpy = spyOn(db, 'getRouterState').mockImplementation(() => {
       throw new Error('read failed');
     });
@@ -32,39 +45,34 @@ describe('persistent-state', () => {
     const result = readPersistentJson('k2');
 
     expect(result).toBeUndefined();
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0][1]).toBe('Failed to read persistent state');
+    expect(messages).toEqual(['Failed to read persistent state']);
 
     readSpy.mockRestore();
-    warnSpy.mockRestore();
+    unsubscribe();
   });
 
   it('returns undefined and warns for invalid JSON payload', () => {
-    const warnSpy = spyOn(logger, 'warn');
+    const { messages, unsubscribe } = captureWarnMessages();
     setRouterState('k3', '{"broken":');
 
     const result = readPersistentJson('k3');
 
     expect(result).toBeUndefined();
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0][1]).toBe(
-      'Failed to parse persistent state JSON',
-    );
+    expect(messages).toEqual(['Failed to parse persistent state JSON']);
 
-    warnSpy.mockRestore();
+    unsubscribe();
   });
 
   it('swallows write errors and logs a warning', () => {
-    const warnSpy = spyOn(logger, 'warn');
+    const { messages, unsubscribe } = captureWarnMessages();
     const writeSpy = spyOn(db, 'setRouterState').mockImplementation(() => {
       throw new Error('write failed');
     });
 
     expect(() => writePersistentJson('k4', { ok: false })).not.toThrow();
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0][1]).toBe('Failed to write persistent state');
+    expect(messages).toEqual(['Failed to write persistent state']);
 
     writeSpy.mockRestore();
-    warnSpy.mockRestore();
+    unsubscribe();
   });
 });
