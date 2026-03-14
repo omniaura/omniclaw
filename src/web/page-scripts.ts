@@ -9,6 +9,7 @@ import { DISCOVERY_POLL_INTERVAL } from '../config.js';
 export function allPageScripts(): Record<string, string> {
   return {
     dashboard: dashboardScript(),
+    tasks: tasksScript(),
     conversations: conversationsScript(),
     context: contextScript(),
     ipc: ipcScript(),
@@ -533,6 +534,309 @@ if(modal&&form){
     .catch(function(err){errorEl.textContent=err.message||"Failed";sb.disabled=false;});
   });
 }
+`;
+}
+
+function tasksScript(): string {
+  return `
+var tbody=document.getElementById("tm-tbody");
+var filters=document.getElementById("tm-filters");
+var createModal=document.getElementById("tm-create-modal");
+var editModal=document.getElementById("tm-edit-modal");
+var deleteModal=document.getElementById("tm-delete-modal");
+var runPanel=document.getElementById("tm-run-panel");
+var currentFilter="all";
+var editingTaskId=null;
+var deletingTaskId=null;
+
+if(!tbody)return;
+
+// ---- Cron schedule preview helper ----
+function cronPreview(expr){
+  var p=expr.trim().split(/\\s+/);
+  if(p.length<5)return"";
+  var min=p[0],hr=p[1],dom=p[2],mon=p[3],dow=p[4];
+  // Every N minutes
+  if(min.indexOf("/")!==-1&&hr==="*"&&dom==="*"&&mon==="*"&&dow==="*"){
+    var n=min.split("/")[1];return"Every "+n+" minute"+(n==="1"?"":"s");
+  }
+  // Every N hours
+  if(hr.indexOf("/")!==-1&&dom==="*"&&mon==="*"&&dow==="*"){
+    var nh=hr.split("/")[1];return"Every "+nh+" hour"+(nh==="1"?"":"s");
+  }
+  // Specific time daily
+  if(min.match(/^\\d+$/)&&hr.match(/^\\d+$/)&&dom==="*"&&mon==="*"&&dow==="*"){
+    var h=parseInt(hr,10),m=parseInt(min,10);
+    var ampm=h>=12?"PM":"AM";var h12=h===0?12:h>12?h-12:h;
+    return"Daily at "+h12+":"+(m<10?"0":"")+m+" "+ampm;
+  }
+  // Specific days of week
+  if(min.match(/^\\d+$/)&&hr.match(/^\\d+$/)&&dom==="*"&&mon==="*"&&dow!=="*"){
+    var days=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+    var dayNames=dow.split(",").map(function(d){return days[parseInt(d,10)]||d;}).join(", ");
+    var h2=parseInt(hr,10),m2=parseInt(min,10);
+    var ap2=h2>=12?"PM":"AM";var h22=h2===0?12:h2>12?h2-12:h2;
+    return dayNames+" at "+h22+":"+(m2<10?"0":"")+m2+" "+ap2;
+  }
+  return"";
+}
+
+function updateSchedulePreview(prefixId){
+  var typeEl=document.getElementById(prefixId+"-schedule-type");
+  var valEl=document.getElementById(prefixId+"-schedule-value");
+  var prevEl=document.getElementById(prefixId+"-schedule-preview");
+  if(!typeEl||!valEl||!prevEl)return;
+  var type=typeEl.value,val=valEl.value.trim();
+  if(!val){prevEl.textContent="";return;}
+  if(type==="cron"){
+    var p=cronPreview(val);
+    prevEl.textContent=p||"";
+  }else if(type==="interval"){
+    var ms=parseInt(val,10);
+    if(isNaN(ms)){prevEl.textContent="";return;}
+    if(ms<1000)prevEl.textContent="Every "+ms+"ms";
+    else if(ms<60000)prevEl.textContent="Every "+(ms/1000).toFixed(0)+"s";
+    else if(ms<3600000)prevEl.textContent="Every "+(ms/60000).toFixed(0)+"m";
+    else prevEl.textContent="Every "+(ms/3600000).toFixed(1)+"h";
+  }else if(type==="once"){
+    try{prevEl.textContent="At: "+new Date(val).toLocaleString();}
+    catch(e){prevEl.textContent="";}
+  }else{prevEl.textContent="";}
+}
+
+// ---- Filter tabs ----
+filters.addEventListener("click",function(e){
+  var btn=e.target.closest(".filter-btn[data-filter]");if(!btn)return;
+  currentFilter=btn.getAttribute("data-filter");
+  filters.querySelectorAll(".filter-btn").forEach(function(b){b.classList.toggle("active",b===btn);});
+  applyFilter();
+});
+
+function applyFilter(){
+  tbody.querySelectorAll("tr[data-task-id]").forEach(function(row){
+    if(currentFilter==="all"){row.classList.remove("hidden");}
+    else{row.classList.toggle("hidden",row.getAttribute("data-status")!==currentFilter);}
+  });
+}
+
+// ---- Table row actions ----
+tbody.addEventListener("click",function(e){
+  var btn=e.target.closest("button[data-tm-action]");if(!btn)return;
+  var row=btn.closest("tr[data-task-id]");if(!row)return;
+  var taskId=row.getAttribute("data-task-id");
+  var action=btn.getAttribute("data-tm-action");
+
+  if(action==="toggle"){
+    var ns=btn.getAttribute("data-status");btn.disabled=true;
+    fetch("/api/tasks/"+encodeURIComponent(taskId),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:ns})})
+    .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})
+    .then(function(t){
+      window.__toast("Task "+(ns==="paused"?"paused":"resumed"));
+      refreshTasks();
+    })
+    .catch(function(err){window.__toast(err.message||"Failed","error");btn.disabled=false;});
+  }
+
+  if(action==="edit"){openEditModal(taskId);}
+  if(action==="runs"){openRunHistory(taskId);}
+  if(action==="delete"){openDeleteModal(taskId);}
+});
+
+// ---- Create task ----
+document.getElementById("tm-btn-create").addEventListener("click",function(){
+  createModal.classList.add("open");
+  document.getElementById("tmc-error").textContent="";
+});
+createModal.addEventListener("click",function(e){if(e.target===createModal)createModal.classList.remove("open");});
+document.getElementById("tmc-cancel").addEventListener("click",function(){createModal.classList.remove("open");});
+
+// Schedule preview for create modal
+["tmc-schedule-type","tmc-schedule-value"].forEach(function(id){
+  var el=document.getElementById(id);
+  if(el)el.addEventListener("input",function(){updateSchedulePreview("tmc");});
+  if(el)el.addEventListener("change",function(){updateSchedulePreview("tmc");});
+});
+
+document.getElementById("tmc-form").addEventListener("submit",function(e){
+  e.preventDefault();
+  var errorEl=document.getElementById("tmc-error");errorEl.textContent="";
+  var sb=document.getElementById("tmc-submit");sb.disabled=true;
+  var av=document.getElementById("tmc-agent").value;
+  if(!av){errorEl.textContent="Select an agent";sb.disabled=false;return;}
+  var parts=av.split("|");
+  var payload={group_folder:parts[0],chat_jid:parts[1],
+    prompt:document.getElementById("tmc-prompt").value,
+    schedule_type:document.getElementById("tmc-schedule-type").value,
+    schedule_value:document.getElementById("tmc-schedule-value").value,
+    context_mode:document.getElementById("tmc-context-mode").value};
+  fetch("/api/tasks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+  .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})
+  .then(function(t){
+    window.__toast("Task created: "+t.id.slice(0,12));
+    createModal.classList.remove("open");
+    document.getElementById("tmc-form").reset();
+    document.getElementById("tmc-schedule-preview").textContent="";
+    refreshTasks();
+  })
+  .catch(function(err){errorEl.textContent=err.message||"Failed";sb.disabled=false;});
+});
+
+// ---- Edit task ----
+function openEditModal(taskId){
+  editingTaskId=taskId;
+  var errorEl=document.getElementById("tme-error");errorEl.textContent="";
+  fetch("/api/tasks/"+encodeURIComponent(taskId))
+  .then(function(r){if(!r.ok)throw new Error("Not found");return r.json();})
+  .then(function(t){
+    document.getElementById("tme-agent").value=t.group_folder+"|"+t.chat_jid;
+    document.getElementById("tme-prompt").value=t.prompt;
+    document.getElementById("tme-schedule-type").value=t.schedule_type;
+    document.getElementById("tme-schedule-value").value=t.schedule_value;
+    document.getElementById("tme-context-mode").value=t.context_mode;
+    updateSchedulePreview("tme");
+    editModal.classList.add("open");
+  })
+  .catch(function(err){window.__toast("Failed to load task: "+err.message,"error");});
+}
+editModal.addEventListener("click",function(e){if(e.target===editModal)editModal.classList.remove("open");});
+document.getElementById("tme-cancel").addEventListener("click",function(){editModal.classList.remove("open");editingTaskId=null;});
+
+["tme-schedule-type","tme-schedule-value"].forEach(function(id){
+  var el=document.getElementById(id);
+  if(el)el.addEventListener("input",function(){updateSchedulePreview("tme");});
+  if(el)el.addEventListener("change",function(){updateSchedulePreview("tme");});
+});
+
+document.getElementById("tme-form").addEventListener("submit",function(e){
+  e.preventDefault();if(!editingTaskId)return;
+  var errorEl=document.getElementById("tme-error");errorEl.textContent="";
+  var sb=document.getElementById("tme-submit");sb.disabled=true;
+  var payload={
+    prompt:document.getElementById("tme-prompt").value,
+    schedule_type:document.getElementById("tme-schedule-type").value,
+    schedule_value:document.getElementById("tme-schedule-value").value};
+  fetch("/api/tasks/"+encodeURIComponent(editingTaskId),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+  .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})
+  .then(function(t){
+    window.__toast("Task updated");
+    editModal.classList.remove("open");editingTaskId=null;
+    refreshTasks();
+  })
+  .catch(function(err){errorEl.textContent=err.message||"Failed";sb.disabled=false;});
+});
+
+// ---- Delete task ----
+function openDeleteModal(taskId){
+  deletingTaskId=taskId;
+  document.getElementById("tm-delete-msg").textContent="Delete task "+taskId.slice(0,20)+"\\u2026?";
+  deleteModal.classList.add("open");
+}
+deleteModal.addEventListener("click",function(e){if(e.target===deleteModal){deleteModal.classList.remove("open");deletingTaskId=null;}});
+document.getElementById("tm-delete-cancel").addEventListener("click",function(){deleteModal.classList.remove("open");deletingTaskId=null;});
+document.getElementById("tm-delete-confirm").addEventListener("click",function(){
+  if(!deletingTaskId)return;
+  var btn=this;btn.disabled=true;
+  fetch("/api/tasks/"+encodeURIComponent(deletingTaskId),{method:"DELETE"})
+  .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})
+  .then(function(){
+    window.__toast("Task deleted");
+    deleteModal.classList.remove("open");deletingTaskId=null;btn.disabled=false;
+    refreshTasks();
+  })
+  .catch(function(err){window.__toast(err.message||"Failed","error");btn.disabled=false;});
+});
+
+// ---- Run history ----
+function openRunHistory(taskId){
+  var panel=document.getElementById("tm-run-panel");
+  var body=document.getElementById("tm-run-body");
+  var title=document.getElementById("tm-run-title");
+  title.textContent="Run History — "+taskId.slice(0,20)+"\\u2026";
+  body.innerHTML='<div style="padding:12px;color:var(--text-dim);font-size:11px">Loading\\u2026</div>';
+  panel.style.display="";
+  fetch("/api/tasks/"+encodeURIComponent(taskId)+"/runs?limit=20")
+  .then(function(r){if(!r.ok)throw new Error("Failed");return r.json();})
+  .then(function(runs){
+    if(!runs.length){body.innerHTML='<div style="padding:12px;color:var(--text-dim);font-size:11px">No runs yet</div>';return;}
+    var html='<table style="width:100%;font-size:11px"><thead><tr><th>time</th><th>duration</th><th>status</th><th>detail</th></tr></thead><tbody>';
+    runs.forEach(function(r){
+      var d=new Date(r.run_at);var ts=d.toLocaleString();
+      var dur=r.duration_ms<1000?r.duration_ms+"ms":(r.duration_ms/1000).toFixed(1)+"s";
+      var cls=r.status==="success"?"color:var(--green)":"color:var(--red)";
+      var detail=r.status==="success"?(r.result||"ok"):("Error: "+(r.error||"unknown"));
+      if(detail.length>80)detail=detail.slice(0,77)+"\\u2026";
+      html+='<tr><td style="white-space:nowrap">'+window.__esc(ts)+'</td>';
+      html+='<td style="white-space:nowrap">'+window.__esc(dur)+'</td>';
+      html+='<td style="'+cls+';font-weight:600">'+window.__esc(r.status)+'</td>';
+      html+='<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+window.__esc(r.result||r.error||"")+'">'+window.__esc(detail)+'</td></tr>';
+    });
+    html+='</tbody></table>';
+    body.innerHTML=html;
+  })
+  .catch(function(){body.innerHTML='<div style="padding:12px;color:var(--red);font-size:11px">Failed to load runs</div>';});
+}
+document.getElementById("tm-run-close").addEventListener("click",function(){
+  document.getElementById("tm-run-panel").style.display="none";
+});
+
+// ---- Refresh tasks from API ----
+function refreshTasks(){
+  fetch("/api/tasks")
+  .then(function(r){return r.json();})
+  .then(function(tasks){
+    // Update stats
+    var total=tasks.length,active=0,paused=0,completed=0;
+    tasks.forEach(function(t){
+      if(t.status==="active")active++;
+      else if(t.status==="paused")paused++;
+      else if(t.status==="completed")completed++;
+    });
+    var stats=document.querySelector(".tasks-stats");
+    if(stats)stats.innerHTML='<span class="tasks-stat">'+total+' total</span>'
+      +'<span class="tasks-stat stat-active">'+active+' active</span>'
+      +'<span class="tasks-stat stat-paused">'+paused+' paused</span>'
+      +'<span class="tasks-stat stat-completed">'+completed+' completed</span>';
+
+    // Update table
+    tbody.innerHTML=tasks.map(function(task){
+      var sc=task.status==="active"?"status-active":task.status==="paused"?"status-paused":"status-completed";
+      var tl=task.status==="active"?"Pause":"Resume";
+      var ts2=task.status==="active"?"paused":"active";
+      var ps=task.prompt.length>60?task.prompt.slice(0,57)+"\\u2026":task.prompt;
+      var nr=task.next_run?relTime(task.next_run):"\\u2014";
+      var lr=task.last_run?relTime(task.last_run):"\\u2014";
+      var lrc=task.last_result==="success"?"run-success":task.last_result==="error"?"run-error":"";
+      return '<tr data-task-id="'+window.__esc(task.id)+'" data-status="'+window.__esc(task.status)+'">'
+        +'<td><span class="badge '+sc+'">'+window.__esc(task.status)+'</span></td>'
+        +'<td class="td-agent" title="'+window.__esc(task.chat_jid)+'">'+window.__esc(task.group_folder)+'</td>'
+        +'<td class="td-prompt" title="'+window.__esc(task.prompt)+'">'+window.__esc(ps)+'</td>'
+        +'<td class="td-sched"><span class="sched-type badge badge-sm">'+window.__esc(task.schedule_type)+'</span> '
+        +'<span class="sched-label">'+window.__esc(task.schedule_value)+'</span></td>'
+        +'<td class="td-time" title="'+window.__esc(task.next_run||"")+'">'+window.__esc(nr)+'</td>'
+        +'<td class="td-time '+lrc+'" title="'+window.__esc(task.last_run||"")+'">'+window.__esc(lr)+'</td>'
+        +'<td><span class="badge badge-sm">'+window.__esc(task.context_mode)+'</span></td>'
+        +'<td class="td-actions">'
+        +'<button class="btn btn-sm btn-toggle" data-tm-action="toggle" data-status="'+ts2+'">'+tl+'</button>'
+        +'<button class="btn btn-sm" data-tm-action="edit">Edit</button>'
+        +'<button class="btn btn-sm" data-tm-action="runs">Runs</button>'
+        +'<button class="btn btn-sm btn-danger" data-tm-action="delete">Del</button>'
+        +'</td></tr>';
+    }).join("");
+    applyFilter();
+  }).catch(function(err){console.error("Failed to refresh tasks:",err);});
+}
+
+function relTime(iso){
+  try{
+    var d=new Date(iso),now=new Date(),diff=d.getTime()-now.getTime(),abs=Math.abs(diff);
+    if(abs<60000)return diff>0?"in <1m":"<1m ago";
+    if(abs<3600000){var m=Math.round(abs/60000);return diff>0?"in "+m+"m":m+"m ago";}
+    if(abs<86400000){var h=Math.round(abs/3600000);return diff>0?"in "+h+"h":h+"h ago";}
+    var dd=Math.round(abs/86400000);return diff>0?"in "+dd+"d":dd+"d ago";
+  }catch(e){return iso;}
+}
+
+window.__cleanup=null;
 `;
 }
 

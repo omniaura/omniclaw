@@ -24,6 +24,7 @@ import {
 import { checkPeerAuth } from '../discovery/routes.js';
 import type { TrustStore } from '../discovery/trust-store.js';
 import { renderSystemContent } from './system.js';
+import { renderTasksContent } from './tasks.js';
 
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
@@ -246,6 +247,11 @@ export function startWebServer(
                   pendingRequests: [],
                 },
               ),
+          },
+          tasks: {
+            path: '/tasks',
+            title: 'Tasks',
+            render: () => renderTasksContent(state),
           },
           system: {
             path: '/system',
