@@ -43,6 +43,7 @@ export function startWebServer(
 ): WebServerHandle {
   const { port, auth, hostname, corsOrigin } = config;
   const sseClients = new Set<SseClient>();
+  let rawLogStreamClients = 0;
 
   const server = Bun.serve({
     port,
@@ -104,10 +105,25 @@ export function startWebServer(
             },
           });
         }
+        if (rawLogStreamClients >= MAX_SSE_CLIENTS) {
+          return new Response('Too many SSE connections', {
+            status: 429,
+            headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
+          });
+        }
 
         let unsubscribe: (() => void) | undefined;
+        let closed = false;
+        const cleanup = () => {
+          if (closed) return;
+          closed = true;
+          if (rawLogStreamClients > 0) rawLogStreamClients -= 1;
+          unsubscribe?.();
+          unsubscribe = undefined;
+        };
         const stream = new ReadableStream<Uint8Array>({
           start(controller) {
+            rawLogStreamClients += 1;
             const encoder = new TextEncoder();
             controller.enqueue(encoder.encode(': connected\n\n'));
             unsubscribe = logger.subscribe((record) => {
@@ -119,23 +135,20 @@ export function startWebServer(
                   ),
                 );
               } catch {
-                unsubscribe?.();
-                unsubscribe = undefined;
+                cleanup();
                 controller.close();
               }
             });
           },
           cancel() {
-            unsubscribe?.();
-            unsubscribe = undefined;
+            cleanup();
           },
         });
 
         req.signal.addEventListener(
           'abort',
           () => {
-            unsubscribe?.();
-            unsubscribe = undefined;
+            cleanup();
           },
           { once: true },
         );
