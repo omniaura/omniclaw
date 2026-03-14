@@ -13,7 +13,9 @@ describe('startSchedulerLoop', () => {
     if (proc.exitCode !== 0) {
       const stderr = new TextDecoder().decode(proc.stderr);
       const stdout = new TextDecoder().decode(proc.stdout);
-      throw new Error(`Scheduler harness failed\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`);
+      throw new Error(
+        `Scheduler harness failed\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`,
+      );
     }
 
     expect(proc.exitCode).toBe(0);

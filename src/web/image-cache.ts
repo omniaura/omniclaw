@@ -14,14 +14,36 @@ interface CacheMetadata {
   fetchedAt: number;
 }
 
-function getCachePaths(cacheKey: string): {
+export type RemoteImageFetch = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>;
+
+export interface RemoteImageCacheOptions {
+  cacheDir?: string;
+  fetchImpl?: RemoteImageFetch;
+}
+
+export function describeImageUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
+function getCachePaths(
+  cacheDir: string,
+  cacheKey: string,
+): {
   dataPath: string;
   metaPath: string;
 } {
   const hash = createHash('sha256').update(cacheKey).digest('hex');
   return {
-    dataPath: path.join(IMAGE_CACHE_DIR, `${hash}.bin`),
-    metaPath: path.join(IMAGE_CACHE_DIR, `${hash}.json`),
+    dataPath: path.join(cacheDir, `${hash}.bin`),
+    metaPath: path.join(cacheDir, `${hash}.json`),
   };
 }
 
@@ -34,7 +56,9 @@ function readMeta(metaPath: string): CacheMetadata | null {
 }
 
 function buildCachedResponse(dataPath: string, contentType: string): Response {
-  return new Response(Bun.file(dataPath), {
+  // Read eagerly so the response body remains valid even if later test cleanup
+  // removes the cache directory before the body stream is consumed.
+  return new Response(fs.readFileSync(dataPath), {
     headers: {
       'Content-Type': contentType,
       'Cache-Control': BROWSER_CACHE_CONTROL,
@@ -42,12 +66,31 @@ function buildCachedResponse(dataPath: string, contentType: string): Response {
   });
 }
 
+function describeFetchError(err: unknown): Record<string, string> {
+  if (!(err instanceof Error)) {
+    return { errorName: 'UnknownError' };
+  }
+
+  const errorMessage = err.message.replace(/https?:\/\/\S+/gi, (match) =>
+    describeImageUrl(match),
+  );
+
+  return {
+    errorName: err.name || 'Error',
+    errorMessage,
+  };
+}
+
 export async function serveCachedRemoteImage(
   cacheKey: string,
   resolveUrl: () => Promise<string | null>,
+  options: RemoteImageCacheOptions = {},
 ): Promise<Response | null> {
-  fs.mkdirSync(IMAGE_CACHE_DIR, { recursive: true });
-  const { dataPath, metaPath } = getCachePaths(cacheKey);
+  const cacheDir = options.cacheDir ?? IMAGE_CACHE_DIR;
+  const fetchImpl: RemoteImageFetch =
+    options.fetchImpl ?? ((input, init) => fetch(input, init));
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const { dataPath, metaPath } = getCachePaths(cacheDir, cacheKey);
   const meta = readMeta(metaPath);
 
   if (
@@ -61,29 +104,43 @@ export async function serveCachedRemoteImage(
   const url = await resolveUrl();
   if (!url) return null;
 
-  const upstream = await fetch(url);
-  if (!upstream.ok) {
-    logger.warn({ cacheKey, status: upstream.status }, 'Failed to fetch image');
+  try {
+    const upstream = await fetchImpl(url, undefined);
+    if (!upstream.ok) {
+      logger.warn(
+        {
+          cacheKey,
+          status: upstream.status,
+          imageUrl: describeImageUrl(url),
+        },
+        'Failed to fetch image',
+      );
+      return null;
+    }
+
+    const contentType =
+      upstream.headers.get('content-type') || 'application/octet-stream';
+    const bytes = Buffer.from(await upstream.arrayBuffer());
+    fs.writeFileSync(dataPath, bytes);
+    fs.writeFileSync(
+      metaPath,
+      JSON.stringify({
+        contentType,
+        fetchedAt: Date.now(),
+      } satisfies CacheMetadata),
+      'utf-8',
+    );
+
+    return buildCachedResponse(dataPath, contentType);
+  } catch (err) {
+    logger.warn(
+      {
+        cacheKey,
+        imageUrl: describeImageUrl(url),
+        ...describeFetchError(err),
+      },
+      'Failed to fetch image',
+    );
     return null;
   }
-
-  const contentType =
-    upstream.headers.get('content-type') || 'application/octet-stream';
-  const bytes = Buffer.from(await upstream.arrayBuffer());
-  fs.writeFileSync(dataPath, bytes);
-  fs.writeFileSync(
-    metaPath,
-    JSON.stringify({
-      contentType,
-      fetchedAt: Date.now(),
-    } satisfies CacheMetadata),
-    'utf-8',
-  );
-
-  return new Response(bytes, {
-    headers: {
-      'Content-Type': contentType,
-      'Cache-Control': BROWSER_CACHE_CONTROL,
-    },
-  });
 }

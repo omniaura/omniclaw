@@ -1,0 +1,97 @@
+name: Update Claude Agent SDK
+
+on:
+  schedule:
+    # Run daily at 8am UTC (offset from opencode update at 7am)
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Get current version
+        id: current
+        run: |
+          VERSION=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          package = json.loads(Path('container/agent-runner/package.json').read_text())
+          version = package.get('dependencies', {}).get('@anthropic-ai/claude-agent-sdk', '')
+          print(version.lstrip('^') if version else '')
+          PY
+          )
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current: $VERSION"
+
+      - name: Get latest version
+        id: latest
+        run: |
+          VERSION=$(curl -fsSL https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/latest | jq -r '.version')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Latest: $VERSION"
+
+      - name: Check if update needed
+        id: check
+        run: |
+          if [ "${{ steps.current.outputs.version }}" != "${{ steps.latest.outputs.version }}" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check for existing PR
+        id: existing_pr
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          PR=$(gh pr list --repo omniaura/omniclaw --base main --head update/claude-sdk-${{ steps.latest.outputs.version }} --json number --jq '.[0].number // ""')
+          echo "pr=$PR" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply update
+        if: steps.check.outputs.changed == 'true' && steps.existing_pr.outputs.pr == ''
+        run: |
+          sed -i "s|\"@anthropic-ai/claude-agent-sdk\": \"\\^${{ steps.current.outputs.version }}\"|\"@anthropic-ai/claude-agent-sdk\": \"^${{ steps.latest.outputs.version }}\"|" container/agent-runner/package.json
+          cd container/agent-runner
+          bun update @anthropic-ai/claude-agent-sdk
+          cd ../..
+
+      - name: Commit and open PR
+        if: steps.check.outputs.changed == 'true' && steps.existing_pr.outputs.pr == ''
+        run: |
+          BRANCH="update/claude-sdk-${{ steps.latest.outputs.version }}"
+          TITLE="chore(container): bump claude-agent-sdk to ${{ steps.latest.outputs.version }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add container/agent-runner/package.json container/agent-runner/bun.lock
+          git commit -m "$TITLE"
+          git push origin "$BRANCH"
+
+          BODY_FILE=$(mktemp)
+          trap 'rm -f "$BODY_FILE"' EXIT
+          printf '## Claude Agent SDK update\n\n' > "$BODY_FILE"
+          printf -- '- **SDK**: `%s` → `%s` (`@anthropic-ai/claude-agent-sdk`)\n' "${{ steps.current.outputs.version }}" "${{ steps.latest.outputs.version }}" >> "$BODY_FILE"
+          printf '\nMerging will not auto-rebuild the container — run `just update-container` after merge.\n' >> "$BODY_FILE"
+
+          gh pr create \
+            --repo omniaura/omniclaw \
+            --base main \
+            --head "$BRANCH" \
+            --title "$TITLE" \
+            --body-file "$BODY_FILE"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

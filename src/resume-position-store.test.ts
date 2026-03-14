@@ -1,13 +1,21 @@
-import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 
 import { _initTestDatabase } from './db.js';
-import { logger } from './logger.js';
+import { subscribeToLogs, type LogRecord } from './logger.js';
 import {
   createResumePositionStore,
   MemoryResumePositionStore,
   PersistentResumePositionStore,
   type PersistentStateAdapter,
 } from './resume-position-store.js';
+
+function captureLogs(): { records: LogRecord[]; stop: () => void } {
+  const records: LogRecord[] = [];
+  const stop = subscribeToLogs((record) => {
+    records.push(record);
+  });
+  return { records, stop };
+}
 
 describe('MemoryResumePositionStore', () => {
   let store: MemoryResumePositionStore;
@@ -40,19 +48,6 @@ describe('MemoryResumePositionStore', () => {
 });
 
 describe('PersistentResumePositionStore', () => {
-  function captureWarnMessages(): {
-    messages: string[];
-    unsubscribe: () => void;
-  } {
-    const messages: string[] = [];
-    const unsubscribe = logger.subscribe((record) => {
-      if (record.level === 'warn' && typeof record.msg === 'string') {
-        messages.push(record.msg);
-      }
-    });
-    return { messages, unsubscribe };
-  }
-
   it('loads only string resume positions from persisted state', () => {
     const adapter: PersistentStateAdapter = {
       read: <T>() =>
@@ -118,40 +113,48 @@ describe('PersistentResumePositionStore', () => {
   });
 
   it('warns and continues when initial load fails', () => {
-    const { messages, unsubscribe } = captureWarnMessages();
-    const store = new PersistentResumePositionStore({
-      stateAdapter: {
-        read: () => {
-          throw new Error('boom');
+    const { records, stop } = captureLogs();
+
+    try {
+      const store = new PersistentResumePositionStore({
+        stateAdapter: {
+          read: () => {
+            throw new Error('boom');
+          },
+          write: () => {},
         },
-        write: () => {},
-      },
-    });
+      });
 
-    expect(store.getAll()).toEqual({});
-    expect(messages).toEqual(['Failed to load persisted resume positions']);
-
-    unsubscribe();
+      expect(store.getAll()).toEqual({});
+      expect(records).toHaveLength(1);
+      expect(records[0]?.msg).toBe('Failed to load persisted resume positions');
+    } finally {
+      stop();
+    }
   });
 
   it('warns and keeps in-memory state when persisting fails', () => {
-    const { messages, unsubscribe } = captureWarnMessages();
-    const store = new PersistentResumePositionStore({
-      stateAdapter: {
-        read: <T>() => ({}) as T,
-        write: () => {
-          throw new Error('disk full');
+    const { records, stop } = captureLogs();
+
+    try {
+      const store = new PersistentResumePositionStore({
+        stateAdapter: {
+          read: <T>() => ({}) as T,
+          write: () => {
+            throw new Error('disk full');
+          },
         },
-      },
-    });
+      });
 
-    expect(() => {
-      store.set('alpha', '2026-03-03T00:00:00.000Z');
-    }).not.toThrow();
-    expect(store.get('alpha')).toBe('2026-03-03T00:00:00.000Z');
-    expect(messages).toEqual(['Failed to persist resume positions']);
-
-    unsubscribe();
+      expect(() => {
+        store.set('alpha', '2026-03-03T00:00:00.000Z');
+      }).not.toThrow();
+      expect(store.get('alpha')).toBe('2026-03-03T00:00:00.000Z');
+      expect(records).toHaveLength(1);
+      expect(records[0]?.msg).toBe('Failed to persist resume positions');
+    } finally {
+      stop();
+    }
   });
 });
 

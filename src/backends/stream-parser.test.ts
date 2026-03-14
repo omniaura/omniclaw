@@ -18,6 +18,8 @@ import {
 } from './stream-parser.js';
 import type { ContainerOutput } from './types.js';
 
+mock.restore();
+
 function makeOutput(overrides: Partial<ContainerOutput> = {}): ContainerOutput {
   return {
     status: 'success',

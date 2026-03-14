@@ -6,6 +6,7 @@ import type {
 } from '../types.js';
 import type { GroupQueueDetail } from '../group-queue.js';
 import type { IpcEvent } from './ipc-events.js';
+import type { RemoteImageFetch } from './image-cache.js';
 
 /**
  * State provider interface — the web server reads orchestrator state
@@ -80,6 +81,10 @@ export interface WebStateProvider {
     guildId: string,
     botId?: string,
   ): Promise<string | null>;
+  /** Optional per-request remote image fetch override, primarily for tests. */
+  fetchRemoteImage?: RemoteImageFetch;
+  /** Optional per-request cache directory override for remote images. */
+  remoteImageCacheDir?: string;
 }
 
 export interface QueueStats {

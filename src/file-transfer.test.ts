@@ -11,16 +11,6 @@ import type { RegisteredGroup } from './types.js';
 
 // ---- Mocks ----
 
-// Mock the logger to prevent noise
-mock.module('./logger.js', () => ({
-  logger: {
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    debug: () => {},
-  },
-}));
-
 // Create mock backends
 function createMockBackend(name: string): AgentBackend & {
   _files: Map<string, Buffer>;
@@ -71,6 +61,8 @@ mock.module('./backends/index.js', () => ({
 
 // Import after mocks
 import { transferFiles } from './file-transfer.js';
+
+mock.restore();
 
 // ---- Test data ----
 

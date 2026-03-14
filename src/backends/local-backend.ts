@@ -482,6 +482,7 @@ interface ContainerArgsOpts {
   containerName: string;
   isMain: boolean;
   networkMode?: 'full' | 'none';
+  runtime?: string;
 }
 
 /** @internal Exported for testing */
@@ -490,8 +491,9 @@ export function buildContainerArgs({
   containerName,
   isMain,
   networkMode,
+  runtime,
 }: ContainerArgsOpts): string[] {
-  const isDocker = LOCAL_RUNTIME === 'docker';
+  const isDocker = (runtime ?? LOCAL_RUNTIME) === 'docker';
   const args: string[] = [
     'run',
     '-i',

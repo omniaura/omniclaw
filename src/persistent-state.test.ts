@@ -2,23 +2,18 @@ import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
 
 import { _initTestDatabase, setRouterState } from './db.js';
 import * as db from './db.js';
-import { logger } from './logger.js';
+import { subscribeToLogs, type LogRecord } from './logger.js';
 import { readPersistentJson, writePersistentJson } from './persistent-state.js';
 
-describe('persistent-state', () => {
-  function captureWarnMessages(): {
-    messages: string[];
-    unsubscribe: () => void;
-  } {
-    const messages: string[] = [];
-    const unsubscribe = logger.subscribe((record) => {
-      if (record.level === 'warn' && typeof record.msg === 'string') {
-        messages.push(record.msg);
-      }
-    });
-    return { messages, unsubscribe };
-  }
+function captureLogs(): { records: LogRecord[]; stop: () => void } {
+  const records: LogRecord[] = [];
+  const stop = subscribeToLogs((record) => {
+    records.push(record);
+  });
+  return { records, stop };
+}
 
+describe('persistent-state', () => {
   beforeEach(() => {
     _initTestDatabase();
   });
@@ -37,42 +32,52 @@ describe('persistent-state', () => {
   });
 
   it('returns undefined and warns when db read throws', () => {
-    const { messages, unsubscribe } = captureWarnMessages();
+    const { records, stop } = captureLogs();
     const readSpy = spyOn(db, 'getRouterState').mockImplementation(() => {
       throw new Error('read failed');
     });
 
-    const result = readPersistentJson('k2');
+    try {
+      const result = readPersistentJson('k2');
 
-    expect(result).toBeUndefined();
-    expect(messages).toEqual(['Failed to read persistent state']);
-
-    readSpy.mockRestore();
-    unsubscribe();
+      expect(result).toBeUndefined();
+      expect(records).toHaveLength(1);
+      expect(records[0].msg).toBe('Failed to read persistent state');
+    } finally {
+      readSpy.mockRestore();
+      stop();
+    }
   });
 
   it('returns undefined and warns for invalid JSON payload', () => {
-    const { messages, unsubscribe } = captureWarnMessages();
-    setRouterState('k3', '{"broken":');
+    const { records, stop } = captureLogs();
 
-    const result = readPersistentJson('k3');
+    try {
+      setRouterState('k3', '{"broken":');
 
-    expect(result).toBeUndefined();
-    expect(messages).toEqual(['Failed to parse persistent state JSON']);
+      const result = readPersistentJson('k3');
 
-    unsubscribe();
+      expect(result).toBeUndefined();
+      expect(records).toHaveLength(1);
+      expect(records[0].msg).toBe('Failed to parse persistent state JSON');
+    } finally {
+      stop();
+    }
   });
 
   it('swallows write errors and logs a warning', () => {
-    const { messages, unsubscribe } = captureWarnMessages();
+    const { records, stop } = captureLogs();
     const writeSpy = spyOn(db, 'setRouterState').mockImplementation(() => {
       throw new Error('write failed');
     });
 
-    expect(() => writePersistentJson('k4', { ok: false })).not.toThrow();
-    expect(messages).toEqual(['Failed to write persistent state']);
-
-    writeSpy.mockRestore();
-    unsubscribe();
+    try {
+      expect(() => writePersistentJson('k4', { ok: false })).not.toThrow();
+      expect(records).toHaveLength(1);
+      expect(records[0].msg).toBe('Failed to write persistent state');
+    } finally {
+      writeSpy.mockRestore();
+      stop();
+    }
   });
 });
