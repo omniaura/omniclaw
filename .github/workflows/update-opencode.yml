@@ -27,7 +27,7 @@ jobs:
           from pathlib import Path
           import re
 
-          text = Path('container/Dockerfile').read_text()
+          text = Path('container/Dockerfile.base').read_text()
           match = re.search(r'ARG OPENCODE_VERSION=([^\s]+)', text)
           print(match.group(1) if match else '')
           PY
@@ -107,7 +107,7 @@ jobs:
         if: steps.check.outputs.changed == 'true' && steps.existing_pr.outputs.pr == ''
         run: |
           if [ "${{ steps.check.outputs.cli_changed }}" == "true" ]; then
-            sed -i "s/ARG OPENCODE_VERSION=${{ steps.current.outputs.cli }}/ARG OPENCODE_VERSION=${{ steps.latest.outputs.cli }}/" container/Dockerfile
+            sed -i "s/ARG OPENCODE_VERSION=${{ steps.current.outputs.cli }}/ARG OPENCODE_VERSION=${{ steps.latest.outputs.cli }}/" container/Dockerfile.base
           fi
           if [ "${{ steps.check.outputs.sdk_changed }}" == "true" ]; then
             sed -i "s|\"@opencode-ai/sdk\": \"\\^${{ steps.current.outputs.sdk }}\"|\"@opencode-ai/sdk\": \"^${{ steps.latest.outputs.sdk }}\"|" container/agent-runner/package.json
@@ -126,7 +126,7 @@ jobs:
 
           CHANGED_FILES=""
           if [ "${{ steps.check.outputs.cli_changed }}" == "true" ]; then
-            CHANGED_FILES="container/Dockerfile"
+            CHANGED_FILES="container/Dockerfile.base"
           fi
           if [ "${{ steps.check.outputs.sdk_changed }}" == "true" ]; then
             CHANGED_FILES="$CHANGED_FILES container/agent-runner/package.json container/agent-runner/bun.lock"
@@ -140,7 +140,7 @@ jobs:
           trap 'rm -f "$BODY_FILE"' EXIT
           printf '## OpenCode update\n\n' > "$BODY_FILE"
           if [ "${{ steps.check.outputs.cli_changed }}" == "true" ]; then
-            printf -- '- **CLI**: `%s` → `%s` (Dockerfile `OPENCODE_VERSION`)\n' "${{ steps.current.outputs.cli }}" "${{ steps.latest.outputs.cli }}" >> "$BODY_FILE"
+            printf -- '- **CLI**: `%s` → `%s` (`container/Dockerfile.base` `OPENCODE_VERSION`)\n' "${{ steps.current.outputs.cli }}" "${{ steps.latest.outputs.cli }}" >> "$BODY_FILE"
           fi
           if [ "${{ steps.check.outputs.sdk_changed }}" == "true" ]; then
             printf -- '- **SDK**: `%s` → `%s` (`@opencode-ai/sdk`)\n' "${{ steps.current.outputs.sdk }}" "${{ steps.latest.outputs.sdk }}" >> "$BODY_FILE"
