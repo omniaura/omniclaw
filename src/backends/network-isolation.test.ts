@@ -1,4 +1,4 @@
-import { describe, it, expect, mock, beforeEach } from 'bun:test';
+import { describe, it, expect } from 'bun:test';
 
 /**
  * Tests for network isolation in container args.
@@ -8,55 +8,17 @@ import { describe, it, expect, mock, beforeEach } from 'bun:test';
  * WebFetch/WebSearch. Per-group override via containerConfig.networkMode.
  */
 
-// Mock config module with all required exports
-const mockConfig = {
-  CONTAINER_IMAGE: 'test-image:latest',
-  CONTAINER_MEMORY: '4096m',
-  CONTAINER_TIMEOUT: 300_000,
-  IDLE_TIMEOUT: 30_000,
-  LOCAL_RUNTIME: 'docker',
-  TIMEZONE: 'America/Los_Angeles',
-  CONTAINER_MAX_OUTPUT_SIZE: 10_000_000,
-  CONTAINER_STARTUP_TIMEOUT: 30_000,
-  DATA_DIR: '/tmp/test-data',
-  GROUPS_DIR: '/tmp/test-data/groups',
-  STORE_DIR: '/tmp/test-data/store',
-  MAIN_GROUP_FOLDER: 'main',
-  MOUNT_ALLOWLIST_PATH: '/tmp/test-data/mount-allowlist.json',
-  ASSISTANT_NAME: 'Omni',
-  TRIGGER_PATTERN: /^@Omni\b/i,
-  POLL_INTERVAL: 2000,
-  SCHEDULER_POLL_INTERVAL: 60000,
-  IPC_POLL_INTERVAL: 1000,
-  SESSION_MAX_AGE: 14_400_000,
-  MAX_CONCURRENT_CONTAINERS: 8,
-  MAX_TASK_CONTAINERS: 7,
-  DISCORD_BOT_TOKEN: '',
-  TELEGRAM_BOT_TOKEN: '',
-  SLACK_BOT_TOKEN: '',
-  SLACK_APP_TOKEN: '',
-  ANTHROPIC_MODEL: undefined,
-  escapeRegex: (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-  buildTriggerPattern: () => /^@Omni\b/i,
-};
-
-mock.module('../config.js', () => mockConfig);
-
-// Import after mocking
 const { buildContainerArgs } = await import('./local-backend.js');
 
 mock.restore();
 
 describe('buildContainerArgs network isolation', () => {
-  beforeEach(() => {
-    mockConfig.LOCAL_RUNTIME = 'docker';
-  });
-
   it('non-main containers get --network none by default', () => {
     const args = buildContainerArgs({
       mounts: [],
       containerName: 'test-container',
       isMain: false,
+      runtime: 'docker',
     });
     expect(args).toContain('--network');
     const networkIdx = args.indexOf('--network');
@@ -68,6 +30,7 @@ describe('buildContainerArgs network isolation', () => {
       mounts: [],
       containerName: 'test-container',
       isMain: true,
+      runtime: 'docker',
     });
     expect(args).not.toContain('--network');
   });
@@ -78,6 +41,7 @@ describe('buildContainerArgs network isolation', () => {
       containerName: 'test-container',
       isMain: false,
       networkMode: 'full',
+      runtime: 'docker',
     });
     expect(args).not.toContain('--network');
   });
@@ -88,6 +52,7 @@ describe('buildContainerArgs network isolation', () => {
       containerName: 'test-container',
       isMain: true,
       networkMode: 'none',
+      runtime: 'docker',
     });
     expect(args).toContain('--network');
     const networkIdx = args.indexOf('--network');
@@ -99,6 +64,7 @@ describe('buildContainerArgs network isolation', () => {
       mounts: [],
       containerName: 'test-container',
       isMain: false,
+      runtime: 'docker',
     });
     expect(args).toContain('--pids-limit');
     const pidsIdx = args.indexOf('--pids-limit');

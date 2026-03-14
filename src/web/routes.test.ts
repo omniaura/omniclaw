@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -9,7 +10,7 @@ import type {
   ScheduledTask,
   TaskRunLog,
 } from '../types.js';
-import { handleRequest } from './routes.js';
+import { handleRequest, resetDiscoveryContextForTests } from './routes.js';
 import type { WebStateProvider } from './types.js';
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
@@ -112,15 +113,29 @@ function makeState(
   };
 }
 
-const realFetch = globalThis.fetch;
 const originalDateCtor = Date;
 const originalRandom = Math.random;
 
-function clearImageCache(): void {
-  fs.rmSync(path.join(DATA_DIR, 'image-cache'), {
+function clearImageCache(dir: string): void {
+  fs.rmSync(dir, {
     recursive: true,
     force: true,
   });
+}
+
+async function assertOkImageResponse(
+  response: Response,
+  expectedBody: string,
+  expectedCacheControl = 'private, max-age=86400',
+): Promise<void> {
+  const body = await response.text();
+  const cacheControl = response.headers.get('cache-control');
+  if (response.status !== 200 || cacheControl !== expectedCacheControl) {
+    throw new Error(
+      `Expected 200 image response with ${expectedCacheControl}, got ${response.status} with ${cacheControl}: ${body}`,
+    );
+  }
+  expect(body).toBe(expectedBody);
 }
 
 async function jsonBody(response: Response): Promise<unknown> {
@@ -135,95 +150,123 @@ async function handle(
 }
 
 beforeEach(() => {
-  globalThis.fetch = realFetch;
-  clearImageCache();
+  resetDiscoveryContextForTests();
 });
 
 afterEach(() => {
-  globalThis.fetch = realFetch;
   globalThis.Date = originalDateCtor;
   Math.random = originalRandom;
-  clearImageCache();
+  resetDiscoveryContextForTests();
 });
 
 describe('handleRequest avatar image proxy', () => {
   it('proxies remote avatar bytes for an agent', async () => {
-    globalThis.fetch = (async (input: string | URL | Request) => {
-      expect(String(input)).toBe('https://example.test/avatar.png');
-      return new Response('avatar-bytes', {
-        status: 200,
-        headers: { 'Content-Type': 'image/png' },
-      });
-    }) as typeof fetch;
-
-    const res = await handleRequest(
-      new Request('http://localhost/api/agents/test-agent/avatar/image'),
-      makeState(
-        makeAgent({
-          avatarUrl: 'https://example.test/avatar.png',
-          avatarSource: 'telegram',
-        }),
-      ),
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-routes-test',
+      randomUUID(),
     );
+    clearImageCache(testImageCacheDir);
 
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toContain('image/png');
-    expect(res.headers.get('cache-control')).toBe('private, max-age=86400');
-    expect(await res.text()).toBe('avatar-bytes');
+    try {
+      const res = await handleRequest(
+        new Request('http://localhost/api/agents/test-agent/avatar/image'),
+        makeState({
+          remoteImageCacheDir: testImageCacheDir,
+          fetchRemoteImage: async (input: string | URL | Request) => {
+            expect(String(input)).toBe('https://example.test/avatar.png');
+            return new Response('avatar-bytes', {
+              status: 200,
+              headers: { 'Content-Type': 'image/png' },
+            });
+          },
+          getAgents: () => ({
+            'test-agent': makeAgent({
+              avatarUrl: 'https://example.test/avatar.png',
+              avatarSource: 'telegram',
+            }),
+          }),
+        }),
+      );
+
+      expect(res.headers.get('content-type')).toContain('image/png');
+      await assertOkImageResponse(res, 'avatar-bytes');
+    } finally {
+      clearImageCache(testImageCacheDir);
+    }
   });
 
   it('proxies telegram DM icons through the chat icon route', async () => {
-    globalThis.fetch = (async (input: string | URL | Request) => {
-      expect(String(input)).toBe('https://example.test/tg-user.png');
-      return new Response('tg-user', {
-        status: 200,
-        headers: { 'Content-Type': 'image/png' },
-      });
-    }) as typeof fetch;
-
-    const res = await handleRequest(
-      new Request(
-        'http://localhost/api/chats/tg%3A8401921193%3A1991174535/icon',
-      ),
-      {
-        ...makeState(makeAgent()),
-        resolveChatImage: async (jid) => {
-          expect(jid).toBe('tg:8401921193:1991174535');
-          return 'https://example.test/tg-user.png';
-        },
-      },
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-routes-test',
+      randomUUID(),
     );
+    clearImageCache(testImageCacheDir);
 
-    expect(res.status).toBe(200);
-    expect(res.headers.get('cache-control')).toBe('private, max-age=86400');
-    expect(await res.text()).toBe('tg-user');
+    try {
+      const res = await handleRequest(
+        new Request(
+          'http://localhost/api/chats/tg%3A8401921193%3A1991174535/icon',
+        ),
+        {
+          ...makeState(makeAgent()),
+          remoteImageCacheDir: testImageCacheDir,
+          fetchRemoteImage: async (input: string | URL | Request) => {
+            expect(String(input)).toBe('https://example.test/tg-user.png');
+            return new Response('tg-user', {
+              status: 200,
+              headers: { 'Content-Type': 'image/png' },
+            });
+          },
+          resolveChatImage: async (jid) => {
+            expect(jid).toBe('tg:8401921193:1991174535');
+            return 'https://example.test/tg-user.png';
+          },
+        },
+      );
+
+      await assertOkImageResponse(res, 'tg-user');
+    } finally {
+      clearImageCache(testImageCacheDir);
+    }
   });
 
   it('proxies discord guild icons through the guild icon route', async () => {
-    globalThis.fetch = (async (input: string | URL | Request) => {
-      expect(String(input)).toBe('https://example.test/discord-guild.png');
-      return new Response('guild-icon', {
-        status: 200,
-        headers: { 'Content-Type': 'image/png' },
-      });
-    }) as typeof fetch;
-
-    const res = await handleRequest(
-      new Request(
-        'http://localhost/api/discord/guilds/753336633083953213/icon?botId=OCPEYTON',
-      ),
-      {
-        ...makeState(makeAgent()),
-        resolveDiscordGuildImage: async (guildId, botId) => {
-          expect(guildId).toBe('753336633083953213');
-          expect(botId).toBe('OCPEYTON');
-          return 'https://example.test/discord-guild.png';
-        },
-      },
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-routes-test',
+      randomUUID(),
     );
+    clearImageCache(testImageCacheDir);
 
-    expect(res.status).toBe(200);
-    expect(await res.text()).toBe('guild-icon');
+    try {
+      const res = await handleRequest(
+        new Request(
+          'http://localhost/api/discord/guilds/753336633083953213/icon?botId=OCPEYTON',
+        ),
+        {
+          ...makeState(makeAgent()),
+          remoteImageCacheDir: testImageCacheDir,
+          fetchRemoteImage: async (input: string | URL | Request) => {
+            expect(String(input)).toBe('https://example.test/discord-guild.png');
+            return new Response('guild-icon', {
+              status: 200,
+              headers: { 'Content-Type': 'image/png' },
+            });
+          },
+          resolveDiscordGuildImage: async (guildId, botId) => {
+            expect(guildId).toBe('753336633083953213');
+            expect(botId).toBe('OCPEYTON');
+            return 'https://example.test/discord-guild.png';
+          },
+        },
+      );
+
+      await assertOkImageResponse(res, 'guild-icon');
+    } finally {
+      clearImageCache(testImageCacheDir);
+    }
   });
 });
 

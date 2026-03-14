@@ -100,11 +100,31 @@ export class GroupQueue {
     null;
   private shuttingDown = false;
   private effectQueue: MessageQueueService | null = null;
+  private readonly dataDir: string;
+  private readonly maxActiveContainers: number;
+  private readonly maxIdleContainers: number;
+  private readonly maxTaskContainers: number;
+  private readonly fsImpl: Pick<typeof fs, 'mkdirSync' | 'writeFileSync' | 'renameSync'>;
 
   // JID→folder mapping: multiple JIDs can share one folder (agent)
   private jidToFolder = new Map<string, string>();
 
-  constructor() {
+  constructor(
+    options: {
+      dataDir?: string;
+      maxActiveContainers?: number;
+      maxIdleContainers?: number;
+      maxTaskContainers?: number;
+      fsImpl?: Pick<typeof fs, 'mkdirSync' | 'writeFileSync' | 'renameSync'>;
+    } = {},
+  ) {
+    this.dataDir = options.dataDir ?? DATA_DIR;
+    this.maxActiveContainers =
+      options.maxActiveContainers ?? MAX_ACTIVE_CONTAINERS;
+    this.maxIdleContainers = options.maxIdleContainers ?? MAX_IDLE_CONTAINERS;
+    this.maxTaskContainers = options.maxTaskContainers ?? MAX_TASK_CONTAINERS;
+    this.fsImpl = options.fsImpl ?? fs;
+
     // Initialize Effect-based message queue
     Effect.runPromise(
       makeMessageQueue().pipe(Effect.provide(OmniClawLoggerLayer)),
@@ -187,7 +207,7 @@ export class GroupQueue {
     }
 
     const processingCount = this.activeCount - this.idleCount;
-    if (processingCount >= MAX_ACTIVE_CONTAINERS) {
+    if (processingCount >= this.maxActiveContainers) {
       // Proactively preempt the oldest idle container to free a slot sooner.
       if (this.idleGroups.length > 0) {
         const oldest = this.idleGroups[0];
@@ -253,8 +273,8 @@ export class GroupQueue {
 
     // Check both global limit and task-specific limit
     if (
-      this.activeCount - this.idleCount >= MAX_ACTIVE_CONTAINERS ||
-      this.activeTaskCount >= MAX_TASK_CONTAINERS
+      this.activeCount - this.idleCount >= this.maxActiveContainers ||
+      this.activeTaskCount >= this.maxTaskContainers
     ) {
       state.pendingTasks.push({ id: taskId, groupJid, fn, promptPreview });
       // If the message container is idle, preempt it to free a slot
@@ -373,10 +393,10 @@ export class GroupQueue {
     }
 
     // Over idle limit? Preempt the oldest idle container.
-    if (this.idleCount > MAX_IDLE_CONTAINERS) {
+    if (this.idleCount > this.maxIdleContainers) {
       const oldest = this.idleGroups.shift()!;
       logger.info(
-        { oldest, idleCount: this.idleCount, maxIdle: MAX_IDLE_CONTAINERS },
+        { oldest, idleCount: this.idleCount, maxIdle: this.maxIdleContainers },
         'Idle limit exceeded, preempting oldest idle container',
       );
       this._closeIdleContainer(oldest);
@@ -453,21 +473,21 @@ export class GroupQueue {
 
     // Fallback: direct local filesystem write
     const inputDir = path.join(
-      DATA_DIR,
+      this.dataDir,
       'ipc',
       state.messageGroupFolder,
       'input',
     );
     try {
-      fs.mkdirSync(inputDir, { recursive: true });
+      this.fsImpl.mkdirSync(inputDir, { recursive: true });
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
       const filepath = path.join(inputDir, filename);
       const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(
+      this.fsImpl.writeFileSync(
         tempPath,
         JSON.stringify({ type: 'message', text, chatJid: channelJid }),
       );
-      fs.renameSync(tempPath, filepath);
+      this.fsImpl.renameSync(tempPath, filepath);
       return true;
     } catch {
       return false;
@@ -498,10 +518,10 @@ export class GroupQueue {
 
     // Fallback: direct local filesystem write
     const inputSubdir = lane === 'task' ? 'input-task' : 'input';
-    const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, inputSubdir);
+    const inputDir = path.join(this.dataDir, 'ipc', groupFolder, inputSubdir);
     try {
-      fs.mkdirSync(inputDir, { recursive: true });
-      fs.writeFileSync(path.join(inputDir, '_close'), '');
+      this.fsImpl.mkdirSync(inputDir, { recursive: true });
+      this.fsImpl.writeFileSync(path.join(inputDir, '_close'), '');
     } catch {
       // ignore
     }
@@ -653,8 +673,8 @@ export class GroupQueue {
     if (state.pendingTasks.length > 0) {
       // Check task concurrency limits before starting next task
       if (
-        this.activeCount - this.idleCount < MAX_ACTIVE_CONTAINERS &&
-        this.activeTaskCount < MAX_TASK_CONTAINERS
+        this.activeCount - this.idleCount < this.maxActiveContainers &&
+        this.activeTaskCount < this.maxTaskContainers
       ) {
         const task = state.pendingTasks.shift()!;
         this.runTask(groupJid, task).catch((err) =>
@@ -682,7 +702,7 @@ export class GroupQueue {
   private drainWaitingMessages(): void {
     while (
       this.waitingMessageGroups.length > 0 &&
-      this.activeCount - this.idleCount < MAX_ACTIVE_CONTAINERS
+      this.activeCount - this.idleCount < this.maxActiveContainers
     ) {
       const nextJid = this.waitingMessageGroups.shift()!;
       const state = this.getGroup(nextJid);
@@ -702,8 +722,8 @@ export class GroupQueue {
   private drainWaitingTasks(): void {
     while (
       this.waitingTaskGroups.length > 0 &&
-      this.activeCount - this.idleCount < MAX_ACTIVE_CONTAINERS &&
-      this.activeTaskCount < MAX_TASK_CONTAINERS
+      this.activeCount - this.idleCount < this.maxActiveContainers &&
+      this.activeTaskCount < this.maxTaskContainers
     ) {
       const nextJid = this.waitingTaskGroups.shift()!;
       const state = this.getGroup(nextJid);
@@ -741,8 +761,8 @@ export class GroupQueue {
     return {
       activeContainers: this.activeCount,
       idleContainers: this.idleCount,
-      maxActive: MAX_ACTIVE_CONTAINERS,
-      maxIdle: MAX_IDLE_CONTAINERS,
+      maxActive: this.maxActiveContainers,
+      maxIdle: this.maxIdleContainers,
     };
   }
 

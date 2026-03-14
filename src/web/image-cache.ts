@@ -14,6 +14,16 @@ interface CacheMetadata {
   fetchedAt: number;
 }
 
+export type RemoteImageFetch = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>;
+
+export interface RemoteImageCacheOptions {
+  cacheDir?: string;
+  fetchImpl?: RemoteImageFetch;
+}
+
 export function describeImageUrl(url: string): string {
   try {
     const parsed = new URL(url);
@@ -23,14 +33,17 @@ export function describeImageUrl(url: string): string {
   }
 }
 
-function getCachePaths(cacheKey: string): {
+function getCachePaths(
+  cacheDir: string,
+  cacheKey: string,
+): {
   dataPath: string;
   metaPath: string;
 } {
   const hash = createHash('sha256').update(cacheKey).digest('hex');
   return {
-    dataPath: path.join(IMAGE_CACHE_DIR, `${hash}.bin`),
-    metaPath: path.join(IMAGE_CACHE_DIR, `${hash}.json`),
+    dataPath: path.join(cacheDir, `${hash}.bin`),
+    metaPath: path.join(cacheDir, `${hash}.json`),
   };
 }
 
@@ -43,7 +56,9 @@ function readMeta(metaPath: string): CacheMetadata | null {
 }
 
 function buildCachedResponse(dataPath: string, contentType: string): Response {
-  return new Response(Bun.file(dataPath), {
+  // Read eagerly so the response body remains valid even if later test cleanup
+  // removes the cache directory before the body stream is consumed.
+  return new Response(fs.readFileSync(dataPath), {
     headers: {
       'Content-Type': contentType,
       'Cache-Control': BROWSER_CACHE_CONTROL,
@@ -69,9 +84,13 @@ function describeFetchError(err: unknown): Record<string, string> {
 export async function serveCachedRemoteImage(
   cacheKey: string,
   resolveUrl: () => Promise<string | null>,
+  options: RemoteImageCacheOptions = {},
 ): Promise<Response | null> {
-  fs.mkdirSync(IMAGE_CACHE_DIR, { recursive: true });
-  const { dataPath, metaPath } = getCachePaths(cacheKey);
+  const cacheDir = options.cacheDir ?? IMAGE_CACHE_DIR;
+  const fetchImpl: RemoteImageFetch =
+    options.fetchImpl ?? ((input, init) => fetch(input, init));
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const { dataPath, metaPath } = getCachePaths(cacheDir, cacheKey);
   const meta = readMeta(metaPath);
 
   if (
@@ -86,7 +105,7 @@ export async function serveCachedRemoteImage(
   if (!url) return null;
 
   try {
-    const upstream = await fetch(url);
+    const upstream = await fetchImpl(url, undefined);
     if (!upstream.ok) {
       logger.warn(
         {

@@ -1,7 +1,23 @@
+import { randomUUID } from 'crypto';
+import fs from 'fs';
+import path from 'path';
+
 import { describe, expect, it } from 'bun:test';
 
+import { DATA_DIR } from '../config.js';
 import { logger } from '../logger.js';
-import { describeImageUrl, serveCachedRemoteImage } from './image-cache.js';
+import {
+  describeImageUrl,
+  type RemoteImageFetch,
+  serveCachedRemoteImage,
+} from './image-cache.js';
+
+function clearTestImageCache(cacheDir: string): void {
+  fs.rmSync(cacheDir, {
+    recursive: true,
+    force: true,
+  });
+}
 
 describe('describeImageUrl', () => {
   it('drops query strings and fragments from absolute urls', () => {
@@ -17,15 +33,15 @@ describe('describeImageUrl', () => {
 
 describe('serveCachedRemoteImage', () => {
   it('sanitizes embedded urls in fetch error messages', async () => {
-    const originalFetch = globalThis.fetch;
     const originalWarn = logger.warn;
     const records: Array<Record<string, unknown>> = [];
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
 
-    globalThis.fetch = (async () => {
-      throw new Error(
-        'request to https://example.test/avatar.png?token=secret failed',
-      );
-    }) as unknown as typeof fetch;
+    clearTestImageCache(testImageCacheDir);
     logger.warn = ((fieldsOrMsg: Record<string, unknown> | string) => {
       if (typeof fieldsOrMsg !== 'string') {
         records.push(fieldsOrMsg);
@@ -36,6 +52,14 @@ describe('serveCachedRemoteImage', () => {
       const response = await serveCachedRemoteImage(
         'cache-key',
         async () => 'https://example.test/avatar.png?token=secret',
+        {
+          cacheDir: testImageCacheDir,
+          fetchImpl: (async () => {
+            throw new Error(
+              'request to https://example.test/avatar.png?token=secret failed',
+            );
+          }) as RemoteImageFetch,
+        },
       );
 
       expect(response).toBeNull();
@@ -45,7 +69,7 @@ describe('serveCachedRemoteImage', () => {
         'request to https://example.test/avatar.png failed',
       );
     } finally {
-      globalThis.fetch = originalFetch;
+      clearTestImageCache(testImageCacheDir);
       logger.warn = originalWarn;
     }
   });

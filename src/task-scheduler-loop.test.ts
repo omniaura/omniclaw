@@ -1,98 +1,105 @@
-import { describe, it, expect, mock } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 
 import type { ContainerOutput } from './backends/types.js';
 import type { Logger } from './logger.js';
 import type { ScheduledTask } from './types.js';
 
-const dueTasks: ScheduledTask[] = [
-  {
-    id: 'task-success',
-    group_folder: 'main',
-    chat_jid: 'main@g.us',
-    prompt: 'x'.repeat(140),
-    schedule_type: 'interval',
-    schedule_value: '60000',
-    context_mode: 'group',
-    next_run: '2026-01-01T00:00:00.000Z',
-    last_run: null,
-    last_result: null,
-    status: 'active',
-    created_at: '2026-01-01T00:00:00.000Z',
-  },
-  {
-    id: 'task-missing-group',
-    group_folder: 'ghost',
-    chat_jid: 'ghost@g.us',
-    prompt: 'missing',
-    schedule_type: 'once',
-    schedule_value: '2026-01-01T00:00:00.000Z',
-    context_mode: 'isolated',
-    next_run: '2026-01-01T00:00:00.000Z',
-    last_run: null,
-    last_result: null,
-    status: 'active',
-    created_at: '2026-01-01T00:00:00.000Z',
-  },
-];
+import {
+  resetSchedulerLoopForTests,
+  startSchedulerLoop,
+} from './task-scheduler.js';
 
-const taskById = new Map(dueTasks.map((t) => [t.id, t]));
-
-const getDueTasksMock = mock(() => dueTasks);
-const getTaskByIdMock = mock((taskId: string) => taskById.get(taskId) ?? null);
-const getAllTasksMock = mock(() => dueTasks);
-const advanceTaskNextRunMock = mock(() => {});
-const updateTaskAfterRunMock = mock(() => {});
-const logTaskRunMock = mock(() => {});
-const writeTasksSnapshotMock = mock(() => {});
-const calculateNextRunMock = mock((scheduleType: string) =>
-  scheduleType === 'once' ? null : '2026-01-01T01:00:00.000Z',
-);
-
-let lastBackendInput: Record<string, unknown> | undefined;
-const resolveBackendMock = mock(() => ({
-  runAgent: async (
-    _group: unknown,
-    input: Record<string, unknown>,
-    _onProcess: unknown,
-    onOutput?: (output: ContainerOutput) => Promise<void>,
-  ) => {
-    lastBackendInput = input;
-    if (onOutput) {
-      await onOutput({ status: 'success', result: null, intermediate: true });
-      await onOutput({ status: 'success', result: 'stream result' });
-    }
-    return { status: 'success', result: 'final result' } as ContainerOutput;
-  },
-}));
-
-const childLoggerMock: Logger = {
-  level: 'debug',
-  trace: mock(() => {}),
-  info: mock(() => {}),
-  debug: mock(() => {}),
-  warn: mock(() => {}),
-  error: mock(() => {}),
-  fatal: mock(() => {}),
-  child: mock(() => childLoggerMock),
-  subscribe: mock(() => () => {}),
-};
-
-const loggerMock: Logger = {
-  level: 'debug',
-  trace: mock(() => {}),
-  info: mock(() => {}),
-  debug: mock(() => {}),
-  warn: mock(() => {}),
-  error: mock(() => {}),
-  fatal: mock(() => {}),
-  child: mock(() => childLoggerMock),
-  subscribe: mock(() => () => {}),
-};
-
-import { startSchedulerLoop } from './task-scheduler.js';
+afterEach(() => {
+  resetSchedulerLoopForTests();
+});
 
 describe('startSchedulerLoop', () => {
   it('runs due tasks once, executes queued callbacks, and blocks duplicate loop startup', async () => {
+    const dueTasks: ScheduledTask[] = [
+      {
+        id: 'task-success',
+        group_folder: 'main',
+        chat_jid: 'main@g.us',
+        prompt: 'x'.repeat(140),
+        schedule_type: 'interval',
+        schedule_value: '60000',
+        context_mode: 'group',
+        next_run: '2026-01-01T00:00:00.000Z',
+        last_run: null,
+        last_result: null,
+        status: 'active',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'task-missing-group',
+        group_folder: 'ghost',
+        chat_jid: 'ghost@g.us',
+        prompt: 'missing',
+        schedule_type: 'once',
+        schedule_value: '2026-01-01T00:00:00.000Z',
+        context_mode: 'isolated',
+        next_run: '2026-01-01T00:00:00.000Z',
+        last_run: null,
+        last_result: null,
+        status: 'active',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+    const taskById = new Map(dueTasks.map((task) => [task.id, task]));
+    const getDueTasksMock = mock(() => dueTasks);
+    const getTaskByIdMock = mock(
+      (taskId: string) => taskById.get(taskId) ?? null,
+    );
+    const getAllTasksMock = mock(() => dueTasks);
+    const advanceTaskNextRunMock = mock(() => {});
+    const updateTaskAfterRunMock = mock(() => {});
+    const logTaskRunMock = mock(() => {});
+    const writeTasksSnapshotMock = mock(() => {});
+    const calculateNextRunMock = mock((scheduleType: string) =>
+      scheduleType === 'once' ? null : '2026-01-01T01:00:00.000Z',
+    );
+    let lastBackendInput: Record<string, unknown> | undefined;
+    const resolveBackendMock = mock(() => ({
+      runAgent: async (
+        _group: unknown,
+        input: Record<string, unknown>,
+        _onProcess: unknown,
+        onOutput?: (output: ContainerOutput) => Promise<void>,
+      ) => {
+        lastBackendInput = input;
+        if (onOutput) {
+          await onOutput({
+            status: 'success',
+            result: null,
+            intermediate: true,
+          });
+          await onOutput({ status: 'success', result: 'stream result' });
+        }
+        return { status: 'success', result: 'final result' } as ContainerOutput;
+      },
+    }));
+    const childLoggerMock: Logger = {
+      level: 'debug',
+      trace: mock(() => {}),
+      info: mock(() => {}),
+      debug: mock(() => {}),
+      warn: mock(() => {}),
+      error: mock(() => {}),
+      fatal: mock(() => {}),
+      child: mock(() => childLoggerMock),
+      subscribe: mock(() => () => {}),
+    };
+    const loggerMock: Logger = {
+      level: 'debug',
+      trace: mock(() => {}),
+      info: mock(() => {}),
+      debug: mock(() => {}),
+      warn: mock(() => {}),
+      error: mock(() => {}),
+      fatal: mock(() => {}),
+      child: mock(() => childLoggerMock),
+      subscribe: mock(() => () => {}),
+    };
     const sentMessages: Array<{ jid: string; text: string }> = [];
     const enqueued: Array<{ taskId: string; promptPreview: string }> = [];
     const runPromises: Array<Promise<void>> = [];
@@ -199,9 +206,7 @@ describe('startSchedulerLoop', () => {
 
       expect(resolveBackendMock).toHaveBeenCalledTimes(1);
       expect(writeTasksSnapshotMock).toHaveBeenCalledTimes(1);
-      expect(sentMessages).toEqual([
-        { jid: 'main@g.us', text: 'stream result' },
-      ]);
+      expect(sentMessages).toEqual([{ jid: 'main@g.us', text: 'stream result' }]);
       expect(lastBackendInput?.resumeAt).toBe('resume-marker');
       expect(lastBackendInput?.isScheduledTask).toBe(true);
       expect(lastBackendInput?.chatJid).toBe('main@g.us');
