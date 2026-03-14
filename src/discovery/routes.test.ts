@@ -171,6 +171,54 @@ describe('handleDiscoveryRequest', () => {
     });
   });
 
+  it('normalizes IPv4-mapped IPv6 socket addresses before storing the callback host', async () => {
+    const createPairRequest = mock(() => ({
+      id: 'req-3',
+      fromInstanceId: 'remote-instance',
+      fromName: 'Remote',
+      fromHost: '10.0.0.22',
+      fromPort: 6001,
+      callbackToken: 'callback-token',
+      status: 'pending',
+      sharedSecret: null,
+      createdAt: new Date().toISOString(),
+      resolvedAt: null,
+    }));
+    const req = withSocketAddress(
+      new Request('http://localhost/api/discovery/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instanceId: 'remote-instance',
+          name: 'Remote',
+          host: '169.254.169.254',
+          port: 6001,
+          callbackToken: 'callback-token',
+          keyAgreementPublicKey: 'test-public-key',
+        }),
+      }),
+      '::ffff:10.0.0.22',
+    );
+
+    const ctx = makeContext({
+      trustStore: {
+        isPeerTrusted: () => false,
+        createPairRequest,
+      } as any,
+    });
+
+    const res = await handleDiscoveryRequest(req, new URL(req.url), ctx);
+    expect(res).not.toBeNull();
+    expect(createPairRequest).toHaveBeenCalledWith(
+      'remote-instance',
+      'Remote',
+      '10.0.0.22',
+      6001,
+      'callback-token',
+      'test-public-key',
+    );
+  });
+
   it('rejects pair requests when the requester address is unavailable', async () => {
     const req = new Request('http://localhost/api/discovery/pair', {
       method: 'POST',
@@ -198,32 +246,34 @@ describe('handleDiscoveryRequest', () => {
   });
 
   it('rejects pair requests with invalid callback ports', async () => {
-    const req = withSocketAddress(
-      new Request('http://localhost/api/discovery/pair', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          instanceId: 'remote-instance',
-          name: 'Remote',
-          host: '127.0.0.1',
-          port: 70000,
-          callbackToken: 'callback-token',
-          keyAgreementPublicKey: 'test-public-key',
+    for (const port of [70000, 0, -1]) {
+      const req = withSocketAddress(
+        new Request('http://localhost/api/discovery/pair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            instanceId: 'remote-instance',
+            name: 'Remote',
+            host: '127.0.0.1',
+            port,
+            callbackToken: 'callback-token',
+            keyAgreementPublicKey: 'test-public-key',
+          }),
         }),
-      }),
-      '10.0.0.22',
-    );
+        '10.0.0.22',
+      );
 
-    const res = await handleDiscoveryRequest(
-      req,
-      new URL(req.url),
-      makeContext(),
-    );
-    expect(res).not.toBeNull();
-    expect((await (res as Response).json()) as { error: string }).toEqual({
-      error: 'Invalid port',
-    });
-    expect((res as Response).status).toBe(400);
+      const res = await handleDiscoveryRequest(
+        req,
+        new URL(req.url),
+        makeContext(),
+      );
+      expect(res).not.toBeNull();
+      expect((await (res as Response).json()) as { error: string }).toEqual({
+        error: 'Invalid port',
+      });
+      expect((res as Response).status).toBe(400);
+    }
   });
 });
 

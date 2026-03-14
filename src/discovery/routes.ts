@@ -83,7 +83,21 @@ function getClientIp(req: Request): string {
   // We avoid trusting X-Forwarded-For which is user-controllable.
   const socket = (req as unknown as { socket?: { remoteAddress?: string } })
     .socket;
-  return socket?.remoteAddress || 'unknown';
+  return normalizeSocketAddress(socket?.remoteAddress);
+}
+
+function normalizeSocketAddress(address?: string): string {
+  if (!address) return 'unknown';
+
+  const ipv4MappedPrefix = '::ffff:';
+  if (address.startsWith(ipv4MappedPrefix)) {
+    const ipv4 = address.slice(ipv4MappedPrefix.length);
+    if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ipv4)) {
+      return ipv4;
+    }
+  }
+
+  return address;
 }
 
 function isValidPeerPort(port: unknown): port is number {
