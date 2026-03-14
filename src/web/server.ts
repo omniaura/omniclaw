@@ -111,7 +111,7 @@ export function startWebServer(
       !isTrustedLanDiscoveryAdminRequest(
         req,
         url.pathname,
-        url.hostname,
+        bindHostname,
         trustLanDiscoveryAdmin,
       )
     ) {
@@ -537,10 +537,10 @@ function isUnauthDiscoveryRoute(pathname: string): boolean {
   );
 }
 
-function isTrustedLanDiscoveryAdminRequest(
+export function isTrustedLanDiscoveryAdminRequest(
   req: Request,
   pathname: string,
-  hostname: string,
+  listenerHostname: string | undefined,
   enabled: boolean | undefined,
 ): boolean {
   if (!enabled || !pathname.startsWith('/api/discovery/')) return false;
@@ -549,12 +549,12 @@ function isTrustedLanDiscoveryAdminRequest(
   const remoteAddress = (
     req as unknown as { socket?: { remoteAddress?: string } }
   ).socket?.remoteAddress;
-  const hostHeader = req.headers.get('host')?.split(':', 1)[0];
 
+  // Only trust the actual socket peer or the configured listener host. URL/Host
+  // are attacker-controlled and must not influence auth decisions.
   return (
     isLoopbackOrPrivateAddress(remoteAddress) ||
-    isLoopbackOrPrivateAddress(hostname) ||
-    isLoopbackOrPrivateAddress(hostHeader)
+    isLoopbackOrPrivateAddress(listenerHostname)
   );
 }
 
