@@ -1759,6 +1759,30 @@ interface SubscriptionSelection {
   selectedByTrigger: boolean;
 }
 
+/**
+ * Check if a subscription is targeted by any of the given messages.
+ * Returns true if messages contain @allagents, a direct bot mention,
+ * or the subscription's trigger pattern.
+ */
+function messagesMatchSubscription(
+  sub: ChannelSubscription,
+  messages: NewMessage[],
+): boolean {
+  if (messages.some((m) => /@allagents/i.test(m.content))) return true;
+
+  const mentionPatterns = getMentionPatterns(sub);
+  if (mentionPatterns.length > 0) {
+    const hasMention = messages.some((m) => {
+      const text = m.content.toLowerCase();
+      return mentionPatterns.some((p) => p.test(text));
+    });
+    if (hasMention) return true;
+  }
+
+  const triggerPattern = buildTriggerPattern(sub.trigger);
+  return messages.some((m) => triggerPattern.test(m.content.trim()));
+}
+
 function selectSubscriptionsForMessage(
   chatJid: string,
   groupMessages: NewMessage[],
@@ -1769,30 +1793,14 @@ function selectSubscriptionsForMessage(
   // @allagents fan-out: regex check on stored message content — no Discord API call,
   // no GuildMembers privileged intent needed. Safe because it only reads already-stored text.
   const hasAllAgents = groupMessages.some((m) => /@allagents/i.test(m.content));
-  const directBotMentions = subs.filter((sub) => {
-    const patterns = getMentionPatterns(sub);
-    if (patterns.length === 0) return false;
-
-    return groupMessages.some((m) => {
-      const text = m.content.toLowerCase();
-      return patterns.some((p) => p.test(text));
-    });
-  });
-  const explicitMatches = subs.filter((sub) => {
-    const triggerPattern = buildTriggerPattern(sub.trigger);
-    return groupMessages.some((m) => triggerPattern.test(m.content.trim()));
-  });
+  const matched = subs.filter((sub) =>
+    messagesMatchSubscription(sub, groupMessages),
+  );
 
   let selected: ChannelSubscription[];
   let selectedByTrigger = false;
-  if (hasAllAgents) {
-    selected = [...subs];
-    selectedByTrigger = true;
-  } else if (directBotMentions.length > 0) {
-    selected = directBotMentions;
-    selectedByTrigger = true;
-  } else if (explicitMatches.length > 0) {
-    selected = explicitMatches;
+  if (hasAllAgents || matched.length > 0) {
+    selected = hasAllAgents ? [...subs] : matched;
     selectedByTrigger = true;
   } else {
     const primaries = subs.filter((s) => s.isPrimary);
@@ -2041,13 +2049,23 @@ function recoverPendingMessages(): void {
       const dispatchJid = makeDispatchKey(chatJid, sub.agentId);
       const sinceTimestamp = lastAgentTimestamp[dispatchJid] || '';
       const pending = getMessagesSince(chatJid, sinceTimestamp);
-      if (pending.length > 0) {
-        logger.info(
+      if (pending.length === 0) continue;
+
+      // Apply the same trigger filtering as the normal message path —
+      // don't dispatch an agent for messages that aren't addressed to it.
+      if (!messagesMatchSubscription(sub, pending)) {
+        logger.debug(
           { chatJid, agentId: sub.agentId, pendingCount: pending.length },
-          'Recovery: found unprocessed messages for subscription',
+          'Recovery: skipping — pending messages do not match trigger',
         );
-        queue.enqueueMessageCheck(dispatchJid);
+        continue;
       }
+
+      logger.info(
+        { chatJid, agentId: sub.agentId, pendingCount: pending.length },
+        'Recovery: found unprocessed messages for subscription',
+      );
+      queue.enqueueMessageCheck(dispatchJid);
     }
   }
 

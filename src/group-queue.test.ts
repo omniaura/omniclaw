@@ -1,33 +1,29 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 
-import { mock as mockModule } from 'bun:test';
-
-mockModule.module('./config.js', () => ({
-  DATA_DIR: '/tmp/omniclaw-test-data',
-  MAX_ACTIVE_CONTAINERS: 3,
-  MAX_IDLE_CONTAINERS: 0, // disable idle slots so tests see hard limit of 3
-  MAX_CONCURRENT_CONTAINERS: 3, // backward-compat alias
-  MAX_TASK_CONTAINERS: 2,
-}));
-
 import realFs from 'fs';
-
-mockModule.module('fs', () => ({
-  default: {
-    ...realFs,
-    mkdirSync: mock(),
-    writeFileSync: mock(),
-    renameSync: mock(),
-  },
-}));
 
 import { GroupQueue } from './group-queue.js';
 
+mock.restore();
+
 describe('GroupQueue', () => {
   let queue: GroupQueue;
+  let fsImpl: Pick<typeof realFs, 'mkdirSync' | 'writeFileSync' | 'renameSync'>;
 
   beforeEach(() => {
-    queue = new GroupQueue();
+    fsImpl = {
+      ...realFs,
+      mkdirSync: mock(),
+      writeFileSync: mock(),
+      renameSync: mock(),
+    };
+    queue = new GroupQueue({
+      dataDir: '/tmp/omniclaw-test-data',
+      maxActiveContainers: 3,
+      maxIdleContainers: 0,
+      maxTaskContainers: 2,
+      fsImpl,
+    });
   });
 
   // --- Message lane isolation ---
