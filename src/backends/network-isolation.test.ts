@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 
 /**
  * Tests for network isolation in container args.
