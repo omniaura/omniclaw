@@ -1028,4 +1028,22 @@ describe('dashboard', () => {
     expect(html).toContain('/api/events?channels=logs,stats,agents,tasks');
     expect(html).toContain('bundles/datastar.js');
   });
+
+  it('uses datastar page navigation actions in nav links', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/');
+    const html = await res.text();
+    expect(html).toContain("data-on:click__prevent=\"history.pushState({page: el.dataset.page}, '', el.getAttribute('href')); @get('/api/page/' + el.dataset.page)\"");
+    expect(html).toContain('<title id="page-title">OmniClaw \u2014 Dashboard</title>');
+  });
+
+  it('returns datastar morph html for page navigation endpoints', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/page/network');
+    const html = await res.text();
+    expect(res.headers.get('Content-Type')).toContain('text/html');
+    expect(html).toContain('<nav id="nav-links">');
+    expect(html).toContain('<main id="content">');
+    expect(html).toContain('<title id="page-title">OmniClaw \u2014 Network</title>');
+  });
 });

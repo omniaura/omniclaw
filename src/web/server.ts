@@ -3,7 +3,7 @@ import { ServerSentEventGenerator } from '@starfederation/datastar-sdk/web';
 import { logger } from '../logger.js';
 import { handleRequest } from './routes.js';
 import type { ScheduledTask } from '../types.js';
-import { escapeHtml, renderNavLinks } from './shared.js';
+import { escapeHtml, renderPagePatch } from './shared.js';
 import type { WebServerConfig, WebStateProvider, WsEvent } from './types.js';
 import { renderDashboardContent } from './dashboard.js';
 import { renderConversationsContent } from './conversations.js';
@@ -231,20 +231,12 @@ export function startWebServer(
           });
         }
 
-        // JSON response for shell-script SPA navigation
-        return new Response(
-          JSON.stringify({
-            html: page.render(),
-            title: page.title,
-            path: page.path,
-          }),
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
-            },
+        return new Response(renderPagePatch(page.path, page.title, page.render()), {
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
           },
-        );
+        });
       }
 
       // --- CORS preflight (only when corsOrigin is configured) ---
@@ -522,7 +514,7 @@ function renderStatusBadge(
   label: string,
   statusClass: 'connected' | 'disconnected',
 ): string {
-  return `<span id="ws-status" class="ws-status ${statusClass}">${escapeHtml(label)}</span>`;
+  return `<span id="ws-status" class="status-badge ${statusClass}">${escapeHtml(label)}</span>`;
 }
 
 function renderAgentRows(state: WebStateProvider): string {
