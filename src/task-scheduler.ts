@@ -275,6 +275,10 @@ async function runTask(
 
 let schedulerRunning = false;
 
+export function resetSchedulerLoopForTests(): void {
+  schedulerRunning = false;
+}
+
 export function startSchedulerLoop(
   deps: SchedulerDependencies,
   runtime: SchedulerRuntime = defaultSchedulerRuntime,
