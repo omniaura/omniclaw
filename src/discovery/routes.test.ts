@@ -64,6 +64,14 @@ function makeContext(
   };
 }
 
+function withSocketAddress(req: Request, remoteAddress: string): Request {
+  Object.defineProperty(req, 'socket', {
+    value: { remoteAddress },
+    configurable: true,
+  });
+  return req;
+}
+
 afterEach(() => {
   mock.restore();
   globalThis.fetch = realFetch;
@@ -76,18 +84,21 @@ describe('handleDiscoveryRequest', () => {
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    const req = new Request('http://localhost/api/discovery/pair', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        instanceId: 'trusted-peer',
-        name: 'Trusted Peer',
-        host: '127.0.0.1',
-        port: 6001,
-        callbackToken: 'callback-token',
-        keyAgreementPublicKey: 'test-public-key',
+    const req = withSocketAddress(
+      new Request('http://localhost/api/discovery/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instanceId: 'trusted-peer',
+          name: 'Trusted Peer',
+          host: '198.51.100.9',
+          port: 6001,
+          callbackToken: 'callback-token',
+          keyAgreementPublicKey: 'test-public-key',
+        }),
       }),
-    });
+      '10.0.0.22',
+    );
 
     const ctx = makeContext({
       trustStore: {
@@ -101,6 +112,110 @@ describe('handleDiscoveryRequest', () => {
     expect((await (res as Response).json()) as { status: string }).toEqual({
       status: 'already_trusted',
     });
+  });
+
+  it('stores the callback host from the socket address instead of the request body', async () => {
+    const createPairRequest = mock(() => ({
+      id: 'req-2',
+      fromInstanceId: 'remote-instance',
+      fromName: 'Remote',
+      fromHost: '10.0.0.22',
+      fromPort: 6001,
+      callbackToken: 'callback-token',
+      status: 'pending',
+      sharedSecret: null,
+      createdAt: new Date().toISOString(),
+      resolvedAt: null,
+    }));
+    const req = withSocketAddress(
+      new Request('http://localhost/api/discovery/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instanceId: 'remote-instance',
+          name: 'Remote',
+          host: '169.254.169.254',
+          port: 6001,
+          callbackToken: 'callback-token',
+          keyAgreementPublicKey: 'test-public-key',
+        }),
+      }),
+      '10.0.0.22',
+    );
+
+    const ctx = makeContext({
+      trustStore: {
+        isPeerTrusted: () => false,
+        createPairRequest,
+      } as any,
+    });
+
+    const res = await handleDiscoveryRequest(req, new URL(req.url), ctx);
+    expect(res).not.toBeNull();
+    expect(createPairRequest).toHaveBeenCalledWith(
+      'remote-instance',
+      'Remote',
+      '10.0.0.22',
+      6001,
+      'callback-token',
+      'test-public-key',
+    );
+    expect(
+      (await (res as Response).json()) as {
+        status: string;
+        requestId: string;
+      },
+    ).toEqual({
+      status: 'pending',
+      requestId: 'req-2',
+    });
+  });
+
+  it('rejects pair requests when the requester address is unavailable', async () => {
+    const req = new Request('http://localhost/api/discovery/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instanceId: 'remote-instance',
+        name: 'Remote',
+        host: '127.0.0.1',
+        port: 6001,
+        callbackToken: 'callback-token',
+        keyAgreementPublicKey: 'test-public-key',
+      }),
+    });
+
+    const res = await handleDiscoveryRequest(req, new URL(req.url), makeContext());
+    expect(res).not.toBeNull();
+    expect((await (res as Response).json()) as { error: string }).toEqual({
+      error: 'Unable to determine requester address',
+    });
+    expect((res as Response).status).toBe(400);
+  });
+
+  it('rejects pair requests with invalid callback ports', async () => {
+    const req = withSocketAddress(
+      new Request('http://localhost/api/discovery/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instanceId: 'remote-instance',
+          name: 'Remote',
+          host: '127.0.0.1',
+          port: 70000,
+          callbackToken: 'callback-token',
+          keyAgreementPublicKey: 'test-public-key',
+        }),
+      }),
+      '10.0.0.22',
+    );
+
+    const res = await handleDiscoveryRequest(req, new URL(req.url), makeContext());
+    expect(res).not.toBeNull();
+    expect((await (res as Response).json()) as { error: string }).toEqual({
+      error: 'Invalid port',
+    });
+    expect((res as Response).status).toBe(400);
   });
 });
 
