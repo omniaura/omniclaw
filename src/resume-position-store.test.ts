@@ -114,41 +114,47 @@ describe('PersistentResumePositionStore', () => {
 
   it('warns and continues when initial load fails', () => {
     const { records, stop } = captureLogs();
-    const store = new PersistentResumePositionStore({
-      stateAdapter: {
-        read: () => {
-          throw new Error('boom');
+
+    try {
+      const store = new PersistentResumePositionStore({
+        stateAdapter: {
+          read: () => {
+            throw new Error('boom');
+          },
+          write: () => {},
         },
-        write: () => {},
-      },
-    });
+      });
 
-    expect(store.getAll()).toEqual({});
-    expect(records).toHaveLength(1);
-    expect(records[0]?.msg).toBe('Failed to load persisted resume positions');
-
-    stop();
+      expect(store.getAll()).toEqual({});
+      expect(records).toHaveLength(1);
+      expect(records[0]?.msg).toBe('Failed to load persisted resume positions');
+    } finally {
+      stop();
+    }
   });
 
   it('warns and keeps in-memory state when persisting fails', () => {
     const { records, stop } = captureLogs();
-    const store = new PersistentResumePositionStore({
-      stateAdapter: {
-        read: <T>() => ({}) as T,
-        write: () => {
-          throw new Error('disk full');
+
+    try {
+      const store = new PersistentResumePositionStore({
+        stateAdapter: {
+          read: <T>() => ({}) as T,
+          write: () => {
+            throw new Error('disk full');
+          },
         },
-      },
-    });
+      });
 
-    expect(() => {
-      store.set('alpha', '2026-03-03T00:00:00.000Z');
-    }).not.toThrow();
-    expect(store.get('alpha')).toBe('2026-03-03T00:00:00.000Z');
-    expect(records).toHaveLength(1);
-    expect(records[0]?.msg).toBe('Failed to persist resume positions');
-
-    stop();
+      expect(() => {
+        store.set('alpha', '2026-03-03T00:00:00.000Z');
+      }).not.toThrow();
+      expect(store.get('alpha')).toBe('2026-03-03T00:00:00.000Z');
+      expect(records).toHaveLength(1);
+      expect(records[0]?.msg).toBe('Failed to persist resume positions');
+    } finally {
+      stop();
+    }
   });
 });
 

@@ -84,13 +84,15 @@ RUN echo 'trustedDependencies = ["agent-browser"]' >> /root/.bunfig.toml \
     && ln -sf $(find /root/.bun -name 'agent-browser-linux-*' -type f | head -1) /usr/local/bin/agent-browser
 
 # Install OpenCode CLI (alternative agent runtime)
-# Pin version to prevent supply-chain attacks via unsigned curl|bash.
-# The installer always writes to ~/.opencode/bin/ regardless of OPENCODE_INSTALL_DIR,
-# so we copy the binary to /usr/local/bin/ (the symlink to /root/ fails for non-root users).
+# Download directly from GitHub releases to avoid DNS issues with opencode.ai.
 ARG OPENCODE_VERSION=1.2.26
-RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash \
-    && cp /root/.opencode/bin/opencode /usr/local/bin/opencode \
-    && chmod +x /usr/local/bin/opencode
+RUN ARCH="$(dpkg --print-architecture)" \
+    && OC_ARCH=$([ "$ARCH" = "amd64" ] && echo "x64" || echo "arm64") \
+    && curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz" \
+       -o /tmp/opencode.tar.gz \
+    && tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode \
+    && chmod +x /usr/local/bin/opencode \
+    && rm /tmp/opencode.tar.gz
 
 # Install Codex CLI (alternative agent runtime)
 # Pin version to avoid silent CLI contract changes breaking the container runtime.

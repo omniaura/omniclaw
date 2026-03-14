@@ -37,27 +37,32 @@ describe('persistent-state', () => {
       throw new Error('read failed');
     });
 
-    const result = readPersistentJson('k2');
+    try {
+      const result = readPersistentJson('k2');
 
-    expect(result).toBeUndefined();
-    expect(records).toHaveLength(1);
-    expect(records[0].msg).toBe('Failed to read persistent state');
-
-    readSpy.mockRestore();
-    stop();
+      expect(result).toBeUndefined();
+      expect(records).toHaveLength(1);
+      expect(records[0].msg).toBe('Failed to read persistent state');
+    } finally {
+      readSpy.mockRestore();
+      stop();
+    }
   });
 
   it('returns undefined and warns for invalid JSON payload', () => {
     const { records, stop } = captureLogs();
-    setRouterState('k3', '{"broken":');
 
-    const result = readPersistentJson('k3');
+    try {
+      setRouterState('k3', '{"broken":');
 
-    expect(result).toBeUndefined();
-    expect(records).toHaveLength(1);
-    expect(records[0].msg).toBe('Failed to parse persistent state JSON');
+      const result = readPersistentJson('k3');
 
-    stop();
+      expect(result).toBeUndefined();
+      expect(records).toHaveLength(1);
+      expect(records[0].msg).toBe('Failed to parse persistent state JSON');
+    } finally {
+      stop();
+    }
   });
 
   it('swallows write errors and logs a warning', () => {
@@ -66,11 +71,13 @@ describe('persistent-state', () => {
       throw new Error('write failed');
     });
 
-    expect(() => writePersistentJson('k4', { ok: false })).not.toThrow();
-    expect(records).toHaveLength(1);
-    expect(records[0].msg).toBe('Failed to write persistent state');
-
-    writeSpy.mockRestore();
-    stop();
+    try {
+      expect(() => writePersistentJson('k4', { ok: false })).not.toThrow();
+      expect(records).toHaveLength(1);
+      expect(records[0].msg).toBe('Failed to write persistent state');
+    } finally {
+      writeSpy.mockRestore();
+      stop();
+    }
   });
 });
