@@ -8,7 +8,7 @@
     "start": "bun src/index.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.56",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.76",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@opencode-ai/sdk": "^1.2.26",
     "cron-parser": "^5.0.0",
