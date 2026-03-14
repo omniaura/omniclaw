@@ -28,6 +28,7 @@ export function renderNavLinks(activePath: string): string {
   return NAV_ITEMS.map(
     (item) =>
       `<a href="${item.href}" data-nav data-page="${item.page}" ` +
+      `data-on:click__prevent="history.pushState({page: el.dataset.page}, '', el.getAttribute('href')); @get('/api/page/' + el.dataset.page)" ` +
       `class="nav-link${item.href === activePath ? ' active' : ''}">${item.label}</a>`,
   ).join('');
 }
@@ -65,7 +66,7 @@ export function renderShell(
     `<!DOCTYPE html><html lang="en"><head>` +
     `<meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">` +
-    `<title>OmniClaw${title ? ' \u2014 ' + escapeHtml(title) : ''}</title>` +
+    `<title id="page-title">OmniClaw${title ? ' \u2014 ' + escapeHtml(title) : ''}</title>` +
     `<link rel="preconnect" href="https://fonts.googleapis.com">` +
     `<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">` +
     `<style>${shellCSS()}</style>` +
@@ -117,6 +118,18 @@ export function renderShell(
     `ipt>${shellScript(pageScripts)}</scr` +
     `ipt>` +
     `</body></html>`
+  );
+}
+
+export function renderPagePatch(
+  activePath: string,
+  title: string,
+  contentHtml: string,
+): string {
+  return (
+    `<title id="page-title">OmniClaw${title ? ' \u2014 ' + escapeHtml(title) : ''}</title>` +
+    `<nav id="nav-links">${renderNavLinks(activePath)}</nav>` +
+    `<main id="content">${contentHtml}</main>`
   );
 }
 
@@ -736,49 +749,9 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('  }');
   parts.push('});');
 
-  // ---- SPA Navigation via fetch ----
-  parts.push('var navLoading=false;');
-  parts.push('function navigateTo(pageName,href){');
-  parts.push('  if(navLoading)return;navLoading=true;');
-  parts.push(
-    '  if(window.__cleanup){window.__cleanup();window.__cleanup=null;}',
-  );
-  parts.push(
-    '  var qp="";var qi=href.indexOf("?");if(qi!==-1)qp=href.slice(qi);',
-  );
-  parts.push('  fetch("/api/page/"+encodeURIComponent(pageName)+qp)');
-  parts.push(
-    '  .then(function(r){if(!r.ok)throw new Error("nav failed");return r.json();})',
-  );
-  parts.push('  .then(function(data){');
-  parts.push('    contentEl.innerHTML=data.html;');
-  parts.push('    document.title="OmniClaw \\u2014 "+data.title;');
-  parts.push('    history.pushState({page:pageName},"",data.path);');
-  parts.push(
-    '    document.querySelectorAll("[data-nav]").forEach(function(a){',
-  );
-  parts.push(
-    '      a.classList.toggle("active",a.getAttribute("href")===data.path);',
-  );
-  parts.push('    });');
-  parts.push('    window.__initPage(pageName);');
-  parts.push('    navLoading=false;');
-  parts.push(
-    '  }).catch(function(err){console.error("SPA nav error:",err);navLoading=false;location.href=href;});',
-  );
-  parts.push('}');
-  parts.push('document.addEventListener("click",function(e){');
-  parts.push('  var link=e.target.closest("[data-nav]");if(!link)return;');
-  parts.push('  e.preventDefault();');
-  parts.push('  var pageName=link.getAttribute("data-page");');
-  parts.push('  var href=link.getAttribute("href");');
-  parts.push('  navigateTo(pageName,href);');
-  parts.push('});');
   parts.push('window.addEventListener("popstate",function(e){');
-  parts.push(
-    '  if(e.state&&e.state.page){navigateTo(e.state.page,location.pathname);}',
-  );
-  parts.push('  else{location.reload();}');
+  parts.push('  if(window.__cleanup){window.__cleanup();window.__cleanup=null;}');
+  parts.push('  location.href=location.pathname+location.search+location.hash;');
   parts.push('});');
 
   // ---- Page init dispatch ----

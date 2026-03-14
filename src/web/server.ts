@@ -5,7 +5,7 @@ import { ServerSentEventGenerator } from '@starfederation/datastar-sdk/web';
 import { logger } from '../logger.js';
 import { handleRequest, getRemotePeers } from './routes.js';
 import type { ScheduledTask } from '../types.js';
-import { escapeHtml, renderNavLinks } from './shared.js';
+import { escapeHtml, renderPagePatch } from './shared.js';
 import type { WebServerConfig, WebStateProvider, WsEvent } from './types.js';
 import {
   renderAgentDetailContent,
@@ -277,16 +277,23 @@ export function startWebServer(
         const data = buildAgentDetailData(agentId, state);
         const title = data ? data.name : 'Agent Not Found';
         const qs = agentId ? `?id=${encodeURIComponent(agentId)}` : '';
-        return new Response(
-          JSON.stringify({
-            html: renderAgentDetailContent(data, agentId),
-            title,
-            path: `/agents${qs}`,
-          }),
+        return ServerSentEventGenerator.stream(
+          (stream) => {
+            stream.patchElements(
+              renderPagePatch(
+                `/agents${qs}`,
+                title,
+                renderAgentDetailContent(data, agentId),
+              ),
+            );
+          },
           {
-            headers: {
-              'Content-Type': 'application/json',
-              ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+            responseInit: {
+              headers: {
+                ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+                'Cache-Control': 'no-cache, no-transform',
+                'X-Accel-Buffering': 'no',
+              },
             },
           },
         );
@@ -303,18 +310,18 @@ export function startWebServer(
         });
       }
 
-      // JSON response for shell-script SPA navigation
       const html = await page.render();
-      return new Response(
-        JSON.stringify({
-          html,
-          title: page.title,
-          path: page.path,
-        }),
+      return ServerSentEventGenerator.stream(
+        (stream) => {
+          stream.patchElements(renderPagePatch(page.path, page.title, html));
+        },
         {
-          headers: {
-            'Content-Type': 'application/json',
-            ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+          responseInit: {
+            headers: {
+              ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+              'Cache-Control': 'no-cache, no-transform',
+              'X-Accel-Buffering': 'no',
+            },
           },
         },
       );
