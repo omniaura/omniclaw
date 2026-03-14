@@ -26,6 +26,7 @@ import {
   type NetworkPageState,
 } from './network.js';
 import { buildHealthData, renderSystem } from './system.js';
+import { renderTasks } from './tasks.js';
 import { buildAgentChannelData } from './agent-channels.js';
 
 /** Optional discovery context — set by the orchestrator when discovery is enabled. */
@@ -178,6 +179,12 @@ export function handleRequest(
   // --- IPC Inspector ---
   if (pathname === '/ipc')
     return new Response(renderIpcInspector(state), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+
+  // --- Task Manager ---
+  if (pathname === '/tasks')
+    return new Response(renderTasks(state), {
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
 
