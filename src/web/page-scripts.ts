@@ -860,6 +860,115 @@ function networkScript(): string {
 var pollTimer=null;
 var syncPeerId=null;
 var networkClicksBound=false;
+var remoteLogAbort=null;
+var remoteLogReader=null;
+var remoteLogPeerId=null;
+var remoteLogLines=0;
+
+function remoteLogElements(){
+  return {
+    status: document.getElementById("remote-logs-status"),
+    output: document.getElementById("remote-logs-output")
+  };
+}
+
+function setRemoteLogsStatus(message,isError){
+  var els=remoteLogElements();
+  if(!els.status)return;
+  els.status.textContent=message;
+  els.status.style.color=isError?"var(--red)":"var(--text-muted)";
+}
+
+function renderRemoteLogLine(log,peerLabel){
+  var level=String(log.level||"info");
+  var lineClass=level==="error"||level==="fatal"?"log-line error":(level==="warn"?"log-line warn":"log-line");
+  var timestamp=new Date(typeof log.ts==="number"?log.ts:Date.now()).toLocaleTimeString();
+  var context=peerLabel+(log.container?" / "+String(log.container):(log.group?" / "+String(log.group):""));
+  var message=String(log.msg||"");
+  if(typeof log.durationMs==="number")message+=" ("+log.durationMs+"ms)";
+  if(typeof log.costUsd==="number")message+=" $"+log.costUsd;
+  return '<div class="'+lineClass+'" data-level="'+window.__esc(level)+'">'
+    +'<span class="ts">'+window.__esc(timestamp)+'</span>'
+    +'<span class="level-badge '+window.__esc(level)+'">'+window.__esc(level)+'</span>'
+    +'<span class="context">'+window.__esc(context)+'</span>'
+    +(log.op?'<span class="op">['+window.__esc(String(log.op))+']</span>':'')
+    +'<span class="msg">'+window.__esc(message)+'</span>'
+    +(log.err?'<span class="err-detail">'+window.__esc(String(log.err))+'</span>':'')
+    +'</div>';
+}
+
+function appendRemoteLogLine(log,peerLabel){
+  var els=remoteLogElements();
+  if(!els.output)return;
+  els.output.insertAdjacentHTML("beforeend",renderRemoteLogLine(log,peerLabel));
+  remoteLogLines++;
+  while(els.output.children.length>300){
+    els.output.removeChild(els.output.firstChild);
+  }
+  els.output.scrollTop=els.output.scrollHeight;
+}
+
+function stopRemoteLogs(silent){
+  if(remoteLogAbort){remoteLogAbort.abort();remoteLogAbort=null;}
+  if(remoteLogReader){try{remoteLogReader.cancel();}catch{} remoteLogReader=null;}
+  remoteLogPeerId=null;
+  if(!silent)setRemoteLogsStatus("Remote log stream stopped.");
+}
+
+function handleRemoteLogEvent(raw,peerLabel){
+  try{
+    var parsed=JSON.parse(raw);
+    appendRemoteLogLine(parsed,peerLabel);
+  }catch{}
+}
+
+function startRemoteLogs(instanceId,peerLabel){
+  stopRemoteLogs(true);
+  remoteLogPeerId=instanceId;
+  remoteLogLines=0;
+  var els=remoteLogElements();
+  if(els.output)els.output.innerHTML="";
+  setRemoteLogsStatus("Streaming logs from "+peerLabel+"...");
+  remoteLogAbort=new AbortController();
+  fetch("/api/discovery/peers/"+encodeURIComponent(instanceId)+"/logs",{
+    headers:{Accept:"text/event-stream"},
+    signal:remoteLogAbort.signal
+  }).then(function(res){
+    if(!res.ok)throw new Error("Failed to stream logs");
+    if(!res.body)throw new Error("Missing stream body");
+    var reader=res.body.getReader();
+    var decoder=new TextDecoder();
+    var buffer="";
+    remoteLogReader=reader;
+    function pump(){
+      return reader.read().then(function(result){
+        if(result.done){
+          if(remoteLogPeerId===instanceId)setRemoteLogsStatus("Remote log stream ended.");
+          return;
+        }
+        buffer+=decoder.decode(result.value,{stream:true});
+        var parts=buffer.split("\n\n");
+        buffer=parts.pop()||"";
+        parts.forEach(function(part){
+          var eventName="message";
+          var dataLines=[];
+          part.split(/\n/).forEach(function(line){
+            if(line.indexOf("event:")===0)eventName=line.slice(6).trim();
+            if(line.indexOf("data:")===0)dataLines.push(line.slice(5).trim());
+          });
+          if(eventName==="log"&&dataLines.length>0){
+            handleRemoteLogEvent(dataLines.join("\n"),peerLabel);
+          }
+        });
+        return pump();
+      });
+    }
+    return pump();
+  }).catch(function(error){
+    if(error&&error.name==="AbortError")return;
+    setRemoteLogsStatus("Remote logs failed: "+(error&&error.message?error.message:String(error)),true);
+  });
+}
 
 function networkAction(action,id){
   if(action==="request"){
@@ -899,6 +1008,12 @@ function networkAction(action,id){
     return;
   }
   if(action==="browse"){browseRemoteAgents(id);return;}
+  if(action==="logs"){
+    var row=document.querySelector('tr[data-instance-id="'+CSS.escape(id)+'"]');
+    var peerLabel=row&&row.querySelector("td strong")?row.querySelector("td strong").textContent:id;
+    startRemoteLogs(id,peerLabel||id);
+    return;
+  }
   if(action==="sync"){openSyncPanel(id);return;}
   if(action==="close-sync"){closeSyncPanel();return;}
   if(action==="push"){syncFile("push",id);return;}
@@ -931,6 +1046,7 @@ function renderPeerActions(peer){
   var id=window.__esc(peer.instanceId||"");
   if(peer.status==="trusted"){
     return '<button class="btn btn-sm" data-network-action="browse" data-network-id="'+id+'">Browse</button> '
+      +'<button class="btn btn-sm" data-network-action="logs" data-network-id="'+id+'">Logs</button> '
       +'<button class="btn btn-sm btn-primary" data-network-action="sync" data-network-id="'+id+'">Sync</button> '
       +'<button class="btn btn-sm btn-danger" data-network-action="revoke" data-network-id="'+id+'">Revoke</button>';
   }
@@ -1144,7 +1260,7 @@ bindNetworkClicks();
 refreshPeers();
 refreshRequests();
 pollTimer=setInterval(function(){refreshPeers();refreshRequests();},${DISCOVERY_POLL_INTERVAL});
-window.__cleanup=function(){if(pollTimer)clearInterval(pollTimer);};
+window.__cleanup=function(){if(pollTimer)clearInterval(pollTimer);stopRemoteLogs(true);};
 `;
 }
 

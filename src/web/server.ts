@@ -18,6 +18,7 @@ import {
 import { checkPeerAuth } from '../discovery/routes.js';
 import type { TrustStore } from '../discovery/trust-store.js';
 import { renderSystemContent } from './system.js';
+import { serializeLogRecord } from './log-stream.js';
 
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
@@ -93,6 +94,62 @@ export function startWebServer(
       }
 
       // --- SSE stream ---
+      if (url.pathname === '/api/logs/stream') {
+        if (req.method !== 'GET') {
+          return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+            status: 405,
+            headers: {
+              'Content-Type': 'application/json',
+              ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+            },
+          });
+        }
+
+        let unsubscribe: (() => void) | undefined;
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            const encoder = new TextEncoder();
+            controller.enqueue(encoder.encode(': connected\n\n'));
+            unsubscribe = logger.subscribe((record) => {
+              if (record.level === 'trace') return;
+              try {
+                controller.enqueue(
+                  encoder.encode(
+                    `event: log\ndata: ${JSON.stringify(serializeLogRecord(record))}\n\n`,
+                  ),
+                );
+              } catch {
+                unsubscribe?.();
+                unsubscribe = undefined;
+                controller.close();
+              }
+            });
+          },
+          cancel() {
+            unsubscribe?.();
+            unsubscribe = undefined;
+          },
+        });
+
+        req.signal.addEventListener(
+          'abort',
+          () => {
+            unsubscribe?.();
+            unsubscribe = undefined;
+          },
+          { once: true },
+        );
+
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache, no-transform',
+            'X-Accel-Buffering': 'no',
+            ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+          },
+        });
+      }
+
       if (url.pathname === '/api/events') {
         if (req.method !== 'GET') {
           return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -418,6 +475,7 @@ function eventChannel(event: WsEvent): string {
 function isPeerRoute(pathname: string): boolean {
   return (
     pathname === '/api/agents' ||
+    pathname === '/api/logs/stream' ||
     pathname === '/api/stats' ||
     pathname === '/api/context/files' ||
     pathname === '/api/context/layers' ||
