@@ -83,7 +83,30 @@ function getClientIp(req: Request): string {
   // We avoid trusting X-Forwarded-For which is user-controllable.
   const socket = (req as unknown as { socket?: { remoteAddress?: string } })
     .socket;
-  return socket?.remoteAddress || 'unknown';
+  return normalizeSocketAddress(socket?.remoteAddress);
+}
+
+function normalizeSocketAddress(address?: string): string {
+  if (!address) return 'unknown';
+
+  const ipv4MappedPrefix = '::ffff:';
+  if (address.startsWith(ipv4MappedPrefix)) {
+    const ipv4 = address.slice(ipv4MappedPrefix.length);
+    if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ipv4)) {
+      return ipv4;
+    }
+  }
+
+  return address;
+}
+
+function isValidPeerPort(port: unknown): port is number {
+  return (
+    typeof port === 'number' &&
+    Number.isInteger(port) &&
+    port >= 1 &&
+    port <= 65535
+  );
 }
 
 /**
@@ -336,6 +359,9 @@ async function handlePairRequest(
 ): Promise<Response> {
   // Rate limit using socket IP (not user-controllable headers)
   const ip = getClientIp(req);
+  if (ip === 'unknown') {
+    return json({ error: 'Unable to determine requester address' }, 400);
+  }
   if (!checkRateLimit(ip)) {
     return json({ error: 'Rate limit exceeded' }, 429);
   }
@@ -350,18 +376,20 @@ async function handlePairRequest(
   if (
     !body.instanceId ||
     !body.name ||
-    !body.host ||
-    !body.port ||
     !body.callbackToken ||
     !body.keyAgreementPublicKey
   ) {
     return json(
       {
         error:
-          'Missing required fields: instanceId, name, host, port, callbackToken, keyAgreementPublicKey',
+          'Missing required fields: instanceId, name, callbackToken, keyAgreementPublicKey',
       },
       400,
     );
+  }
+
+  if (!isValidPeerPort(body.port)) {
+    return json({ error: 'Invalid port' }, 400);
   }
 
   // Check if already trusted
@@ -377,7 +405,7 @@ async function handlePairRequest(
   const request = ctx.trustStore.createPairRequest(
     body.instanceId,
     body.name,
-    body.host,
+    ip,
     body.port,
     body.callbackToken,
     body.keyAgreementPublicKey,
