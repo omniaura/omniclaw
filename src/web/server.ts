@@ -28,12 +28,31 @@ import { renderSystemContent } from './system.js';
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
 const SNAPSHOT_INTERVAL_MS = 5000;
+const PORT_ZERO_RETRY_ATTEMPTS = 10;
+const PORT_ZERO_FALLBACK_START = 40000;
+const PORT_ZERO_FALLBACK_SPAN = 20000;
 
 interface SseClient {
   subscriptions: Set<string>;
   stream: ServerSentEventGenerator;
   logs: string[];
   close(): void;
+}
+
+function isAddrInUseError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: unknown }).code === 'EADDRINUSE'
+  );
+}
+
+function randomFallbackPort(): number {
+  return (
+    PORT_ZERO_FALLBACK_START +
+    Math.floor(Math.random() * PORT_ZERO_FALLBACK_SPAN)
+  );
 }
 
 /**
@@ -47,14 +66,9 @@ export function startWebServer(
   trustStore?: TrustStore,
 ): WebServerHandle {
   const { port, auth, hostname, corsOrigin, trustLanDiscoveryAdmin } = config;
+  const bindHostname = hostname || '127.0.0.1';
   const sseClients = new Set<SseClient>();
-
-  const server = Bun.serve({
-    port,
-    hostname: hostname || '127.0.0.1',
-    development: false,
-
-    async fetch(req) {
+  const fetchHandler = async (req: Request) => {
       const url = new URL(req.url);
       if (url.pathname === '/ws') {
         return new Response('WebSocket is deprecated for the web dashboard', {
@@ -325,8 +339,32 @@ export function startWebServer(
         return result.then(addCors);
       }
       return addCors(result);
-    },
-  });
+    };
+
+  let server: Bun.Server<unknown>;
+  let requestedPort = port;
+  let attempts = 0;
+  while (true) {
+    try {
+      server = Bun.serve({
+        port: requestedPort,
+        hostname: bindHostname,
+        development: false,
+        fetch: fetchHandler,
+      });
+      break;
+    } catch (err) {
+      attempts += 1;
+      if (
+        port !== 0 ||
+        !isAddrInUseError(err) ||
+        attempts >= PORT_ZERO_RETRY_ATTEMPTS
+      ) {
+        throw err;
+      }
+      requestedPort = randomFallbackPort();
+    }
+  }
 
   const snapshotTicker = setInterval(() => {
     for (const client of sseClients) {
@@ -340,7 +378,11 @@ export function startWebServer(
   }, SNAPSHOT_INTERVAL_MS);
 
   logger.info(
-    { port, hostname: hostname || '127.0.0.1', cors: corsOrigin || 'disabled' },
+    {
+      port: server.port!,
+      hostname: bindHostname,
+      cors: corsOrigin || 'disabled',
+    },
     'Web UI server started',
   );
 
