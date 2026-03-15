@@ -28,6 +28,10 @@ import {
 import { buildHealthData, renderSystem } from './system.js';
 import { renderTasks } from './tasks.js';
 import { buildAgentChannelData } from './agent-channels.js';
+import {
+  renderAgentsPageWithRemote,
+  renderAgentsContent,
+} from './agents-page.js';
 
 /** Optional discovery context — set by the orchestrator when discovery is enabled. */
 let discoveryContext: DiscoveryRouteContext | null = null;
@@ -182,6 +186,9 @@ export function handleRequest(
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
 
+  // --- Agents list ---
+  if (pathname === '/agents-list') return handleAgentsListPage(state);
+
   // --- Task Manager ---
   if (pathname === '/tasks')
     return new Response(renderTasks(state), {
@@ -261,6 +268,17 @@ async function handleDashboardPage(state: WebStateProvider): Promise<Response> {
     ? await fetchTrustedRemoteAgents(discoveryContext)
     : [];
   return new Response(renderDashboardWithRemote(state, remotePeers), {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  });
+}
+
+async function handleAgentsListPage(
+  state: WebStateProvider,
+): Promise<Response> {
+  const remotePeers = discoveryContext
+    ? await fetchTrustedRemoteAgents(discoveryContext)
+    : [];
+  return new Response(renderAgentsPageWithRemote(state, remotePeers), {
     headers: { 'Content-Type': 'text/html; charset=utf-8' },
   });
 }
