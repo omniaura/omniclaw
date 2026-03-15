@@ -334,7 +334,7 @@ describe('renderAgentsPage', () => {
     const html = renderAgentsPage(makeState());
 
     expect(html).toContain('<!DOCTYPE html>');
-    expect(html).toContain('<title>OmniClaw — Agents</title>');
+    expect(html).toContain('<title id="page-title">OmniClaw — Agents</title>');
     expect(html).toContain('class="nav-link active">Agents</a>');
   });
 });
