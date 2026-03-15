@@ -378,16 +378,7 @@ export function startWebServer(
             'Content-Type': 'application/json',
             ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
           },
-          {
-            responseInit: {
-              headers: {
-                ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
-                'Cache-Control': 'no-cache, no-transform',
-                'X-Accel-Buffering': 'no',
-              },
-            },
-          },
-        );
+        });
       }
 
       const html = await page.render();
