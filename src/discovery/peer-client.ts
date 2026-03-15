@@ -170,7 +170,9 @@ export class PeerClient {
   ): Promise<Response> {
     const controller = new AbortController();
     const timeout =
-      timeoutMs == null ? null : setTimeout(() => controller.abort(), timeoutMs);
+      timeoutMs == null
+        ? null
+        : setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {

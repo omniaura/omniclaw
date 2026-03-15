@@ -437,9 +437,12 @@ describe('checkPeerAuth — body hash verification', () => {
       ),
     ) as unknown as typeof fetch;
 
-    const req = new Request('http://localhost/api/discovery/peers/peer-1/logs', {
-      method: 'GET',
-    });
+    const req = new Request(
+      'http://localhost/api/discovery/peers/peer-1/logs',
+      {
+        method: 'GET',
+      },
+    );
 
     const ctx = makeContext({
       trustStore: {

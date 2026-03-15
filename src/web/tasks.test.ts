@@ -143,7 +143,7 @@ describe('renderTasks', () => {
     const html = renderTasks(makeState());
 
     expect(html).toContain('<!DOCTYPE html>');
-    expect(html).toContain('<title>OmniClaw — Tasks</title>');
+    expect(html).toContain('<title id="page-title">OmniClaw — Tasks</title>');
     expect(html).toContain('class="nav-link active">Tasks</a>');
   });
 });
