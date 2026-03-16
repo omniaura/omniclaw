@@ -26,6 +26,7 @@ import type { TrustStore } from '../discovery/trust-store.js';
 import { serializeLogRecord } from './log-stream.js';
 import { renderSystemContent } from './system.js';
 import { renderTasksContent } from './tasks.js';
+import { renderAgentsContent } from './agents-page.js';
 
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
@@ -297,6 +298,12 @@ export function startWebServer(
           title: 'Dashboard',
           render: async () =>
             renderDashboardContent(state, await getRemotePeers()),
+        },
+        agents: {
+          path: '/agents-list',
+          title: 'Agents',
+          render: async () =>
+            renderAgentsContent(state, await getRemotePeers()),
         },
         conversations: {
           path: '/conversations',

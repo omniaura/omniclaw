@@ -9,6 +9,7 @@ import { DISCOVERY_POLL_INTERVAL } from '../config.js';
 export function allPageScripts(): Record<string, string> {
   return {
     dashboard: dashboardScript(),
+    agents: agentsScript(),
     tasks: tasksScript(),
     conversations: conversationsScript(),
     context: contextScript(),
@@ -533,6 +534,35 @@ if(modal&&form){
     .then(function(t){window.__toast("Task created: "+t.id.slice(0,12));modal.classList.remove("open");form.reset();})
     .catch(function(err){errorEl.textContent=err.message||"Failed";sb.disabled=false;});
   });
+}
+`;
+}
+
+function agentsScript(): string {
+  return `
+var searchInput=document.getElementById("ap-search");
+var backendSelect=document.getElementById("ap-filter-backend");
+var runtimeSelect=document.getElementById("ap-filter-runtime");
+var tbody=document.getElementById("ap-tbody");
+if(searchInput&&tbody){
+  function applyFilters(){
+    var q=(searchInput.value||"").toLowerCase();
+    var be=backendSelect?backendSelect.value:"";
+    var rt=runtimeSelect?runtimeSelect.value:"";
+    var rows=tbody.querySelectorAll("tr.ap-row");
+    for(var i=0;i<rows.length;i++){
+      var row=rows[i];
+      var name=(row.querySelector(".ap-name")||{}).textContent||"";
+      var matchQ=!q||name.toLowerCase().indexOf(q)>=0||
+        (row.getAttribute("data-agent-id")||"").toLowerCase().indexOf(q)>=0;
+      var matchBe=!be||row.getAttribute("data-backend")===be;
+      var matchRt=!rt||row.getAttribute("data-runtime")===rt;
+      row.style.display=(matchQ&&matchBe&&matchRt)?"":"none";
+    }
+  }
+  searchInput.addEventListener("input",applyFilters);
+  if(backendSelect)backendSelect.addEventListener("change",applyFilters);
+  if(runtimeSelect)runtimeSelect.addEventListener("change",applyFilters);
 }
 `;
 }
