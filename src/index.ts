@@ -2422,6 +2422,7 @@ async function main(): Promise<void> {
       return {
         instanceId,
         instanceName: INSTANCE_NAME,
+        discoveryAvailable: true,
         discoveryEnabled: runtime.active,
         runtime,
         peers: buildPeers(),

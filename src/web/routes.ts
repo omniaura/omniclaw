@@ -83,6 +83,7 @@ export function handleRequest(
     const pageState = networkPageState?.() ?? {
       instanceId: '',
       instanceName: '',
+      discoveryAvailable: false,
       discoveryEnabled: false,
       runtime: {
         enabled: false,

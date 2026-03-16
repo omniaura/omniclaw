@@ -1377,6 +1377,8 @@ function networkScript(): string {
 var pollTimer=null;
 var syncPeerId=null;
 var networkClicksBound=false;
+var networkRoot=document.getElementById("network-root");
+var discoveryAvailable=networkRoot&&networkRoot.getAttribute("data-discovery-available")==="true";
 
 function renderDiscoveryRuntime(runtime){
   var status=document.getElementById("discovery-runtime-status");
@@ -1717,10 +1719,12 @@ function bulkSync(direction,instanceId){
 function fmtBytes(b){if(b<1024)return b+" B";if(b<1048576)return(b/1024).toFixed(1)+" KB";return(b/1048576).toFixed(1)+" MB";}
 
 bindNetworkClicks();
-refreshDiscoveryRuntime();
-refreshPeers();
-refreshRequests();
-pollTimer=setInterval(function(){refreshDiscoveryRuntime();refreshPeers();refreshRequests();},${DISCOVERY_POLL_INTERVAL});
+if(discoveryAvailable){
+  refreshDiscoveryRuntime();
+  refreshPeers();
+  refreshRequests();
+  pollTimer=setInterval(function(){refreshDiscoveryRuntime();refreshPeers();refreshRequests();},${DISCOVERY_POLL_INTERVAL});
+}
 window.__cleanup=function(){if(pollTimer)clearInterval(pollTimer);stopRemoteLogs(true);};
 `;
 }

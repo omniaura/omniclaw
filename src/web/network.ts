@@ -13,6 +13,7 @@ import type {
 export interface NetworkPageState {
   instanceId: string;
   instanceName: string;
+  discoveryAvailable: boolean;
   discoveryEnabled: boolean;
   runtime: DiscoveryRuntimeSnapshot;
   peers: PeerView[];
@@ -24,17 +25,23 @@ export function renderNetworkContent(pageState: NetworkPageState): string {
   const {
     instanceId,
     instanceName,
+    discoveryAvailable,
     discoveryEnabled,
     peers,
     pendingRequests,
     runtime,
   } = pageState;
 
+  const controlsDisabled = !discoveryAvailable;
+  const controlsHint = controlsDisabled
+    ? 'Discovery controls are unavailable in this environment.'
+    : 'Trusted networks gate discovery when present. Leave the list empty to allow discovery anywhere the toggle is on.';
+
   const trustedCount = peers.filter((p) => p.status === 'trusted').length;
   const onlineCount = peers.filter((p) => p.online).length;
 
   return (
-    `<div data-init="window.__initPage && window.__initPage('network')">` +
+    `<div data-init="window.__initPage && window.__initPage('network')" id="network-root" data-discovery-available="${discoveryAvailable ? 'true' : 'false'}">` +
     // Instance info card
     `<div class="stats-grid" style="margin-bottom:1.5rem">` +
     `<div class="stat-card"><div class="label">instance</div><div class="value" style="font-size:0.85rem">${escapeHtml(instanceName)}</div></div>` +
@@ -50,11 +57,11 @@ export function renderNetworkContent(pageState: NetworkPageState): string {
     `<div class="card" style="margin-bottom:1.5rem">` +
     `<div class="section-header"><h2>discovery controls</h2></div>` +
     `<div style="display:flex;flex-wrap:wrap;gap:0.75rem;align-items:center;margin-bottom:1rem">` +
-    `<button class="btn btn-sm ${runtime.enabled ? 'btn-danger' : 'btn-primary'}" id="discovery-toggle" data-network-action="toggle-discovery" data-network-id="${runtime.enabled ? 'off' : 'on'}">${runtime.enabled ? 'Turn discovery off' : 'Turn discovery on'}</button>` +
-    `<button class="btn btn-sm" id="trust-current-network" data-network-action="trust-current-network" data-network-id="current">Trust Wi-Fi</button>` +
+    `<button class="btn btn-sm ${runtime.enabled ? 'btn-danger' : 'btn-primary'}" id="discovery-toggle" data-network-action="toggle-discovery" data-network-id="${runtime.enabled ? 'off' : 'on'}"${controlsDisabled ? ' disabled' : ''}>${runtime.enabled ? 'Turn discovery off' : 'Turn discovery on'}</button>` +
+    `<button class="btn btn-sm" id="trust-current-network" data-network-action="trust-current-network" data-network-id="current"${controlsDisabled ? ' disabled' : ''}>Trust Wi-Fi</button>` +
     `<span style="color:var(--text-muted);font-size:0.85rem" id="current-network-label">${runtime.currentNetwork ? `Current Wi-Fi: <strong>${escapeHtml(runtime.currentNetwork.label)}</strong>` : 'No Wi-Fi network detected'}</span>` +
     `</div>` +
-    `<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.75rem">Trusted networks gate discovery when present. Leave the list empty to allow discovery anywhere the toggle is on.</div>` +
+    `<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.75rem">${controlsHint}</div>` +
     `<div id="trusted-networks-list">${renderTrustedNetworks(runtime)}</div>` +
     `</div>` +
     // Main layout: peers + pending

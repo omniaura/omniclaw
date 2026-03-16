@@ -308,6 +308,7 @@ function setTestDiscoveryContext(): void {
     () => ({
       instanceId: 'local-instance',
       instanceName: 'local',
+      discoveryAvailable: true,
       discoveryEnabled: true,
       runtime: {
         enabled: true,
