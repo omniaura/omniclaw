@@ -5,7 +5,7 @@ import { ServerSentEventGenerator } from '@starfederation/datastar-sdk/web';
 import { logger } from '../logger.js';
 import { handleRequest, getRemotePeers } from './routes.js';
 import type { ScheduledTask } from '../types.js';
-import { escapeHtml, renderNavLinks } from './shared.js';
+import { escapeHtml, renderPagePatch } from './shared.js';
 import type { WebServerConfig, WebStateProvider, WsEvent } from './types.js';
 import {
   renderAgentDetailContent,
@@ -23,6 +23,7 @@ import {
 } from './network.js';
 import { checkPeerAuth } from '../discovery/routes.js';
 import type { TrustStore } from '../discovery/trust-store.js';
+import { serializeLogRecord } from './log-stream.js';
 import { renderSystemContent } from './system.js';
 import { renderTasksContent } from './tasks.js';
 import { renderLogsContent } from './logs.js';
@@ -70,6 +71,11 @@ export function startWebServer(
   const { port, auth, hostname, corsOrigin, trustLanDiscoveryAdmin } = config;
   const bindHostname = hostname || '127.0.0.1';
   const sseClients = new Set<SseClient>();
+  let rawLogStreamClients = 0;
+  const subscribeToRawLogs =
+    typeof logger.subscribe === 'function'
+      ? logger.subscribe.bind(logger)
+      : null;
   const fetchHandler = async (req: Request) => {
     const url = new URL(req.url);
     if (url.pathname === '/ws') {
@@ -128,6 +134,75 @@ export function startWebServer(
           headers: { 'Content-Type': 'application/json' },
         },
       );
+    }
+
+    if (url.pathname === '/api/logs/stream') {
+      if (req.method !== 'GET') {
+        return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+          status: 405,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+          },
+        });
+      }
+      if (rawLogStreamClients >= MAX_SSE_CLIENTS) {
+        return new Response('Too many SSE connections', {
+          status: 429,
+          headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
+        });
+      }
+
+      let unsubscribe: (() => void) | undefined;
+      let closed = false;
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        if (rawLogStreamClients > 0) rawLogStreamClients -= 1;
+        unsubscribe?.();
+        unsubscribe = undefined;
+      };
+
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          rawLogStreamClients += 1;
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode(': connected\n\n'));
+          unsubscribe = subscribeToRawLogs?.((record) => {
+            if (record.level === 'trace') return;
+            try {
+              controller.enqueue(
+                encoder.encode(
+                  `event: log\ndata: ${JSON.stringify(serializeLogRecord(record))}\n\n`,
+                ),
+              );
+            } catch {
+              cleanup();
+              controller.close();
+            }
+          });
+        },
+        cancel() {
+          cleanup();
+        },
+      });
+
+      req.signal.addEventListener(
+        'abort',
+        () => {
+          cleanup();
+        },
+        { once: true },
+      );
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          'X-Accel-Buffering': 'no',
+          ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+        },
+      });
     }
 
     // --- SSE stream ---
@@ -283,16 +358,23 @@ export function startWebServer(
         const data = buildAgentDetailData(agentId, state);
         const title = data ? data.name : 'Agent Not Found';
         const qs = agentId ? `?id=${encodeURIComponent(agentId)}` : '';
-        return new Response(
-          JSON.stringify({
-            html: renderAgentDetailContent(data, agentId),
-            title,
-            path: `/agents${qs}`,
-          }),
+        return ServerSentEventGenerator.stream(
+          (stream) => {
+            stream.patchElements(
+              renderPagePatch(
+                `/agents${qs}`,
+                title,
+                renderAgentDetailContent(data, agentId),
+              ),
+            );
+          },
           {
-            headers: {
-              'Content-Type': 'application/json',
-              ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+            responseInit: {
+              headers: {
+                ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+                'Cache-Control': 'no-cache, no-transform',
+                'X-Accel-Buffering': 'no',
+              },
             },
           },
         );
@@ -309,18 +391,18 @@ export function startWebServer(
         });
       }
 
-      // JSON response for shell-script SPA navigation
       const html = await page.render();
-      return new Response(
-        JSON.stringify({
-          html,
-          title: page.title,
-          path: page.path,
-        }),
+      return ServerSentEventGenerator.stream(
+        (stream) => {
+          stream.patchElements(renderPagePatch(page.path, page.title, html));
+        },
         {
-          headers: {
-            'Content-Type': 'application/json',
-            ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+          responseInit: {
+            headers: {
+              ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+              'Cache-Control': 'no-cache, no-transform',
+              'X-Accel-Buffering': 'no',
+            },
           },
         },
       );
@@ -539,6 +621,7 @@ function eventChannel(event: WsEvent): string {
 function isPeerRoute(pathname: string): boolean {
   return (
     pathname === '/api/agents' ||
+    pathname === '/api/logs/stream' ||
     pathname === '/api/stats' ||
     pathname === '/api/context/files' ||
     pathname === '/api/context/layers' ||

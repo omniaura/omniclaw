@@ -1691,7 +1691,7 @@ refreshDiscoveryRuntime();
 refreshPeers();
 refreshRequests();
 pollTimer=setInterval(function(){refreshDiscoveryRuntime();refreshPeers();refreshRequests();},${DISCOVERY_POLL_INTERVAL});
-window.__cleanup=function(){if(pollTimer)clearInterval(pollTimer);};
+window.__cleanup=function(){if(pollTimer)clearInterval(pollTimer);stopRemoteLogs(true);};
 `;
 }
 

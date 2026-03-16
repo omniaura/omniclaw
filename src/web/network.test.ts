@@ -199,7 +199,7 @@ describe('renderNetworkPage', () => {
     });
 
     expect(html).toContain('<!DOCTYPE html>');
-    expect(html).toContain('<title>OmniClaw — Network</title>');
+    expect(html).toContain('<title id="page-title">OmniClaw — Network</title>');
     expect(html).toContain('class="nav-link active">Network</a>');
     expect(html).toContain("window.__initPage && window.__initPage('network')");
     expect(html).toContain(

@@ -76,6 +76,11 @@ export function renderNetworkContent(pageState: NetworkPageState): string {
     `</div>` +
     // Remote agents section (populated dynamically)
     `<div id="remote-agents" style="margin-top:1.5rem"></div>` +
+    `<div class="card" id="remote-logs-panel" style="margin-top:1.5rem">` +
+    `<div class="section-header"><h2>remote logs</h2></div>` +
+    `<div id="remote-logs-status" style="padding:0.75rem 1rem;color:var(--text-muted);border-bottom:1px solid var(--border)">Select a trusted peer to start streaming logs.</div>` +
+    `<div id="remote-logs-output" class="log-stream" style="max-height:320px"></div>` +
+    `</div>` +
     // Context sync panel (populated dynamically)
     `<div id="sync-panel" style="margin-top:1.5rem"></div>` +
     `</div>`
@@ -135,6 +140,7 @@ function renderPeerActions(peer: PeerView): string {
   if (peer.status === 'trusted') {
     return (
       `<button class="btn btn-sm" data-network-action="browse" data-network-id="${escapeHtml(peer.instanceId)}">Browse</button> ` +
+      `<button class="btn btn-sm" data-network-action="logs" data-network-id="${escapeHtml(peer.instanceId)}">Logs</button> ` +
       `<button class="btn btn-sm btn-primary" data-network-action="sync" data-network-id="${escapeHtml(peer.instanceId)}">Sync</button> ` +
       `<button class="btn btn-sm btn-danger" data-network-action="revoke" data-network-id="${escapeHtml(peer.instanceId)}">Revoke</button>`
     );
