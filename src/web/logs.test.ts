@@ -186,10 +186,7 @@ describe('Logs page routes', () => {
   });
 
   it('GET /logs returns HTML page', async () => {
-    handle = startWebServer(
-      { port: 0, auth: testAuth },
-      makeState(),
-    );
+    handle = startWebServer({ port: 0, auth: testAuth }, makeState());
     const res = await fetch(`http://localhost:${handle.port}/logs`, {
       headers: authHeaders,
     });
@@ -200,28 +197,21 @@ describe('Logs page routes', () => {
     expect(html).toContain('logs-output');
   });
 
-  it('GET /api/page/logs returns JSON for SPA nav', async () => {
-    handle = startWebServer(
-      { port: 0, auth: testAuth },
-      makeState(),
-    );
+  it('GET /api/page/logs returns a Datastar patch response for SPA nav', async () => {
+    handle = startWebServer({ port: 0, auth: testAuth }, makeState());
     const res = await fetch(`http://localhost:${handle.port}/api/page/logs`, {
       headers: authHeaders,
     });
     expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toContain('application/json');
-    const data = (await res.json()) as { html: string; title: string; path: string };
-    expect(data.title).toBe('Logs');
-    expect(data.path).toBe('/logs');
-    expect(data.html).toContain('logs-page');
-    expect(data.html).toContain('logs-output');
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+    const body = await res.text();
+    expect(body).toContain('logs-page');
+    expect(body).toContain('logs-output');
+    expect(body).toContain('<title id="page-title">OmniClaw — Logs</title>');
   });
 
   it('nav includes Logs link on all pages', async () => {
-    handle = startWebServer(
-      { port: 0, auth: testAuth },
-      makeState(),
-    );
+    handle = startWebServer({ port: 0, auth: testAuth }, makeState());
     // Check dashboard
     const dashRes = await fetch(`http://localhost:${handle.port}/`, {
       headers: authHeaders,
@@ -239,19 +229,13 @@ describe('Logs page routes', () => {
   });
 
   it('requires auth when configured', async () => {
-    handle = startWebServer(
-      { port: 0, auth: testAuth },
-      makeState(),
-    );
+    handle = startWebServer({ port: 0, auth: testAuth }, makeState());
     const res = await fetch(`http://localhost:${handle.port}/logs`);
     expect(res.status).toBe(401);
   });
 
   it('allows access without auth when auth not configured', async () => {
-    handle = startWebServer(
-      { port: 0 },
-      makeState(),
-    );
+    handle = startWebServer({ port: 0 }, makeState());
     const res = await fetch(`http://localhost:${handle.port}/logs`);
     expect(res.status).toBe(200);
   });
