@@ -5,6 +5,7 @@ import {
   invalidateGitHubContextCacheForAgents,
   loadGitHubWatchesConfig,
 } from './github.js';
+import { recordGitHubWebhookDelivery } from './db.js';
 import { logger } from './logger.js';
 import type { GitHubWatchesConfig } from './types.js';
 
@@ -197,12 +198,21 @@ function cleanupDeliveryCache(now = Date.now()): void {
   }
 }
 
-function markDeliveryProcessed(deliveryId: string): boolean {
-  const now = Date.now();
+export function markGitHubWebhookDeliveryProcessed(
+  deliveryId: string,
+  now = Date.now(),
+): boolean {
   cleanupDeliveryCache(now);
   if (recentlyProcessedDeliveries.has(deliveryId)) return false;
+  if (!recordGitHubWebhookDelivery(deliveryId, DELIVERY_TTL_MS, now)) {
+    return false;
+  }
   recentlyProcessedDeliveries.set(deliveryId, now);
   return true;
+}
+
+export function _resetGitHubWebhookReplayCacheForTest(): void {
+  recentlyProcessedDeliveries.clear();
 }
 
 export function buildGitHubWebhookNotification(
@@ -267,7 +277,7 @@ export function startGitHubWebhookServer(options: GitHubWebhookServerOptions): {
         return new Response('Invalid signature', { status: 401 });
       }
 
-      if (!markDeliveryProcessed(deliveryId)) {
+      if (!markGitHubWebhookDeliveryProcessed(deliveryId)) {
         return new Response('Duplicate delivery ignored', { status: 202 });
       }
 

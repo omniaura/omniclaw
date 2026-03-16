@@ -351,6 +351,13 @@ export function createSchema(database: Database): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS github_webhook_deliveries (
+      delivery_id TEXT PRIMARY KEY,
+      processed_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_github_webhook_deliveries_expires_at
+      ON github_webhook_deliveries(expires_at);
     CREATE TABLE IF NOT EXISTS sessions (
       group_folder TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
@@ -611,6 +618,7 @@ export function initDatabase(): void {
 
   db = new Database(dbPath);
   createSchema(db);
+  cleanupExpiredGitHubWebhookDeliveries();
 
   // Migrate from JSON files if they exist
   migrateJsonState();
@@ -621,6 +629,15 @@ export function initDatabase(): void {
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
+  cleanupExpiredGitHubWebhookDeliveries();
+}
+
+/** @internal - for tests only. */
+export function _countGitHubWebhookDeliveriesForTest(): number {
+  const row = db
+    .query('SELECT COUNT(*) as count FROM github_webhook_deliveries')
+    .get() as { count: number };
+  return row.count;
 }
 
 /** @internal - for tests only. Backdates a session's created_at timestamp. */
@@ -1175,6 +1192,40 @@ export function setRouterState(key: string, value: string): void {
   db.query(
     'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
   ).run(key, value);
+}
+
+export function cleanupExpiredGitHubWebhookDeliveries(
+  nowMs = Date.now(),
+): void {
+  const nowIso = new Date(nowMs).toISOString();
+  db.query('DELETE FROM github_webhook_deliveries WHERE expires_at <= ?').run(
+    nowIso,
+  );
+}
+
+export function recordGitHubWebhookDelivery(
+  deliveryId: string,
+  ttlMs: number,
+  nowMs = Date.now(),
+): boolean {
+  const nowIso = new Date(nowMs).toISOString();
+  const expiresAtIso = new Date(nowMs + ttlMs).toISOString();
+
+  const transaction = db.transaction(() => {
+    cleanupExpiredGitHubWebhookDeliveries(nowMs);
+
+    return db
+      .query(
+        `INSERT OR IGNORE INTO github_webhook_deliveries (
+           delivery_id,
+           processed_at, -- audit trail only; queries use delivery_id/expires_at
+           expires_at
+         ) VALUES (?, ?, ?)`,
+      )
+      .run(deliveryId, nowIso, expiresAtIso);
+  });
+
+  return transaction().changes === 1;
 }
 
 // --- Session accessors ---
