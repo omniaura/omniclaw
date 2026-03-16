@@ -36,7 +36,7 @@ RUN ARCH="$(dpkg --print-architecture)" \
     && chmod +x /usr/bin/yq
 
 # Install Go (latest stable version) - cross-platform support
-ARG GO_VERSION=1.25.0
+ARG GO_VERSION=1.26.0
 RUN ARCH="$(dpkg --print-architecture)" \
     && wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" \
     && tar -C /usr/local -xzf "go${GO_VERSION}.linux-${ARCH}.tar.gz" \
