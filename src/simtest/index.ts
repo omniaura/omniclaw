@@ -51,18 +51,18 @@ const webServer = startWebServer(
 );
 
 // Start the admin API on a separate port
-const adminApi = startAdminApi(
-  { port: adminPort, hostname },
-  state,
-  webServer,
-);
+const adminApi = startAdminApi({ port: adminPort, hostname }, state, webServer);
 
 console.log('');
 console.log('╔══════════════════════════════════════════════════════╗');
 console.log('║         OmniClaw Web UI — Simulation Mode           ║');
 console.log('╠══════════════════════════════════════════════════════╣');
-console.log(`║  Web UI:    http://${hostname}:${webServer.port.toString().padEnd(27)}║`);
-console.log(`║  Admin API: http://${hostname}:${adminApi.port.toString().padEnd(27)}║`);
+console.log(
+  `║  Web UI:    http://${hostname}:${webServer.port.toString().padEnd(27)}║`,
+);
+console.log(
+  `║  Admin API: http://${hostname}:${adminApi.port.toString().padEnd(27)}║`,
+);
 console.log('╠══════════════════════════════════════════════════════╣');
 console.log('║  No secrets. No containers. No database.            ║');
 console.log('║                                                     ║');
@@ -81,15 +81,34 @@ console.log('╚═════════════════════�
 console.log('');
 
 // Graceful shutdown
+let shuttingDown = false;
+
+async function shutdown(signal: 'SIGINT' | 'SIGTERM'): Promise<void> {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+  console.log(
+    signal === 'SIGINT'
+      ? '\n[simtest] Shutting down...'
+      : '[simtest] Shutting down...',
+  );
+
+  try {
+    await Promise.resolve(adminApi.stop());
+    await webServer.stop();
+    process.exit(0);
+  } catch (error) {
+    console.error('[simtest] Shutdown failed:', error);
+    process.exit(1);
+  }
+}
+
 process.on('SIGINT', () => {
-  console.log('\n[simtest] Shutting down...');
-  adminApi.stop();
-  webServer.stop();
-  process.exit(0);
+  void shutdown('SIGINT');
 });
 
 process.on('SIGTERM', () => {
-  adminApi.stop();
-  webServer.stop();
-  process.exit(0);
+  void shutdown('SIGTERM');
 });

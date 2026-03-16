@@ -5,7 +5,10 @@
  * All endpoints are JSON. No auth required (simtest only).
  */
 
-import type { WebServerHandle, WsEvent, WsEventType } from '../web/types.js';
+import type { IpcEventKind } from '../web/ipc-events.js';
+import type { WsEventType } from '../web/types.js';
+import type { WebServerHandle } from '../web/server.js';
+import { calculateNextRun } from '../schedule-utils.js';
 import type { FakeState } from './fake-state.js';
 
 export interface AdminApiConfig {
@@ -39,23 +42,38 @@ export function startAdminApi(
           status: 204,
           headers: {
             'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+            'Access-Control-Allow-Methods':
+              'GET, POST, PUT, PATCH, DELETE, OPTIONS',
             'Access-Control-Allow-Headers': 'Content-Type',
           },
         });
       }
 
       try {
-        const result = await handleAdminRequest(method, url, req, state, webServer);
+        const result = await handleAdminRequest(
+          method,
+          url,
+          req,
+          state,
+          webServer,
+        );
         result.headers.set('Access-Control-Allow-Origin', '*');
         return result;
       } catch (err) {
-        return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+        const status = isInvalidJsonError(err) ? 400 : 500;
+        const response = json(
+          { error: err instanceof Error ? err.message : String(err) },
+          status,
+        );
+        response.headers.set('Access-Control-Allow-Origin', '*');
+        return response;
       }
     },
   });
 
-  console.log(`[simtest] Admin API running on http://${hostname}:${server.port}`);
+  console.log(
+    `[simtest] Admin API running on http://${hostname}:${server.port}`,
+  );
 
   return {
     port: server.port!,
@@ -81,20 +99,29 @@ async function handleAdminRequest(
       endpoints: {
         'GET /state': 'Full state snapshot',
         'POST /reset': 'Reset to seed data',
-        'POST /agents': 'Add agent { id, name?, backend?, agentRuntime?, isAdmin? }',
+        'POST /agents':
+          'Add agent { id, name?, backend?, agentRuntime?, isAdmin? }',
         'DELETE /agents/:id': 'Remove agent',
-        'POST /subscriptions': 'Add subscription { channelJid, agentId, trigger?, priority? }',
+        'POST /subscriptions':
+          'Add subscription { channelJid, agentId, trigger?, priority? }',
         'POST /chats': 'Add/update chat { jid, name }',
-        'POST /messages': 'Add message { chatJid, sender, senderName, content }',
-        'POST /tasks': 'Add task { id, group_folder?, prompt?, schedule_type?, schedule_value?, status? }',
-        'PATCH /tasks/:id': 'Update task { prompt?, status?, schedule_type?, schedule_value? }',
+        'POST /messages':
+          'Add message { chatJid, sender, senderName, content }',
+        'POST /tasks':
+          'Add task { id, group_folder?, prompt?, schedule_type?, schedule_value?, status? }',
+        'PATCH /tasks/:id':
+          'Update task { prompt?, status?, schedule_type?, schedule_value? }',
         'DELETE /tasks/:id': 'Delete task',
-        'POST /task-runs': 'Add task run log { taskId, durationMs, status, result?, error? }',
-        'POST /ipc-events': 'Add IPC event { kind, sourceGroup, summary, details? }',
-        'POST /queue-stats': 'Set queue stats { activeContainers?, idleContainers?, maxActive?, maxIdle? }',
+        'POST /task-runs':
+          'Add task run log { taskId, durationMs, status, result?, error? }',
+        'POST /ipc-events':
+          'Add IPC event { kind, sourceGroup, summary, details? }',
+        'POST /queue-stats':
+          'Set queue stats { activeContainers?, idleContainers?, maxActive?, maxIdle? }',
         'POST /queue-details': 'Set queue details (array of GroupQueueDetail)',
         'POST /broadcast': 'Broadcast event to web UI { type, data }',
-        'POST /scenario/:name': 'Run predefined scenario (agent-overload, task-storm, error-cascade, idle-fleet, empty)',
+        'POST /scenario/:name':
+          'Run predefined scenario (agent-overload, task-storm, error-cascade, idle-fleet, empty)',
       },
     });
   }
@@ -123,11 +150,13 @@ async function handleAdminRequest(
 
   // ---- Agents ----
   if (path === '/agents' && method === 'POST') {
-    const body = await req.json() as Record<string, unknown>;
+    const body = (await req.json()) as Record<string, unknown>;
     if (!body.id || typeof body.id !== 'string') {
       return json({ error: '"id" is required' }, 400);
     }
-    const agent = state.addAgent(body as { id: string } & Record<string, unknown>);
+    const agent = state.addAgent(
+      body as { id: string } & Record<string, unknown>,
+    );
     broadcast(webServer, 'agent_status', { added: agent.id });
     return json(agent, 201);
   }
@@ -141,18 +170,24 @@ async function handleAdminRequest(
 
   // ---- Subscriptions ----
   if (path === '/subscriptions' && method === 'POST') {
-    const body = await req.json() as Record<string, unknown>;
+    const body = (await req.json()) as Record<string, unknown>;
     if (!body.channelJid || !body.agentId) {
       return json({ error: '"channelJid" and "agentId" are required' }, 400);
     }
-    state.addSubscription(body.channelJid as string, body.agentId as string, body);
-    broadcast(webServer, 'agent_status', { subscriptionAdded: body.channelJid });
+    state.addSubscription(
+      body.channelJid as string,
+      body.agentId as string,
+      body,
+    );
+    broadcast(webServer, 'agent_status', {
+      subscriptionAdded: body.channelJid,
+    });
     return json({ ok: true }, 201);
   }
 
   // ---- Chats ----
   if (path === '/chats' && method === 'POST') {
-    const body = await req.json() as Record<string, unknown>;
+    const body = (await req.json()) as Record<string, unknown>;
     if (!body.jid || !body.name) {
       return json({ error: '"jid" and "name" are required' }, 400);
     }
@@ -162,9 +197,12 @@ async function handleAdminRequest(
 
   // ---- Messages ----
   if (path === '/messages' && method === 'POST') {
-    const body = await req.json() as Record<string, unknown>;
+    const body = (await req.json()) as Record<string, unknown>;
     if (!body.chatJid || !body.sender || !body.content) {
-      return json({ error: '"chatJid", "sender", and "content" are required' }, 400);
+      return json(
+        { error: '"chatJid", "sender", and "content" are required' },
+        400,
+      );
     }
     const msg = state.addMessage(
       body.chatJid as string,
@@ -177,34 +215,125 @@ async function handleAdminRequest(
 
   // ---- Tasks ----
   if (path === '/tasks' && method === 'POST') {
-    const body = await req.json() as Record<string, unknown>;
+    const body = (await req.json()) as Record<string, unknown>;
     if (!body.id || typeof body.id !== 'string') {
       return json({ error: '"id" is required' }, 400);
     }
+    const scheduleType = normalizeScheduleType(body.schedule_type);
+    const scheduleValue =
+      typeof body.schedule_value === 'string' ? body.schedule_value : '300000';
+    const status = normalizeTaskStatus(body.status);
+    const createdAt = new Date().toISOString();
+    const nextRun =
+      status === 'completed'
+        ? null
+        : calculateNextRun(scheduleType, scheduleValue, new Date(createdAt));
+
+    if (status !== 'completed' && nextRun === null) {
+      return json(
+        { error: 'Invalid schedule: could not calculate next run time' },
+        400,
+      );
+    }
+
     state.createTask({
-      id: body.id as string,
-      group_folder: (body.group_folder as string) || 'main',
-      chat_jid: (body.chat_jid as string) || 'sim:general',
-      prompt: (body.prompt as string) || 'Simulated task',
-      schedule_type: (body.schedule_type as 'cron' | 'interval' | 'once') || 'interval',
-      schedule_value: (body.schedule_value as string) || '300000',
-      context_mode: (body.context_mode as 'group' | 'isolated') || 'isolated',
-      next_run: new Date(Date.now() + 300_000).toISOString(),
-      status: (body.status as 'active' | 'paused' | 'completed') || 'active',
-      created_at: new Date().toISOString(),
+      id: body.id,
+      group_folder:
+        typeof body.group_folder === 'string' ? body.group_folder : 'main',
+      chat_jid:
+        typeof body.chat_jid === 'string' ? body.chat_jid : 'sim:general',
+      prompt: typeof body.prompt === 'string' ? body.prompt : 'Simulated task',
+      schedule_type: scheduleType,
+      schedule_value: scheduleValue,
+      context_mode: body.context_mode === 'group' ? 'group' : 'isolated',
+      next_run: nextRun,
+      status,
+      created_at: createdAt,
     });
     broadcast(webServer, 'task_update', { created: body.id });
     return json({ ok: true, id: body.id }, 201);
   }
   if (path.startsWith('/tasks/') && method === 'PATCH') {
     const id = decodeURIComponent(path.slice('/tasks/'.length));
-    const body = await req.json() as Record<string, unknown>;
+    const body = (await req.json()) as Record<string, unknown>;
     try {
-      state.updateTask(id, body);
+      const existing = state.getTaskById(id);
+      if (!existing) {
+        return json({ error: 'Task not found' }, 404);
+      }
+
+      const updates: Partial<{
+        prompt: string;
+        schedule_type: 'cron' | 'interval' | 'once';
+        schedule_value: string;
+        next_run: string | null;
+        status: 'active' | 'paused' | 'completed';
+      }> = {};
+
+      if (typeof body.prompt === 'string') {
+        updates.prompt = body.prompt;
+      }
+
+      const scheduleType =
+        body.schedule_type === undefined
+          ? existing.schedule_type
+          : normalizeScheduleType(body.schedule_type);
+      const scheduleValue =
+        body.schedule_value === undefined
+          ? existing.schedule_value
+          : typeof body.schedule_value === 'string'
+            ? body.schedule_value
+            : null;
+      const status =
+        body.status === undefined
+          ? existing.status
+          : normalizeTaskStatus(body.status);
+
+      if (body.schedule_value !== undefined && scheduleValue === null) {
+        return json({ error: '"schedule_value" must be a string' }, 400);
+      }
+
+      if (body.schedule_type !== undefined) {
+        updates.schedule_type = scheduleType;
+      }
+
+      if (body.schedule_value !== undefined && scheduleValue !== null) {
+        updates.schedule_value = scheduleValue;
+      }
+
+      if (body.status !== undefined) {
+        updates.status = status;
+      }
+
+      if (
+        body.schedule_type !== undefined ||
+        body.schedule_value !== undefined ||
+        body.status !== undefined
+      ) {
+        updates.next_run =
+          status === 'completed'
+            ? null
+            : calculateNextRun(
+                scheduleType,
+                scheduleValue ?? existing.schedule_value,
+              );
+
+        if (status !== 'completed' && updates.next_run === null) {
+          return json(
+            { error: 'Invalid schedule: could not calculate next run time' },
+            400,
+          );
+        }
+      }
+
+      state.updateTask(id, updates);
       broadcast(webServer, 'task_update', { updated: id });
       return json(state.getTaskById(id));
     } catch (err) {
-      return json({ error: err instanceof Error ? err.message : String(err) }, 404);
+      return json(
+        { error: err instanceof Error ? err.message : String(err) },
+        404,
+      );
     }
   }
   if (path.startsWith('/tasks/') && method === 'DELETE') {
@@ -214,13 +343,16 @@ async function handleAdminRequest(
       broadcast(webServer, 'task_update', { deleted: id });
       return json({ ok: true, deleted: id });
     } catch (err) {
-      return json({ error: err instanceof Error ? err.message : String(err) }, 404);
+      return json(
+        { error: err instanceof Error ? err.message : String(err) },
+        404,
+      );
     }
   }
 
   // ---- Task Run Logs ----
   if (path === '/task-runs' && method === 'POST') {
-    const body = await req.json() as Record<string, unknown>;
+    const body = (await req.json()) as Record<string, unknown>;
     if (!body.taskId) return json({ error: '"taskId" is required' }, 400);
     state.addTaskRunLog(body.taskId as string, {
       run_at: new Date().toISOString(),
@@ -233,7 +365,8 @@ async function handleAdminRequest(
     const task = state.getTaskById(body.taskId as string);
     if (task) {
       task.last_run = new Date().toISOString();
-      task.last_result = (body.result as string) || (body.error as string) || null;
+      task.last_result =
+        (body.result as string) || (body.error as string) || null;
     }
     broadcast(webServer, 'task_update', { taskRun: body.taskId });
     return json({ ok: true }, 201);
@@ -241,15 +374,33 @@ async function handleAdminRequest(
 
   // ---- IPC Events ----
   if (path === '/ipc-events' && method === 'POST') {
-    const body = await req.json() as Record<string, unknown>;
+    const body = (await req.json()) as Record<string, unknown>;
     if (!body.kind || !body.sourceGroup || !body.summary) {
-      return json({ error: '"kind", "sourceGroup", and "summary" are required' }, 400);
+      return json(
+        { error: '"kind", "sourceGroup", and "summary" are required' },
+        400,
+      );
+    }
+    if (!isIpcEventKind(body.kind)) {
+      return json({ error: '"kind" must be a valid IPC event kind' }, 400);
+    }
+    if (
+      typeof body.sourceGroup !== 'string' ||
+      typeof body.summary !== 'string'
+    ) {
+      return json(
+        { error: '"sourceGroup" and "summary" must be strings' },
+        400,
+      );
+    }
+    if (body.details !== undefined && !isRecord(body.details)) {
+      return json({ error: '"details" must be an object when provided' }, 400);
     }
     const event = state.addIpcEvent(
-      body.kind as string,
-      body.sourceGroup as string,
-      body.summary as string,
-      body.details as Record<string, unknown> | undefined,
+      body.kind,
+      body.sourceGroup,
+      body.summary,
+      body.details,
     );
     broadcast(webServer, 'ipc_event', event);
     return json(event, 201);
@@ -257,7 +408,7 @@ async function handleAdminRequest(
 
   // ---- Queue Stats ----
   if (path === '/queue-stats' && method === 'POST') {
-    const body = await req.json() as Record<string, unknown>;
+    const body = (await req.json()) as Record<string, unknown>;
     state.setQueueStats(body);
     broadcast(webServer, 'agent_status', { queueStats: state.queueStats });
     return json(state.queueStats);
@@ -266,14 +417,15 @@ async function handleAdminRequest(
   // ---- Queue Details ----
   if (path === '/queue-details' && method === 'POST') {
     const body = await req.json();
-    if (!Array.isArray(body)) return json({ error: 'Expected array of GroupQueueDetail' }, 400);
+    if (!Array.isArray(body))
+      return json({ error: 'Expected array of GroupQueueDetail' }, 400);
     state.setQueueDetails(body);
     return json({ ok: true, count: body.length });
   }
 
   // ---- Broadcast arbitrary event ----
   if (path === '/broadcast' && method === 'POST') {
-    const body = await req.json() as Record<string, unknown>;
+    const body = (await req.json()) as Record<string, unknown>;
     if (!body.type) return json({ error: '"type" is required' }, 400);
     broadcast(webServer, body.type as WsEventType, body.data ?? {});
     return json({ ok: true, type: body.type });
@@ -290,35 +442,75 @@ async function handleAdminRequest(
 
 // ---- Predefined scenarios ----
 
-function runScenario(name: string, state: FakeState, webServer: WebServerHandle): Response {
+function runScenario(
+  name: string,
+  state: FakeState,
+  webServer: WebServerHandle,
+): Response {
+  state.reset();
+
   switch (name) {
     case 'agent-overload': {
       // Simulate many agents with high activity
       for (let i = 0; i < 12; i++) {
-        state.addAgent({ id: `overload-agent-${i}`, name: `Overload Bot ${i}` });
+        state.addAgent({
+          id: `overload-agent-${i}`,
+          name: `Overload Bot ${i}`,
+        });
         state.addSubscription('sim:general', `overload-agent-${i}`);
       }
-      state.setQueueStats({ activeContainers: 10, idleContainers: 5, maxActive: 10, maxIdle: 5 });
+      state.setQueueStats({
+        activeContainers: 10,
+        idleContainers: 5,
+        maxActive: 10,
+        maxIdle: 5,
+      });
       broadcast(webServer, 'agent_status', { scenario: 'agent-overload' });
       return json({ ok: true, scenario: 'agent-overload', agentsAdded: 12 });
     }
 
     case 'task-storm': {
       // Create many tasks in various states
-      const statuses: Array<'active' | 'paused' | 'completed'> = ['active', 'paused', 'completed'];
-      const types: Array<'cron' | 'interval' | 'once'> = ['cron', 'interval', 'once'];
+      const statuses: Array<'active' | 'paused' | 'completed'> = [
+        'active',
+        'paused',
+        'completed',
+      ];
+      const types: Array<'cron' | 'interval' | 'once'> = [
+        'cron',
+        'interval',
+        'once',
+      ];
+      const agentFolders = Object.keys(state.agents);
+      const chatJids = state.chats.map((chat) => chat.jid);
+
+      if (agentFolders.length === 0 || chatJids.length === 0) {
+        return json(
+          { error: 'Task storm requires at least one agent and one chat' },
+          400,
+        );
+      }
+
       for (let i = 0; i < 30; i++) {
         const status = statuses[i % 3];
         const type = types[i % 3];
         state.createTask({
           id: `storm-task-${i}`,
-          group_folder: Object.keys(state.agents)[i % Object.keys(state.agents).length],
-          chat_jid: state.chats[i % state.chats.length].jid,
+          group_folder: agentFolders[i % agentFolders.length],
+          chat_jid: chatJids[i % chatJids.length],
           prompt: `Storm task ${i}: ${['Check logs', 'Run tests', 'Deploy staging', 'Sync data', 'Generate report'][i % 5]}`,
           schedule_type: type,
-          schedule_value: type === 'cron' ? `*/${(i % 30) + 1} * * * *` : type === 'interval' ? `${(i + 1) * 60000}` : new Date(Date.now() + i * 3600_000).toISOString(),
+          schedule_value:
+            type === 'cron'
+              ? `*/${(i % 30) + 1} * * * *`
+              : type === 'interval'
+                ? `${(i + 1) * 60000}`
+                : new Date(Date.now() + i * 3600_000).toISOString(),
           context_mode: i % 2 === 0 ? 'group' : 'isolated',
-          next_run: status === 'completed' ? null : new Date(Date.now() + i * 60_000).toISOString(),
+          next_run:
+            status === 'completed'
+              ? null
+              : new Date(Date.now() + i * 60_000).toISOString(),
           status,
           created_at: new Date(Date.now() - i * 86400_000).toISOString(),
         });
@@ -329,7 +521,7 @@ function runScenario(name: string, state: FakeState, webServer: WebServerHandle)
 
     case 'error-cascade': {
       // Simulate IPC errors and failed task runs
-      const errorKinds: Array<[string, string]> = [
+      const errorKinds: Array<[IpcEventKind, string]> = [
         ['ipc_error', 'JSON parse error in message file'],
         ['message_blocked', 'Rate limit exceeded for sim:general'],
         ['task_error', 'Container OOM killed after 4096MB'],
@@ -351,7 +543,10 @@ function runScenario(name: string, state: FakeState, webServer: WebServerHandle)
         task.last_run = new Date().toISOString();
         task.last_result = 'ERROR: OOM killed';
       }
-      state.queueDetails = state.queueDetails.map((d) => ({ ...d, retryCount: 3 }));
+      state.queueDetails = state.queueDetails.map((d) => ({
+        ...d,
+        retryCount: 3,
+      }));
       broadcast(webServer, 'agent_status', { scenario: 'error-cascade' });
       broadcast(webServer, 'task_update', { scenario: 'error-cascade' });
       return json({ ok: true, scenario: 'error-cascade' });
@@ -359,11 +554,26 @@ function runScenario(name: string, state: FakeState, webServer: WebServerHandle)
 
     case 'idle-fleet': {
       // All containers idle, no active work
-      state.setQueueStats({ activeContainers: 0, idleContainers: 4, maxActive: 10, maxIdle: 5 });
+      state.setQueueStats({
+        activeContainers: 0,
+        idleContainers: 4,
+        maxActive: 10,
+        maxIdle: 5,
+      });
       state.queueDetails = Object.keys(state.agents).map((folder) => ({
         folderKey: folder,
-        messageLane: { active: false, idle: true, pendingCount: 0, containerName: `omniclaw-${folder}-idle` },
-        taskLane: { active: false, pendingCount: 0, containerName: null, activeTask: null },
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 0,
+          containerName: `omniclaw-${folder}-idle`,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
         retryCount: 0,
       }));
       broadcast(webServer, 'agent_status', { scenario: 'idle-fleet' });
@@ -379,7 +589,12 @@ function runScenario(name: string, state: FakeState, webServer: WebServerHandle)
       state.chats = [];
       state.ipcEvents = [];
       state.taskRunLogs = {};
-      state.queueStats = { activeContainers: 0, idleContainers: 0, maxActive: 10, maxIdle: 5 };
+      state.queueStats = {
+        activeContainers: 0,
+        idleContainers: 0,
+        maxActive: 10,
+        maxIdle: 5,
+      };
       state.queueDetails = [];
       broadcast(webServer, 'agent_status', { scenario: 'empty' });
       broadcast(webServer, 'task_update', { scenario: 'empty' });
@@ -387,16 +602,29 @@ function runScenario(name: string, state: FakeState, webServer: WebServerHandle)
     }
 
     default:
-      return json({
-        error: `Unknown scenario: ${name}`,
-        available: ['agent-overload', 'task-storm', 'error-cascade', 'idle-fleet', 'empty'],
-      }, 404);
+      return json(
+        {
+          error: `Unknown scenario: ${name}`,
+          available: [
+            'agent-overload',
+            'task-storm',
+            'error-cascade',
+            'idle-fleet',
+            'empty',
+          ],
+        },
+        404,
+      );
   }
 }
 
 // ---- Helpers ----
 
-function broadcast(webServer: WebServerHandle, type: WsEventType, data: unknown): void {
+function broadcast(
+  webServer: WebServerHandle,
+  type: WsEventType,
+  data: unknown,
+): void {
   webServer.broadcast({ type, data, timestamp: new Date().toISOString() });
 }
 
@@ -405,4 +633,50 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+const VALID_IPC_EVENT_KINDS = [
+  'message_sent',
+  'message_blocked',
+  'message_suppressed',
+  'task_created',
+  'task_edited',
+  'task_cancelled',
+  'task_error',
+  'group_registered',
+  'ipc_error',
+] as const satisfies readonly IpcEventKind[];
+
+function isInvalidJsonError(err: unknown): boolean {
+  return (
+    err instanceof SyntaxError ||
+    (err instanceof Error && /json/i.test(err.message))
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeScheduleType(value: unknown): 'cron' | 'interval' | 'once' {
+  if (value === 'cron' || value === 'interval' || value === 'once') {
+    return value;
+  }
+  return 'interval';
+}
+
+function normalizeTaskStatus(
+  value: unknown,
+): 'active' | 'paused' | 'completed' {
+  if (value === 'active' || value === 'paused' || value === 'completed') {
+    return value;
+  }
+  return 'active';
+}
+
+function isIpcEventKind(value: unknown): value is IpcEventKind {
+  return (
+    typeof value === 'string' &&
+    VALID_IPC_EVENT_KINDS.includes(value as IpcEventKind)
+  );
 }

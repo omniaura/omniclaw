@@ -3,10 +3,16 @@
  * No secrets, no containers, no database required.
  */
 
-import type { Agent, ChannelSubscription, ScheduledTask, TaskRunLog } from '../types.js';
+import type {
+  Agent,
+  ChannelSubscription,
+  ScheduledTask,
+  TaskRunLog,
+} from '../types.js';
 import type { GroupQueueDetail } from '../group-queue.js';
 import type { IpcEvent, IpcEventKind } from '../web/ipc-events.js';
 import type { WebStateProvider, QueueStats } from '../web/types.js';
+import { calculateNextRun } from '../schedule-utils.js';
 
 // ---- Seed data generators ----
 
@@ -39,7 +45,9 @@ function makeSub(
   };
 }
 
-function makeTask(overrides: Partial<ScheduledTask> & { id: string }): ScheduledTask {
+function makeTask(
+  overrides: Partial<ScheduledTask> & { id: string },
+): ScheduledTask {
   return {
     group_folder: 'main',
     chat_jid: 'sim:general',
@@ -101,18 +109,25 @@ function seedSubscriptions(): Record<string, ChannelSubscription[]> {
   return {
     'sim:general': [
       makeSub('sim:general', 'main', { isPrimary: true }),
-      makeSub('sim:general', 'research-bot', { isPrimary: false, priority: 50 }),
+      makeSub('sim:general', 'research-bot', {
+        isPrimary: false,
+        priority: 50,
+      }),
     ],
     'sim:code-review': [
       makeSub('sim:code-review', 'code-reviewer', { isPrimary: true }),
     ],
-    'sim:tasks': [
-      makeSub('sim:tasks', 'task-runner', { isPrimary: true }),
-    ],
+    'sim:tasks': [makeSub('sim:tasks', 'task-runner', { isPrimary: true })],
     'sim:multi-agent': [
       makeSub('sim:multi-agent', 'main', { isPrimary: true }),
-      makeSub('sim:multi-agent', 'research-bot', { isPrimary: false, priority: 80 }),
-      makeSub('sim:multi-agent', 'code-reviewer', { isPrimary: false, priority: 60 }),
+      makeSub('sim:multi-agent', 'research-bot', {
+        isPrimary: false,
+        priority: 80,
+      }),
+      makeSub('sim:multi-agent', 'code-reviewer', {
+        isPrimary: false,
+        priority: 60,
+      }),
     ],
   };
 }
@@ -176,7 +191,8 @@ function seedMessages(): SimMessage[] {
       chat_jid: 'sim:general',
       sender: 'agent:main',
       sender_name: 'Main Assistant',
-      content: 'Checking deploy status now. The latest deployment was successful — all health checks passed.',
+      content:
+        'Checking deploy status now. The latest deployment was successful — all health checks passed.',
       timestamp: new Date(now - 590_000).toISOString(),
     },
     {
@@ -192,7 +208,8 @@ function seedMessages(): SimMessage[] {
       chat_jid: 'sim:general',
       sender: 'agent:research-bot',
       sender_name: 'Research Bot',
-      content: 'Investigating PR #315. Found a potential N+1 query in the agent detail page rendering.',
+      content:
+        'Investigating PR #315. Found a potential N+1 query in the agent detail page rendering.',
       timestamp: new Date(now - 280_000).toISOString(),
     },
     {
@@ -208,7 +225,8 @@ function seedMessages(): SimMessage[] {
       chat_jid: 'sim:code-review',
       sender: 'agent:code-reviewer',
       sender_name: 'Code Reviewer',
-      content: 'Reviewing now. The fake state provider looks clean — good separation of concerns.',
+      content:
+        'Reviewing now. The fake state provider looks clean — good separation of concerns.',
       timestamp: new Date(now - 100_000).toISOString(),
     },
     {
@@ -225,10 +243,26 @@ function seedMessages(): SimMessage[] {
 function seedChats(): SimChat[] {
   const now = Date.now();
   return [
-    { jid: 'sim:general', name: '#general', last_message_time: new Date(now - 280_000).toISOString() },
-    { jid: 'sim:code-review', name: '#code-review', last_message_time: new Date(now - 100_000).toISOString() },
-    { jid: 'sim:tasks', name: '#tasks', last_message_time: new Date(now - 60_000).toISOString() },
-    { jid: 'sim:multi-agent', name: '#multi-agent', last_message_time: new Date(now - 3600_000).toISOString() },
+    {
+      jid: 'sim:general',
+      name: '#general',
+      last_message_time: new Date(now - 280_000).toISOString(),
+    },
+    {
+      jid: 'sim:code-review',
+      name: '#code-review',
+      last_message_time: new Date(now - 100_000).toISOString(),
+    },
+    {
+      jid: 'sim:tasks',
+      name: '#tasks',
+      last_message_time: new Date(now - 60_000).toISOString(),
+    },
+    {
+      jid: 'sim:multi-agent',
+      name: '#multi-agent',
+      last_message_time: new Date(now - 3600_000).toISOString(),
+    },
   ];
 }
 
@@ -330,19 +364,44 @@ function seedQueueDetails(): GroupQueueDetail[] {
   return [
     {
       folderKey: 'main',
-      messageLane: { active: true, idle: false, pendingCount: 0, containerName: 'omniclaw-main-abc123' },
-      taskLane: { active: false, pendingCount: 1, containerName: null, activeTask: null },
+      messageLane: {
+        active: true,
+        idle: false,
+        pendingCount: 0,
+        containerName: 'omniclaw-main-abc123',
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 1,
+        containerName: null,
+        activeTask: null,
+      },
       retryCount: 0,
     },
     {
       folderKey: 'research-bot',
-      messageLane: { active: false, idle: true, pendingCount: 0, containerName: 'omniclaw-research-def456' },
-      taskLane: { active: false, pendingCount: 0, containerName: null, activeTask: null },
+      messageLane: {
+        active: false,
+        idle: true,
+        pendingCount: 0,
+        containerName: 'omniclaw-research-def456',
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+      },
       retryCount: 0,
     },
     {
       folderKey: 'code-reviewer',
-      messageLane: { active: true, idle: false, pendingCount: 2, containerName: 'omniclaw-reviewer-ghi789' },
+      messageLane: {
+        active: true,
+        idle: false,
+        pendingCount: 2,
+        containerName: 'omniclaw-reviewer-ghi789',
+      },
       taskLane: {
         active: true,
         pendingCount: 0,
@@ -351,11 +410,21 @@ function seedQueueDetails(): GroupQueueDetail[] {
           taskId: 'task-paused',
           promptPreview: 'Review new PRs on main branch',
           startedAt: Date.now() - 30_000,
+          runningMs: 30_000,
         },
       },
       retryCount: 1,
     },
   ];
+}
+
+function seedContextFiles(): Record<string, string> {
+  return {
+    main: '# Main Agent\n\nThis is the main agent context.',
+    'research-bot': '# Research Bot\n\nFocused on issue triage and research.',
+    'servers/sim-server':
+      '# Sim Server\n\nShared server context for simulation.',
+  };
 }
 
 // ---- FakeState class ----
@@ -389,11 +458,7 @@ export class FakeState implements WebStateProvider {
       maxIdle: 5,
     };
     this.queueDetails = seedQueueDetails();
-    this.contextFiles = {
-      main: '# Main Agent\n\nThis is the main agent context.',
-      'research-bot': '# Research Bot\n\nFocused on issue triage and research.',
-      'servers/sim-server': '# Sim Server\n\nShared server context for simulation.',
-    };
+    this.contextFiles = seedContextFiles();
     this.nextIpcId = 6;
     this.nextMsgId = 8;
   }
@@ -419,7 +484,10 @@ export class FakeState implements WebStateProvider {
   getMessages(chatJid: string, sinceTimestamp: string, limit?: number) {
     const since = new Date(sinceTimestamp).getTime();
     return this.messages
-      .filter((m) => m.chat_jid === chatJid && new Date(m.timestamp).getTime() >= since)
+      .filter(
+        (m) =>
+          m.chat_jid === chatJid && new Date(m.timestamp).getTime() >= since,
+      )
       .slice(0, limit ?? 100);
   }
 
@@ -445,12 +513,20 @@ export class FakeState implements WebStateProvider {
   }
 
   createTask(task: Omit<ScheduledTask, 'last_run' | 'last_result'>): void {
+    if (this.tasks.some((existingTask) => existingTask.id === task.id)) {
+      throw new Error(`Task already exists: ${task.id}`);
+    }
     this.tasks.push({ ...task, last_run: null, last_result: null });
   }
 
   updateTask(
     id: string,
-    updates: Partial<Pick<ScheduledTask, 'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'>>,
+    updates: Partial<
+      Pick<
+        ScheduledTask,
+        'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
+      >
+    >,
   ): void {
     const task = this.tasks.find((t) => t.id === id);
     if (!task) throw new Error(`Task not found: ${id}`);
@@ -467,18 +543,7 @@ export class FakeState implements WebStateProvider {
     scheduleType: 'cron' | 'interval' | 'once',
     scheduleValue: string,
   ): string | null {
-    if (scheduleType === 'interval') {
-      const ms = parseInt(scheduleValue, 10);
-      if (isNaN(ms) || ms <= 0) return null;
-      return new Date(Date.now() + ms).toISOString();
-    }
-    if (scheduleType === 'once') {
-      const d = new Date(scheduleValue);
-      if (isNaN(d.getTime())) return null;
-      return d.toISOString();
-    }
-    // cron — simplified: just return next minute
-    return new Date(Date.now() + 60_000).toISOString();
+    return calculateNextRun(scheduleType, scheduleValue);
   }
 
   readContextFile(layerPath: string): string | null {
@@ -489,7 +554,11 @@ export class FakeState implements WebStateProvider {
     this.contextFiles[layerPath] = content;
   }
 
-  updateAgentAvatar(agentId: string, url: string | null, source: string | null): void {
+  updateAgentAvatar(
+    agentId: string,
+    url: string | null,
+    source: string | null,
+  ): void {
     const agent = this.agents[agentId];
     if (!agent) throw new Error(`Agent not found: ${agentId}`);
     agent.avatarUrl = url ?? undefined;
@@ -515,9 +584,15 @@ export class FakeState implements WebStateProvider {
     return true;
   }
 
-  addSubscription(channelJid: string, agentId: string, overrides?: Partial<ChannelSubscription>): void {
+  addSubscription(
+    channelJid: string,
+    agentId: string,
+    overrides?: Partial<ChannelSubscription>,
+  ): void {
     if (!this.subscriptions[channelJid]) this.subscriptions[channelJid] = [];
-    this.subscriptions[channelJid].push(makeSub(channelJid, agentId, overrides));
+    this.subscriptions[channelJid].push(
+      makeSub(channelJid, agentId, overrides),
+    );
   }
 
   addChat(jid: string, name: string): void {
@@ -529,7 +604,12 @@ export class FakeState implements WebStateProvider {
     this.chats.push({ jid, name, last_message_time: new Date().toISOString() });
   }
 
-  addMessage(chatJid: string, sender: string, senderName: string, content: string): SimMessage {
+  addMessage(
+    chatJid: string,
+    sender: string,
+    senderName: string,
+    content: string,
+  ): SimMessage {
     const msg: SimMessage = {
       id: `msg-${this.nextMsgId++}`,
       chat_jid: chatJid,
@@ -545,7 +625,12 @@ export class FakeState implements WebStateProvider {
     return msg;
   }
 
-  addIpcEvent(kind: IpcEventKind, sourceGroup: string, summary: string, details?: Record<string, unknown>): IpcEvent {
+  addIpcEvent(
+    kind: IpcEventKind,
+    sourceGroup: string,
+    summary: string,
+    details?: Record<string, unknown>,
+  ): IpcEvent {
     const event: IpcEvent = {
       id: this.nextIpcId++,
       kind,
@@ -581,13 +666,14 @@ export class FakeState implements WebStateProvider {
     this.chats = seedChats();
     this.ipcEvents = seedIpcEvents();
     this.taskRunLogs = seedTaskRunLogs();
-    this.queueStats = { activeContainers: 3, idleContainers: 1, maxActive: 10, maxIdle: 5 };
-    this.queueDetails = seedQueueDetails();
-    this.contextFiles = {
-      main: '# Main Agent\n\nThis is the main agent context.',
-      'research-bot': '# Research Bot\n\nFocused on issue triage and research.',
-      'servers/sim-server': '# Sim Server\n\nShared server context for simulation.',
+    this.queueStats = {
+      activeContainers: 3,
+      idleContainers: 1,
+      maxActive: 10,
+      maxIdle: 5,
     };
+    this.queueDetails = seedQueueDetails();
+    this.contextFiles = seedContextFiles();
     this.nextIpcId = 6;
     this.nextMsgId = 8;
   }
