@@ -27,6 +27,7 @@ import {
 } from './network.js';
 import { buildHealthData, renderSystem } from './system.js';
 import { renderTasks } from './tasks.js';
+import { renderLogs } from './logs.js';
 import { buildAgentChannelData } from './agent-channels.js';
 import {
   renderAgentsPageWithRemote,
@@ -192,6 +193,12 @@ export function handleRequest(
   // --- Task Manager ---
   if (pathname === '/tasks')
     return new Response(renderTasks(state), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+
+  // --- Logs ---
+  if (pathname === '/logs')
+    return new Response(renderLogs(state), {
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
 
