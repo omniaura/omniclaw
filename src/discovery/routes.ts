@@ -275,6 +275,18 @@ export function handleDiscoveryRequest(
     return handleProxyStats(instanceId, ctx);
   }
 
+  // GET /api/discovery/peers/:id/logs
+  if (
+    pathname.startsWith('/api/discovery/peers/') &&
+    pathname.endsWith('/logs') &&
+    method === 'GET'
+  ) {
+    const instanceId = decodeURIComponent(
+      pathname.slice('/api/discovery/peers/'.length, -'/logs'.length),
+    );
+    return handleProxyLogStream(instanceId, ctx);
+  }
+
   // GET /api/discovery/peers/:id/context/layers
   if (
     pathname.startsWith('/api/discovery/peers/') &&
@@ -866,6 +878,32 @@ async function handleProxyStats(
   try {
     const stats = await client.getStats();
     return json(stats);
+  } catch (err) {
+    return json(
+      {
+        error: `Proxy error: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      502,
+    );
+  }
+}
+
+async function handleProxyLogStream(
+  instanceId: string,
+  ctx: DiscoveryRouteContext,
+): Promise<Response> {
+  const client = getPeerClient(instanceId, ctx);
+  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+
+  try {
+    const response = await client.streamLogs();
+    return new Response(response.body, {
+      headers: {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        'X-Accel-Buffering': 'no',
+      },
+    });
   } catch (err) {
     return json(
       {
