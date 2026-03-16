@@ -25,6 +25,7 @@ import { checkPeerAuth } from '../discovery/routes.js';
 import type { TrustStore } from '../discovery/trust-store.js';
 import { renderSystemContent } from './system.js';
 import { renderTasksContent } from './tasks.js';
+import { renderLogsContent } from './logs.js';
 
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
@@ -264,6 +265,11 @@ export function startWebServer(
           title: 'Tasks',
           render: () => renderTasksContent(state),
         },
+        logs: {
+          path: '/logs',
+          title: 'Logs',
+          render: () => renderLogsContent(state),
+        },
         system: {
           path: '/system',
           title: 'System',
@@ -398,7 +404,8 @@ export function startWebServer(
         if (!client.subscriptions.has(channel)) continue;
         try {
           if (event.type === 'log') {
-            client.logs.push(renderLogLine(event.data));
+            const logHtml = renderLogLine(event.data);
+            client.logs.push(logHtml);
             if (client.logs.length > MAX_LOG_LINES) {
               client.logs.splice(0, client.logs.length - MAX_LOG_LINES);
             }
@@ -409,6 +416,11 @@ export function startWebServer(
             client.stream.patchElements(
               `<span class="log-count" id="log-count">${client.logs.length} lines</span>`,
             );
+            // Also append to the full-page logs viewer (if present)
+            client.stream.patchElements(logHtml, {
+              selector: '#logs-output',
+              mode: 'append',
+            });
             continue;
           }
 
@@ -752,7 +764,7 @@ function renderLogLine(data: unknown): string {
   if (typeof log.durationMs === 'number') message += ` (${log.durationMs}ms)`;
   if (typeof log.costUsd === 'number') message += ` $${log.costUsd}`;
 
-  return `<div class="${lineClass}" data-level="${escapeHtml(level)}">
+  return `<div class="${lineClass}" data-level="${escapeHtml(level)}" data-source="${escapeHtml(String(context || ''))}">
     <span class="ts">${escapeHtml(timestamp)}</span>
     <span class="level-badge ${escapeHtml(level)}">${escapeHtml(level)}</span>
     ${context ? `<span class="context">${escapeHtml(String(context))}</span>` : ''}

@@ -7,6 +7,7 @@
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', page: 'dashboard' },
   { href: '/tasks', label: 'Tasks', page: 'tasks' },
+  { href: '/logs', label: 'Logs', page: 'logs' },
   { href: '/conversations', label: 'Conversations', page: 'conversations' },
   { href: '/context', label: 'Context', page: 'context' },
   { href: '/ipc', label: 'IPC', page: 'ipc' },
@@ -519,6 +520,28 @@ function shellCSS(): string {
     `.tm-run-header h3{font-size:12px;font-weight:600;color:var(--text-bright)}`,
     `.tm-delete-msg{font-size:12px;color:var(--text);margin-bottom:.75rem}`,
     `.schedule-preview{font-size:10px;color:var(--accent);margin-top:3px;min-height:14px}`,
+
+    // --- Page: Logs ---
+    `.logs-page{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}`,
+    `.logs-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;background:var(--surface)}`,
+    `.logs-toolbar-left{display:flex;align-items:center;gap:8px;flex-shrink:0}`,
+    `.logs-toolbar-left h2{font-size:13px;font-weight:600;color:var(--text-bright);letter-spacing:.03em;white-space:nowrap}`,
+    `.logs-line-count{font-size:10px;color:var(--text-dim);font-variant-numeric:tabular-nums;white-space:nowrap}`,
+    `.logs-toolbar-center{flex:1;min-width:200px;max-width:400px}`,
+    `.logs-search{display:flex;align-items:center;gap:6px}`,
+    `.logs-search input{flex:1;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:11px}`,
+    `.logs-search input:focus{outline:none;border-color:var(--accent)}`,
+    `.logs-search-option{display:flex;align-items:center;gap:3px;font-size:10px;color:var(--text-dim);cursor:pointer;white-space:nowrap;user-select:none}`,
+    `.logs-search-option input{width:12px;height:12px;accent-color:var(--accent)}`,
+    `.logs-toolbar-right{display:flex;align-items:center;gap:4px;flex-shrink:0;flex-wrap:wrap}`,
+    `.logs-level-filters{display:flex;gap:2px}`,
+    `.logs-source-select{padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:10px;max-width:160px}`,
+    `.logs-source-select:focus{outline:none;border-color:var(--accent)}`,
+    `.logs-output{flex:1;overflow-y:auto;padding:2px 0;font-size:11px;line-height:1.6;background:var(--bg)}`,
+    `.logs-output .log-line{padding:0 12px}`,
+    `.logs-output .log-line.search-match{background:rgba(129,140,248,.08)}`,
+    `.logs-output .log-line .search-highlight{background:rgba(251,191,36,.3);border-radius:2px;padding:0 1px}`,
+    `.logs-status-bar{display:flex;align-items:center;justify-content:space-between;padding:4px 12px;border-top:1px solid var(--border);flex-shrink:0;background:var(--surface);font-size:10px;color:var(--text-dim)}`,
 
     // --- Responsive ---
     `@media(max-width:900px){.stats-grid{grid-template-columns:repeat(2,1fr)}.tables-grid{grid-template-columns:1fr}.system-grid{grid-template-columns:1fr}}`,

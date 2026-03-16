@@ -3,6 +3,7 @@ export type { WebServerHandle } from './server.js';
 export { startLogStream } from './log-stream.js';
 export { renderConversations } from './conversations.js';
 export { renderContextViewer } from './context-viewer.js';
+export { renderLogs } from './logs.js';
 export { renderIpcInspector } from './ipc-inspector.js';
 export { renderSystem, buildHealthData } from './system.js';
 export type { HealthData } from './system.js';
