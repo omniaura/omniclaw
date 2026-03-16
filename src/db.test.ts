@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 
 import {
+  _countGitHubWebhookDeliveriesForTest,
   _initTestDatabase,
+  cleanupExpiredGitHubWebhookDeliveries,
   createTask,
   deleteTask,
   getAllAgents,
@@ -596,12 +598,25 @@ describe('github webhook replay persistence', () => {
     const start = Date.parse('2026-03-16T00:00:00.000Z');
 
     expect(recordGitHubWebhookDelivery('delivery-1', 60_000, start)).toBe(true);
-    expect(recordGitHubWebhookDelivery('delivery-1', 60_000, start + 30_000)).toBe(
-      false,
-    );
-    expect(recordGitHubWebhookDelivery('delivery-1', 60_000, start + 61_000)).toBe(
+    expect(
+      recordGitHubWebhookDelivery('delivery-1', 60_000, start + 30_000),
+    ).toBe(false);
+    expect(
+      recordGitHubWebhookDelivery('delivery-1', 60_000, start + 61_000),
+    ).toBe(true);
+  });
+
+  it('can clean up expired delivery ids during startup-style initialization', () => {
+    const start = Date.parse('2026-03-16T00:00:00.000Z');
+
+    expect(recordGitHubWebhookDelivery('delivery-expired', 60_000, start)).toBe(
       true,
     );
+    expect(_countGitHubWebhookDeliveriesForTest()).toBe(1);
+
+    cleanupExpiredGitHubWebhookDeliveries(start + 61_000);
+
+    expect(_countGitHubWebhookDeliveriesForTest()).toBe(0);
   });
 });
 

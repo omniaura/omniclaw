@@ -618,6 +618,7 @@ export function initDatabase(): void {
 
   db = new Database(dbPath);
   createSchema(db);
+  cleanupExpiredGitHubWebhookDeliveries();
 
   // Migrate from JSON files if they exist
   migrateJsonState();
@@ -628,6 +629,15 @@ export function initDatabase(): void {
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
+  cleanupExpiredGitHubWebhookDeliveries();
+}
+
+/** @internal - for tests only. */
+export function _countGitHubWebhookDeliveriesForTest(): number {
+  const row = db
+    .query('SELECT COUNT(*) as count FROM github_webhook_deliveries')
+    .get() as { count: number };
+  return row.count;
 }
 
 /** @internal - for tests only. Backdates a session's created_at timestamp. */
@@ -1184,6 +1194,15 @@ export function setRouterState(key: string, value: string): void {
   ).run(key, value);
 }
 
+export function cleanupExpiredGitHubWebhookDeliveries(
+  nowMs = Date.now(),
+): void {
+  const nowIso = new Date(nowMs).toISOString();
+  db.query('DELETE FROM github_webhook_deliveries WHERE expires_at <= ?').run(
+    nowIso,
+  );
+}
+
 export function recordGitHubWebhookDelivery(
   deliveryId: string,
   ttlMs: number,
@@ -1193,14 +1212,15 @@ export function recordGitHubWebhookDelivery(
   const expiresAtIso = new Date(nowMs + ttlMs).toISOString();
 
   const transaction = db.transaction(() => {
-    db.query('DELETE FROM github_webhook_deliveries WHERE expires_at <= ?').run(
-      nowIso,
-    );
+    cleanupExpiredGitHubWebhookDeliveries(nowMs);
 
     return db
       .query(
-        `INSERT OR IGNORE INTO github_webhook_deliveries (delivery_id, processed_at, expires_at)
-         VALUES (?, ?, ?)`,
+        `INSERT OR IGNORE INTO github_webhook_deliveries (
+           delivery_id,
+           processed_at, -- audit trail only; queries use delivery_id/expires_at
+           expires_at
+         ) VALUES (?, ?, ?)`,
       )
       .run(deliveryId, nowIso, expiresAtIso);
   });

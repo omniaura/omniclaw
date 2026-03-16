@@ -46,13 +46,15 @@ describe('github webhooks', () => {
   it('rejects duplicate deliveries after an in-memory cache reset', () => {
     const now = Date.parse('2026-03-16T00:00:00.000Z');
 
-    expect(markGitHubWebhookDeliveryProcessed('delivery-replay', now)).toBe(true);
+    expect(markGitHubWebhookDeliveryProcessed('delivery-replay', now)).toBe(
+      true,
+    );
 
     _resetGitHubWebhookReplayCacheForTest();
 
-    expect(markGitHubWebhookDeliveryProcessed('delivery-replay', now + 1_000)).toBe(
-      false,
-    );
+    expect(
+      markGitHubWebhookDeliveryProcessed('delivery-replay', now + 1_000),
+    ).toBe(false);
   });
 
   it('builds notification for watched PR review comment', () => {
