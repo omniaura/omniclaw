@@ -36,6 +36,7 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     last_result: null,
     status: 'active',
     created_at: '2026-01-01T00:00:00.000Z',
+    executing_since: null,
     ...overrides,
   };
 }

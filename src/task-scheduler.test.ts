@@ -3,16 +3,23 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import {
   _initTestDatabase,
   advanceTaskNextRun,
+  clearTaskExecuting,
   createTask,
   deleteTask,
   getAllTasks,
   getDueTasks,
+  getOrphanedOnceTasks,
+  getStaleExecutingTasks,
   getTaskById,
   getTaskRunLogs,
+  hasSuccessfulRun,
   logTaskRun,
+  markTaskExecuting,
+  updateTask,
   updateTaskAfterRun,
 } from './db.js';
 import { calculateNextRun, validateSchedule } from './schedule-utils.js';
+import { recoverStaleTasks } from './task-scheduler.js';
 import {
   findGroupByFolder,
   findJidByFolder,
@@ -262,7 +269,10 @@ describe('DB task lifecycle', () => {
       advanceTaskNextRun('once-task', null);
       const task = getTaskById('once-task');
       expect(task!.next_run).toBeNull();
-      expect(task!.status).toBe('completed');
+      // advanceTaskNextRun no longer marks once tasks completed — that
+      // happens in updateTaskAfterRun after actual execution, so crashes
+      // between enqueue and completion don't lose one-shot tasks.
+      expect(task!.status).toBe('active');
     });
   });
 
@@ -639,12 +649,12 @@ describe('scheduler task lifecycle (deterministic simulation)', () => {
     // 4. Verify it's no longer returned as due
     expect(getDueTasks()).toHaveLength(0);
 
-    // 5. Task is marked completed
+    // 5. Task stays active (completion happens in updateTaskAfterRun after execution)
     const task = getTaskById('sim-once');
-    expect(task!.status).toBe('completed');
+    expect(task!.status).toBe('active');
     expect(task!.next_run).toBeNull();
 
-    // 6. After run, update with result
+    // 6. After run, update with result — this marks once tasks completed
     updateTaskAfterRun('sim-once', null, 'Completed successfully');
     const final = getTaskById('sim-once');
     expect(final!.last_result).toBe('Completed successfully');
@@ -729,5 +739,407 @@ describe('scheduler task lifecycle (deterministic simulation)', () => {
 
     // Due again
     expect(getDueTasks()).toHaveLength(1);
+  });
+});
+
+// ============================================================
+// Execution lease tracking
+// ============================================================
+
+describe('execution lease tracking', () => {
+  beforeEach(() => _initTestDatabase());
+
+  it('marks a task as executing and clears it', () => {
+    createTask({
+      id: 'exec-test',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'test',
+      schedule_type: 'cron',
+      schedule_value: '0 * * * *',
+      next_run: new Date().toISOString(),
+      status: 'active',
+      context_mode: 'isolated',
+      created_at: new Date().toISOString(),
+    });
+
+    const before = getTaskById('exec-test');
+    expect(before?.executing_since).toBeNull();
+
+    markTaskExecuting('exec-test');
+    const during = getTaskById('exec-test');
+    expect(during?.executing_since).toBeTruthy();
+
+    clearTaskExecuting('exec-test');
+    const after = getTaskById('exec-test');
+    expect(after?.executing_since).toBeNull();
+  });
+
+  it('getStaleExecutingTasks returns only tasks older than cutoff', () => {
+    const old = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1 hour ago
+    createTask({
+      id: 'stale-task',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'stale',
+      schedule_type: 'interval',
+      schedule_value: '3600000',
+      next_run: null,
+      status: 'active',
+      context_mode: 'isolated',
+      created_at: old,
+    });
+    // Manually set executing_since to an old timestamp
+    markTaskExecuting('stale-task');
+    // Overwrite with old timestamp directly
+    const { db } = require('./db.js');
+    // Use the internal db to set an old executing_since
+    const dbObj = (globalThis as any).__omniclaw_test_db;
+
+    // Instead, create a fresh task and use the DB-level query
+    createTask({
+      id: 'fresh-task',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'fresh',
+      schedule_type: 'interval',
+      schedule_value: '3600000',
+      next_run: null,
+      status: 'active',
+      context_mode: 'isolated',
+      created_at: new Date().toISOString(),
+    });
+    markTaskExecuting('fresh-task');
+
+    // Cutoff: 30 min ago — fresh-task was just marked, stale-task was also just marked
+    // Both were just marked so neither should be stale
+    const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    expect(getStaleExecutingTasks(cutoff)).toHaveLength(0);
+
+    // Cutoff: 1 minute in the future — both should be stale
+    const futureCutoff = new Date(Date.now() + 60 * 1000).toISOString();
+    expect(getStaleExecutingTasks(futureCutoff)).toHaveLength(2);
+  });
+});
+
+// ============================================================
+// advanceTaskNextRun — once tasks stay active
+// ============================================================
+
+describe('advanceTaskNextRun for once tasks', () => {
+  beforeEach(() => _initTestDatabase());
+
+  it('does not mark once tasks as completed when advancing next_run to null', () => {
+    createTask({
+      id: 'once-advance',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'one-shot',
+      schedule_type: 'once',
+      schedule_value: '2025-01-01T00:00:00.000Z',
+      next_run: '2025-01-01T00:00:00.000Z',
+      status: 'active',
+      context_mode: 'isolated',
+      created_at: new Date().toISOString(),
+    });
+
+    // Advance next_run to null (simulating pre-enqueue for once task)
+    advanceTaskNextRun('once-advance', null);
+
+    const task = getTaskById('once-advance');
+    expect(task?.status).toBe('active'); // NOT 'completed'
+    expect(task?.next_run).toBeNull();
+  });
+});
+
+// ============================================================
+// Crash recovery: recoverStaleTasks
+// ============================================================
+
+describe('recoverStaleTasks', () => {
+  beforeEach(() => _initTestDatabase());
+
+  it('re-queues a stale once task that never completed', () => {
+    createTask({
+      id: 'stale-once',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'one-shot task',
+      schedule_type: 'once',
+      schedule_value: '2025-06-01T00:00:00.000Z',
+      next_run: null,
+      status: 'active',
+      context_mode: 'isolated',
+      created_at: new Date().toISOString(),
+    });
+    // Simulate: task started executing, then process crashed
+    markTaskExecuting('stale-once');
+    // Manually backdate executing_since to make it stale
+    updateTask('stale-once', {
+      next_run: null, // already null, but keeping the shape
+    });
+
+    // Use a future cutoff to make the task appear stale
+    const result = recoverStaleTasks({
+      calculateNextRun,
+      resolveBackend: () => ({
+        runAgent: async () => ({ status: 'success', result: '' }),
+      }),
+      writeTasksSnapshot: () => {},
+      advanceTaskNextRun,
+      markTaskExecuting,
+      clearTaskExecuting,
+      getStaleExecutingTasks: (cutoff) =>
+        getStaleExecutingTasks(new Date(Date.now() + 60000).toISOString()),
+      getOrphanedOnceTasks,
+      hasSuccessfulRun,
+      getAllTasks,
+      getDueTasks,
+      getTaskById,
+      logTaskRun,
+      updateTaskAfterRun,
+      logger: {
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+        child: () => ({
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        }),
+      } as any,
+    });
+
+    expect(result.recovered).toBeGreaterThanOrEqual(1);
+
+    const task = getTaskById('stale-once');
+    expect(task?.executing_since).toBeNull();
+    expect(task?.next_run).toBeTruthy(); // re-queued with a next_run
+  });
+
+  it('marks a stale once task as completed if it has a successful run log', () => {
+    createTask({
+      id: 'completed-once',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'completed one-shot',
+      schedule_type: 'once',
+      schedule_value: '2025-06-01T00:00:00.000Z',
+      next_run: null,
+      status: 'active',
+      context_mode: 'isolated',
+      created_at: new Date().toISOString(),
+    });
+    markTaskExecuting('completed-once');
+
+    // Log a successful run (simulating the task completed but crash before clearing lease)
+    logTaskRun({
+      task_id: 'completed-once',
+      run_at: new Date().toISOString(),
+      duration_ms: 5000,
+      status: 'success',
+      result: 'Done',
+      error: null,
+    });
+
+    const result = recoverStaleTasks({
+      calculateNextRun,
+      resolveBackend: () => ({
+        runAgent: async () => ({ status: 'success', result: '' }),
+      }),
+      writeTasksSnapshot: () => {},
+      advanceTaskNextRun,
+      markTaskExecuting,
+      clearTaskExecuting,
+      getStaleExecutingTasks: () =>
+        getStaleExecutingTasks(new Date(Date.now() + 60000).toISOString()),
+      getOrphanedOnceTasks,
+      hasSuccessfulRun,
+      getAllTasks,
+      getDueTasks,
+      getTaskById,
+      logTaskRun,
+      updateTaskAfterRun,
+      logger: {
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+        child: () => ({
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        }),
+      } as any,
+    });
+
+    expect(result.completed).toBeGreaterThanOrEqual(1);
+
+    const task = getTaskById('completed-once');
+    expect(task?.status).toBe('completed');
+    expect(task?.executing_since).toBeNull();
+  });
+
+  it('recalculates next_run for stale recurring tasks', () => {
+    createTask({
+      id: 'stale-cron',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'recurring task',
+      schedule_type: 'interval',
+      schedule_value: '3600000',
+      next_run: null,
+      status: 'active',
+      context_mode: 'isolated',
+      created_at: new Date().toISOString(),
+    });
+    markTaskExecuting('stale-cron');
+
+    const result = recoverStaleTasks({
+      calculateNextRun,
+      resolveBackend: () => ({
+        runAgent: async () => ({ status: 'success', result: '' }),
+      }),
+      writeTasksSnapshot: () => {},
+      advanceTaskNextRun,
+      markTaskExecuting,
+      clearTaskExecuting,
+      getStaleExecutingTasks: () =>
+        getStaleExecutingTasks(new Date(Date.now() + 60000).toISOString()),
+      getOrphanedOnceTasks,
+      hasSuccessfulRun,
+      getAllTasks,
+      getDueTasks,
+      getTaskById,
+      logTaskRun,
+      updateTaskAfterRun,
+      logger: {
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+        child: () => ({
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        }),
+      } as any,
+    });
+
+    expect(result.recovered).toBe(1);
+
+    const task = getTaskById('stale-cron');
+    expect(task?.executing_since).toBeNull();
+    expect(task?.next_run).toBeTruthy(); // recalculated
+  });
+
+  it('re-queues orphaned once tasks with no executing lease', () => {
+    // Simulate: advanceTaskNextRun set next_run=null, process crashed before execution
+    createTask({
+      id: 'orphaned-once',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'orphaned',
+      schedule_type: 'once',
+      schedule_value: '2025-06-01T00:00:00.000Z',
+      next_run: null, // cleared by advanceTaskNextRun
+      status: 'active',
+      context_mode: 'isolated',
+      created_at: new Date().toISOString(),
+    });
+    // No executing_since, no successful run — this is orphaned
+
+    const result = recoverStaleTasks({
+      calculateNextRun,
+      resolveBackend: () => ({
+        runAgent: async () => ({ status: 'success', result: '' }),
+      }),
+      writeTasksSnapshot: () => {},
+      advanceTaskNextRun,
+      markTaskExecuting,
+      clearTaskExecuting,
+      getStaleExecutingTasks: () => [], // no stale executing tasks
+      getOrphanedOnceTasks,
+      hasSuccessfulRun,
+      getAllTasks,
+      getDueTasks,
+      getTaskById,
+      logTaskRun,
+      updateTaskAfterRun,
+      logger: {
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+        child: () => ({
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        }),
+      } as any,
+    });
+
+    expect(result.recovered).toBe(1);
+
+    const task = getTaskById('orphaned-once');
+    expect(task?.next_run).toBeTruthy(); // re-queued
+    expect(task?.status).toBe('active');
+  });
+
+  it('does not re-fire completed once tasks during recovery', () => {
+    createTask({
+      id: 'done-once',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'already done',
+      schedule_type: 'once',
+      schedule_value: '2025-01-01T00:00:00.000Z',
+      next_run: null,
+      status: 'completed',
+      context_mode: 'isolated',
+      created_at: new Date().toISOString(),
+    });
+
+    const result = recoverStaleTasks({
+      calculateNextRun,
+      resolveBackend: () => ({
+        runAgent: async () => ({ status: 'success', result: '' }),
+      }),
+      writeTasksSnapshot: () => {},
+      advanceTaskNextRun,
+      markTaskExecuting,
+      clearTaskExecuting,
+      getStaleExecutingTasks: () => [],
+      getOrphanedOnceTasks, // won't include this — status is 'completed', not 'active'
+      hasSuccessfulRun,
+      getAllTasks,
+      getDueTasks,
+      getTaskById,
+      logTaskRun,
+      updateTaskAfterRun,
+      logger: {
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+        child: () => ({
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        }),
+      } as any,
+    });
+
+    expect(result.recovered).toBe(0);
+    expect(result.completed).toBe(0);
+
+    const task = getTaskById('done-once');
+    expect(task?.status).toBe('completed');
   });
 });

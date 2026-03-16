@@ -20,6 +20,7 @@ function makeTask(id: string, status: ScheduledTask['status']): ScheduledTask {
     last_result: null,
     status,
     created_at: '2026-01-01T00:00:00.000Z',
+    executing_since: null,
   };
 }
 

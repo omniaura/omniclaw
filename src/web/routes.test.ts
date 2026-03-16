@@ -38,6 +38,7 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     next_run: '2026-03-05T09:00:00.000Z',
     last_run: null,
     last_result: null,
+    executing_since: null,
     status: 'active',
     created_at: '2026-01-01T00:00:00.000Z',
     ...overrides,
@@ -90,7 +91,12 @@ function makeState(
     getQueueDetails: () => [],
     getIpcEvents: () => [],
     createTask: (task) => {
-      tasks.set(task.id, { ...task, last_run: null, last_result: null });
+      tasks.set(task.id, {
+        ...task,
+        last_run: null,
+        last_result: null,
+        executing_since: null,
+      });
     },
     updateTask: (id, updates) => {
       const existing = tasks.get(id);
@@ -563,6 +569,7 @@ describe('handleRequest task run logs', () => {
               next_run: '2026-03-10T13:00:00.000Z',
               last_run: '2026-03-10T12:00:00.000Z',
               last_result: 'Completed successfully',
+              executing_since: null,
               status: 'active',
               created_at: '2026-03-01T00:00:00.000Z',
             }
@@ -600,6 +607,7 @@ describe('handleRequest task run logs', () => {
               next_run: null,
               last_run: null,
               last_result: null,
+              executing_since: null,
               status: 'active',
               created_at: '2026-03-01T00:00:00.000Z',
             }
@@ -630,6 +638,7 @@ describe('handleRequest task run logs', () => {
         next_run: null,
         last_run: null,
         last_result: null,
+        executing_since: null,
         status: 'active' as const,
         created_at: '2026-03-01T00:00:00.000Z',
       }),

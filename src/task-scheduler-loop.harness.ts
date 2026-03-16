@@ -29,6 +29,7 @@ describe('startSchedulerLoop harness', () => {
         last_result: null,
         status: 'active',
         created_at: '2026-01-01T00:00:00.000Z',
+        executing_since: null,
       },
       {
         id: 'task-missing-group',
@@ -42,6 +43,7 @@ describe('startSchedulerLoop harness', () => {
         last_run: null,
         last_result: null,
         status: 'active',
+        executing_since: null,
         created_at: '2026-01-01T00:00:00.000Z',
       },
     ];
@@ -129,11 +131,22 @@ describe('startSchedulerLoop harness', () => {
     }) as typeof clearTimeout;
 
     try {
+      const markTaskExecutingMock = mock(() => {});
+      const clearTaskExecutingMock = mock(() => {});
+      const getStaleExecutingTasksMock = mock(() => [] as ScheduledTask[]);
+      const getOrphanedOnceTasksMock = mock(() => [] as ScheduledTask[]);
+      const hasSuccessfulRunMock = mock(() => false);
+
       const runtime = {
         calculateNextRun: calculateNextRunMock,
         resolveBackend: resolveBackendMock,
         writeTasksSnapshot: writeTasksSnapshotMock,
         advanceTaskNextRun: advanceTaskNextRunMock,
+        markTaskExecuting: markTaskExecutingMock,
+        clearTaskExecuting: clearTaskExecutingMock,
+        getStaleExecutingTasks: getStaleExecutingTasksMock,
+        getOrphanedOnceTasks: getOrphanedOnceTasksMock,
+        hasSuccessfulRun: hasSuccessfulRunMock,
         getAllTasks: getAllTasksMock,
         getDueTasks: getDueTasksMock,
         getTaskById: getTaskByIdMock,

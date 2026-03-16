@@ -44,7 +44,9 @@ export interface WebStateProvider {
   getTaskRunLogs(taskId: string, limit?: number): TaskRunLog[];
 
   // ---- Task mutations ----
-  createTask(task: Omit<ScheduledTask, 'last_run' | 'last_result'>): void;
+  createTask(
+    task: Omit<ScheduledTask, 'last_run' | 'last_result' | 'executing_since'>,
+  ): void;
   updateTask(
     id: string,
     updates: Partial<
