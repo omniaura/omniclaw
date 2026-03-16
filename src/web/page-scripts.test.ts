@@ -16,3 +16,36 @@ describe('dashboard page script', () => {
     expect(script).toContain('if(resize()&&(!hadSize||!hasFitted))fitView();');
   });
 });
+
+describe('logs page script', () => {
+  it('re-syncs the full logs view when sidebar logs replay after reload', () => {
+    const script = allPageScripts().logs;
+    const sidebarObserverStart = script.indexOf(
+      'sidebarObs=new MutationObserver(function(mutations){',
+    );
+    const sidebarObserverEnd = script.indexOf(
+      'sidebarObs.observe(sidebar,{childList:true});',
+      sidebarObserverStart,
+    );
+    const sidebarObserverBlock = script.slice(
+      sidebarObserverStart,
+      sidebarObserverEnd,
+    );
+
+    expect(script).toContain('function syncFromSidebar(){');
+    expect(script).toContain('output.innerHTML="";');
+    expect(script).toContain(
+      'sidebarObs=new MutationObserver(function(mutations){',
+    );
+    expect(sidebarObserverBlock).toContain('needsFullSync');
+    expect(sidebarObserverBlock).toContain('added[j].cloneNode(true)');
+    expect(sidebarObserverBlock).toContain('syncFromSidebar();');
+    expect(sidebarObserverBlock).not.toContain('updateCount();');
+    expect(sidebarObserverBlock).not.toContain(
+      'output.scrollTop=output.scrollHeight;',
+    );
+    expect(script).toContain(
+      'window.__cleanup=function(){obs.disconnect();if(sidebarObs)sidebarObs.disconnect();clearTimeout(searchTimer);};',
+    );
+  });
+});
