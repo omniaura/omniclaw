@@ -1806,13 +1806,19 @@ function selectSubscriptionsForMessage(
     selected = hasAllAgents ? [...subs] : matched;
     selectedByTrigger = true;
   } else {
+    // No explicit trigger/mention — be conservative to avoid waking all agents.
+    // Pick at most ONE fallback agent: the highest-priority primary that doesn't
+    // require a trigger (or is admin).  This prevents every subscribed agent from
+    // typing when a user sends an untriggered message in a multi-agent channel.
     const primaries = subs.filter((s) => s.isPrimary);
-    selected = primaries.length > 0 ? primaries : [subs[0]];
-    selected = selected.filter((s) => {
+    const candidates = primaries.length > 0 ? primaries : [subs[0]];
+    const eligible = candidates.filter((s) => {
       const agent = agents[s.agentId];
       const isMain = agent?.isAdmin === true;
       return isMain || s.requiresTrigger === false;
     });
+    // Limit to a single fallback agent — attentive state handles follow-ups
+    selected = eligible.length > 0 ? [eligible[0]] : [];
   }
 
   if (selected.length === 0) {
@@ -1894,13 +1900,10 @@ async function startMessageLoop(): Promise<void> {
                 attentive.has(s.agentId),
               );
               if (attentiveSubs.length > 0) {
-                // Merge attentive agents into selection (alongside any fallback agents)
-                const existing = new Set(selectedSubs.map((s) => s.agentId));
-                for (const s of attentiveSubs) {
-                  if (!existing.has(s.agentId)) {
-                    selectedSubs = [...selectedSubs, s];
-                  }
-                }
+                // Replace fallback selection with attentive agents — the user is
+                // continuing a conversation with specific agent(s), so only those
+                // should respond, not the generic fallback agent too.
+                selectedSubs = attentiveSubs;
                 // Consume attentive state — one follow-up per mention
                 for (const s of attentiveSubs) {
                   attentive.delete(s.agentId);
