@@ -9,6 +9,7 @@ import { DISCOVERY_POLL_INTERVAL } from '../config.js';
 export function allPageScripts(): Record<string, string> {
   return {
     dashboard: dashboardScript(),
+    agents: agentsScript(),
     tasks: tasksScript(),
     logs: logsScript(),
     conversations: conversationsScript(),
@@ -703,6 +704,35 @@ function logsScript(): string {
     'window.__cleanup=function(){obs.disconnect();clearTimeout(searchTimer);};',
     '})();',
   ].join('\n');
+}
+
+function agentsScript(): string {
+  return `
+var searchInput=document.getElementById("ap-search");
+var backendSelect=document.getElementById("ap-filter-backend");
+var runtimeSelect=document.getElementById("ap-filter-runtime");
+var tbody=document.getElementById("ap-tbody");
+if(searchInput&&tbody){
+  function applyFilters(){
+    var q=(searchInput.value||"").toLowerCase();
+    var be=backendSelect?backendSelect.value:"";
+    var rt=runtimeSelect?runtimeSelect.value:"";
+    var rows=tbody.querySelectorAll("tr.ap-row");
+    for(var i=0;i<rows.length;i++){
+      var row=rows[i];
+      var name=(row.querySelector(".ap-name")||{}).textContent||"";
+      var matchQ=!q||name.toLowerCase().indexOf(q)>=0||
+        (row.getAttribute("data-agent-id")||"").toLowerCase().indexOf(q)>=0;
+      var matchBe=!be||row.getAttribute("data-backend")===be;
+      var matchRt=!rt||row.getAttribute("data-runtime")===rt;
+      row.style.display=(matchQ&&matchBe&&matchRt)?"":"none";
+    }
+  }
+  searchInput.addEventListener("input",applyFilters);
+  if(backendSelect)backendSelect.addEventListener("change",applyFilters);
+  if(runtimeSelect)runtimeSelect.addEventListener("change",applyFilters);
+}
+`;
 }
 
 function tasksScript(): string {

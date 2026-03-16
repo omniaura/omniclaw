@@ -6,6 +6,7 @@
 
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', page: 'dashboard' },
+  { href: '/agents-list', label: 'Agents', page: 'agents' },
   { href: '/tasks', label: 'Tasks', page: 'tasks' },
   { href: '/logs', label: 'Logs', page: 'logs' },
   { href: '/conversations', label: 'Conversations', page: 'conversations' },
@@ -555,6 +556,34 @@ function shellCSS(): string {
     `.logs-output .log-line.search-match{background:rgba(129,140,248,.08)}`,
     `.logs-output .log-line .search-highlight{background:rgba(251,191,36,.3);border-radius:2px;padding:0 1px}`,
     `.logs-status-bar{display:flex;align-items:center;justify-content:space-between;padding:4px 12px;border-top:1px solid var(--border);flex-shrink:0;background:var(--surface);font-size:10px;color:var(--text-dim)}`,
+
+    // --- Agents Page ---
+    `.agents-page{padding:12px 16px;flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column}`,
+    `.ap-header{flex-shrink:0;margin-bottom:12px}`,
+    `.ap-title-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}`,
+    `.ap-title-row h2{font-size:14px;font-weight:600;color:var(--text-bright);letter-spacing:.03em}`,
+    `.ap-counts{display:flex;gap:12px}`,
+    `.ap-count{font-size:11px;color:var(--text-dim);font-variant-numeric:tabular-nums}`,
+    `.ap-filters{display:flex;gap:6px;flex-wrap:wrap}`,
+    `.ap-search{background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;padding:4px 8px;width:200px;font-family:inherit}`,
+    `.ap-search::placeholder{color:var(--text-dim)}`,
+    `.ap-filter-select{background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;padding:4px 6px;font-family:inherit}`,
+    `.ap-table-wrap{flex:1;overflow:auto;border:1px solid var(--border);border-radius:6px}`,
+    `.ap-table{width:100%;border-collapse:collapse;font-size:12px}`,
+    `.ap-table th{text-align:left;padding:6px 10px;background:var(--bg);font-weight:600;font-size:10px;text-transform:lowercase;letter-spacing:.05em;color:var(--text-dim);position:sticky;top:0;z-index:1;border-bottom:1px solid var(--border)}`,
+    `.ap-table .th-center{text-align:center}`,
+    `.ap-table td{padding:5px 10px;border-top:1px solid var(--border);vertical-align:middle}`,
+    `.ap-table .td-center{text-align:center;font-variant-numeric:tabular-nums}`,
+    `.ap-table tbody tr{transition:background .08s}`,
+    `.ap-table tbody tr:hover{background:var(--surface)}`,
+    `.ap-agent-link{display:flex;align-items:center;gap:8px;color:var(--text);text-decoration:none}`,
+    `.ap-agent-link:hover .ap-name{color:var(--accent)}`,
+    `.ap-avatar-wrap{flex-shrink:0;width:24px;height:24px}`,
+    `.ap-avatar{width:24px;height:24px;border-radius:50%;object-fit:cover}`,
+    `.ap-avatar-ph{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--surface-2);color:var(--text-dim);font-size:11px;font-weight:600}`,
+    `.ap-name{font-weight:500;white-space:nowrap}`,
+    `.badge-remote{background:var(--surface-2);color:var(--blue)}`,
+    `.ap-empty{padding:2rem;text-align:center;color:var(--text-dim);font-size:12px}`,
 
     // --- Responsive ---
     `@media(max-width:900px){.stats-grid{grid-template-columns:repeat(2,1fr)}.tables-grid{grid-template-columns:1fr}.system-grid{grid-template-columns:1fr}}`,
