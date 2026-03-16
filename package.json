@@ -4,6 +4,9 @@
   "description": "OmniClaw - Personal Claude assistant from the Omni ecosystem.",
   "type": "module",
   "main": "src/index.ts",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "build": "bun build src/index.ts --outdir dist --target bun",
     "start": "bun src/index.ts",

@@ -109,7 +109,7 @@ Skills we'd love to see:
 ## Requirements
 
 - macOS or Linux
-- Node.js 20+
+- Node.js 22 LTS+ (22.12.0 or newer)
 - [Claude Code](https://claude.ai/download)
 - [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
 

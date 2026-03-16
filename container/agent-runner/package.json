@@ -4,6 +4,9 @@
   "type": "module",
   "description": "Container-side agent runner for OmniClaw",
   "main": "src/index.ts",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "start": "bun src/index.ts"
   },

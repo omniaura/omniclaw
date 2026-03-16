@@ -112,7 +112,7 @@ claude
 ## 系统要求
 
 - macOS 或 Linux
-- Node.js 20+
+- Node.js 22 LTS+（22.12.0 或更高版本）
 - [Claude Code](https://claude.ai/download)
 - [Apple Container](https://github.com/apple/container) (macOS) 或 [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
 
