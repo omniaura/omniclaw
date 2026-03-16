@@ -133,7 +133,9 @@ describe('renderContextViewerContent', () => {
     expect(html).toContain('remote agents');
     expect(html).toContain('General');
     expect(html).toContain('data-select-channel');
-    expect(html).toContain('data-channel-folder="servers/local/channels/general"');
+    expect(html).toContain(
+      'data-channel-folder="servers/local/channels/general"',
+    );
     expect(html).toContain(
       'data-category-folder="servers/local/categories/engineering"',
     );
@@ -158,14 +160,14 @@ describe('renderContextViewer shells', () => {
   it('renders the local-only shell', () => {
     const html = renderContextViewer(makeState());
 
-    expect(html).toContain('<title>OmniClaw — Context</title>');
+    expect(html).toContain('<title id="page-title">OmniClaw — Context</title>');
     expect(html).toContain('href="/context"');
   });
 
   it('renders the remote-aware shell', () => {
     const html = renderContextViewerWithRemote(makeState(), []);
 
-    expect(html).toContain('<title>OmniClaw — Context</title>');
+    expect(html).toContain('<title id="page-title">OmniClaw — Context</title>');
     expect(html).toContain('id="remote-agent-groups"');
   });
 });

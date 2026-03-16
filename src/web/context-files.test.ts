@@ -11,6 +11,13 @@ const realReaddirSync = fs.readdirSync;
 const realStatSync = fs.statSync;
 const realReadFileSync = fs.readFileSync;
 
+const mockedFs = fs as unknown as {
+  existsSync: typeof fs.existsSync;
+  readdirSync: typeof fs.readdirSync;
+  statSync: typeof fs.statSync;
+  readFileSync: typeof fs.readFileSync;
+};
+
 type FakeDirent = Pick<fs.Dirent, 'name' | 'isDirectory'>;
 
 function dir(name: string): FakeDirent {
@@ -22,10 +29,10 @@ function file(name: string): FakeDirent {
 }
 
 afterEach(() => {
-  fs.existsSync = realExistsSync;
-  fs.readdirSync = realReaddirSync;
-  fs.statSync = realStatSync;
-  fs.readFileSync = realReadFileSync;
+  mockedFs.existsSync = realExistsSync;
+  mockedFs.readdirSync = realReaddirSync;
+  mockedFs.statSync = realStatSync;
+  mockedFs.readFileSync = realReadFileSync;
 });
 
 describe('listLocalContextFiles', () => {
@@ -36,8 +43,9 @@ describe('listLocalContextFiles', () => {
     const alphaContent = '# alpha\nhello\n';
     const nestedContent = '# nested\nworld\n';
 
-    fs.existsSync = ((target: fs.PathLike) => target === root) as typeof fs.existsSync;
-    fs.readdirSync = ((target: fs.PathLike) => {
+    mockedFs.existsSync = ((target: fs.PathLike) =>
+      target === root) as typeof fs.existsSync;
+    mockedFs.readdirSync = ((target: fs.PathLike) => {
       const dirPath = String(target);
       if (dirPath === root) {
         return [
@@ -58,18 +66,24 @@ describe('listLocalContextFiles', () => {
         return [file('CLAUDE.md')];
       }
       throw new Error(`Unexpected readdir for ${dirPath}`);
-    }) as typeof fs.readdirSync;
-    fs.statSync = ((target: fs.PathLike) => {
+    }) as unknown as typeof fs.readdirSync;
+    mockedFs.statSync = ((target: fs.PathLike) => {
       const filePath = String(target);
       if (filePath === alphaClaude) {
-        return { size: alphaContent.length, mtime: new Date('2026-03-10T00:00:00.000Z') } as fs.Stats;
+        return {
+          size: alphaContent.length,
+          mtime: new Date('2026-03-10T00:00:00.000Z'),
+        } as fs.Stats;
       }
       if (filePath === nestedClaude) {
-        return { size: nestedContent.length, mtime: new Date('2026-03-11T00:00:00.000Z') } as fs.Stats;
+        return {
+          size: nestedContent.length,
+          mtime: new Date('2026-03-11T00:00:00.000Z'),
+        } as fs.Stats;
       }
       throw new Error(`Unexpected stat for ${filePath}`);
     }) as typeof fs.statSync;
-    fs.readFileSync = ((target: fs.PathLike) => {
+    mockedFs.readFileSync = ((target: fs.PathLike) => {
       const filePath = String(target);
       if (filePath === alphaClaude) return alphaContent;
       if (filePath === nestedClaude) return nestedContent;
@@ -95,7 +109,7 @@ describe('listLocalContextFiles', () => {
   });
 
   it('returns an empty list when the groups directory does not exist', () => {
-    fs.existsSync = (() => false) as typeof fs.existsSync;
+    mockedFs.existsSync = (() => false) as typeof fs.existsSync;
 
     expect(listLocalContextFiles()).toEqual([]);
   });
@@ -105,8 +119,9 @@ describe('listLocalContextFiles', () => {
     const okClaude = path.join(root, 'ok', 'CLAUDE.md');
     const okContent = 'safe';
 
-    fs.existsSync = ((target: fs.PathLike) => target === root) as typeof fs.existsSync;
-    fs.readdirSync = ((target: fs.PathLike) => {
+    mockedFs.existsSync = ((target: fs.PathLike) =>
+      target === root) as typeof fs.existsSync;
+    mockedFs.readdirSync = ((target: fs.PathLike) => {
       const dirPath = String(target);
       if (dirPath === root) {
         return [dir('broken-dir'), dir('ok'), dir('escape')];
@@ -121,15 +136,18 @@ describe('listLocalContextFiles', () => {
         return [file('CLAUDE.md')];
       }
       throw new Error(`Unexpected readdir for ${dirPath}`);
-    }) as typeof fs.readdirSync;
-    fs.statSync = ((target: fs.PathLike) => {
+    }) as unknown as typeof fs.readdirSync;
+    mockedFs.statSync = ((target: fs.PathLike) => {
       const filePath = String(target);
       if (filePath === okClaude) {
-        return { size: okContent.length, mtime: new Date('2026-03-12T00:00:00.000Z') } as fs.Stats;
+        return {
+          size: okContent.length,
+          mtime: new Date('2026-03-12T00:00:00.000Z'),
+        } as fs.Stats;
       }
       throw new Error('bad stat');
     }) as typeof fs.statSync;
-    fs.readFileSync = ((target: fs.PathLike) => {
+    mockedFs.readFileSync = ((target: fs.PathLike) => {
       const filePath = String(target);
       if (filePath === okClaude) return okContent;
       throw new Error('bad read');
