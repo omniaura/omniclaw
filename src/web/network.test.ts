@@ -114,11 +114,19 @@ describe('renderNetworkContent', () => {
       pendingRequests: [],
     });
 
-    expect(html).toContain('id="network-root" data-discovery-available="false"');
+    expect(html).toContain(
+      'id="network-root" data-discovery-available="false"',
+    );
     expect(html).toContain('id="discovery-toggle"');
-    expect(html).toContain('id="discovery-toggle" data-network-action="toggle-discovery" data-network-id="on" disabled');
-    expect(html).toContain('id="trust-current-network" data-network-action="trust-current-network" data-network-id="current" disabled');
-    expect(html).toContain('Discovery controls are unavailable in this environment.');
+    expect(html).toContain(
+      'id="discovery-toggle" data-network-action="toggle-discovery" data-network-id="on" disabled',
+    );
+    expect(html).toContain(
+      'id="trust-current-network" data-network-action="trust-current-network" data-network-id="current" disabled',
+    );
+    expect(html).toContain(
+      'Discovery controls are unavailable in this environment.',
+    );
   });
 });
 
