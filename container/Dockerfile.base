@@ -85,7 +85,7 @@ RUN echo 'trustedDependencies = ["agent-browser"]' >> /root/.bunfig.toml \
 
 # Install OpenCode CLI (alternative agent runtime)
 # Download directly from GitHub releases to avoid DNS issues with opencode.ai.
-ARG OPENCODE_VERSION=1.2.26
+ARG OPENCODE_VERSION=1.2.27
 RUN ARCH="$(dpkg --print-architecture)" \
     && OC_ARCH=$([ "$ARCH" = "amd64" ] && echo "x64" || echo "arm64") \
     && curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz" \
