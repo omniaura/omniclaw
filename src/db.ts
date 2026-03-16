@@ -382,6 +382,7 @@ export function createSchema(database: Database): void {
     'TEXT',
     "'isolated'",
   );
+  addColumnIfNotExists(database, 'scheduled_tasks', 'executing_since', 'TEXT');
   addColumnIfNotExists(database, 'registered_groups', 'heartbeat', 'TEXT');
   addColumnIfNotExists(database, 'registered_groups', 'discord_bot_id', 'TEXT');
   addColumnIfNotExists(
@@ -1017,7 +1018,7 @@ export function getMessagesSince(
 }
 
 export function createTask(
-  task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
+  task: Omit<ScheduledTask, 'last_run' | 'last_result' | 'executing_since'>,
 ): void {
   db.query(
     `
@@ -1126,11 +1127,17 @@ export function getDueTasks(): ScheduledTask[] {
     .all(now) as ScheduledTask[];
 }
 
-/** Advance next_run without touching last_run/last_result (used before enqueue). */
+/**
+ * Advance next_run without touching last_run/last_result (used before enqueue).
+ * For once tasks (nextRun=null), we no longer mark status='completed' here —
+ * that happens in updateTaskAfterRun after actual execution, so crashes
+ * between enqueue and completion don't lose one-shot tasks.
+ */
 export function advanceTaskNextRun(id: string, nextRun: string | null): void {
-  db.query(
-    `UPDATE scheduled_tasks SET next_run = ?, status = CASE WHEN ? IS NULL THEN 'completed' ELSE status END WHERE id = ?`,
-  ).run(nextRun, nextRun, id);
+  db.query(`UPDATE scheduled_tasks SET next_run = ? WHERE id = ?`).run(
+    nextRun,
+    id,
+  );
 }
 
 export function updateTaskAfterRun(
@@ -1177,6 +1184,65 @@ export function getTaskRunLogs(taskId: string, limit = 20): TaskRunLog[] {
        LIMIT ?`,
     )
     .all(taskId, limit) as TaskRunLog[];
+}
+
+/** Mark a task as currently executing (set execution lease). */
+export function markTaskExecuting(id: string): void {
+  db.query(`UPDATE scheduled_tasks SET executing_since = ? WHERE id = ?`).run(
+    new Date().toISOString(),
+    id,
+  );
+}
+
+/** Clear the execution lease after a task finishes. */
+export function clearTaskExecuting(id: string): void {
+  db.query(
+    `UPDATE scheduled_tasks SET executing_since = NULL WHERE id = ?`,
+  ).run(id);
+}
+
+/**
+ * Find tasks with stale execution leases (started but never finished).
+ * Returns tasks where executing_since is set and older than the given cutoff.
+ */
+export function getStaleExecutingTasks(cutoffIso: string): ScheduledTask[] {
+  return db
+    .prepare(
+      `SELECT * FROM scheduled_tasks
+       WHERE executing_since IS NOT NULL AND executing_since <= ?`,
+    )
+    .all(cutoffIso) as ScheduledTask[];
+}
+
+/**
+ * Find orphaned once tasks: active status, null next_run, not currently
+ * executing. These are once tasks that had next_run cleared (via
+ * advanceTaskNextRun) but never completed — likely due to a crash.
+ */
+export function getOrphanedOnceTasks(): ScheduledTask[] {
+  return db
+    .prepare(
+      `SELECT * FROM scheduled_tasks
+       WHERE schedule_type = 'once'
+         AND status = 'active'
+         AND next_run IS NULL
+         AND executing_since IS NULL`,
+    )
+    .all() as ScheduledTask[];
+}
+
+/**
+ * Check whether a task has at least one successful run logged.
+ */
+export function hasSuccessfulRun(taskId: string): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1 FROM task_run_logs
+       WHERE task_id = ? AND status = 'success'
+       LIMIT 1`,
+    )
+    .get(taskId);
+  return row !== undefined && row !== null;
 }
 
 // --- Router state accessors ---

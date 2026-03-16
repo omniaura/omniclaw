@@ -14,12 +14,17 @@ import type { ContainerOutput } from './backends/types.js';
 import { writeTasksSnapshot } from './ipc-snapshots.js';
 import {
   advanceTaskNextRun,
+  clearTaskExecuting,
   createTask,
   deleteTask,
   getAllTasks,
   getDueTasks,
+  getOrphanedOnceTasks,
+  getStaleExecutingTasks,
   getTaskById,
+  hasSuccessfulRun,
   logTaskRun,
+  markTaskExecuting,
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
@@ -38,6 +43,11 @@ interface SchedulerRuntime {
   resolveBackend: (group: RegisteredGroup) => Pick<AgentBackend, 'runAgent'>;
   writeTasksSnapshot: typeof writeTasksSnapshot;
   advanceTaskNextRun: typeof advanceTaskNextRun;
+  markTaskExecuting: typeof markTaskExecuting;
+  clearTaskExecuting: typeof clearTaskExecuting;
+  getStaleExecutingTasks: typeof getStaleExecutingTasks;
+  getOrphanedOnceTasks: typeof getOrphanedOnceTasks;
+  hasSuccessfulRun: typeof hasSuccessfulRun;
   getAllTasks: typeof getAllTasks;
   getDueTasks: typeof getDueTasks;
   getTaskById: typeof getTaskById;
@@ -51,6 +61,11 @@ const defaultSchedulerRuntime: SchedulerRuntime = {
   resolveBackend,
   writeTasksSnapshot,
   advanceTaskNextRun,
+  markTaskExecuting,
+  clearTaskExecuting,
+  getStaleExecutingTasks,
+  getOrphanedOnceTasks,
+  hasSuccessfulRun,
   getAllTasks,
   getDueTasks,
   getTaskById,
@@ -104,6 +119,9 @@ async function runTask(
     );
     return;
   }
+
+  // Set execution lease so crash recovery can detect stale runs
+  runtime.markTaskExecuting(task.id);
 
   const startTime = Date.now();
   const groupDir = path.join(GROUPS_DIR, task.group_folder);
@@ -271,6 +289,111 @@ async function runTask(
       ? result.slice(0, 200)
       : 'Completed';
   runtime.updateTaskAfterRun(task.id, nextRun, resultSummary);
+
+  // Clear execution lease — task is done
+  runtime.clearTaskExecuting(task.id);
+}
+
+/** Default timeout after which an executing task is considered stale (30 minutes). */
+const STALE_EXECUTION_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * Recover stale tasks on startup. Must run before the first scheduler poll.
+ *
+ * Handles two crash-recovery scenarios:
+ * 1. Stale executing tasks — executing_since set but process crashed before completion
+ * 2. Orphaned once tasks — active with null next_run, never executed (advanceTaskNextRun
+ *    cleared next_run before the crash)
+ */
+export function recoverStaleTasks(
+  runtime: SchedulerRuntime = defaultSchedulerRuntime,
+): { recovered: number; completed: number } {
+  let recovered = 0;
+  let completed = 0;
+
+  // Phase 1: Reset stale executing tasks
+  const cutoff = new Date(
+    Date.now() - STALE_EXECUTION_TIMEOUT_MS,
+  ).toISOString();
+  const staleTasks = runtime.getStaleExecutingTasks(cutoff);
+
+  for (const task of staleTasks) {
+    if (task.schedule_type === 'once') {
+      // Check if the task actually completed before the crash
+      if (runtime.hasSuccessfulRun(task.id)) {
+        runtime.clearTaskExecuting(task.id);
+        runtime.updateTaskAfterRun(task.id, null, 'Completed (recovered)');
+        runtime.logger.info(
+          { taskId: task.id },
+          'Recovery: stale once task had successful run — marking completed',
+        );
+        completed++;
+      } else {
+        // Re-drive: set next_run to now so getDueTasks picks it up
+        runtime.clearTaskExecuting(task.id);
+        runtime.advanceTaskNextRun(task.id, new Date().toISOString());
+        runtime.logger.info(
+          { taskId: task.id },
+          'Recovery: stale once task never completed — re-queuing',
+        );
+        recovered++;
+      }
+    } else {
+      // Recurring: recalculate next_run and clear lease
+      const nextRun = runtime.calculateNextRun(
+        task.schedule_type,
+        task.schedule_value,
+      );
+      runtime.clearTaskExecuting(task.id);
+      if (nextRun) {
+        runtime.advanceTaskNextRun(task.id, nextRun);
+      }
+      runtime.logger.info(
+        { taskId: task.id, nextRun },
+        'Recovery: stale recurring task — recalculated next run',
+      );
+      recovered++;
+    }
+
+    runtime.logTaskRun({
+      task_id: task.id,
+      run_at: new Date().toISOString(),
+      duration_ms: 0,
+      status: 'error',
+      result: null,
+      error: 'Recovered after crash — execution lease expired',
+    });
+  }
+
+  // Phase 2: Find orphaned once tasks (active, next_run null, not executing)
+  const orphaned = runtime.getOrphanedOnceTasks();
+  for (const task of orphaned) {
+    if (runtime.hasSuccessfulRun(task.id)) {
+      runtime.updateTaskAfterRun(task.id, null, 'Completed (recovered)');
+      runtime.logger.info(
+        { taskId: task.id },
+        'Recovery: orphaned once task had successful run — marking completed',
+      );
+      completed++;
+    } else {
+      // Re-drive: set next_run to now
+      runtime.advanceTaskNextRun(task.id, new Date().toISOString());
+      runtime.logger.info(
+        { taskId: task.id },
+        'Recovery: orphaned once task never completed — re-queuing',
+      );
+      recovered++;
+    }
+  }
+
+  if (recovered > 0 || completed > 0) {
+    runtime.logger.info(
+      { recovered, completed },
+      'Scheduler crash recovery complete',
+    );
+  }
+
+  return { recovered, completed };
 }
 
 let schedulerRunning = false;
@@ -290,6 +413,10 @@ export function startSchedulerLoop(
     return;
   }
   schedulerRunning = true;
+
+  // Run crash recovery before first poll
+  recoverStaleTasks(runtime);
+
   runtime.logger.info('Scheduler loop started');
 
   const loop = async () => {

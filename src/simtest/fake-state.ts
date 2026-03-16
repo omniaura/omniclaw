@@ -60,6 +60,7 @@ function makeTask(
     last_result: null,
     status: 'active',
     created_at: new Date().toISOString(),
+    executing_since: null,
     ...overrides,
   };
 }
@@ -512,11 +513,18 @@ export class FakeState implements WebStateProvider {
     return logs.slice(0, limit ?? 20);
   }
 
-  createTask(task: Omit<ScheduledTask, 'last_run' | 'last_result'>): void {
+  createTask(
+    task: Omit<ScheduledTask, 'last_run' | 'last_result' | 'executing_since'>,
+  ): void {
     if (this.tasks.some((existingTask) => existingTask.id === task.id)) {
       throw new Error(`Task already exists: ${task.id}`);
     }
-    this.tasks.push({ ...task, last_run: null, last_result: null });
+    this.tasks.push({
+      ...task,
+      last_run: null,
+      last_result: null,
+      executing_since: null,
+    });
   }
 
   updateTask(

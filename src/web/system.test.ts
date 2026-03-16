@@ -39,6 +39,7 @@ function makeState(agents: Agent[] = [makeAgent()]): WebStateProvider {
         last_result: null,
         status: 'active' as const,
         created_at: '2026-01-01T00:00:00.000Z',
+        executing_since: null,
       },
       {
         id: 't2',
@@ -53,6 +54,7 @@ function makeState(agents: Agent[] = [makeAgent()]): WebStateProvider {
         last_result: null,
         status: 'paused' as const,
         created_at: '2026-01-01T00:00:00.000Z',
+        executing_since: null,
       },
       {
         id: 't3',
@@ -67,6 +69,7 @@ function makeState(agents: Agent[] = [makeAgent()]): WebStateProvider {
         last_result: 'ok',
         status: 'completed' as const,
         created_at: '2026-01-01T00:00:00.000Z',
+        executing_since: null,
       },
     ],
     getTaskById: () => undefined,

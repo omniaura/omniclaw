@@ -416,7 +416,10 @@ async function handleCreateTask(
   }
 
   const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const task: Omit<ScheduledTask, 'last_run' | 'last_result'> = {
+  const task: Omit<
+    ScheduledTask,
+    'last_run' | 'last_result' | 'executing_since'
+  > = {
     id: taskId,
     group_folder: group_folder as string,
     chat_jid: chat_jid as string,

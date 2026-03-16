@@ -130,6 +130,8 @@ export interface ScheduledTask {
   last_result: string | null;
   status: 'active' | 'paused' | 'completed';
   created_at: string;
+  /** ISO timestamp set when a task starts executing; cleared on completion. */
+  executing_since: string | null;
 }
 
 export interface TaskRunLog {

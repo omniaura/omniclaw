@@ -35,6 +35,7 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     next_run: '2026-03-02T09:00:00.000Z',
     last_run: null,
     last_result: null,
+    executing_since: null,
     status: 'active',
     created_at: '2026-01-01T00:00:00.000Z',
     ...overrides,
