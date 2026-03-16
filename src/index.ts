@@ -3,6 +3,7 @@ import path from 'path';
 import { createHash } from 'crypto';
 
 import { syncAvatars } from './avatar-sync.js';
+import { hasAttentiveEligibleMessage } from './attentive-routing.js';
 
 import {
   ASSISTANT_NAME,
@@ -1870,10 +1871,16 @@ async function startMessageLoop(): Promise<void> {
           const { selected: triggerSelected, selectedByTrigger } =
             selectSubscriptionsForMessage(chatJid, groupMessages);
           let selectedSubs = triggerSelected;
+          const hasEligibleAttentiveMessage =
+            hasAttentiveEligibleMessage(groupMessages);
 
           // Attentive follow-up: if agents were selected by explicit trigger/mention,
           // mark them attentive so the next human message is routed without a trigger.
-          if (selectedByTrigger && selectedSubs.length > 0) {
+          if (
+            selectedByTrigger &&
+            selectedSubs.length > 0 &&
+            hasEligibleAttentiveMessage
+          ) {
             if (!attentiveAgents[chatJid]) attentiveAgents[chatJid] = new Set();
             for (const s of selectedSubs) {
               attentiveAgents[chatJid].add(s.agentId);
@@ -1883,7 +1890,7 @@ async function startMessageLoop(): Promise<void> {
           // If no trigger match (or only fallback agents selected), check if
           // any agents are attentive from a recent mention — route the
           // follow-up message to them.
-          if (!selectedByTrigger) {
+          if (!selectedByTrigger && hasEligibleAttentiveMessage) {
             const attentive = attentiveAgents[chatJid];
             if (attentive && attentive.size > 0) {
               const subs = getSubscriptionsForChannelInMemory(chatJid);
