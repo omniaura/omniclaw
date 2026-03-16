@@ -161,7 +161,7 @@ function makeState(
 }
 
 function extractInlineShellScript(html: string): string {
-  const match = html.match(/<script>([\s\S]*)<\/script><\/body><\/html>$/);
+  const match = html.match(/<script>([\s\S]*?)<\/script><\/body><\/html>$/);
   expect(match).not.toBeNull();
   return match![1];
 }
