@@ -66,3 +66,28 @@ export function buildAgentToChannelsMapFromSubscriptions(
   }
   return map;
 }
+
+/**
+ * Build send_message guidance for an agent registry entry.
+ *
+ * For single-channel agents we can safely hardcode target_jid. For multi-channel
+ * agents, hardcoding one JID misroutes messages from the other shared channels,
+ * so the caller should prefer the current chat and only pick a target_jid when
+ * they intentionally need a different channel.
+ */
+export function buildSendToInstruction(
+  jids: string[],
+  trigger: string,
+  requiresTrigger: boolean,
+): string {
+  if (jids.length <= 1) {
+    const target = jids[0] || '';
+    return requiresTrigger
+      ? `target_jid="${target}", text must start with "${trigger} "`
+      : `target_jid="${target}"`;
+  }
+
+  return requiresTrigger
+    ? `text must start with "${trigger} "; omit target_jid to use the current chat when available, otherwise choose the correct target_jid from this agent's jids list`
+    : "omit target_jid to use the current chat when available, otherwise choose the correct target_jid from this agent's jids list";
+}

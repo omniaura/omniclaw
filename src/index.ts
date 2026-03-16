@@ -92,7 +92,10 @@ import {
   getOrCreateDiscoveryInstanceId,
   getTaskRunLogs,
 } from './db.js';
-import { buildAgentToChannelsMapFromSubscriptions } from './channel-routes.js';
+import {
+  buildAgentToChannelsMapFromSubscriptions,
+  buildSendToInstruction,
+} from './channel-routes.js';
 import { resolveContextLayers } from './context-layers.js';
 import { parseScopedSlackJid } from './slack-jid.js';
 import { GroupQueue } from './group-queue.js';
@@ -2104,12 +2107,7 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
     const primaryJid = jids[0] || agent.id;
     const trigger = firstSub?.trigger || `@${ASSISTANT_NAME}`;
     const requiresTrigger = firstSub?.requiresTrigger !== false;
-    // Pre-computed send instructions so agents don't have to guess how to
-    // reach each other. Sending to a shared channel with the wrong target_jid
-    // or without the trigger silently routes to the wrong agent.
-    const sendTo = requiresTrigger
-      ? `target_jid="${primaryJid}", text must start with "${trigger} "`
-      : `target_jid="${primaryJid}"`;
+    const sendTo = buildSendToInstruction(jids, trigger, requiresTrigger);
     return {
       id: agent.id,
       jid: primaryJid,
@@ -2138,10 +2136,11 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
         agentRuntime: group.agentRuntime || 'claude-agent-sdk',
         isMain: group.folder === MAIN_GROUP_FOLDER,
         trigger: group.trigger,
-        sendTo:
-          group.requiresTrigger !== false
-            ? `target_jid="${jid}", text must start with "${group.trigger} "`
-            : `target_jid="${jid}"`,
+        sendTo: buildSendToInstruction(
+          [jid],
+          group.trigger,
+          group.requiresTrigger !== false,
+        ),
         discoveryVersion: 1,
       });
     }

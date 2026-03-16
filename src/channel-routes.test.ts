@@ -5,6 +5,7 @@ import {
   getChannelJidsForAgent,
   buildAgentToChannelsMap,
   buildAgentToChannelsMapFromSubscriptions,
+  buildSendToInstruction,
 } from './channel-routes.js';
 import type { ChannelRoute, ChannelSubscription } from './types.js';
 
@@ -163,5 +164,33 @@ describe('buildAgentToChannelsMapFromSubscriptions', () => {
     const map = buildAgentToChannelsMapFromSubscriptions(subs);
     expect(map.get('a1')).toEqual(['dc:1', 'dc:2']);
     expect(map.get('a2')).toEqual(['dc:1']);
+  });
+});
+
+describe('buildSendToInstruction', () => {
+  it('hardcodes target_jid for single-channel agents', () => {
+    expect(buildSendToInstruction(['dc:1'], '@Clayton', true)).toBe(
+      'target_jid="dc:1", text must start with "@Clayton "',
+    );
+  });
+
+  it('avoids hardcoding a single target_jid for multi-channel agents', () => {
+    expect(
+      buildSendToInstruction(['dc:agentflow', 'dc:omniclaw'], '@Clayton', true),
+    ).toBe(
+      'text must start with "@Clayton "; omit target_jid to use the current chat when available, otherwise choose the correct target_jid from this agent\'s jids list',
+    );
+  });
+
+  it('supports multi-channel agents without triggers', () => {
+    expect(
+      buildSendToInstruction(
+        ['dc:agentflow', 'dc:omniclaw'],
+        '@Clayton',
+        false,
+      ),
+    ).toBe(
+      "omit target_jid to use the current chat when available, otherwise choose the correct target_jid from this agent's jids list",
+    );
   });
 });
