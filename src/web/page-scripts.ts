@@ -612,8 +612,6 @@ function logsScript(): string {
     '    syncFromSidebar();',
     '    trimLines();',
     '    applyFilters();',
-    '    updateCount();',
-    '    if(autoScroll)output.scrollTop=output.scrollHeight;',
     '  });',
     '  sidebarObs.observe(sidebar,{childList:true});',
     '}',

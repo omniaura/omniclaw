@@ -25,6 +25,7 @@ describe('logs page script', () => {
     expect(script).toContain('output.innerHTML="";');
     expect(script).toContain('sidebarObs=new MutationObserver(function(){');
     expect(script).toContain('syncFromSidebar();');
+    expect(script).not.toContain('    applyFilters();\n    updateCount();');
     expect(script).toContain(
       'window.__cleanup=function(){obs.disconnect();if(sidebarObs)sidebarObs.disconnect();clearTimeout(searchTimer);};',
     );
