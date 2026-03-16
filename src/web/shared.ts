@@ -903,7 +903,7 @@ function shellScript(pageScripts: Record<string, string>): string {
     '        var detail=r.status==="success"?(r.result||"ok"):("Error: "+(r.error||"unknown"));',
   );
   parts.push('        if(detail.length>60)detail=detail.slice(0,57)+"…";');
-  parts.push('        return "<div class=\\"task-run-row \\"+cls+"\\">"');
+  parts.push('        return "<div class=\\"task-run-row "+cls+"\\">"');
   parts.push(
     '          +"<span class=\\"run-ts\\">"+window.__esc(ts)+"</span>"',
   );

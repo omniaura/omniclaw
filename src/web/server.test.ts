@@ -160,6 +160,12 @@ function makeState(
   };
 }
 
+function extractInlineShellScript(html: string): string {
+  const match = html.match(/<script>([\s\S]*?)<\/script><\/body><\/html>$/);
+  expect(match).not.toBeNull();
+  return match![1];
+}
+
 // ---- Test suite ----
 
 const testAuth = { username: 'admin', password: 'secret' };
@@ -1237,6 +1243,16 @@ describe('dashboard', () => {
     const html = await res.text();
     expect(html).toContain('/api/events?channels=logs,stats,agents,tasks');
     expect(html).toContain('bundles/datastar.js');
+  });
+
+  it('serves a syntactically valid inline shell script', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/conversations');
+    const html = await res.text();
+
+    const script = extractInlineShellScript(html);
+
+    expect(() => new Function(script)).not.toThrow();
   });
 
   it('uses datastar page navigation actions in nav links', async () => {
