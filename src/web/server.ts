@@ -40,6 +40,7 @@ interface SseClient {
   subscriptions: Set<string>;
   stream: ServerSentEventGenerator;
   logs: string[];
+  logsDirty: boolean;
   close(): void;
 }
 
@@ -72,6 +73,7 @@ export function startWebServer(
   const { port, auth, hostname, corsOrigin, trustLanDiscoveryAdmin } = config;
   const bindHostname = hostname || '127.0.0.1';
   const sseClients = new Set<SseClient>();
+  const recentLogs: string[] = [];
   let rawLogStreamClients = 0;
   const subscribeToRawLogs =
     typeof logger.subscribe === 'function'
@@ -260,7 +262,8 @@ export function startWebServer(
           const nextClient: SseClient = {
             subscriptions,
             stream,
-            logs: [],
+            logs: recentLogs.slice(),
+            logsDirty: subscriptions.has('logs'),
             close() {
               stream.close();
             },
@@ -495,10 +498,15 @@ export function startWebServer(
         try {
           if (event.type === 'log') {
             const logHtml = renderLogLine(event.data);
+            recentLogs.push(logHtml);
+            if (recentLogs.length > MAX_LOG_LINES) {
+              recentLogs.splice(0, recentLogs.length - MAX_LOG_LINES);
+            }
             client.logs.push(logHtml);
             if (client.logs.length > MAX_LOG_LINES) {
               client.logs.splice(0, client.logs.length - MAX_LOG_LINES);
             }
+            client.logsDirty = true;
             client.stream.patchElements(client.logs.join(''), {
               selector: '#log-container',
               mode: 'inner',
@@ -698,6 +706,20 @@ function patchSnapshot(client: SseClient, state: WebStateProvider): void {
   patchStats(client, state);
   patchAgents(client, state);
   patchTasks(client, state);
+  patchLogs(client);
+}
+
+function patchLogs(client: SseClient): void {
+  if (!client.subscriptions.has('logs') || !client.logsDirty) return;
+  client.logsDirty = false;
+  client.stream.patchElements(
+    `<span class="log-count" id="log-count">${client.logs.length} lines</span>`,
+  );
+  if (client.logs.length === 0) return;
+  client.stream.patchElements(client.logs.join(''), {
+    selector: '#log-container',
+    mode: 'inner',
+  });
 }
 
 function patchStats(client: SseClient, state: WebStateProvider): void {

@@ -1072,6 +1072,46 @@ describe('SSE', () => {
     reader.releaseLock();
   });
 
+  it('replays buffered logs to newly connected SSE clients', async () => {
+    handle = startWebServer(testConfig(), makeState());
+
+    const first = await authedFetch('/api/events?channels=logs', {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(first.status).toBe(200);
+    expect(first.body).toBeTruthy();
+    const firstReader = first.body!.getReader();
+
+    handle.broadcast({
+      type: 'log',
+      data: { level: 'info', msg: 'buffered log replay', ts: Date.now() },
+      timestamp: new Date().toISOString(),
+    });
+
+    const firstPayload = await readUntilContains(
+      firstReader,
+      'buffered log replay',
+    );
+    expect(firstPayload).toContain('selector #log-container');
+
+    const second = await authedFetch('/api/events?channels=logs', {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(second.status).toBe(200);
+    expect(second.body).toBeTruthy();
+    const secondReader = second.body!.getReader();
+
+    const replayPayload = await readUntilContains(
+      secondReader,
+      'buffered log replay',
+    );
+    expect(replayPayload).toContain('selector #log-container');
+    expect(replayPayload).toContain('buffered log replay');
+
+    firstReader.releaseLock();
+    secondReader.releaseLock();
+  });
+
   it('only sends events matching subscribed channels', async () => {
     handle = startWebServer(testConfig(), makeState());
 
