@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 import { createHmac } from 'crypto';
 import {
+  _resetGitHubWebhookReplayCacheForTest,
   buildGitHubWebhookNotification,
+  markGitHubWebhookDeliveryProcessed,
   verifyGitHubWebhookSignature,
 } from './github-webhooks.js';
+import { _initTestDatabase } from './db.js';
 import type { GitHubWatchesConfig } from './types.js';
 
 describe('github webhooks', () => {
@@ -16,6 +19,11 @@ describe('github webhooks', () => {
       },
     ],
   };
+
+  beforeEach(() => {
+    _initTestDatabase();
+    _resetGitHubWebhookReplayCacheForTest();
+  });
 
   it('verifies valid webhook signature', () => {
     const body = JSON.stringify({ hello: 'world' });
@@ -33,6 +41,18 @@ describe('github webhooks', () => {
     const body = JSON.stringify({ hello: 'world' });
     const valid = verifyGitHubWebhookSignature(body, 'sha256=deadbeef', secret);
     expect(valid).toBe(false);
+  });
+
+  it('rejects duplicate deliveries after an in-memory cache reset', () => {
+    const now = Date.parse('2026-03-16T00:00:00.000Z');
+
+    expect(markGitHubWebhookDeliveryProcessed('delivery-replay', now)).toBe(true);
+
+    _resetGitHubWebhookReplayCacheForTest();
+
+    expect(markGitHubWebhookDeliveryProcessed('delivery-replay', now + 1_000)).toBe(
+      false,
+    );
   });
 
   it('builds notification for watched PR review comment', () => {

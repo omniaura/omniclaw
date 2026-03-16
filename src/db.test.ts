@@ -13,6 +13,7 @@ import {
   getNewMessages,
   getTaskById,
   loadAllDeltaCursors,
+  recordGitHubWebhookDelivery,
   setAgent,
   setDeltaCursorInDb,
   setAgentHealth,
@@ -587,6 +588,20 @@ describe('task CRUD', () => {
 
     deleteTask('task-3');
     expect(getTaskById('task-3')).toBeNull();
+  });
+});
+
+describe('github webhook replay persistence', () => {
+  it('deduplicates repeated delivery ids until their TTL expires', () => {
+    const start = Date.parse('2026-03-16T00:00:00.000Z');
+
+    expect(recordGitHubWebhookDelivery('delivery-1', 60_000, start)).toBe(true);
+    expect(recordGitHubWebhookDelivery('delivery-1', 60_000, start + 30_000)).toBe(
+      false,
+    );
+    expect(recordGitHubWebhookDelivery('delivery-1', 60_000, start + 61_000)).toBe(
+      true,
+    );
   });
 });
 
