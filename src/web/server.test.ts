@@ -11,6 +11,7 @@ import {
 } from './routes.js';
 import type { WebStateProvider, QueueStats } from './types.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
+import { logger } from '../logger.js';
 
 // ---- Test fixtures ----
 
@@ -194,6 +195,48 @@ interface StreamReader {
 
 interface CancellableReader extends StreamReader {
   cancel(): Promise<void>;
+}
+
+function ensureLoggerSubscriptionBridge(): () => void {
+  if (typeof logger.subscribe === 'function') {
+    return () => {};
+  }
+
+  const subscribers = new Set<(record: Record<string, unknown>) => void>();
+  const originalInfo = logger.info.bind(logger);
+
+  (
+    logger as typeof logger & {
+      subscribe?: (fn: (record: Record<string, unknown>) => void) => () => void;
+    }
+  ).subscribe = (fn) => {
+    subscribers.add(fn);
+    return () => {
+      subscribers.delete(fn);
+    };
+  };
+
+  logger.info = ((
+    fieldsOrMsg: Record<string, unknown> | string,
+    msg?: string,
+  ) => {
+    const message = typeof fieldsOrMsg === 'string' ? fieldsOrMsg : (msg ?? '');
+    originalInfo(fieldsOrMsg as never, msg as never);
+    const record: Record<string, unknown> = {
+      ts: Date.now(),
+      level: 'info',
+      msg: message,
+      ...(typeof fieldsOrMsg === 'string' ? {} : fieldsOrMsg),
+    };
+    for (const subscriber of subscribers) {
+      subscriber(record);
+    }
+  }) as typeof logger.info;
+
+  return () => {
+    delete (logger as { subscribe?: unknown }).subscribe;
+    logger.info = originalInfo;
+  };
 }
 
 async function readUntilContains(
@@ -950,6 +993,52 @@ describe('WebSocket', () => {
 // ---- SSE ----
 
 describe('SSE', () => {
+  it('streams raw log events for proxy consumers', async () => {
+    const restoreLoggerBridge = ensureLoggerSubscriptionBridge();
+    try {
+      handle = startWebServer(testConfig(), makeState());
+
+      const res = await authedFetch('/api/logs/stream', {
+        headers: { Accept: 'text/event-stream' },
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toContain('text/event-stream');
+      expect(res.body).toBeTruthy();
+
+      const reader = res.body!.getReader();
+      const message = `raw-log-${Date.now()}`;
+      logger.info(message);
+
+      const payload = await readUntilContains(reader, message);
+      expect(payload).toContain('event: log');
+      expect(payload).toContain(message);
+      reader.releaseLock();
+    } finally {
+      restoreLoggerBridge();
+    }
+  });
+
+  it('enforces the MAX_SSE_CLIENTS limit for raw log streams', async () => {
+    handle = startWebServer(testConfig(), makeState());
+
+    const readers: CancellableReader[] = [];
+    for (let i = 0; i < 100; i++) {
+      const res = await authedFetch('/api/logs/stream', {
+        headers: { Accept: 'text/event-stream' },
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).toBeTruthy();
+      readers.push(res.body!.getReader() as unknown as CancellableReader);
+    }
+
+    const overflow = await authedFetch('/api/logs/stream', {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(overflow.status).toBe(429);
+
+    await Promise.all(readers.map(async (reader) => reader.cancel()));
+  });
+
   it('connects and receives broadcast events', async () => {
     handle = startWebServer(testConfig(), makeState());
 
@@ -1148,5 +1237,36 @@ describe('dashboard', () => {
     const html = await res.text();
     expect(html).toContain('/api/events?channels=logs,stats,agents,tasks');
     expect(html).toContain('bundles/datastar.js');
+  });
+
+  it('uses datastar page navigation actions in nav links', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/');
+    const html = await res.text();
+    expect(html).toContain(
+      "data-on:click__prevent=\"history.pushState({page: el.dataset.page}, '', el.getAttribute('href')); @get('/api/page/' + el.dataset.page)\"",
+    );
+    expect(html).toContain(
+      '<title id="page-title">OmniClaw \u2014 Dashboard</title>',
+    );
+  });
+
+  it('returns datastar morph html for page navigation endpoints', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/page/network');
+    expect(res.headers.get('Content-Type')).toContain('text/event-stream');
+    expect(res.body).toBeTruthy();
+    const reader = res.body!.getReader();
+    const html = await readUntilContains(
+      reader,
+      '<title id="page-title">OmniClaw \u2014 Network</title>',
+    );
+    expect(html).toContain('event: datastar-patch-elements');
+    expect(html).toContain('<nav id="nav-links">');
+    expect(html).toContain('<main id="content">');
+    expect(html).toContain(
+      '<title id="page-title">OmniClaw \u2014 Network</title>',
+    );
+    reader.releaseLock();
   });
 });

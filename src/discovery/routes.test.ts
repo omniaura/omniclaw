@@ -413,4 +413,56 @@ describe('checkPeerAuth — body hash verification', () => {
     const replay = checkPeerAuth(req, makeTrustStore(), computedHash);
     expect(replay).toBe(false);
   });
+
+  it('proxies trusted peer log streams', async () => {
+    const encoder = new TextEncoder();
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  'event: log\ndata: {"level":"info","msg":"remote log"}\n\n',
+                ),
+              );
+              controller.close();
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream; charset=utf-8' },
+          },
+        ),
+      ),
+    ) as unknown as typeof fetch;
+
+    const req = new Request(
+      'http://localhost/api/discovery/peers/peer-1/logs',
+      {
+        method: 'GET',
+      },
+    );
+
+    const ctx = makeContext({
+      trustStore: {
+        getPeer: () => ({
+          status: 'trusted',
+          sharedSecret: 'secret',
+          host: '127.0.0.1',
+          port: 6001,
+        }),
+        updatePeerLastSeen: () => {},
+      } as any,
+    });
+
+    const res = await handleDiscoveryRequest(req, new URL(req.url), ctx);
+    expect(res).not.toBeNull();
+    expect((res as Response).headers.get('Content-Type')).toContain(
+      'text/event-stream',
+    );
+    const body = await (res as Response).text();
+    expect(body).toContain('event: log');
+    expect(body).toContain('remote log');
+  });
 });
