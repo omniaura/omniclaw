@@ -40,6 +40,7 @@ interface SseClient {
   subscriptions: Set<string>;
   stream: ServerSentEventGenerator;
   logs: string[];
+  logsDirty: boolean;
   close(): void;
 }
 
@@ -262,6 +263,7 @@ export function startWebServer(
             subscriptions,
             stream,
             logs: recentLogs.slice(),
+            logsDirty: subscriptions.has('logs'),
             close() {
               stream.close();
             },
@@ -504,6 +506,7 @@ export function startWebServer(
             if (client.logs.length > MAX_LOG_LINES) {
               client.logs.splice(0, client.logs.length - MAX_LOG_LINES);
             }
+            client.logsDirty = true;
             client.stream.patchElements(client.logs.join(''), {
               selector: '#log-container',
               mode: 'inner',
@@ -707,7 +710,8 @@ function patchSnapshot(client: SseClient, state: WebStateProvider): void {
 }
 
 function patchLogs(client: SseClient): void {
-  if (!client.subscriptions.has('logs')) return;
+  if (!client.subscriptions.has('logs') || !client.logsDirty) return;
+  client.logsDirty = false;
   client.stream.patchElements(
     `<span class="log-count" id="log-count">${client.logs.length} lines</span>`,
   );
