@@ -60,6 +60,7 @@ describe('renderNetworkContent', () => {
     const html = renderNetworkContent({
       instanceId: 'local<id>',
       instanceName: 'Main <Node> & "Ops"',
+      discoveryAvailable: true,
       discoveryEnabled: true,
       runtime: makeRuntime(),
       peers: [
@@ -85,6 +86,7 @@ describe('renderNetworkContent', () => {
     const html = renderNetworkContent({
       instanceId: 'local-id',
       instanceName: 'Main Node',
+      discoveryAvailable: true,
       discoveryEnabled: false,
       runtime: makeRuntime({ enabled: false, active: false }),
       peers: [],
@@ -99,6 +101,32 @@ describe('renderNetworkContent', () => {
     );
     expect(html).toContain('No pending requests');
     expect(html).toContain('id="pending-count">0<');
+  });
+
+  it('disables discovery controls when discovery routes are unavailable', () => {
+    const html = renderNetworkContent({
+      instanceId: '',
+      instanceName: '',
+      discoveryAvailable: false,
+      discoveryEnabled: false,
+      runtime: makeRuntime({ enabled: false, active: false }),
+      peers: [],
+      pendingRequests: [],
+    });
+
+    expect(html).toContain(
+      'id="network-root" data-discovery-available="false"',
+    );
+    expect(html).toContain('id="discovery-toggle"');
+    expect(html).toContain(
+      'id="discovery-toggle" data-network-action="toggle-discovery" data-network-id="on" disabled',
+    );
+    expect(html).toContain(
+      'id="trust-current-network" data-network-action="trust-current-network" data-network-id="current" disabled',
+    );
+    expect(html).toContain(
+      'Discovery controls are unavailable in this environment.',
+    );
   });
 });
 
@@ -192,6 +220,7 @@ describe('renderNetworkPage', () => {
     const html = renderNetworkPage({
       instanceId: 'instance-1',
       instanceName: 'Main Node',
+      discoveryAvailable: true,
       discoveryEnabled: true,
       runtime: makeRuntime(),
       peers: [makePeer()],

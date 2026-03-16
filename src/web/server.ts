@@ -330,6 +330,7 @@ export function startWebServer(
               networkPageStateGetter?.() ?? {
                 instanceId: '',
                 instanceName: '',
+                discoveryAvailable: false,
                 discoveryEnabled: false,
                 runtime: {
                   enabled: false,
