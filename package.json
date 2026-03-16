@@ -13,7 +13,9 @@
     "format": "bunx prettier --write \"src/**/*.ts\"",
     "format:check": "bunx prettier --check \"src/**/*.ts\"",
     "test": "bun test",
-    "test:watch": "bun test --watch"
+    "test:watch": "bun test --watch",
+    "simtest": "bun run src/simtest/index.ts",
+    "simtest:dev": "bun --watch src/simtest/index.ts"
   },
   "dependencies": {
     "@effect/schema": "^0.75.5",
