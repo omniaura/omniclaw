@@ -31,8 +31,10 @@ function dashboardScript(): string {
   if(!canvas||!dataEl)return;
   var ctx=canvas.getContext("2d");
   var wrap=canvas.parentElement;
+  if(!ctx||!wrap)return;
   var dpr=window.devicePixelRatio||1;
   var W,H;
+  var resizeRetryTimer=null;
 
   // ---- Pan & Zoom state ----
   var panX=0,panY=0,zoom=1;
@@ -40,12 +42,28 @@ function dashboardScript(): string {
 
   function resize(){
     var r=wrap.getBoundingClientRect();
-    W=r.width;H=r.height;
+    W=Math.max(0,r.width);H=Math.max(0,r.height);
+    if(!W||!H){
+      if(resizeRetryTimer)clearTimeout(resizeRetryTimer);
+      resizeRetryTimer=setTimeout(function(){
+        resizeRetryTimer=null;
+        if(canvas.isConnected)resize();
+      },80);
+      return false;
+    }
     canvas.width=W*dpr;canvas.height=H*dpr;
     canvas.style.width=W+"px";canvas.style.height=H+"px";
+    return true;
   }
   resize();
   var ro=new ResizeObserver(resize);ro.observe(wrap);
+  function refreshLayout(){
+    if(!canvas.isConnected||document.visibilityState==="hidden")return;
+    var hadSize=!!(W&&H);
+    if(resize()&&(!hadSize||!hasFitted))fitView();
+  }
+  window.addEventListener("pageshow",refreshLayout);
+  document.addEventListener("visibilitychange",refreshLayout);
 
   // Convert screen coords to world coords
   function screenToWorld(sx,sy){return{x:(sx-panX)/zoom,y:(sy-panY)/zoom};}
@@ -290,7 +308,7 @@ function dashboardScript(): string {
     centerX=W/2;centerY=H/2;
 
     // Auto-fit after simulation settles
-    if(step===SIM_STEPS&&!hasFitted){
+    if(W&&H&&step===SIM_STEPS&&!hasFitted){
       hasFitted=true;fitView();
     }
 
@@ -510,7 +528,13 @@ function dashboardScript(): string {
     panY=H/2-((minY+maxY)/2)*zoom;
   });
 
-  window.__cleanup=function(){ro.disconnect();if(animFrame)cancelAnimationFrame(animFrame);};
+  window.__cleanup=function(){
+    ro.disconnect();
+    if(animFrame)cancelAnimationFrame(animFrame);
+    if(resizeRetryTimer)clearTimeout(resizeRetryTimer);
+    window.removeEventListener("pageshow",refreshLayout);
+    document.removeEventListener("visibilitychange",refreshLayout);
+  };
 })();
 
 // ---- Create task modal (dashboard only) ----
