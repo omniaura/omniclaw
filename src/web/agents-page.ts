@@ -43,8 +43,8 @@ export function renderAgentRow(
   const detailUrl = `/agents?id=${encodeURIComponent(agent.id)}`;
 
   const avatarHtml = avatar
-    ? `<img class="ap-avatar" src="${avatar}" alt="${esc(agent.name)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
-    + `<span class="ap-avatar-ph" style="display:none">${esc(agent.name.charAt(0).toUpperCase())}</span>`
+    ? `<img class="ap-avatar" src="${avatar}" alt="${esc(agent.name)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">` +
+      `<span class="ap-avatar-ph" style="display:none">${esc(agent.name.charAt(0).toUpperCase())}</span>`
     : `<span class="ap-avatar-ph">${esc(agent.name.charAt(0).toUpperCase())}</span>`;
 
   return (
@@ -62,7 +62,9 @@ export function renderAgentRow(
     `<td class="td-center">${agent.channels.length}</td>` +
     `<td class="td-center">${taskCount}</td>` +
     `<td>` +
-    (agent.isAdmin ? `<span class="badge badge-admin badge-sm">admin</span> ` : '') +
+    (agent.isAdmin
+      ? `<span class="badge badge-admin badge-sm">admin</span> `
+      : '') +
     (agent.remoteInstanceId
       ? `<span class="badge badge-sm badge-remote">${esc(agent.remoteInstanceName || 'remote')}</span>`
       : '') +
@@ -99,17 +101,11 @@ export function renderAgentsContent(
   const remoteCount = agentData.filter((a) => a.remoteInstanceId).length;
 
   const backendOptions = backends
-    .map(
-      (b) =>
-        `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`,
-    )
+    .map((b) => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`)
     .join('');
 
   const runtimeOptions = runtimes
-    .map(
-      (r) =>
-        `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`,
-    )
+    .map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`)
     .join('');
 
   const rows = agentData

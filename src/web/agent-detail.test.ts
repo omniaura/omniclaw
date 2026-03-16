@@ -412,22 +412,25 @@ describe('/api/agents/:id/detail endpoint', () => {
 });
 
 describe('/api/page/agent-detail SPA navigation', () => {
-  it('returns JSON with html, title, path', async () => {
+  it('returns a Datastar patch response for known agents', async () => {
     handle = startWebServer(testConfig(), makeState());
     const res = await authedFetch('/api/page/agent-detail?id=test-agent');
     expect(res.status).toBe(200);
-    const data = (await res.json()) as JsonObject;
-    expect(data.html).toContain('Test Agent');
-    expect(data.title).toBe('Test Agent');
-    expect(data.path).toBe('/agents?id=test-agent');
+    const body = await res.text();
+    expect(body).toContain('Test Agent');
+    expect(body).toContain(
+      '<title id="page-title">OmniClaw — Test Agent</title>',
+    );
   });
 
-  it('returns not-found content for unknown agent', async () => {
+  it('returns not-found patch content for unknown agents', async () => {
     handle = startWebServer(testConfig(), makeState());
     const res = await authedFetch('/api/page/agent-detail?id=bad');
     expect(res.status).toBe(200);
-    const data = (await res.json()) as JsonObject;
-    expect(data.html).toContain('Agent not found');
-    expect(data.title).toBe('Agent Not Found');
+    const body = await res.text();
+    expect(body).toContain('Agent not found');
+    expect(body).toContain(
+      '<title id="page-title">OmniClaw — Agent Not Found</title>',
+    );
   });
 });

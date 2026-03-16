@@ -779,8 +779,12 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('});');
 
   parts.push('window.addEventListener("popstate",function(e){');
-  parts.push('  if(window.__cleanup){window.__cleanup();window.__cleanup=null;}');
-  parts.push('  location.href=location.pathname+location.search+location.hash;');
+  parts.push(
+    '  if(window.__cleanup){window.__cleanup();window.__cleanup=null;}',
+  );
+  parts.push(
+    '  location.href=location.pathname+location.search+location.hash;',
+  );
   parts.push('});');
 
   // ---- Page init dispatch ----

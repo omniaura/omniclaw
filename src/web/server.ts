@@ -72,6 +72,10 @@ export function startWebServer(
   const bindHostname = hostname || '127.0.0.1';
   const sseClients = new Set<SseClient>();
   let rawLogStreamClients = 0;
+  const subscribeToRawLogs =
+    typeof logger.subscribe === 'function'
+      ? logger.subscribe.bind(logger)
+      : null;
   const fetchHandler = async (req: Request) => {
     const url = new URL(req.url);
     if (url.pathname === '/ws') {
@@ -164,7 +168,7 @@ export function startWebServer(
           rawLogStreamClients += 1;
           const encoder = new TextEncoder();
           controller.enqueue(encoder.encode(': connected\n\n'));
-          unsubscribe = logger.subscribe((record) => {
+          unsubscribe = subscribeToRawLogs?.((record) => {
             if (record.level === 'trace') return;
             try {
               controller.enqueue(

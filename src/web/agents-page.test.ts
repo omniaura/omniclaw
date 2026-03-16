@@ -100,9 +100,7 @@ describe('renderAgentRow', () => {
       backend: 'apple-container',
       agentRuntime: 'claude-agent-sdk',
       isAdmin: false,
-      channels: [
-        { jid: 'dc:123', displayName: 'general' },
-      ],
+      channels: [{ jid: 'dc:123', displayName: 'general' }],
     };
 
     const html = renderAgentRow(agentData, 2);
