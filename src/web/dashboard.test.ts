@@ -4,7 +4,10 @@ import { describe, expect, it } from 'bun:test';
 
 import type { RemotePeerAgents } from '../discovery/types.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
-import { renderDashboardContent, renderDashboardWithRemote } from './dashboard.js';
+import {
+  renderDashboardContent,
+  renderDashboardWithRemote,
+} from './dashboard.js';
 import type { WebStateProvider } from './types.js';
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
@@ -80,13 +83,23 @@ function makeState(options?: {
     getQueueDetails: () => [],
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
-    createTask: () => {},
-    updateTask: () => {},
-    deleteTask: () => {},
+    createTask: () => {
+      throw new Error('Unexpected createTask during render');
+    },
+    updateTask: () => {
+      throw new Error('Unexpected updateTask during render');
+    },
+    deleteTask: () => {
+      throw new Error('Unexpected deleteTask during render');
+    },
     calculateNextRun: () => null,
     readContextFile: () => null,
-    writeContextFile: () => {},
-    updateAgentAvatar: () => {},
+    writeContextFile: () => {
+      throw new Error('Unexpected writeContextFile during render');
+    },
+    updateAgentAvatar: () => {
+      throw new Error('Unexpected updateAgentAvatar during render');
+    },
     resolveChatImage: async () => null,
     resolveDiscordGuildImage: async () => null,
   };
@@ -265,8 +278,12 @@ describe('renderDashboardWithRemote', () => {
     const html = renderDashboardWithRemote(makeState(), []);
 
     expect(html).toContain('<!DOCTYPE html>');
-    expect(html).toContain('<title id="page-title">OmniClaw — Dashboard</title>');
-    expect(html).toContain("window.__initPage && window.__initPage('dashboard')");
+    expect(html).toContain(
+      '<title id="page-title">OmniClaw — Dashboard</title>',
+    );
+    expect(html).toContain(
+      "window.__initPage && window.__initPage('dashboard')",
+    );
     expect(html).toContain('class="nav-link active">Dashboard</a>');
   });
 });

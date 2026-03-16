@@ -11,6 +11,7 @@ import {
 describe('escapeHtml', () => {
   it('escapes the HTML-sensitive characters used by the web UI', () => {
     expect(escapeHtml('&<>"')).toBe('&amp;&lt;&gt;&quot;');
+    expect(escapeHtml("it's fine")).toBe("it's fine");
     expect(escapeHtml('')).toBe('');
   });
 });
@@ -22,7 +23,9 @@ describe('renderNavLinks', () => {
     expect(html).toContain('href="/tasks"');
     expect(html).toContain('class="nav-link active">Tasks</a>');
     expect(html).toContain("@get('/api/page/' + el.dataset.page)");
-    expect(html).not.toContain('href="/" data-nav data-page="dashboard" class="nav-link active"');
+    expect(html).not.toContain(
+      'href="/" data-nav data-page="dashboard" class="nav-link active"',
+    );
   });
 });
 
@@ -53,8 +56,12 @@ describe('renderShell', () => {
       '<title id="page-title">OmniClaw — Context &lt;Viewer&gt; &amp; &quot;Editor&quot;</title>',
     );
     expect(html).toContain('<main id="content"><section>body</section></main>');
-    expect(html).toContain("@get('/api/events?channels=logs,stats,agents,tasks')");
-    expect(html).toContain('https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js');
+    expect(html).toContain(
+      "@get('/api/events?channels=logs,stats,agents,tasks')",
+    );
+    expect(html).toContain(
+      'https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js',
+    );
     expect(html).toContain('window.contextInit = true;');
     expect(html).toContain('window.tasksInit = true;');
     expect(html).toContain('class="nav-link active">Context</a>');
@@ -63,7 +70,11 @@ describe('renderShell', () => {
 
 describe('renderPagePatch', () => {
   it('patches the title, nav, and content for SSE navigation', () => {
-    const html = renderPagePatch('/logs', 'Logs & <Alerts>', '<div>patched</div>');
+    const html = renderPagePatch(
+      '/logs',
+      'Logs & <Alerts>',
+      '<div>patched</div>',
+    );
 
     expect(html).toContain(
       '<title id="page-title">OmniClaw — Logs &amp; &lt;Alerts&gt;</title>',
