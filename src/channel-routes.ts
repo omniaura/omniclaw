@@ -80,6 +80,10 @@ export function buildSendToInstruction(
   trigger: string,
   requiresTrigger: boolean,
 ): string {
+  if (jids.length === 0) {
+    return '';
+  }
+
   if (jids.length <= 1) {
     const target = jids[0] || '';
     return requiresTrigger

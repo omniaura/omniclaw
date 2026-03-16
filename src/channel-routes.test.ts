@@ -168,6 +168,10 @@ describe('buildAgentToChannelsMapFromSubscriptions', () => {
 });
 
 describe('buildSendToInstruction', () => {
+  it('returns an empty instruction when an agent has no channel jids', () => {
+    expect(buildSendToInstruction([], '@Clayton', true)).toBe('');
+  });
+
   it('hardcodes target_jid for single-channel agents', () => {
     expect(buildSendToInstruction(['dc:1'], '@Clayton', true)).toBe(
       'target_jid="dc:1", text must start with "@Clayton "',
