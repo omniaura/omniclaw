@@ -184,6 +184,14 @@ export const SESSION_MAX_AGE = parseInt(
   process.env.SESSION_MAX_AGE || '14400000',
   10,
 ); // 4 hours — rotate sessions to prevent unbounded context growth
+// Guild IDs where verbose retry notifications are shown (comma-separated).
+// Other servers get silent retries with a message only on final failure.
+export const ADMIN_GUILD_IDS = new Set(
+  (process.env.ADMIN_GUILD_IDS || '940321040482074702')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
 export const ROSTER_REFRESH_INTERVAL = parseInt(
   process.env.ROSTER_REFRESH_INTERVAL || '900000',
   10,

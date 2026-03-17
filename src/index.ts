@@ -36,6 +36,7 @@ import {
   DISCOVERY_ENABLED,
   DISCOVERY_TRUST_LAN_ADMIN,
   INSTANCE_NAME,
+  ADMIN_GUILD_IDS,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
 import { SlackChannel } from './channels/slack.js';
@@ -1250,6 +1251,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   }
 
   let hadError = false;
+  let hadOverloadedError = false;
   let outputSentToUser = false;
 
   // Patterns that indicate system/auth errors — never send these to channels
@@ -1261,6 +1263,10 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
     /Invalid (?:API key|bearer token)/,
     /rate_limit_error/,
   ];
+  // 529 overloaded errors get special treatment: retry with optional notification
+  const overloadedPattern = /overloaded_error|API Error: 529\b/i;
+  const isAdminChannel =
+    isMainGroup || ADMIN_GUILD_IDS.has(group.discordGuildId || '');
 
   // Thread streaming via shared helper
   // Synthetic IDs (synth-*, react-*, notify-*) aren't real channel message IDs
@@ -1337,8 +1343,26 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
 
             // Suppress system/auth errors — log them but don't send to channels
             // This prevents infinite loops when auth fails (error echoed back → triggers agent → fails again)
+            const isOverloaded = overloadedPattern.test(text);
             const isSystemError = systemErrorPatterns.some((p) => p.test(text));
-            if (isSystemError) {
+            if (isOverloaded) {
+              // 529 overloaded — track separately for retry messaging
+              log.warn('API overloaded (529), will retry');
+              hadError = true;
+              hadOverloadedError = true;
+              // In admin channels, notify the user that we're retrying
+              const errorCount = (consecutiveErrors[dispatchJid] || 0) + 1;
+              if (isAdminChannel && channel && errorCount < MAX_CONSECUTIVE_ERRORS) {
+                const retryMsg = `API is overloaded, retrying... (attempt ${errorCount}/${MAX_CONSECUTIVE_ERRORS})`;
+                const formatted = formatOutbound(channel, retryMsg, getAgentName(group));
+                if (formatted) {
+                  channel.sendMessage(chatJid, formatted, replyAnchorMessageId || undefined).catch((err) => {
+                    log.debug({ err }, 'Failed to send overloaded retry notice');
+                  });
+                  if (replyAnchorMessageId) replyAnchorMessageId = null;
+                }
+              }
+            } else if (isSystemError) {
               const redactedText = redactSensitiveData(text.slice(0, 300));
               log.error(
                 `Suppressed system error (not sent to user): ${redactedText}`,
@@ -1443,8 +1467,9 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
 
       // Notify the user so the message isn't silently dropped (fixes #94)
       if (channel) {
-        const errorMsg =
-          "Sorry, I hit a server error a few times and couldn't process your message. Please try again.";
+        const errorMsg = hadOverloadedError
+          ? "The AI API is currently overloaded. I'll respond once it's back. Please try again shortly."
+          : "Sorry, I hit a server error a few times and couldn't process your message. Please try again.";
         const formatted = formatOutbound(
           channel,
           errorMsg,
