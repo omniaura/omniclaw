@@ -5,7 +5,7 @@ import { GROUPS_DIR } from '../config.js';
 import { assertPathWithin } from '../path-security.js';
 import type { ScheduledTask } from '../types.js';
 import type { WebStateProvider } from './types.js';
-import { serveCachedRemoteImage } from './image-cache.js';
+import { serveCachedRemoteImage, validateRemoteImageUrl } from './image-cache.js';
 import { renderAgentDetail, buildAgentDetailData } from './agent-detail.js';
 import { renderConversations } from './conversations.js';
 import {
@@ -894,21 +894,27 @@ async function handleSetAgentAvatar(
     );
   }
 
+  const sanitizedUrl =
+    sanitizeTelegramAvatarUrl((url as string) || undefined, source as string) ||
+    ((url as string) || undefined);
+
+  if (sanitizedUrl?.startsWith('http://') || sanitizedUrl?.startsWith('https://')) {
+    const blockReason = await validateRemoteImageUrl(sanitizedUrl);
+    if (blockReason) {
+      return json({ error: `Avatar URL rejected: ${blockReason}` }, 400);
+    }
+  }
+
   state.updateAgentAvatar(
     agentId,
-    sanitizeTelegramAvatarUrl((url as string) || undefined, source as string) ||
-      null,
+    sanitizedUrl || null,
     (source as string) || null,
   );
 
   return json({
     success: true,
     agentId,
-    avatarUrl:
-      sanitizeTelegramAvatarUrl(
-        (url as string) || undefined,
-        source as string,
-      ) || null,
+    avatarUrl: sanitizedUrl || null,
     avatarSource: (source as string) || null,
   });
 }

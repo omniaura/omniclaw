@@ -1,5 +1,7 @@
 import { createHash } from 'crypto';
+import { lookup } from 'dns/promises';
 import fs from 'fs';
+import { isIP } from 'net';
 import path from 'path';
 
 import { DATA_DIR } from '../config.js';
@@ -8,6 +10,7 @@ import { logger } from '../logger.js';
 const IMAGE_CACHE_DIR = path.join(DATA_DIR, 'image-cache');
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const BROWSER_CACHE_CONTROL = 'private, max-age=86400';
+const REMOTE_IMAGE_FETCH_TIMEOUT_MS = 10_000;
 
 interface CacheMetadata {
   contentType: string;
@@ -22,6 +25,90 @@ export type RemoteImageFetch = (
 export interface RemoteImageCacheOptions {
   cacheDir?: string;
   fetchImpl?: RemoteImageFetch;
+}
+
+async function lookupHostAddresses(hostname: string): Promise<string[]> {
+  const records = await lookup(hostname, { all: true, verbatim: true });
+  return records.map((record) => record.address);
+}
+
+function isBlockedPrivateAddress(address: string): boolean {
+  const normalized = address.toLowerCase();
+  const ipv4 = normalized.startsWith('::ffff:')
+    ? normalized.slice('::ffff:'.length)
+    : normalized;
+
+  if (normalized === '::' || normalized === '::1') return true;
+  if (ipv4 === '0.0.0.0') return true;
+  if (ipv4.startsWith('127.')) return true;
+  if (ipv4.startsWith('10.')) return true;
+  if (ipv4.startsWith('192.168.')) return true;
+  if (ipv4.startsWith('169.254.')) return true;
+
+  const match172 = ipv4.match(/^172\.(\d{1,3})\./);
+  if (match172) {
+    const octet = Number.parseInt(match172[1], 10);
+    if (octet >= 16 && octet <= 31) return true;
+  }
+
+  const match100 = ipv4.match(/^100\.(\d{1,3})\./);
+  if (match100) {
+    const octet = Number.parseInt(match100[1], 10);
+    if (octet >= 64 && octet <= 127) return true;
+  }
+
+  const match198 = ipv4.match(/^198\.(\d{1,3})\./);
+  if (match198) {
+    const octet = Number.parseInt(match198[1], 10);
+    if (octet === 18 || octet === 19) return true;
+  }
+
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+  if (normalized.startsWith('fe8')) return true;
+  if (normalized.startsWith('fe9')) return true;
+  if (normalized.startsWith('fea')) return true;
+  if (normalized.startsWith('feb')) return true;
+
+  return false;
+}
+
+export async function validateRemoteImageUrl(url: string): Promise<string | null> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'invalid url';
+  }
+
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return 'unsupported protocol';
+  }
+
+  if (parsed.username || parsed.password) {
+    return 'embedded credentials are not allowed';
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+    return 'loopback host is not allowed';
+  }
+
+  if (isIP(hostname) && isBlockedPrivateAddress(hostname)) {
+    return 'private address is not allowed';
+  }
+
+  if (isIP(hostname)) return null;
+
+  try {
+    const addresses = await lookupHostAddresses(hostname);
+    if (addresses.some((address) => isBlockedPrivateAddress(address))) {
+      return 'resolved private address is not allowed';
+    }
+  } catch {
+    // Fall back to fetch-time handling if DNS lookup is unavailable.
+  }
+
+  return null;
 }
 
 export function describeImageUrl(url: string): string {
@@ -104,8 +191,23 @@ export async function serveCachedRemoteImage(
   const url = await resolveUrl();
   if (!url) return null;
 
+  const blockReason = await validateRemoteImageUrl(url);
+  if (blockReason) {
+    logger.warn(
+      {
+        cacheKey,
+        imageUrl: describeImageUrl(url),
+        blockReason,
+      },
+      'Blocked remote image fetch',
+    );
+    return null;
+  }
+
   try {
-    const upstream = await fetchImpl(url, undefined);
+    const upstream = await fetchImpl(url, {
+      signal: AbortSignal.timeout(REMOTE_IMAGE_FETCH_TIMEOUT_MS),
+    });
     if (!upstream.ok) {
       logger.warn(
         {

@@ -235,6 +235,32 @@ describe('handleRequest avatar image proxy', () => {
     }
   });
 
+  it('rejects custom avatar urls that target loopback hosts', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/api/agents/test-agent/avatar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'custom',
+          url: 'http://127.0.0.1:8080/private.png',
+        }),
+      }),
+      makeState({
+        getAgents: () => ({
+          'test-agent': makeAgent({
+            id: 'test-agent',
+            folder: 'test-agent',
+          }),
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: 'Avatar URL rejected: private address is not allowed',
+    });
+  });
+
   it('redacts Telegram bot tokens from avatar metadata responses', async () => {
     const res = await handleRequest(
       new Request('http://localhost/api/agents/test-agent/avatar'),

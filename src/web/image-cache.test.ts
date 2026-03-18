@@ -10,6 +10,7 @@ import {
   describeImageUrl,
   type RemoteImageFetch,
   serveCachedRemoteImage,
+  validateRemoteImageUrl,
 } from './image-cache.js';
 
 function clearTestImageCache(cacheDir: string): void {
@@ -32,6 +33,33 @@ describe('describeImageUrl', () => {
 });
 
 describe('serveCachedRemoteImage', () => {
+  it('rejects loopback image urls before fetching', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    try {
+      const response = await serveCachedRemoteImage(
+        'cache-key',
+        async () => 'http://127.0.0.1:8080/private.png',
+        {
+          cacheDir: testImageCacheDir,
+          fetchImpl: (async () => {
+            throw new Error('should not fetch blocked url');
+          }) as RemoteImageFetch,
+        },
+      );
+
+      expect(response).toBeNull();
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+    }
+  });
+
   it('sanitizes embedded urls in fetch error messages', async () => {
     const originalWarn = logger.warn;
     const records: Array<Record<string, unknown>> = [];
@@ -72,5 +100,19 @@ describe('serveCachedRemoteImage', () => {
       clearTestImageCache(testImageCacheDir);
       logger.warn = originalWarn;
     }
+  });
+});
+
+describe('validateRemoteImageUrl', () => {
+  it('rejects localhost hosts', async () => {
+    await expect(
+      validateRemoteImageUrl('http://localhost:3000/avatar.png'),
+    ).resolves.toBe('loopback host is not allowed');
+  });
+
+  it('rejects private ip ranges', async () => {
+    await expect(
+      validateRemoteImageUrl('http://169.254.169.254/latest/meta-data'),
+    ).resolves.toBe('private address is not allowed');
   });
 });
