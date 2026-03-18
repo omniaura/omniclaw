@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/omniaura/omniclaw">GitHub</a>&nbsp; • &nbsp;
   <a href="https://discord.gg/ENharzMzbs"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
-  <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
+  <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="Repository token footprint badge" valign="middle"></a>
 </p>
 
 OmniClaw is no longer just a personal chat bot wrapper.
@@ -109,8 +109,8 @@ This lets one agent inherit shared instructions while still keeping channel-spec
 Agents can run with different runtimes depending on the task and credentials you provide:
 
 - `claude-agent-sdk`
-- `opencode`
-- `codex`
+- `opencode` (supported, newer path)
+- `codex` (supported, newer path)
 
 ### Built-in web UI
 
