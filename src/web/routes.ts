@@ -33,6 +33,7 @@ import {
   renderAgentsPageWithRemote,
   renderAgentsContent,
 } from './agents-page.js';
+import { sanitizeTelegramAvatarUrl } from '../telegram-avatar.js';
 
 /** Optional discovery context — set by the orchestrator when discovery is enabled. */
 let discoveryContext: DiscoveryRouteContext | null = null;
@@ -734,7 +735,8 @@ function handleGetAgentAvatar(
   const agent = agents[agentId];
   if (!agent) return json({ error: 'Agent not found' }, 404);
   return json({
-    avatarUrl: agent.avatarUrl || null,
+    avatarUrl:
+      sanitizeTelegramAvatarUrl(agent.avatarUrl, agent.avatarSource) || null,
     avatarSource: agent.avatarSource || null,
   });
 }
@@ -754,9 +756,23 @@ async function handleGetAgentAvatarImage(
     return response;
   }
 
+  const safeAvatarRef =
+    sanitizeTelegramAvatarUrl(agent.avatarUrl, agent.avatarSource) ||
+    agent.avatarUrl;
+  const resolvedAvatarUrl = state.resolveAgentAvatarUrl
+    ? await state.resolveAgentAvatarUrl(
+        agentId,
+        agent.avatarUrl,
+        agent.avatarSource,
+      )
+    : agent.avatarUrl;
+  if (!resolvedAvatarUrl) {
+    return json({ error: 'Avatar not found' }, 404);
+  }
+
   const response = await serveCachedRemoteImage(
-    `agent:${agentId}:${agent.avatarUrl}`,
-    async () => agent.avatarUrl || null,
+    `agent:${agentId}:${safeAvatarRef}`,
+    async () => resolvedAvatarUrl,
     {
       cacheDir: state.remoteImageCacheDir,
       fetchImpl: state.fetchRemoteImage,
@@ -833,14 +849,17 @@ async function handleSetAgentAvatar(
 
   state.updateAgentAvatar(
     agentId,
-    (url as string) || null,
+    sanitizeTelegramAvatarUrl((url as string) || undefined, source as string) ||
+      null,
     (source as string) || null,
   );
 
   return json({
     success: true,
     agentId,
-    avatarUrl: (url as string) || null,
+    avatarUrl:
+      sanitizeTelegramAvatarUrl((url as string) || undefined, source as string) ||
+      null,
     avatarSource: (source as string) || null,
   });
 }

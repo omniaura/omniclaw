@@ -4,6 +4,12 @@ import telegramifyMarkdown from 'telegramify-markdown';
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
 import {
+  buildTelegramApiFileUrl,
+  buildTelegramFileDescriptor,
+  parseTelegramApiFileUrl,
+  parseTelegramFileDescriptor,
+} from '../telegram-avatar.js';
+import {
   Channel,
   OnInboundMessage,
   OnChatMetadata,
@@ -442,11 +448,23 @@ export class TelegramChannel implements Channel {
       const photo = photos.photos[0][photos.photos[0].length - 1];
       const file = await this.bot.api.getFile(photo.file_id);
       if (!file.file_path) return null;
-      return `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+      return buildTelegramFileDescriptor(this.botId, file.file_path);
     } catch (err) {
       logger.warn({ err }, 'Failed to get Telegram avatar');
       return null;
     }
+  }
+
+  async resolveStoredAvatarUrl(storedAvatarUrl: string): Promise<string | null> {
+    const descriptor = parseTelegramFileDescriptor(storedAvatarUrl);
+    if (descriptor) {
+      if (descriptor.botId !== this.botId) return null;
+      return buildTelegramApiFileUrl(this.botToken, descriptor.filePath);
+    }
+
+    const parsed = parseTelegramApiFileUrl(storedAvatarUrl);
+    if (!parsed || parsed.botId !== this.botId) return null;
+    return buildTelegramApiFileUrl(this.botToken, parsed.filePath);
   }
 
   async getChatAvatarUrl(jid: string): Promise<string | null> {
@@ -477,7 +495,7 @@ export class TelegramChannel implements Channel {
       if (!fileId) return null;
       const file = await this.bot.api.getFile(fileId);
       if (!file.file_path) return null;
-      return `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+      return buildTelegramApiFileUrl(this.botToken, file.file_path);
     } catch (err) {
       logger.warn({ err, jid }, 'Failed to get Telegram chat avatar');
       return null;

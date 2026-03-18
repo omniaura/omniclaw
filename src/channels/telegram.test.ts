@@ -1,9 +1,15 @@
 import { describe, it, expect } from 'bun:test';
 
 import {
+  buildTelegramFileDescriptor,
+  parseTelegramApiFileUrl,
+  parseTelegramFileDescriptor,
+  sanitizeTelegramAvatarUrl,
+} from '../telegram-avatar.js';
+import {
+  TelegramChannel,
   isTelegramReactionEmoji,
   VALID_TELEGRAM_REACTIONS,
-  TelegramChannel,
   safeErrorMessage,
 } from './telegram.js';
 
@@ -216,6 +222,56 @@ describe('TelegramChannel bot identity', () => {
     });
 
     expect(channel.botId).toBe('telegram-bot');
+  });
+});
+
+describe('telegram avatar descriptors', () => {
+  it('round-trips safe Telegram avatar descriptors', () => {
+    const descriptor = buildTelegramFileDescriptor(
+      '123456',
+      'photos/file_42.jpg',
+    );
+
+    expect(parseTelegramFileDescriptor(descriptor)).toEqual({
+      botId: '123456',
+      filePath: 'photos/file_42.jpg',
+    });
+  });
+
+  it('sanitizes Telegram file URLs into token-free descriptors', () => {
+    const sanitized = sanitizeTelegramAvatarUrl(
+      'https://api.telegram.org/file/bot123456:secret-token/photos/file_42.jpg',
+      'telegram',
+    );
+
+    expect(sanitized).toBe('tg-file:123456:photos%2Ffile_42.jpg');
+    expect(sanitized).not.toContain('secret-token');
+  });
+
+  it('parses Telegram file URLs into token, botId, and path', () => {
+    expect(
+      parseTelegramApiFileUrl(
+        'https://api.telegram.org/file/bot123456:secret-token/photos/file_42.jpg',
+      ),
+    ).toEqual({
+      botToken: '123456:secret-token',
+      botId: '123456',
+      filePath: 'photos/file_42.jpg',
+    });
+  });
+
+  it('resolves stored descriptors back into fetchable Telegram file URLs', async () => {
+    const channel = new TelegramChannel('123456:secret-token', {
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    await expect(
+      channel.resolveStoredAvatarUrl?.('tg-file:123456:photos%2Ffile_42.jpg'),
+    ).resolves.toBe(
+      'https://api.telegram.org/file/bot123456:secret-token/photos/file_42.jpg',
+    );
   });
 });
 

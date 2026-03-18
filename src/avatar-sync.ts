@@ -1,5 +1,6 @@
 import { logger } from './logger.js';
 import { updateAgentAvatar } from './db.js';
+import { sanitizeTelegramAvatarUrl } from './telegram-avatar.js';
 import type { Agent, Channel } from './types.js';
 
 type AvatarSource = 'discord' | 'telegram' | 'slack';
@@ -172,10 +173,11 @@ export async function syncAvatars(
     if (!candidate?.channel.getAvatarUrl) continue;
 
     try {
-      const url = await candidate.channel.getAvatarUrl();
-      if (url && url !== agent.avatarUrl) {
-        updateAgentAvatar(agent.id, url, candidate.platform);
-        agent.avatarUrl = url;
+      const fetchedUrl = await candidate.channel.getAvatarUrl();
+      const safeUrl = sanitizeTelegramAvatarUrl(fetchedUrl || undefined, candidate.platform);
+      if (safeUrl && safeUrl !== agent.avatarUrl) {
+        updateAgentAvatar(agent.id, safeUrl, candidate.platform);
+        agent.avatarUrl = safeUrl;
         agent.avatarSource = candidate.platform;
         logger.info(
           {

@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 
+import { sanitizeTelegramAvatarUrl } from '../telegram-avatar.js';
 import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
@@ -99,7 +100,7 @@ export function buildAgentDetailData(
     createdAt: agent.createdAt,
     serverFolder: agent.serverFolder,
     agentContextFolder: agent.agentContextFolder,
-    avatarUrl: agent.avatarUrl,
+    avatarUrl: sanitizeTelegramAvatarUrl(agent.avatarUrl, agent.avatarSource),
     channels,
     tasks,
     recentChats,
