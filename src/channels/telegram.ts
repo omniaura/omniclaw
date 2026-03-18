@@ -455,7 +455,9 @@ export class TelegramChannel implements Channel {
     }
   }
 
-  async resolveStoredAvatarUrl(storedAvatarUrl: string): Promise<string | null> {
+  async resolveStoredAvatarUrl(
+    storedAvatarUrl: string,
+  ): Promise<string | null> {
     const descriptor = parseTelegramFileDescriptor(storedAvatarUrl);
     if (descriptor) {
       if (descriptor.botId !== this.botId) return null;

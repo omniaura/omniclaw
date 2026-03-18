@@ -174,7 +174,10 @@ export async function syncAvatars(
 
     try {
       const fetchedUrl = await candidate.channel.getAvatarUrl();
-      const safeUrl = sanitizeTelegramAvatarUrl(fetchedUrl || undefined, candidate.platform);
+      const safeUrl = sanitizeTelegramAvatarUrl(
+        fetchedUrl || undefined,
+        candidate.platform,
+      );
       if (safeUrl && safeUrl !== agent.avatarUrl) {
         updateAgentAvatar(agent.id, safeUrl, candidate.platform);
         agent.avatarUrl = safeUrl;

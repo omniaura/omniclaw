@@ -858,8 +858,10 @@ async function handleSetAgentAvatar(
     success: true,
     agentId,
     avatarUrl:
-      sanitizeTelegramAvatarUrl((url as string) || undefined, source as string) ||
-      null,
+      sanitizeTelegramAvatarUrl(
+        (url as string) || undefined,
+        source as string,
+      ) || null,
     avatarSource: (source as string) || null,
   });
 }

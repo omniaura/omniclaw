@@ -2339,7 +2339,10 @@ async function main(): Promise<void> {
       fs.writeFileSync(resolved, content, 'utf-8');
     },
     updateAgentAvatar: (agentId, url, source) => {
-      const safeUrl = sanitizeTelegramAvatarUrl(url || undefined, source || undefined);
+      const safeUrl = sanitizeTelegramAvatarUrl(
+        url || undefined,
+        source || undefined,
+      );
       updateAgentAvatar(agentId, safeUrl || null, source);
       if (agents[agentId]) {
         agents[agentId].avatarUrl = safeUrl || undefined;
