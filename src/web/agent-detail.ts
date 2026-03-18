@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 
 import { sanitizeTelegramAvatarUrl } from '../telegram-avatar.js';
+import type { RemotePeerAgents } from '../discovery/types.js';
 import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
@@ -19,6 +20,10 @@ export interface AgentDetailData {
   isAdmin: boolean;
   description?: string;
   createdAt: string;
+  remoteInstanceId?: string;
+  remoteInstanceName?: string;
+  remoteHost?: string;
+  remotePort?: number;
   serverFolder?: string;
   agentContextFolder?: string;
   avatarUrl?: string;
@@ -48,10 +53,43 @@ export interface AgentDetailData {
 export function buildAgentDetailData(
   agentId: string,
   state: WebStateProvider,
+  remotePeers: RemotePeerAgents[] = [],
 ): AgentDetailData | null {
   const agents = state.getAgents();
   const agent = agents[agentId];
-  if (!agent) return null;
+
+  if (!agent) {
+    const remoteAgent = buildAgentChannelData(state, remotePeers).find(
+      (candidate) => candidate.id === agentId && candidate.remoteInstanceId,
+    );
+
+    if (!remoteAgent) return null;
+
+    return {
+      id: remoteAgent.id,
+      name: remoteAgent.name,
+      folder: remoteAgent.folder,
+      backend: remoteAgent.backend,
+      agentRuntime: remoteAgent.agentRuntime,
+      isAdmin: remoteAgent.isAdmin,
+      createdAt: '',
+      remoteInstanceId: remoteAgent.remoteInstanceId,
+      remoteInstanceName: remoteAgent.remoteInstanceName,
+      remoteHost: remoteAgent.remoteHost,
+      remotePort: remoteAgent.remotePort,
+      serverFolder: remoteAgent.serverFolder,
+      agentContextFolder: remoteAgent.agentContextFolder,
+      avatarUrl: remoteAgent.avatarUrl,
+      channels: remoteAgent.channels.map((ch) => ({
+        jid: ch.jid,
+        displayName: ch.displayName,
+        channelFolder: ch.channelFolder,
+        categoryFolder: ch.categoryFolder,
+      })),
+      tasks: [],
+      recentChats: [],
+    };
+  }
 
   const agentChannelData = buildAgentChannelData(state);
   const agentEntry = agentChannelData.find((a) => a.id === agentId);
@@ -96,6 +134,10 @@ export function buildAgentDetailData(
     backend: agent.backend,
     agentRuntime: agent.agentRuntime,
     isAdmin: agent.isAdmin,
+    remoteInstanceId: undefined,
+    remoteInstanceName: undefined,
+    remoteHost: undefined,
+    remotePort: undefined,
     description: agent.description,
     createdAt: agent.createdAt,
     serverFolder: agent.serverFolder,
@@ -124,7 +166,9 @@ export function renderAgentDetailContent(
 
   const esc = escapeHtml;
   const avatarSrc = data.avatarUrl
-    ? `/api/agents/${encodeURIComponent(data.id)}/avatar/image?rev=${imageRev(data.avatarUrl)}`
+    ? data.remoteInstanceId
+      ? `/api/discovery/peers/${encodeURIComponent(data.remoteInstanceId)}/agents/${encodeURIComponent(data.id.split(':').slice(1).join(':'))}/avatar/image?rev=${imageRev(data.avatarUrl)}`
+      : `/api/agents/${encodeURIComponent(data.id)}/avatar/image?rev=${imageRev(data.avatarUrl)}`
     : null;
 
   const backendBadge =
@@ -144,7 +188,11 @@ export function renderAgentDetailContent(
               `<td>${esc(ch.displayName)}</td>` +
               `<td class="td-dim">${esc(ch.jid)}</td>` +
               `<td class="td-dim">${esc(ch.channelFolder || '\u2014')}</td>` +
-              `<td class="actions"><a href="/conversations?chat=${encodeURIComponent(ch.jid)}" data-nav data-page="conversations" class="btn btn-sm">messages</a></td>` +
+              `<td class="actions">` +
+              (data.remoteInstanceId
+                ? `<span class="td-dim">remote</span>`
+                : `<a href="/conversations?chat=${encodeURIComponent(ch.jid)}" data-nav data-page="conversations" class="btn btn-sm">messages</a>`) +
+              `</td>` +
               `</tr>`,
           )
           .join('')
@@ -218,6 +266,9 @@ export function renderAgentDetailContent(
     `<div class="ad-meta">` +
     `<span class="badge ${backendBadge}">${esc(data.backend)}</span>` +
     `<span class="badge">${esc(data.agentRuntime)}</span>` +
+    (data.remoteInstanceId
+      ? `<span class="badge badge-remote">${esc(data.remoteInstanceName || data.remoteInstanceId)}</span>`
+      : '') +
     (data.isAdmin ? `<span class="badge badge-admin">admin</span>` : '') +
     `</div>` +
     (data.description
@@ -230,6 +281,9 @@ export function renderAgentDetailContent(
     `<div class="ad-info-item"><span class="ad-info-label">id</span><span class="ad-info-value">${esc(data.id)}</span></div>` +
     `<div class="ad-info-item"><span class="ad-info-label">folder</span><span class="ad-info-value">${esc(data.folder)}</span></div>` +
     `<div class="ad-info-item"><span class="ad-info-label">created</span><span class="ad-info-value">${createdDate}</span></div>` +
+    (data.remoteInstanceId
+      ? `<div class="ad-info-item"><span class="ad-info-label">remote peer</span><span class="ad-info-value">${esc(data.remoteInstanceName || data.remoteInstanceId)}</span></div>`
+      : '') +
     (data.serverFolder
       ? `<div class="ad-info-item"><span class="ad-info-label">server</span><span class="ad-info-value">${esc(data.serverFolder)}</span></div>`
       : '') +
@@ -266,8 +320,9 @@ export function renderAgentDetailContent(
 export function renderAgentDetail(
   agentId: string,
   state: WebStateProvider,
+  remotePeers: RemotePeerAgents[] = [],
 ): string {
-  const data = buildAgentDetailData(agentId, state);
+  const data = buildAgentDetailData(agentId, state, remotePeers);
   const title = data ? data.name : 'Agent Not Found';
   return renderShell(
     '/agents',
