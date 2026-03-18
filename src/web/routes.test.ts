@@ -10,7 +10,11 @@ import type {
   ScheduledTask,
   TaskRunLog,
 } from '../types.js';
-import { handleRequest, resetDiscoveryContextForTests } from './routes.js';
+import {
+  createRemotePeerResolver,
+  handleRequest,
+  resetDiscoveryContextForTests,
+} from './routes.js';
 import type { WebStateProvider } from './types.js';
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
@@ -163,6 +167,35 @@ afterEach(() => {
   globalThis.Date = originalDateCtor;
   Math.random = originalRandom;
   resetDiscoveryContextForTests();
+});
+
+describe('createRemotePeerResolver', () => {
+  it('memoizes the fetcher result for a single request flow', async () => {
+    let callCount = 0;
+    const expected = [
+      {
+        instanceId: 'peer-1',
+        instanceName: 'orangepi5',
+        online: true,
+        host: '10.0.0.12',
+        port: 7777,
+        agents: [],
+      },
+    ];
+    const resolveRemotePeers = createRemotePeerResolver(async () => {
+      callCount += 1;
+      return expected;
+    });
+
+    const [first, second] = await Promise.all([
+      resolveRemotePeers(),
+      resolveRemotePeers(),
+    ]);
+
+    expect(callCount).toBe(1);
+    expect(first).toBe(expected);
+    expect(second).toBe(expected);
+  });
 });
 
 describe('handleRequest avatar image proxy', () => {

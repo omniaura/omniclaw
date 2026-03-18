@@ -3,7 +3,11 @@ import { createHash } from 'crypto';
 import { ServerSentEventGenerator } from '@starfederation/datastar-sdk/web';
 
 import { logger } from '../logger.js';
-import { handleRequest, getRemotePeers } from './routes.js';
+import {
+  handleRequest,
+  getRemotePeers,
+  createRemotePeerResolver,
+} from './routes.js';
 import type { ScheduledTask } from '../types.js';
 import { escapeHtml, renderPagePatch } from './shared.js';
 import type { WebServerConfig, WebStateProvider, WsEvent } from './types.js';
@@ -82,6 +86,7 @@ export function startWebServer(
       : null;
   const fetchHandler = async (req: Request) => {
     const url = new URL(req.url);
+    const resolveRemotePeers = createRemotePeerResolver(getRemotePeers);
     if (url.pathname === '/ws') {
       return new Response('WebSocket is deprecated for the web dashboard', {
         status: 410,
@@ -303,13 +308,13 @@ export function startWebServer(
           path: '/',
           title: 'Dashboard',
           render: async () =>
-            renderDashboardContent(state, await getRemotePeers()),
+            renderDashboardContent(state, await resolveRemotePeers()),
         },
         agents: {
           path: '/agents-list',
           title: 'Agents',
           render: async () =>
-            renderAgentsContent(state, await getRemotePeers()),
+            renderAgentsContent(state, await resolveRemotePeers()),
         },
         conversations: {
           path: '/conversations',
@@ -320,7 +325,7 @@ export function startWebServer(
           path: '/context',
           title: 'Context',
           render: async () =>
-            renderContextViewerContent(state, await getRemotePeers()),
+            renderContextViewerContent(state, await resolveRemotePeers()),
         },
         ipc: {
           path: '/ipc',
@@ -376,7 +381,7 @@ export function startWebServer(
         const data = buildAgentDetailData(
           agentId,
           state,
-          await getRemotePeers(),
+          await resolveRemotePeers(),
         );
         const title = data ? data.name : 'Agent Not Found';
         const qs = agentId ? `?id=${encodeURIComponent(agentId)}` : '';
