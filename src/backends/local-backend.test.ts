@@ -15,10 +15,18 @@ function uniqueId(): string {
 
 function initializeProjectRoot(projectRoot: string): void {
   const runnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
-  const skillsDir = path.join(projectRoot, 'container', 'skills', 'sample-skill');
+  const skillsDir = path.join(
+    projectRoot,
+    'container',
+    'skills',
+    'sample-skill',
+  );
   fs.mkdirSync(runnerSrc, { recursive: true });
   fs.mkdirSync(skillsDir, { recursive: true });
-  fs.writeFileSync(path.join(runnerSrc, 'index.ts'), 'export const version = 1;\n');
+  fs.writeFileSync(
+    path.join(runnerSrc, 'index.ts'),
+    'export const version = 1;\n',
+  );
   fs.writeFileSync(path.join(skillsDir, 'SKILL.md'), 'sample\n');
 }
 
@@ -32,7 +40,10 @@ function createFixture() {
   const categoryFolder = `__test_local_backend_category__-${id}`;
   const serverFolder = `__test_local_backend_server__-${id}`;
   const tempHome = path.join(DATA_DIR, `tmp-home-local-backend-${id}`);
-  const tempProjectRoot = path.join(DATA_DIR, `tmp-project-local-backend-${id}`);
+  const tempProjectRoot = path.join(
+    DATA_DIR,
+    `tmp-project-local-backend-${id}`,
+  );
   const hostCodexDir = path.join(tempHome, '.codex');
   const hostOpenCodeDir = path.join(tempHome, '.local', 'share', 'opencode');
   const groupDir = path.join(GROUPS_DIR, groupFolder);
@@ -41,6 +52,7 @@ function createFixture() {
   const categoryDir = path.join(GROUPS_DIR, categoryFolder);
   const serverDir = path.join(GROUPS_DIR, serverFolder);
   const globalDir = path.join(GROUPS_DIR, 'global');
+  const globalDirPreexisted = fs.existsSync(globalDir);
   const codexDataDir = path.join(DATA_DIR, 'codex-data', runtimeFolder);
   const openCodeDataDir = path.join(DATA_DIR, 'opencode-data', runtimeFolder);
   const envDir = path.join(DATA_DIR, 'env', runtimeFolder);
@@ -102,21 +114,19 @@ function createFixture() {
       ]) {
         fs.rmSync(dir, { recursive: true, force: true });
       }
+      if (!globalDirPreexisted) {
+        fs.rmSync(globalDir, { recursive: true, force: true });
+      }
     },
   };
 }
 
-function findMount(mounts: ReturnType<typeof buildVolumeMounts>, containerPath: string) {
+function findMount(
+  mounts: ReturnType<typeof buildVolumeMounts>,
+  containerPath: string,
+) {
   return mounts.find((mount) => mount.containerPath === containerPath);
 }
-
-const originalGetuid = process.getuid;
-const originalGetgid = process.getgid;
-
-afterEach(() => {
-  process.getuid = originalGetuid;
-  process.getgid = originalGetgid;
-});
 
 describe('LocalBackend', () => {
   it('exposes the expected public methods', () => {
@@ -134,7 +144,10 @@ describe('LocalBackend', () => {
 
   it('returns null when reading a file from a missing group', async () => {
     const backend = new LocalBackend();
-    const result = await backend.readFile('__missing_local_backend_group__', 'missing.txt');
+    const result = await backend.readFile(
+      '__missing_local_backend_group__',
+      'missing.txt',
+    );
     expect(result).toBeNull();
   });
 
@@ -201,9 +214,18 @@ describe('LocalBackend', () => {
       const fixture = createFixture();
       try {
         fs.mkdirSync(fixture.hostCodexDir, { recursive: true });
-        fs.writeFileSync(path.join(fixture.hostCodexDir, 'auth.json'), '{"mode":"chatgpt"}\n');
-        fs.writeFileSync(path.join(fixture.hostCodexDir, 'config.toml'), 'model = "gpt-5"\n');
-        fs.writeFileSync(path.join(fixture.hostCodexDir, 'history.jsonl'), 'secret\n');
+        fs.writeFileSync(
+          path.join(fixture.hostCodexDir, 'auth.json'),
+          '{"mode":"chatgpt"}\n',
+        );
+        fs.writeFileSync(
+          path.join(fixture.hostCodexDir, 'config.toml'),
+          'model = "gpt-5"\n',
+        );
+        fs.writeFileSync(
+          path.join(fixture.hostCodexDir, 'history.jsonl'),
+          'secret\n',
+        );
 
         const mounts = buildVolumeMounts(
           { folder: fixture.groupFolder, name: 'Codex Test' } as any,
@@ -220,9 +242,15 @@ describe('LocalBackend', () => {
           containerPath: '/home/bun/.codex',
           readonly: false,
         });
-        expect(fs.existsSync(path.join(fixture.codexDataDir, 'auth.json'))).toBe(true);
-        expect(fs.existsSync(path.join(fixture.codexDataDir, 'config.toml'))).toBe(true);
-        expect(fs.existsSync(path.join(fixture.codexDataDir, 'history.jsonl'))).toBe(false);
+        expect(
+          fs.existsSync(path.join(fixture.codexDataDir, 'auth.json')),
+        ).toBe(true);
+        expect(
+          fs.existsSync(path.join(fixture.codexDataDir, 'config.toml')),
+        ).toBe(true);
+        expect(
+          fs.existsSync(path.join(fixture.codexDataDir, 'history.jsonl')),
+        ).toBe(false);
       } finally {
         fixture.cleanup();
       }
@@ -232,8 +260,14 @@ describe('LocalBackend', () => {
       const fixture = createFixture();
       try {
         fs.mkdirSync(fixture.hostCodexDir, { recursive: true });
-        fs.writeFileSync(path.join(fixture.hostCodexDir, 'auth.json'), '{"mode":"chatgpt"}\n');
-        fs.writeFileSync(path.join(fixture.hostCodexDir, 'config.toml'), 'model = "gpt-5"\n');
+        fs.writeFileSync(
+          path.join(fixture.hostCodexDir, 'auth.json'),
+          '{"mode":"chatgpt"}\n',
+        );
+        fs.writeFileSync(
+          path.join(fixture.hostCodexDir, 'config.toml'),
+          'model = "gpt-5"\n',
+        );
 
         buildVolumeMounts(
           { folder: fixture.groupFolder, name: 'Codex Test' } as any,
@@ -258,8 +292,12 @@ describe('LocalBackend', () => {
           fixture.pathOverrides,
         );
 
-        expect(fs.existsSync(path.join(fixture.codexDataDir, 'auth.json'))).toBe(false);
-        expect(fs.existsSync(path.join(fixture.codexDataDir, 'config.toml'))).toBe(false);
+        expect(
+          fs.existsSync(path.join(fixture.codexDataDir, 'auth.json')),
+        ).toBe(false);
+        expect(
+          fs.existsSync(path.join(fixture.codexDataDir, 'config.toml')),
+        ).toBe(false);
       } finally {
         fixture.cleanup();
       }
@@ -295,7 +333,10 @@ describe('LocalBackend', () => {
           readonly: true,
         });
 
-        const codexEnv = fs.readFileSync(path.join(fixture.envDir, 'env'), 'utf-8');
+        const codexEnv = fs.readFileSync(
+          path.join(fixture.envDir, 'env'),
+          'utf-8',
+        );
         expect(codexEnv).toContain('OPENAI_API_KEY=openai-key');
         expect(codexEnv).toContain('CODEX_API_KEY=codex-key');
         expect(codexEnv).toContain('CODEX_MODEL=gpt-5');
@@ -316,7 +357,10 @@ describe('LocalBackend', () => {
           readonly: true,
         });
 
-        const claudeEnv = fs.readFileSync(path.join(fixture.altEnvDir, 'env'), 'utf-8');
+        const claudeEnv = fs.readFileSync(
+          path.join(fixture.altEnvDir, 'env'),
+          'utf-8',
+        );
         expect(claudeEnv).toContain('CLAUDE_CODE_OAUTH_TOKEN=claude-token');
         expect(claudeEnv).toContain('ANTHROPIC_API_KEY=anthropic-key');
         expect(claudeEnv).not.toContain('OPENAI_API_KEY=openai-key');
@@ -387,9 +431,15 @@ describe('LocalBackend', () => {
           fixture.pathOverrides,
         );
 
-        const cachedRunnerDir = path.join(fixture.sessionDir, 'agent-runner-src');
+        const cachedRunnerDir = path.join(
+          fixture.sessionDir,
+          'agent-runner-src',
+        );
         const syncedIndex = path.join(cachedRunnerDir, 'index.ts');
-        const optOutMarker = path.join(cachedRunnerDir, '.omniclaw-no-autosync');
+        const optOutMarker = path.join(
+          cachedRunnerDir,
+          '.omniclaw-no-autosync',
+        );
         fs.writeFileSync(syncedIndex, 'export const version = 99;\n');
         fs.writeFileSync(optOutMarker, '1\n');
 
@@ -424,9 +474,18 @@ describe('LocalBackend', () => {
       const fixture = createFixture();
       try {
         fs.mkdirSync(fixture.hostOpenCodeDir, { recursive: true });
-        fs.writeFileSync(path.join(fixture.hostOpenCodeDir, 'auth.json'), '{"token":"abc"}\n');
-        fs.writeFileSync(path.join(fixture.hostOpenCodeDir, 'mcp-auth.json'), '{"token":"def"}\n');
-        fs.writeFileSync(path.join(fixture.hostOpenCodeDir, 'opencode.db'), 'sqlite');
+        fs.writeFileSync(
+          path.join(fixture.hostOpenCodeDir, 'auth.json'),
+          '{"token":"abc"}\n',
+        );
+        fs.writeFileSync(
+          path.join(fixture.hostOpenCodeDir, 'mcp-auth.json'),
+          '{"token":"def"}\n',
+        );
+        fs.writeFileSync(
+          path.join(fixture.hostOpenCodeDir, 'opencode.db'),
+          'sqlite',
+        );
 
         const mounts = buildVolumeMounts(
           { folder: fixture.groupFolder, name: 'OpenCode Test' } as any,
@@ -443,9 +502,15 @@ describe('LocalBackend', () => {
           containerPath: '/home/bun/.local/share/opencode',
           readonly: false,
         });
-        expect(fs.existsSync(path.join(fixture.openCodeDataDir, 'auth.json'))).toBe(true);
-        expect(fs.existsSync(path.join(fixture.openCodeDataDir, 'mcp-auth.json'))).toBe(true);
-        expect(fs.existsSync(path.join(fixture.openCodeDataDir, 'opencode.db'))).toBe(false);
+        expect(
+          fs.existsSync(path.join(fixture.openCodeDataDir, 'auth.json')),
+        ).toBe(true);
+        expect(
+          fs.existsSync(path.join(fixture.openCodeDataDir, 'mcp-auth.json')),
+        ).toBe(true);
+        expect(
+          fs.existsSync(path.join(fixture.openCodeDataDir, 'opencode.db')),
+        ).toBe(false);
       } finally {
         fixture.cleanup();
       }
@@ -453,6 +518,14 @@ describe('LocalBackend', () => {
   });
 
   describe('buildContainerArgs', () => {
+    const originalGetuid = process.getuid;
+    const originalGetgid = process.getgid;
+
+    afterEach(() => {
+      process.getuid = originalGetuid;
+      process.getgid = originalGetgid;
+    });
+
     it('renders readonly and read-write mounts with the expected flags', () => {
       const args = buildContainerArgs({
         mounts: [
