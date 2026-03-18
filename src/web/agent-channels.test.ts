@@ -217,6 +217,23 @@ describe('buildAgentChannelData', () => {
     ]);
   });
 
+  it('sanitizes Telegram avatar URLs before exposing agent data', () => {
+    const result = buildAgentChannelData(
+      makeState({
+        agents: [
+          makeAgent({
+            avatarUrl:
+              'https://api.telegram.org/file/bot123456:secret-token/photos/file_42.jpg',
+            avatarSource: 'telegram',
+          }),
+        ],
+      }),
+    );
+
+    expect(result[0]?.avatarUrl).toBe('tg-file:123456:photos%2Ffile_42.jpg');
+    expect(result[0]?.avatarUrl).not.toContain('secret-token');
+  });
+
   it('only includes subscriptions for the matching agent', () => {
     const state = makeState({
       agents: [makeAgent({ id: 'agent-1' }), makeAgent({ id: 'agent-2' })],

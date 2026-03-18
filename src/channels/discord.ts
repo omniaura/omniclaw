@@ -60,6 +60,33 @@ function getAttachmentMediaDir(
   return path.join(GROUPS_DIR, getAttachmentWorkspaceFolder(group), 'media');
 }
 
+const IMAGE_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.bmp',
+  '.svg',
+]);
+
+/**
+ * Determine if a Discord attachment is an image.
+ * Discord sometimes sends contentType as null even for images,
+ * so we fall back to file extension detection.
+ */
+/** @internal exported for testing */
+export function isImageAttachment(a: {
+  contentType?: string | null;
+  name?: string | null;
+}): boolean {
+  if (a.contentType?.startsWith('image/')) return true;
+  if (a.contentType) return false; // Known non-image type
+  // contentType is null/undefined — check file extension
+  const ext = path.extname(a.name || '').toLowerCase();
+  return IMAGE_EXTENSIONS.has(ext);
+}
+
 /**
  * Merge Discord user mention data into the shared user registry JSON.
  * Keyed by lowercase display name so the format_mention MCP tool can look users up.
@@ -940,7 +967,7 @@ export class DiscordChannel implements Channel {
     if (message.attachments.size > 0) {
       const parts: string[] = [];
       for (const [, a] of message.attachments) {
-        if (a.contentType?.startsWith('image/')) {
+        if (isImageAttachment(a)) {
           try {
             const mediaDir = getAttachmentMediaDir(group);
             fs.mkdirSync(mediaDir, { recursive: true });
@@ -952,6 +979,14 @@ export class DiscordChannel implements Channel {
             // Layer 2: Defense-in-depth — verify resolved path stays within mediaDir
             assertPathWithin(filePath, mediaDir, 'Discord image attachment');
             const resp = await fetch(a.url);
+            if (!resp.ok) {
+              logger.error(
+                { status: resp.status, url: a.url },
+                'Discord CDN returned non-OK status for image',
+              );
+              parts.push('[Image]');
+              continue;
+            }
             fs.writeFileSync(filePath, Buffer.from(await resp.arrayBuffer()));
             parts.push(`[attachment:image file=${filename}]`);
           } catch (err) {
@@ -1018,6 +1053,40 @@ export class DiscordChannel implements Channel {
       }
       const suffix = parts.join(' ');
       content = content ? `${content} ${suffix}` : suffix;
+    }
+
+    // Handle embed images (linked images, URL previews) that aren't attachments
+    if (message.embeds.length > 0 && group) {
+      const embedParts: string[] = [];
+      for (const embed of message.embeds) {
+        const imageUrl = embed.image?.url || embed.thumbnail?.url;
+        if (!imageUrl) continue;
+        try {
+          const mediaDir = getAttachmentMediaDir(group);
+          fs.mkdirSync(mediaDir, { recursive: true });
+          const urlPath = new URL(imageUrl).pathname;
+          const safeName = path.basename(urlPath) || 'embed.png';
+          const filename = `${msgId}-embed-${safeName}`;
+          const filePath = path.join(mediaDir, filename);
+          assertPathWithin(filePath, mediaDir, 'Discord embed image');
+          const resp = await fetch(imageUrl);
+          if (!resp.ok) {
+            logger.warn(
+              { status: resp.status, url: imageUrl },
+              'Failed to fetch Discord embed image',
+            );
+            continue;
+          }
+          fs.writeFileSync(filePath, Buffer.from(await resp.arrayBuffer()));
+          embedParts.push(`[attachment:image file=${filename}]`);
+        } catch (err) {
+          logger.warn({ err, url: imageUrl }, 'Failed to download embed image');
+        }
+      }
+      if (embedParts.length > 0) {
+        const suffix = embedParts.join(' ');
+        content = content ? `${content} ${suffix}` : suffix;
+      }
     }
 
     if (!content) return;

@@ -1,10 +1,10 @@
 ## Summary
+- expose immutable sender metadata more explicitly in agent prompts by adding `sender_key`, `sender_label`, and `participant_keys` alongside the existing attributes
+- add sender identity observability for participant roster inflation and display-name changes on a stable sender key
+- refresh the sender identity audit doc so it matches the current formatter and logging behavior
 
-- stop replaying stored discovery secrets when an already-trusted peer re-requests access
-- require pairing public keys for new discovery requests and encrypt all discovery secret delivery with per-request X25519 key agreement plus AES-GCM
-- add regression coverage for the trusted-peer re-pair flow and encrypted pairing completion
-
-## Validation
-
+## Testing
+- `bun test src/formatting.test.ts src/db.test.ts`
 - `bun run typecheck`
-- `bun test src/discovery/routes.test.ts src/discovery/pairing-crypto.test.ts`
+
+Refs #204.

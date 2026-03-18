@@ -78,6 +78,12 @@ export interface WebStateProvider {
   ): void;
   /** Resolve a platform-backed icon for a specific chat/channel JID. */
   resolveChatImage?(chatJid: string): Promise<string | null>;
+  /** Resolve a stored agent avatar reference to a fetchable URL. */
+  resolveAgentAvatarUrl?(
+    agentId: string,
+    avatarUrl: string,
+    avatarSource?: Agent['avatarSource'],
+  ): Promise<string | null>;
   /** Resolve a Discord guild/server icon, optionally through a specific bot. */
   resolveDiscordGuildImage?(
     guildId: string,

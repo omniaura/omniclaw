@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: '/ipc', label: 'IPC', page: 'ipc' },
   { href: '/network', label: 'Network', page: 'network' },
   { href: '/system', label: 'System', page: 'system' },
+  { href: '/settings', label: 'Settings', page: 'settings' },
 ];
 
 export function escapeHtml(str: string): string {

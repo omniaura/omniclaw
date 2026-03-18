@@ -3,7 +3,11 @@ import { createHash } from 'crypto';
 import { ServerSentEventGenerator } from '@starfederation/datastar-sdk/web';
 
 import { logger } from '../logger.js';
-import { handleRequest, getRemotePeers } from './routes.js';
+import {
+  handleRequest,
+  getRemotePeers,
+  createRemotePeerResolver,
+} from './routes.js';
 import type { ScheduledTask } from '../types.js';
 import { escapeHtml, renderPagePatch } from './shared.js';
 import type { WebServerConfig, WebStateProvider, WsEvent } from './types.js';
@@ -25,6 +29,7 @@ import { checkPeerAuth } from '../discovery/routes.js';
 import type { TrustStore } from '../discovery/trust-store.js';
 import { serializeLogRecord } from './log-stream.js';
 import { renderSystemContent } from './system.js';
+import { renderSettingsContent } from './settings.js';
 import { renderTasksContent } from './tasks.js';
 import { renderLogsContent } from './logs.js';
 import { renderAgentsContent } from './agents-page.js';
@@ -81,6 +86,7 @@ export function startWebServer(
       : null;
   const fetchHandler = async (req: Request) => {
     const url = new URL(req.url);
+    const resolveRemotePeers = createRemotePeerResolver(getRemotePeers);
     if (url.pathname === '/ws') {
       return new Response('WebSocket is deprecated for the web dashboard', {
         status: 410,
@@ -123,14 +129,17 @@ export function startWebServer(
         req,
         url.pathname,
         bindHostname,
-        trustLanDiscoveryAdmin,
+        // When no auth is configured, implicitly trust private-network requests
+        // so WiFi-based discovery works out of the box without WEB_UI_USER/WEB_UI_PASS.
+        true, // no auth configured → implicitly trust private network
       )
     ) {
-      // Discovery admin routes MUST have auth — reject if credentials not configured
+      // Discovery admin routes from the public internet MUST have auth.
+      // Private-network requests (loopback, LAN) are allowed without credentials.
       return new Response(
         JSON.stringify({
           error:
-            'Discovery admin routes require WEB_UI_USER/WEB_UI_PASS to be configured',
+            'Discovery admin routes require authentication (set WEB_UI_USER/WEB_UI_PASS or access from a private network)',
         }),
         {
           status: 403,
@@ -273,9 +282,7 @@ export function startWebServer(
           sseClients.add(nextClient);
           logger.debug({ sseClients: sseClients.size }, 'SSE client connected');
 
-          stream.patchElements(
-            renderStatusBadge('connected (datastar)', 'connected'),
-          );
+          stream.patchElements(renderStatusBadge('connected', 'connected'));
           patchSnapshot(nextClient, state);
         },
         {
@@ -301,13 +308,13 @@ export function startWebServer(
           path: '/',
           title: 'Dashboard',
           render: async () =>
-            renderDashboardContent(state, await getRemotePeers()),
+            renderDashboardContent(state, await resolveRemotePeers()),
         },
         agents: {
           path: '/agents-list',
           title: 'Agents',
           render: async () =>
-            renderAgentsContent(state, await getRemotePeers()),
+            renderAgentsContent(state, await resolveRemotePeers()),
         },
         conversations: {
           path: '/conversations',
@@ -318,7 +325,7 @@ export function startWebServer(
           path: '/context',
           title: 'Context',
           render: async () =>
-            renderContextViewerContent(state, await getRemotePeers()),
+            renderContextViewerContent(state, await resolveRemotePeers()),
         },
         ipc: {
           path: '/ipc',
@@ -361,12 +368,21 @@ export function startWebServer(
           title: 'System',
           render: () => renderSystemContent(state, sseClients.size),
         },
+        settings: {
+          path: '/settings',
+          title: 'Settings',
+          render: () => renderSettingsContent(),
+        },
       };
 
       // Handle parametric pages (e.g., agent-detail?id=xxx)
       if (pageName === 'agent-detail') {
         const agentId = url.searchParams.get('id') || '';
-        const data = buildAgentDetailData(agentId, state);
+        const data = buildAgentDetailData(
+          agentId,
+          state,
+          await resolveRemotePeers(),
+        );
         const title = data ? data.name : 'Agent Not Found';
         const qs = agentId ? `?id=${encodeURIComponent(agentId)}` : '';
         return ServerSentEventGenerator.stream(

@@ -10,7 +10,11 @@ import type {
   ScheduledTask,
   TaskRunLog,
 } from '../types.js';
-import { handleRequest, resetDiscoveryContextForTests } from './routes.js';
+import {
+  createRemotePeerResolver,
+  handleRequest,
+  resetDiscoveryContextForTests,
+} from './routes.js';
 import type { WebStateProvider } from './types.js';
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
@@ -165,6 +169,35 @@ afterEach(() => {
   resetDiscoveryContextForTests();
 });
 
+describe('createRemotePeerResolver', () => {
+  it('memoizes the fetcher result for a single request flow', async () => {
+    let callCount = 0;
+    const expected = [
+      {
+        instanceId: 'peer-1',
+        instanceName: 'orangepi5',
+        online: true,
+        host: '10.0.0.12',
+        port: 7777,
+        agents: [],
+      },
+    ];
+    const resolveRemotePeers = createRemotePeerResolver(async () => {
+      callCount += 1;
+      return expected;
+    });
+
+    const [first, second] = await Promise.all([
+      resolveRemotePeers(),
+      resolveRemotePeers(),
+    ]);
+
+    expect(callCount).toBe(1);
+    expect(first).toBe(expected);
+    expect(second).toBe(expected);
+  });
+});
+
 describe('handleRequest avatar image proxy', () => {
   it('proxies remote avatar bytes for an agent', async () => {
     const testImageCacheDir = path.join(
@@ -197,6 +230,68 @@ describe('handleRequest avatar image proxy', () => {
 
       expect(res.headers.get('content-type')).toContain('image/png');
       await assertOkImageResponse(res, 'avatar-bytes');
+    } finally {
+      clearImageCache(testImageCacheDir);
+    }
+  });
+
+  it('redacts Telegram bot tokens from avatar metadata responses', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/api/agents/test-agent/avatar'),
+      makeState({
+        getAgents: () => ({
+          'test-agent': makeAgent({
+            avatarUrl:
+              'https://api.telegram.org/file/bot123456:secret-token/photos/file_42.jpg',
+            avatarSource: 'telegram',
+          }),
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      avatarUrl: 'tg-file:123456:photos%2Ffile_42.jpg',
+      avatarSource: 'telegram',
+    });
+  });
+
+  it('resolves Telegram avatar descriptors server-side before fetching', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-routes-test',
+      randomUUID(),
+    );
+    clearImageCache(testImageCacheDir);
+
+    try {
+      const res = await handleRequest(
+        new Request('http://localhost/api/agents/test-agent/avatar/image'),
+        makeState({
+          remoteImageCacheDir: testImageCacheDir,
+          fetchRemoteImage: async (input: string | URL | Request) => {
+            expect(String(input)).toBe('https://example.test/tg-avatar.png');
+            return new Response('telegram-avatar', {
+              status: 200,
+              headers: { 'Content-Type': 'image/png' },
+            });
+          },
+          resolveAgentAvatarUrl: async (agentId, avatarUrl, avatarSource) => {
+            expect(agentId).toBe('test-agent');
+            expect(avatarSource).toBe('telegram');
+            expect(avatarUrl).toBe('tg-file:123456:photos%2Ffile_42.jpg');
+            return 'https://example.test/tg-avatar.png';
+          },
+          getAgents: () => ({
+            'test-agent': makeAgent({
+              avatarUrl: 'tg-file:123456:photos%2Ffile_42.jpg',
+              avatarSource: 'telegram',
+            }),
+          }),
+        }),
+      );
+
+      await assertOkImageResponse(res, 'telegram-avatar');
     } finally {
       clearImageCache(testImageCacheDir);
     }

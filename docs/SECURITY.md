@@ -2,18 +2,19 @@
 
 ## Trust Model
 
-| Entity | Trust Level | Rationale |
-|--------|-------------|-----------|
-| Main group | Trusted | Private self-chat, admin control |
-| Non-main groups | Untrusted | Other users may be malicious |
-| Container agents | Sandboxed | Isolated execution environment |
-| WhatsApp messages | User input | Potential prompt injection |
+| Entity            | Trust Level | Rationale                        |
+| ----------------- | ----------- | -------------------------------- |
+| Main group        | Trusted     | Private self-chat, admin control |
+| Non-main groups   | Untrusted   | Other users may be malicious     |
+| Container agents  | Sandboxed   | Isolated execution environment   |
+| WhatsApp messages | User input  | Potential prompt injection       |
 
 ## Security Boundaries
 
 ### 1. Container Isolation (Primary Boundary)
 
 Agents execute in Apple Container (lightweight Linux VMs), providing:
+
 - **Process isolation** - Container processes cannot affect the host
 - **Filesystem isolation** - Only explicitly mounted directories are visible
 - **Network isolation** - Non-main containers run with `--network none` (Docker), preventing data exfiltration. Main containers retain full network access for WebFetch/WebSearch tools. Per-group override via `containerConfig.networkMode: 'full' | 'none'`
@@ -30,6 +31,7 @@ a container escape attack where the agent modifies host application code (e.g., 
 `package.json`) that runs outside the container on next restart.
 
 Writable paths the agent legitimately needs are mounted separately:
+
 - `/workspace/group` — group folder (rw)
 - `/workspace/ipc` — IPC directory (rw)
 - `/home/bun/.claude` — per-group Claude sessions (rw)
@@ -38,11 +40,13 @@ Writable paths the agent legitimately needs are mounted separately:
 ### 3. Mount Security
 
 **External Allowlist** - Mount permissions stored at `~/.config/omniclaw/mount-allowlist.json`, which is:
+
 - Outside project root
 - Never mounted into containers
 - Cannot be modified by agents
 
 **Default Blocked Patterns:**
+
 ```
 .ssh, .gnupg, .aws, .azure, .gcloud, .kube, .docker,
 credentials, .env, .netrc, .npmrc, id_rsa, id_ed25519,
@@ -50,6 +54,7 @@ private_key, .secret
 ```
 
 **Protections:**
+
 - Symlink resolution before validation (prevents traversal attacks)
 - Container path validation (rejects `..` and absolute paths)
 - `nonMainReadOnly` option forces read-only for non-main groups
@@ -57,6 +62,7 @@ private_key, .secret
 ### 4. Session Isolation
 
 Each group has isolated Claude sessions at `data/sessions/{group}/.claude/`:
+
 - Groups cannot see other groups' conversation history
 - Session data includes full message history and file contents read
 - Prevents cross-group information disclosure
@@ -65,22 +71,24 @@ Each group has isolated Claude sessions at `data/sessions/{group}/.claude/`:
 
 Messages and task operations are verified against group identity:
 
-| Operation | Main Group | Non-Main Group |
-|-----------|------------|----------------|
-| Send message to own chat | ✓ | ✓ |
-| Send message to other chats | ✓ | ✗ |
-| Schedule task for self | ✓ | ✓ |
-| Schedule task for others | ✓ | ✗ |
-| View all tasks | ✓ | Own only |
-| Manage other groups | ✓ | ✗ |
+| Operation                   | Main Group | Non-Main Group |
+| --------------------------- | ---------- | -------------- |
+| Send message to own chat    | ✓          | ✓              |
+| Send message to other chats | ✓          | ✗              |
+| Schedule task for self      | ✓          | ✓              |
+| Schedule task for others    | ✓          | ✗              |
+| View all tasks              | ✓          | Own only       |
+| Manage other groups         | ✓          | ✗              |
 
 ### 6. Credential Handling
 
 **Mounted Credentials:**
+
 - Runtime-specific auth/config variables from the filtered `.env` allowlist
   (read-only)
 
 **NOT Mounted:**
+
 - WhatsApp session (`store/auth/`) - host only
 - Mount allowlist - external, never mounted
 - Any credentials matching blocked patterns
@@ -89,6 +97,7 @@ Messages and task operations are verified against group identity:
 Only the allowlisted environment variables needed by the selected runtime are
 exposed to containers. Claude/OpenCode runtimes receive their own subset, while
 Codex runtimes additionally receive the OpenAI/Codex entries:
+
 ```typescript
 // Authoritative source: allowedVars in src/backends/local-backend.ts
 const allowedVars = [
@@ -130,14 +139,14 @@ contains ALL secrets (not just `allowedVars`). Four layers prevent agent access:
 
 ## Privilege Comparison
 
-| Capability | Main Group | Non-Main Group |
-|------------|------------|----------------|
-| Project root access | `/workspace/project` (ro) | None |
-| Group folder | `/workspace/group` (rw) | `/workspace/group` (rw) |
-| Global memory | Implicit via project | `/workspace/global` (ro) |
-| Additional mounts | Configurable | Read-only unless allowed |
-| Network access | Unrestricted | Unrestricted |
-| MCP tools | All | All |
+| Capability          | Main Group                | Non-Main Group           |
+| ------------------- | ------------------------- | ------------------------ |
+| Project root access | `/workspace/project` (ro) | None                     |
+| Group folder        | `/workspace/group` (rw)   | `/workspace/group` (rw)  |
+| Global memory       | Implicit via project      | `/workspace/global` (ro) |
+| Additional mounts   | Configurable              | Read-only unless allowed |
+| Network access      | Unrestricted              | Unrestricted             |
+| MCP tools           | All                       | All                      |
 
 ## Security Architecture Diagram
 

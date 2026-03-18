@@ -17,6 +17,7 @@ Run `./.claude/skills/setup/scripts/01-check-environment.sh` and parse the statu
 - Record PLATFORM, APPLE_CONTAINER, and DOCKER values for step 3
 
 **If NODE_OK=false:** Ask user if they'd like you to install it:
+
 - macOS: `brew install node@22` or nvm → `nvm install 22`
 - Linux: `curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs`
 
@@ -27,6 +28,7 @@ Install brew/nvm first if needed. Re-run environment check after to confirm NODE
 Run `./.claude/skills/setup/scripts/02-install-deps.sh` and parse the status block.
 
 **If failed:** Read `logs/setup.log` tail. Common fixes:
+
 1. Delete `node_modules` and `package-lock.json`, re-run
 2. Permission errors: suggest corrected permissions
 3. Native module build fail: install `xcode-select --install` (macOS) or `build-essential` (Linux), retry
@@ -50,6 +52,7 @@ Use environment check results:
 Run `./.claude/skills/setup/scripts/03-setup-container.sh --runtime <chosen>` and parse.
 
 **If BUILD_OK=false:** Check `logs/setup.log`.
+
 - Cache issue: `container builder stop && container builder rm && container builder start` (Apple) or `docker builder prune -f` (Docker), retry.
 
 **If TEST_OK=false but BUILD_OK=true:** Runtime not fully started. Wait and retry.
@@ -61,6 +64,7 @@ If HAS_ENV=true, check `.env` for `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KE
 AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 **Subscription:** Tell user:
+
 1. Open another terminal: `claude setup-token`
 2. Copy the token
 3. Add to `.env`: `CLAUDE_CODE_OAUTH_TOKEN=<token>`
@@ -114,6 +118,7 @@ AskUserQuestion: QR code in browser (recommended) vs pairing code vs QR code in 
 If AUTH_STATUS=already_authenticated → skip ahead.
 
 **If failed:**
+
 - qr_timeout → Re-run auth script automatically for fresh QR
 - logged_out → Delete `store/auth/` and re-run
 - 515 → Stream error; re-run if it persists
@@ -138,6 +143,7 @@ AskUserQuestion: Main channel type?
 **Personal chat / DM:** Construct JID as `NUMBER@s.whatsapp.net`.
 
 **Group:**
+
 1. `./.claude/skills/setup/scripts/05-sync-groups.sh` (timeout: 60000ms)
 2. If BUILD=failed: fix TS error, re-run
 3. If GROUPS_IN_DB=0: check `logs/setup.log` — auth expired or timeout
@@ -147,6 +153,7 @@ AskUserQuestion: Main channel type?
 ## 8. Register Channel
 
 `./.claude/skills/setup/scripts/06-register-channel.sh` with:
+
 - `--jid "JID"`
 - `--name "main"`
 - `--trigger "@TriggerWord"`
@@ -166,6 +173,7 @@ AskUserQuestion: Want the agent to access directories outside OmniClaw? (Git rep
 ## 10. Start Service
 
 Check if already running and unload if so:
+
 - **macOS:** `launchctl list | grep omniclaw` — if running, `launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist`
 - **Linux:** `systemctl --user is-active --quiet omniclaw` — if running, `systemctl --user stop omniclaw && systemctl --user disable omniclaw`
 
@@ -174,9 +182,11 @@ Run `./.claude/skills/setup/scripts/08-setup-service.sh` and parse.
 **If SERVICE_LOADED=false:** Check `logs/setup.log`. Common fix: old plist loaded. Unload it, re-run. If crashing: check `logs/omniclaw.error.log` for crash reason (wrong Node path, missing .env, missing auth). On Linux: `systemctl --user status omniclaw`.
 
 **Linux — if LINGER_ENABLED=false:** The service will stop when the user logs out (e.g. SSH disconnects). Fix with:
+
 ```bash
 loginctl enable-linger $(whoami)
 ```
+
 This may require sudo on some distributions. Without linger, systemd tears down all user services when the last login session ends.
 
 ## 10b. Auto-Updates (Optional)
@@ -229,6 +239,7 @@ launchctl list | grep omniclaw.autoupdate   # '-' PID is correct
 **Linux — if yes:**
 
 Write `~/.config/systemd/user/omniclaw-autoupdate.service` and `omniclaw-autoupdate.timer`, then:
+
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now omniclaw-autoupdate.timer
@@ -243,6 +254,7 @@ Logs: `logs/auto-update.log`
 Run `./.claude/skills/setup/scripts/09-verify.sh` and parse.
 
 **Fix each failure:**
+
 - SERVICE=stopped → `bun run build`, then `launchctl kickstart -k gui/$(id -u)/com.omniclaw` (macOS) or `systemctl --user restart omniclaw` (Linux). Re-check.
 - SERVICE=not_found → re-run step 10
 - CREDENTIALS=missing → re-run step 4

@@ -4,6 +4,7 @@ import {
   jidToChannelId,
   DiscordChannel,
   getAttachmentWorkspaceFolder,
+  isImageAttachment,
 } from './discord.js';
 import type { RegisteredGroup } from '../types.js';
 
@@ -73,6 +74,77 @@ describe('getAttachmentWorkspaceFolder', () => {
 
   it('falls back to agent folder when channelFolder is missing', () => {
     expect(getAttachmentWorkspaceFolder({ folder: 'rind' })).toBe('rind');
+  });
+});
+
+// --- isImageAttachment ---
+
+describe('isImageAttachment', () => {
+  it('matches when contentType starts with image/', () => {
+    expect(
+      isImageAttachment({ contentType: 'image/png', name: 'photo.png' }),
+    ).toBe(true);
+    expect(
+      isImageAttachment({ contentType: 'image/jpeg', name: 'photo.jpg' }),
+    ).toBe(true);
+    expect(
+      isImageAttachment({ contentType: 'image/gif', name: 'anim.gif' }),
+    ).toBe(true);
+    expect(
+      isImageAttachment({ contentType: 'image/webp', name: 'img.webp' }),
+    ).toBe(true);
+  });
+
+  it('rejects when contentType is a known non-image type', () => {
+    expect(
+      isImageAttachment({ contentType: 'application/pdf', name: 'doc.pdf' }),
+    ).toBe(false);
+    expect(
+      isImageAttachment({ contentType: 'text/plain', name: 'notes.txt' }),
+    ).toBe(false);
+    expect(
+      isImageAttachment({ contentType: 'video/mp4', name: 'clip.mp4' }),
+    ).toBe(false);
+  });
+
+  it('falls back to extension when contentType is null', () => {
+    expect(
+      isImageAttachment({ contentType: null, name: 'screenshot.png' }),
+    ).toBe(true);
+    expect(isImageAttachment({ contentType: null, name: 'photo.jpg' })).toBe(
+      true,
+    );
+    expect(isImageAttachment({ contentType: null, name: 'image.jpeg' })).toBe(
+      true,
+    );
+    expect(isImageAttachment({ contentType: null, name: 'anim.gif' })).toBe(
+      true,
+    );
+    expect(isImageAttachment({ contentType: null, name: 'pic.webp' })).toBe(
+      true,
+    );
+  });
+
+  it('falls back to extension when contentType is undefined', () => {
+    expect(isImageAttachment({ name: 'screenshot.png' })).toBe(true);
+    expect(isImageAttachment({ name: 'doc.pdf' })).toBe(false);
+  });
+
+  it('rejects non-image extensions when contentType is null', () => {
+    expect(isImageAttachment({ contentType: null, name: 'file.txt' })).toBe(
+      false,
+    );
+    expect(isImageAttachment({ contentType: null, name: 'app.exe' })).toBe(
+      false,
+    );
+    expect(isImageAttachment({ contentType: null, name: 'data.json' })).toBe(
+      false,
+    );
+  });
+
+  it('handles missing name when contentType is null', () => {
+    expect(isImageAttachment({ contentType: null })).toBe(false);
+    expect(isImageAttachment({ contentType: null, name: null })).toBe(false);
   });
 });
 

@@ -19,6 +19,7 @@ import {
   handleDiscoveryRequest,
   type DiscoveryRouteContext,
 } from '../discovery/routes.js';
+import type { RemotePeerAgents } from '../discovery/types.js';
 import { listLocalContextFiles } from './context-files.js';
 import {
   renderNetworkPage,
@@ -26,6 +27,7 @@ import {
   type NetworkPageState,
 } from './network.js';
 import { buildHealthData, renderSystem } from './system.js';
+import { buildSettingsData, renderSettings } from './settings.js';
 import { renderTasks } from './tasks.js';
 import { renderLogs } from './logs.js';
 import { buildAgentChannelData } from './agent-channels.js';
@@ -33,6 +35,7 @@ import {
   renderAgentsPageWithRemote,
   renderAgentsContent,
 } from './agents-page.js';
+import { sanitizeTelegramAvatarUrl } from '../telegram-avatar.js';
 
 /** Optional discovery context — set by the orchestrator when discovery is enabled. */
 let discoveryContext: DiscoveryRouteContext | null = null;
@@ -54,6 +57,16 @@ export function getRemotePeers() {
     : Promise.resolve([]);
 }
 
+export function createRemotePeerResolver(
+  fetcher: () => Promise<RemotePeerAgents[]> = getRemotePeers,
+): () => Promise<RemotePeerAgents[]> {
+  let cached: Promise<RemotePeerAgents[]> | null = null;
+  return () => {
+    cached ??= fetcher();
+    return cached;
+  };
+}
+
 export function resetDiscoveryContextForTests(): void {
   discoveryContext = null;
   networkPageState = null;
@@ -71,6 +84,7 @@ export function handleRequest(
   const url = new URL(req.url);
   const { pathname } = url;
   const method = req.method;
+  const resolveRemotePeers = createRemotePeerResolver();
 
   // --- Discovery API routes ---
   if (pathname.startsWith('/api/discovery/') && discoveryContext) {
@@ -102,6 +116,10 @@ export function handleRequest(
   // --- API routes ---
   if (pathname === '/api/health')
     return json(buildHealthData(state, sseClientCount ?? 0));
+  if (pathname === '/api/settings') {
+    if (method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+    return json(buildSettingsData());
+  }
   if (pathname === '/api/agents') return handleGetAgents(state);
 
   // Tasks — CRUD
@@ -164,14 +182,12 @@ export function handleRequest(
       pathname.slice('/api/agents/'.length, -'/detail'.length),
     );
     if (!agentId) return json({ error: 'Missing agent ID' }, 400);
-    const data = buildAgentDetailData(agentId, state);
-    if (!data) return json({ error: 'Agent not found' }, 404);
-    return json(data);
+    return handleGetAgentDetail(agentId, state, resolveRemotePeers);
   }
 
   // --- Dashboard ---
   if (pathname === '/' || pathname === '/index.html')
-    return handleDashboardPage(state);
+    return handleDashboardPage(state, resolveRemotePeers);
 
   // --- Conversations viewer ---
   if (pathname === '/conversations')
@@ -180,7 +196,8 @@ export function handleRequest(
     });
 
   // --- Context viewer ---
-  if (pathname === '/context') return handleContextPage(state);
+  if (pathname === '/context')
+    return handleContextPage(state, resolveRemotePeers);
 
   // --- IPC Inspector ---
   if (pathname === '/ipc')
@@ -189,7 +206,8 @@ export function handleRequest(
     });
 
   // --- Agents list ---
-  if (pathname === '/agents-list') return handleAgentsListPage(state);
+  if (pathname === '/agents-list')
+    return handleAgentsListPage(state, resolveRemotePeers);
 
   // --- Task Manager ---
   if (pathname === '/tasks')
@@ -209,12 +227,16 @@ export function handleRequest(
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
 
+  // --- Settings ---
+  if (pathname === '/settings')
+    return new Response(renderSettings(), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+
   // --- Agent Detail ---
   if (pathname === '/agents') {
     const agentId = url.searchParams.get('id') || '';
-    return new Response(renderAgentDetail(agentId, state), {
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
-    });
+    return handleAgentDetailPage(agentId, state, resolveRemotePeers);
   }
 
   // --- Agent avatar endpoints ---
@@ -271,10 +293,11 @@ export function handleRequest(
   return json({ error: 'Not found' }, 404);
 }
 
-async function handleDashboardPage(state: WebStateProvider): Promise<Response> {
-  const remotePeers = discoveryContext
-    ? await fetchTrustedRemoteAgents(discoveryContext)
-    : [];
+async function handleDashboardPage(
+  state: WebStateProvider,
+  resolveRemotePeers: () => Promise<RemotePeerAgents[]>,
+): Promise<Response> {
+  const remotePeers = await resolveRemotePeers();
   return new Response(renderDashboardWithRemote(state, remotePeers), {
     headers: { 'Content-Type': 'text/html; charset=utf-8' },
   });
@@ -282,19 +305,41 @@ async function handleDashboardPage(state: WebStateProvider): Promise<Response> {
 
 async function handleAgentsListPage(
   state: WebStateProvider,
+  resolveRemotePeers: () => Promise<RemotePeerAgents[]>,
 ): Promise<Response> {
-  const remotePeers = discoveryContext
-    ? await fetchTrustedRemoteAgents(discoveryContext)
-    : [];
+  const remotePeers = await resolveRemotePeers();
   return new Response(renderAgentsPageWithRemote(state, remotePeers), {
     headers: { 'Content-Type': 'text/html; charset=utf-8' },
   });
 }
 
-async function handleContextPage(state: WebStateProvider): Promise<Response> {
-  const remotePeers = discoveryContext
-    ? await fetchTrustedRemoteAgents(discoveryContext)
-    : [];
+async function handleAgentDetailPage(
+  agentId: string,
+  state: WebStateProvider,
+  resolveRemotePeers: () => Promise<RemotePeerAgents[]>,
+): Promise<Response> {
+  const remotePeers = await resolveRemotePeers();
+  return new Response(renderAgentDetail(agentId, state, remotePeers), {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  });
+}
+
+async function handleGetAgentDetail(
+  agentId: string,
+  state: WebStateProvider,
+  resolveRemotePeers: () => Promise<RemotePeerAgents[]>,
+): Promise<Response> {
+  const remotePeers = await resolveRemotePeers();
+  const data = buildAgentDetailData(agentId, state, remotePeers);
+  if (!data) return json({ error: 'Agent not found' }, 404);
+  return json(data);
+}
+
+async function handleContextPage(
+  state: WebStateProvider,
+  resolveRemotePeers: () => Promise<RemotePeerAgents[]>,
+): Promise<Response> {
+  const remotePeers = await resolveRemotePeers();
   return new Response(renderContextViewerWithRemote(state, remotePeers), {
     headers: { 'Content-Type': 'text/html; charset=utf-8' },
   });
@@ -737,7 +782,8 @@ function handleGetAgentAvatar(
   const agent = agents[agentId];
   if (!agent) return json({ error: 'Agent not found' }, 404);
   return json({
-    avatarUrl: agent.avatarUrl || null,
+    avatarUrl:
+      sanitizeTelegramAvatarUrl(agent.avatarUrl, agent.avatarSource) || null,
     avatarSource: agent.avatarSource || null,
   });
 }
@@ -757,9 +803,23 @@ async function handleGetAgentAvatarImage(
     return response;
   }
 
+  const safeAvatarRef =
+    sanitizeTelegramAvatarUrl(agent.avatarUrl, agent.avatarSource) ||
+    agent.avatarUrl;
+  const resolvedAvatarUrl = state.resolveAgentAvatarUrl
+    ? await state.resolveAgentAvatarUrl(
+        agentId,
+        agent.avatarUrl,
+        agent.avatarSource,
+      )
+    : agent.avatarUrl;
+  if (!resolvedAvatarUrl) {
+    return json({ error: 'Avatar not found' }, 404);
+  }
+
   const response = await serveCachedRemoteImage(
-    `agent:${agentId}:${agent.avatarUrl}`,
-    async () => agent.avatarUrl || null,
+    `agent:${agentId}:${safeAvatarRef}`,
+    async () => resolvedAvatarUrl,
     {
       cacheDir: state.remoteImageCacheDir,
       fetchImpl: state.fetchRemoteImage,
@@ -836,14 +896,19 @@ async function handleSetAgentAvatar(
 
   state.updateAgentAvatar(
     agentId,
-    (url as string) || null,
+    sanitizeTelegramAvatarUrl((url as string) || undefined, source as string) ||
+      null,
     (source as string) || null,
   );
 
   return json({
     success: true,
     agentId,
-    avatarUrl: (url as string) || null,
+    avatarUrl:
+      sanitizeTelegramAvatarUrl(
+        (url as string) || undefined,
+        source as string,
+      ) || null,
     avatarSource: (source as string) || null,
   });
 }

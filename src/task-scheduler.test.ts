@@ -790,7 +790,6 @@ describe('execution lease tracking', () => {
       created_at: old,
     });
     markTaskExecuting('stale-task');
-
     createTask({
       id: 'fresh-task',
       group_folder: 'test',

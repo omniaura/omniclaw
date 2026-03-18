@@ -31,6 +31,7 @@ container builder stop && container builder rm && container builder start
 ```
 
 Verify the new image:
+
 ```bash
 container run -i --rm --entrypoint wc omniclaw-agent:latest -l /app/src/index.ts
 ```
@@ -55,6 +56,7 @@ just install
 ```
 
 Or manually:
+
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
 cp launchd/com.omniclaw.plist ~/Library/LaunchAgents/com.omniclaw.plist
@@ -81,12 +83,12 @@ rm groups/*/CLAUDE.md
 
 Environment variable prefixes changed:
 
-| Old | New |
-|-----|-----|
-| `NANOCLAW_BRANCH` | `OMNICLAW_BRANCH` |
-| `NANOCLAW_SERVICE` | `OMNICLAW_SERVICE` |
+| Old                       | New                       |
+| ------------------------- | ------------------------- |
+| `NANOCLAW_BRANCH`         | `OMNICLAW_BRANCH`         |
+| `NANOCLAW_SERVICE`        | `OMNICLAW_SERVICE`        |
 | `NANOCLAW_IDLE_THRESHOLD` | `OMNICLAW_IDLE_THRESHOLD` |
-| `NANOCLAW_MAX_WAIT` | `OMNICLAW_MAX_WAIT` |
+| `NANOCLAW_MAX_WAIT`       | `OMNICLAW_MAX_WAIT`       |
 
 **Backwards compatibility:** The old names still work as fallback in `auto-update.sh`. Update at your convenience.
 

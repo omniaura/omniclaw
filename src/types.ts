@@ -72,7 +72,7 @@ export interface RegisteredGroup {
 /**
  * Inbound message envelope.
  *
- * Sender identity contract (see docs/nanoclaw-sender-identity-pipeline.md):
+ * Sender identity contract (see docs/sender-identity-phase0-audit.md):
  *
  *   sender           — Immutable platform ID (e.g. Discord snowflake, WhatsApp JID).
  *                       Used as the authoritative identity key for routing, filtering,
@@ -173,6 +173,8 @@ export interface Channel {
   prefixAssistantName?: boolean;
   /** Fetch the bot's own profile image URL from this channel's platform. */
   getAvatarUrl?(): Promise<string | null>;
+  /** Resolve a stored avatar reference into a fetchable remote URL. */
+  resolveStoredAvatarUrl?(storedAvatarUrl: string): Promise<string | null>;
   /** Fetch a chat/user image URL for a specific JID. */
   getChatAvatarUrl?(jid: string): Promise<string | null>;
   /** Fetch a server/community image URL for a specific server ID. */
@@ -212,7 +214,7 @@ export interface Agent {
   agentContextFolder?: string; // e.g., 'agents/peytonomi'
   /** Roles required to appear in this agent's channel roster context. Empty = no filter. */
   rosterRoleFilters?: string[];
-  /** Profile image URL (CDN URL or local /avatars/{folder}/avatar.png path). */
+  /** Profile image reference (safe URL, token-free descriptor, or local path). */
   avatarUrl?: string;
   /** Which platform the avatar was sourced from. */
   avatarSource?: 'discord' | 'telegram' | 'slack' | 'custom';
