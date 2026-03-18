@@ -936,7 +936,10 @@ function noteSenderNameChange(msg: NewMessage): void {
     );
   }
 
-  if (!lastSenderNames.has(msg.sender) && lastSenderNames.size >= LAST_SENDER_NAMES_MAX) {
+  if (
+    !lastSenderNames.has(msg.sender) &&
+    lastSenderNames.size >= LAST_SENDER_NAMES_MAX
+  ) {
     const oldest = lastSenderNames.keys().next().value;
     if (oldest) lastSenderNames.delete(oldest);
   }

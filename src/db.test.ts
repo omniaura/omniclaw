@@ -196,9 +196,9 @@ describe('storeMessage sender_missing counter', () => {
 
     const originalInfo = logger.info;
     const records: Array<Record<string, unknown>> = [];
-    logger.info = (((fieldsOrMsg: Record<string, unknown> | string) => {
+    logger.info = ((fieldsOrMsg: Record<string, unknown> | string) => {
       if (typeof fieldsOrMsg === 'object') records.push(fieldsOrMsg);
-    }) as unknown) as typeof logger.info;
+    }) as unknown as typeof logger.info;
 
     try {
       storeMessage({

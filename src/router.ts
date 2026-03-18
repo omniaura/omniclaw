@@ -22,21 +22,19 @@ export function formatMessages(
 ): string {
   const uniqueSenderKeys = new Set<string>();
   const uniqueSenderLabels = new Set<string>();
-  const lines = messages.map(
-    (m) => {
-      if (m.sender) uniqueSenderKeys.add(m.sender);
-      if (m.sender_name && m.sender_name !== 'System') {
-        uniqueSenderLabels.add(m.sender_name);
-      }
-      return (
-        `<message id="${m.id}" sender="${escapeXml(m.sender_name)}" ` +
-        `sender_id="${escapeXml(m.sender)}" ` +
-        `sender_key="${escapeXml(m.sender)}" ` +
-        `sender_label="${escapeXml(m.sender_name)}" ` +
-        `time="${m.timestamp}">${escapeXml(m.content)}</message>`
-      );
-    },
-  );
+  const lines = messages.map((m) => {
+    if (m.sender) uniqueSenderKeys.add(m.sender);
+    if (m.sender_name && m.sender_name !== 'System') {
+      uniqueSenderLabels.add(m.sender_name);
+    }
+    return (
+      `<message id="${m.id}" sender="${escapeXml(m.sender_name)}" ` +
+      `sender_id="${escapeXml(m.sender)}" ` +
+      `sender_key="${escapeXml(m.sender)}" ` +
+      `sender_label="${escapeXml(m.sender_name)}" ` +
+      `time="${m.timestamp}">${escapeXml(m.content)}</message>`
+    );
+  });
 
   // Build a participant roster so that conversation compaction/summarization
   // preserves correct sender attribution (see Issue #13).
@@ -62,10 +60,15 @@ export function formatMessages(
   }
 
   if (seen.size > 0) {
-    attrs.push(`participant_keys="${Array.from(seen).map(escapeXml).join(', ')}"`);
+    attrs.push(
+      `participant_keys="${Array.from(seen).map(escapeXml).join(', ')}"`,
+    );
   }
 
-  if (uniqueSenderLabels.size > uniqueSenderKeys.size && uniqueSenderKeys.size > 0) {
+  if (
+    uniqueSenderLabels.size > uniqueSenderKeys.size &&
+    uniqueSenderKeys.size > 0
+  ) {
     logger.info(
       {
         op: 'senderIdentity',
