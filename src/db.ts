@@ -896,6 +896,9 @@ export function storeMessage(msg: NewMessage): void {
       'Message has empty/falsy sender ID',
     );
   }
+
+  noteSenderNameChange(msg);
+
   db.query(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, sender_platform, sender_user_id, mentions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
@@ -910,6 +913,35 @@ export function storeMessage(msg: NewMessage): void {
     msg.sender_user_id ?? null,
     msg.mentions ? JSON.stringify(msg.mentions) : null,
   );
+}
+
+const LAST_SENDER_NAMES_MAX = 10000;
+const lastSenderNames = new Map<string, string>();
+
+function noteSenderNameChange(msg: NewMessage): void {
+  if (!msg.sender || !msg.sender_name) return;
+
+  const previous = lastSenderNames.get(msg.sender);
+  if (previous && previous !== msg.sender_name) {
+    logger.info(
+      {
+        op: 'senderIdentity',
+        counter: 'sender_name_changed',
+        platform: msg.sender_platform,
+        sender: msg.sender,
+        old_name: previous,
+        new_name: msg.sender_name,
+      },
+      'Sender display name changed for existing immutable sender identity',
+    );
+  }
+
+  if (!lastSenderNames.has(msg.sender) && lastSenderNames.size >= LAST_SENDER_NAMES_MAX) {
+    const oldest = lastSenderNames.keys().next().value;
+    if (oldest) lastSenderNames.delete(oldest);
+  }
+
+  lastSenderNames.set(msg.sender, msg.sender_name);
 }
 
 /** DB row type with nullable JSON fields that need conversion to NewMessage */

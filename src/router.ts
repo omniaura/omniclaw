@@ -20,9 +20,22 @@ export function formatMessages(
   messages: NewMessage[],
   options: FormatMessagesOptions = {},
 ): string {
+  const uniqueSenderKeys = new Set<string>();
+  const uniqueSenderLabels = new Set<string>();
   const lines = messages.map(
-    (m) =>
-      `<message id="${m.id}" sender="${escapeXml(m.sender_name)}" sender_id="${escapeXml(m.sender)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
+    (m) => {
+      if (m.sender) uniqueSenderKeys.add(m.sender);
+      if (m.sender_name && m.sender_name !== 'System') {
+        uniqueSenderLabels.add(m.sender_name);
+      }
+      return (
+        `<message id="${m.id}" sender="${escapeXml(m.sender_name)}" ` +
+        `sender_id="${escapeXml(m.sender)}" ` +
+        `sender_key="${escapeXml(m.sender)}" ` +
+        `sender_label="${escapeXml(m.sender_name)}" ` +
+        `time="${m.timestamp}">${escapeXml(m.content)}</message>`
+      );
+    },
   );
 
   // Build a participant roster so that conversation compaction/summarization
@@ -46,6 +59,22 @@ export function formatMessages(
     attrs.push(`excerpt_participants="${roster}"`);
     // Backward-compatible alias for existing prompts/parsers.
     attrs.push(`participants="${roster}"`);
+  }
+
+  if (seen.size > 0) {
+    attrs.push(`participant_keys="${Array.from(seen).map(escapeXml).join(', ')}"`);
+  }
+
+  if (uniqueSenderLabels.size > uniqueSenderKeys.size && uniqueSenderKeys.size > 0) {
+    logger.info(
+      {
+        op: 'senderIdentity',
+        counter: 'participant_roster_inflation',
+        expected_count: uniqueSenderKeys.size,
+        actual_count: uniqueSenderLabels.size,
+      },
+      'Participant roster labels exceed unique sender identities in message batch',
+    );
   }
 
   const uniqueRosterNames = Array.from(

@@ -23,6 +23,7 @@ import {
   storeMessage,
   updateTask,
 } from './db.js';
+import { logger } from './logger.js';
 import type { Agent } from './types.js';
 
 beforeEach(() => {
@@ -188,6 +189,52 @@ describe('storeMessage sender_missing counter', () => {
     expect(messages).toHaveLength(1);
     expect(messages[0].sender).toBe('');
     expect(messages[0].content).toBe('no sender');
+  });
+
+  it('logs when a sender display name changes for the same immutable sender', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    const originalInfo = logger.info;
+    const records: Array<Record<string, unknown>> = [];
+    logger.info = (((fieldsOrMsg: Record<string, unknown> | string) => {
+      if (typeof fieldsOrMsg === 'object') records.push(fieldsOrMsg);
+    }) as unknown) as typeof logger.info;
+
+    try {
+      storeMessage({
+        id: 'name-change-1',
+        chat_jid: 'group@g.us',
+        sender: 'discord:123',
+        sender_name: 'Alice',
+        content: 'hello',
+        timestamp: '2024-01-01T00:00:01.000Z',
+        is_from_me: false,
+        sender_platform: 'discord',
+      });
+
+      storeMessage({
+        id: 'name-change-2',
+        chat_jid: 'group@g.us',
+        sender: 'discord:123',
+        sender_name: 'Alice (Mobile)',
+        content: 'hello again',
+        timestamp: '2024-01-01T00:00:02.000Z',
+        is_from_me: false,
+        sender_platform: 'discord',
+      });
+    } finally {
+      logger.info = originalInfo;
+    }
+
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        op: 'senderIdentity',
+        counter: 'sender_name_changed',
+        sender: 'discord:123',
+        old_name: 'Alice',
+        new_name: 'Alice (Mobile)',
+      }),
+    );
   });
 });
 

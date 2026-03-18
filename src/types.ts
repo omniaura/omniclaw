@@ -72,7 +72,7 @@ export interface RegisteredGroup {
 /**
  * Inbound message envelope.
  *
- * Sender identity contract (see docs/nanoclaw-sender-identity-pipeline.md):
+ * Sender identity contract (see docs/sender-identity-phase0-audit.md):
  *
  *   sender           — Immutable platform ID (e.g. Discord snowflake, WhatsApp JID).
  *                       Used as the authoritative identity key for routing, filtering,
