@@ -1,10 +1,10 @@
 ## Summary
-- treat Discord attachments as images when their filename extension is image-like, even if Discord omits `contentType`
-- keep the existing content-type path first, then fall back to extension-based detection for common image formats
-- add regression coverage for missing-content-type image attachments in `src/channels/discord.test.ts`
+- expose immutable sender metadata more explicitly in agent prompts by adding `sender_key`, `sender_label`, and `participant_keys` alongside the existing attributes
+- add sender identity observability for participant roster inflation and display-name changes on a stable sender key
+- refresh the sender identity audit doc so it matches the current formatter and logging behavior
 
 ## Testing
-- `bun test src/channels/discord.test.ts`
+- `bun test src/formatting.test.ts src/db.test.ts`
 - `bun run typecheck`
 
-Follow-up hardening for the Discord image attachment path from #254.
+Refs #204.

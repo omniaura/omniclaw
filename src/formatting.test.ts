@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
+import { logger } from './logger.js';
 import {
   escapeXml,
   formatMessages,
@@ -61,8 +62,8 @@ describe('formatMessages', () => {
   it('formats a single message as XML with participant attributes', () => {
     const result = formatMessages([makeMsg()]);
     expect(result).toBe(
-      '<messages excerpt_participants="Alice" participants="Alice">\n' +
-        '<message id="1" sender="Alice" sender_id="123@s.whatsapp.net" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
+      '<messages excerpt_participants="Alice" participants="Alice" participant_keys="123@s.whatsapp.net">\n' +
+        '<message id="1" sender="Alice" sender_id="123@s.whatsapp.net" sender_key="123@s.whatsapp.net" sender_label="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
         '</messages>',
     );
   });
@@ -223,6 +224,42 @@ describe('formatMessages', () => {
       makeMsg({ sender: 'discord:456789', sender_name: 'Bob' }),
     ]);
     expect(result).toContain('sender_id="discord:456789"');
+    expect(result).toContain('sender_key="discord:456789"');
+    expect(result).toContain('sender_label="Bob"');
+  });
+
+  it('includes participant_keys for immutable sender roster', () => {
+    const result = formatMessages([
+      makeMsg({ id: '1', sender: 'discord:111', sender_name: 'Alice' }),
+      makeMsg({ id: '2', sender: 'discord:222', sender_name: 'Bob' }),
+    ]);
+    expect(result).toContain('participant_keys="discord:111, discord:222"');
+  });
+
+  it('logs participant roster inflation when labels exceed sender identities', () => {
+    const originalInfo = logger.info;
+    const records: Array<Record<string, unknown>> = [];
+    logger.info = ((fieldsOrMsg: Record<string, unknown> | string) => {
+      if (typeof fieldsOrMsg === 'object') records.push(fieldsOrMsg);
+    }) as unknown as typeof logger.info;
+
+    try {
+      formatMessages([
+        makeMsg({ id: '1', sender: 'discord:123', sender_name: 'Alice' }),
+        makeMsg({ id: '2', sender: 'discord:123', sender_name: 'Alice (AFK)' }),
+      ]);
+    } finally {
+      logger.info = originalInfo;
+    }
+
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        op: 'senderIdentity',
+        counter: 'participant_roster_inflation',
+        expected_count: 1,
+        actual_count: 2,
+      }),
+    );
   });
 
   it('excludes messages with no sender ID from participant roster', () => {

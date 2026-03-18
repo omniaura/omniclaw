@@ -315,5 +315,10 @@ This audit is observational only. The instrumentation counters specified in Sect
 
 ---
 
-_Last updated: 2026-03-04_
-_Next: Phase 1 PRs based on the touch list in Section 5._
+## Implementation Notes
+
+- `formatMessages()` now emits explicit immutable sender attributes (`sender_id` and `sender_key`) alongside presentation attributes, plus `participant_keys` for the deduplicated immutable roster.
+- Sender identity observability now logs `participant_roster_inflation` and `sender_name_changed` counters through the structured logger.
+
+_Last updated: 2026-03-18_
+_Next: continue phased sender identity enforcement at adapter and IPC boundaries._
