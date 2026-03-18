@@ -60,7 +60,16 @@ export function buildTelegramApiFileUrl(
 
 export function sanitizeTelegramAvatarUrl(
   avatarUrl: string | undefined,
-  _avatarSource?: string,
+  avatarSource?: string,
+): string | undefined {
+  if (!avatarUrl || avatarSource !== 'telegram') return avatarUrl;
+  const parsed = parseTelegramApiFileUrl(avatarUrl);
+  if (!parsed) return avatarUrl;
+  return buildTelegramFileDescriptor(parsed.botId, parsed.filePath);
+}
+
+export function redactTelegramBotTokenFromUrl(
+  avatarUrl: string | undefined,
 ): string | undefined {
   if (!avatarUrl) return avatarUrl;
   const parsed = parseTelegramApiFileUrl(avatarUrl);

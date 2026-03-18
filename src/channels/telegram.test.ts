@@ -4,6 +4,7 @@ import {
   buildTelegramFileDescriptor,
   parseTelegramApiFileUrl,
   parseTelegramFileDescriptor,
+  redactTelegramBotTokenFromUrl,
   sanitizeTelegramAvatarUrl,
 } from '../telegram-avatar.js';
 import {
@@ -246,6 +247,21 @@ describe('telegram avatar descriptors', () => {
 
     expect(sanitized).toBe('tg-file:123456:photos%2Ffile_42.jpg');
     expect(sanitized).not.toContain('secret-token');
+  });
+
+  it('does not rewrite custom avatar URLs even if they look like Telegram file URLs', () => {
+    const original =
+      'https://api.telegram.org/file/bot123456:secret-token/photos/file_42.jpg';
+
+    expect(sanitizeTelegramAvatarUrl(original, 'custom')).toBe(original);
+  });
+
+  it('can still redact unknown-source Telegram file URLs when needed', () => {
+    expect(
+      redactTelegramBotTokenFromUrl(
+        'https://api.telegram.org/file/bot123456:secret-token/photos/file_42.jpg',
+      ),
+    ).toBe('tg-file:123456:photos%2Ffile_42.jpg');
   });
 
   it('parses Telegram file URLs into token, botId, and path', () => {

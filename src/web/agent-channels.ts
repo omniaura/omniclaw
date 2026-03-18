@@ -1,5 +1,8 @@
 import type { WebStateProvider } from './types.js';
-import { sanitizeTelegramAvatarUrl } from '../telegram-avatar.js';
+import {
+  redactTelegramBotTokenFromUrl,
+  sanitizeTelegramAvatarUrl,
+} from '../telegram-avatar.js';
 import { escapeHtml } from './shared.js';
 import type { RemotePeerAgents } from '../discovery/types.js';
 
@@ -106,7 +109,7 @@ export function buildAgentChannelData(
       isAdmin: !!agent.isAdmin,
       serverFolder: agent.serverFolder,
       agentContextFolder: agent.agentContextFolder,
-      avatarUrl: sanitizeTelegramAvatarUrl(agent.avatarUrl),
+      avatarUrl: redactTelegramBotTokenFromUrl(agent.avatarUrl),
       remoteInstanceId: peer.instanceId,
       remoteInstanceName: peer.instanceName,
       remoteHost: peer.host,
