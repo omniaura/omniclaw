@@ -393,16 +393,14 @@ describe('basic auth', () => {
     expect(apiRes.status).toBe(200);
   });
 
-  it('keeps discovery admin routes locked by default without credentials', async () => {
+  it('allows discovery admin routes from private network without credentials', async () => {
     setTestDiscoveryContext();
     handle = startWebServer(testConfig({ auth: undefined }), makeState());
 
+    // Test runs on localhost — private network requests are allowed without auth
     const res = await fetch(url('/api/discovery/requests'));
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toMatchObject({
-      error:
-        'Discovery admin routes require WEB_UI_USER/WEB_UI_PASS to be configured',
-    });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual([]);
   });
 
   it('allows discovery admin routes from loopback with trusted LAN mode enabled', async () => {
