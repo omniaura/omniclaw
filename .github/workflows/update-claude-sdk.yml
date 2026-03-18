@@ -10,12 +10,35 @@ jobs:
   update:
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: write
       pull-requests: write
 
     steps:
+      - name: Check for GitHub App secrets
+        id: check-secrets
+        run: |
+          if [ -z "$APP_ID" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "GitHub App secrets not configured, using default token"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+
+      - name: Create GitHub App token
+        if: steps.check-secrets.outputs.skip != 'true'
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || github.token }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -58,7 +81,7 @@ jobs:
           PR=$(gh pr list --repo omniaura/omniclaw --base main --head update/claude-sdk-${{ steps.latest.outputs.version }} --json number --jq '.[0].number // ""')
           echo "pr=$PR" >> $GITHUB_OUTPUT
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || github.token }}
 
       - name: Apply update
         if: steps.check.outputs.changed == 'true' && steps.existing_pr.outputs.pr == ''
@@ -94,4 +117,13 @@ jobs:
             --title "$TITLE" \
             --body-file "$BODY_FILE"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || github.token }}
+
+      - name: Trigger CI for update PR
+        if: steps.check.outputs.changed == 'true' && steps.existing_pr.outputs.pr == '' && steps.check-secrets.outputs.skip == 'true'
+        run: |
+          gh workflow run ci.yml \
+            --repo omniaura/omniclaw \
+            --ref "update/claude-sdk-${{ steps.latest.outputs.version }}"
+        env:
+          GH_TOKEN: ${{ github.token }}

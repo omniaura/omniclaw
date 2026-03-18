@@ -1,10 +1,7 @@
 ## Summary
+- let `CI` run via `workflow_dispatch` so automation can explicitly kick it off for bot-created branches
+- use a GitHub App token in the dependency-update workflows when available so auto-created PRs trigger normal `pull_request` checks
+- fall back to dispatching `ci.yml` manually when only the default `GITHUB_TOKEN` is available, and grant the workflows `actions: write` for that path
 
-- stop replaying stored discovery secrets when an already-trusted peer re-requests access
-- require pairing public keys for new discovery requests and encrypt all discovery secret delivery with per-request X25519 key agreement plus AES-GCM
-- add regression coverage for the trusted-peer re-pair flow and encrypted pairing completion
-
-## Validation
-
-- `bun run typecheck`
-- `bun test src/discovery/routes.test.ts src/discovery/pairing-crypto.test.ts`
+## Testing
+- `for f in .github/workflows/*.yml; do yq eval '.' "$f" > /dev/null || exit 1; done`
