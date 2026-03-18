@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/omniaura/omniclaw">GitHub</a>&nbsp; • &nbsp;
-  <a href="https://discord.gg/VGWXrf8x"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
+  <a href="https://discord.gg/ENharzMzbs"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
   <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
 </p>
 
@@ -38,7 +38,7 @@ OmniClaw aims for the middle path:
 - Runs AI agents behind Apple Container or Docker with explicit mounts and runtime-specific credential allowlists
 - Routes messages from WhatsApp, Discord, Telegram, and Slack into agent-specific workspaces and context layers
 - Manages multiple agents per server/channel topology instead of assuming one bot equals one workspace
-- Ships a built-in operations UI for topology, logs, tasks, conversations, context editing, network discovery, system status, and settings
+- Ships a built-in operations UI for topology, logs, tasks, conversations, context editing, network discovery, and system status
 - Runs scheduled work as first-class agent tasks with logs, controls, and message delivery
 - Supports cross-agent messaging and trusted peer discovery so instances can collaborate across machines
 - Keeps state in SQLite and uses file-based IPC so the host process stays understandable and debuggable
@@ -123,7 +123,7 @@ The web UI is not a demo page. It is the operational surface for the system and 
 - Tasks page with create/pause/resume/delete flows
 - Live logs and IPC inspector
 - Network discovery and peer management
-- System and settings pages
+- System status and runtime visibility
 
 The UI is server-rendered with Datastar and uses SSE for live updates, which keeps the stack simple while still supporting live logs, topology updates, and task state changes.
 
@@ -157,7 +157,7 @@ Key modules:
 - `src/ipc.ts` - agent IPC watcher and command handling
 - `src/task-scheduler.ts` - cron, interval, and one-shot task execution
 - `src/db.ts` - SQLite persistence for agents, channels, messages, tasks, and state
-- `src/web/` - web UI pages, image proxy/cache, SSE streams, settings, logs, and network screens
+- `src/web/` - web UI pages, image proxy/cache, SSE streams, logs, and network screens
 - `src/discovery/` - trusted peer auth, pairing, remote agent discovery, and sync helpers
 
 ## Security Model
@@ -299,7 +299,7 @@ Because `/setup`, `/customize`, and `/debug` are still the intended onboarding p
 
 ## Community
 
-Questions or ideas? [Join the Discord](https://discord.gg/VGWXrf8x).
+Questions or ideas? [Join the Discord](https://discord.gg/ENharzMzbs).
 
 ## License
 
