@@ -101,11 +101,19 @@ describe('network identity detection', () => {
   it('falls back to wdutil when the older macOS commands fail', async () => {
     spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
       if (cmd.includes('-listallhardwareports')) {
-        return createProcess({ stdout: '', stderr: 'networksetup unavailable', exitCode: 1 });
+        return createProcess({
+          stdout: '',
+          stderr: 'networksetup unavailable',
+          exitCode: 1,
+        });
       }
 
       if (cmd[0] === '/usr/sbin/system_profiler') {
-        return createProcess({ stdout: '', stderr: 'permission denied', exitCode: 1 });
+        return createProcess({
+          stdout: '',
+          stderr: 'permission denied',
+          exitCode: 1,
+        });
       }
 
       if (cmd[0] === '/usr/bin/wdutil') {
@@ -123,15 +131,27 @@ describe('network identity detection', () => {
   it('logs command failures at warn level for troubleshooting', async () => {
     spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
       if (cmd.includes('-listallhardwareports')) {
-        return createProcess({ stdout: '', stderr: 'networksetup unavailable', exitCode: 1 });
+        return createProcess({
+          stdout: '',
+          stderr: 'networksetup unavailable',
+          exitCode: 1,
+        });
       }
 
       if (cmd[0] === '/usr/sbin/system_profiler') {
-        return createProcess({ stdout: '', stderr: 'system profiler unavailable', exitCode: 1 });
+        return createProcess({
+          stdout: '',
+          stderr: 'system profiler unavailable',
+          exitCode: 1,
+        });
       }
 
       if (cmd[0] === '/usr/bin/wdutil') {
-        return createProcess({ stdout: '', stderr: 'wdutil unavailable', exitCode: 1 });
+        return createProcess({
+          stdout: '',
+          stderr: 'wdutil unavailable',
+          exitCode: 1,
+        });
       }
 
       throw new Error(`Unexpected command: ${cmd.join(' ')}`);

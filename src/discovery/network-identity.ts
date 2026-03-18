@@ -76,7 +76,9 @@ async function getMacWifiDevice(): Promise<string | null> {
   const blocks = output.split(/\n\n+/);
 
   for (const block of blocks) {
-    if (!/Hardware Port: (Wi-?Fi|AirPort|Wireless LAN|WLAN|802\.11)/i.test(block)) {
+    if (
+      !/Hardware Port: (Wi-?Fi|AirPort|Wireless LAN|WLAN|802\.11)/i.test(block)
+    ) {
       continue;
     }
     const match = block.match(/Device: (.+)/);
