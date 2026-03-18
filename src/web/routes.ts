@@ -26,6 +26,7 @@ import {
   type NetworkPageState,
 } from './network.js';
 import { buildHealthData, renderSystem } from './system.js';
+import { buildSettingsData, renderSettings } from './settings.js';
 import { renderTasks } from './tasks.js';
 import { renderLogs } from './logs.js';
 import { buildAgentChannelData } from './agent-channels.js';
@@ -102,6 +103,10 @@ export function handleRequest(
   // --- API routes ---
   if (pathname === '/api/health')
     return json(buildHealthData(state, sseClientCount ?? 0));
+  if (pathname === '/api/settings') {
+    if (method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+    return json(buildSettingsData());
+  }
   if (pathname === '/api/agents') return handleGetAgents(state);
 
   // Tasks — CRUD
@@ -206,6 +211,12 @@ export function handleRequest(
   // --- System Health ---
   if (pathname === '/system')
     return new Response(renderSystem(state, sseClientCount ?? 0), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+
+  // --- Settings ---
+  if (pathname === '/settings')
+    return new Response(renderSettings(), {
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
 

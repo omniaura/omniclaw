@@ -25,6 +25,7 @@ import { checkPeerAuth } from '../discovery/routes.js';
 import type { TrustStore } from '../discovery/trust-store.js';
 import { serializeLogRecord } from './log-stream.js';
 import { renderSystemContent } from './system.js';
+import { renderSettingsContent } from './settings.js';
 import { renderTasksContent } from './tasks.js';
 import { renderLogsContent } from './logs.js';
 import { renderAgentsContent } from './agents-page.js';
@@ -360,6 +361,11 @@ export function startWebServer(
           path: '/system',
           title: 'System',
           render: () => renderSystemContent(state, sseClients.size),
+        },
+        settings: {
+          path: '/settings',
+          title: 'Settings',
+          render: () => renderSettingsContent(),
         },
       };
 
