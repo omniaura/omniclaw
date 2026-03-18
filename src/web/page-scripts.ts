@@ -1053,6 +1053,7 @@ function refreshTasks(){
       var tl=task.status==="active"?"Pause":"Resume";
       var ts2=task.status==="active"?"paused":"active";
       var ps=task.prompt.length>60?task.prompt.slice(0,57)+"\\u2026":task.prompt;
+      var sl=scheduleLabel(task.schedule_type,task.schedule_value);
       var nr=task.next_run?relTime(task.next_run):"\\u2014";
       var lr=task.last_run?relTime(task.last_run):"\\u2014";
       var lrc=task.last_result==="success"?"run-success":task.last_result==="error"?"run-error":"";
@@ -1061,7 +1062,7 @@ function refreshTasks(){
         +'<td class="td-agent" title="'+window.__esc(task.chat_jid)+'">'+window.__esc(task.group_folder)+'</td>'
         +'<td class="td-prompt" title="'+window.__esc(task.prompt)+'">'+window.__esc(ps)+'</td>'
         +'<td class="td-sched"><span class="sched-type badge badge-sm">'+window.__esc(task.schedule_type)+'</span> '
-        +'<span class="sched-label">'+window.__esc(task.schedule_value)+'</span></td>'
+        +'<span class="sched-label">'+window.__esc(sl)+'</span></td>'
         +'<td class="td-time" title="'+window.__esc(task.next_run||"")+'">'+window.__esc(nr)+'</td>'
         +'<td class="td-time '+lrc+'" title="'+window.__esc(task.last_run||"")+'">'+window.__esc(lr)+'</td>'
         +'<td><span class="badge badge-sm">'+window.__esc(task.context_mode)+'</span></td>'
@@ -1074,6 +1075,22 @@ function refreshTasks(){
     }).join("");
     applyFilter();
   }).catch(function(err){console.error("Failed to refresh tasks:",err);});
+}
+
+function scheduleLabel(type,value){
+  if(type==="interval"){
+    var ms=parseInt(value,10);
+    if(isNaN(ms))return value;
+    if(ms<1000)return ms+"ms";
+    if(ms<60000)return (ms/1000).toFixed(0)+"s";
+    if(ms<3600000)return (ms/60000).toFixed(0)+"m";
+    return (ms/3600000).toFixed(1)+"h";
+  }
+  if(type==="once"){
+    try{return new Date(value).toLocaleString();}
+    catch(e){return value;}
+  }
+  return value;
 }
 
 function relTime(iso){
