@@ -4,6 +4,7 @@ import {
   jidToChannelId,
   DiscordChannel,
   getAttachmentWorkspaceFolder,
+  isImageAttachment,
 } from './discord.js';
 import type { RegisteredGroup } from '../types.js';
 
@@ -73,6 +74,28 @@ describe('getAttachmentWorkspaceFolder', () => {
 
   it('falls back to agent folder when channelFolder is missing', () => {
     expect(getAttachmentWorkspaceFolder({ folder: 'rind' })).toBe('rind');
+  });
+});
+
+describe('isImageAttachment', () => {
+  it('detects image attachments from content type', () => {
+    expect(
+      isImageAttachment({ name: 'screenshot.bin', contentType: 'image/png' }),
+    ).toBe(true);
+  });
+
+  it('falls back to file extension when content type is missing', () => {
+    expect(isImageAttachment({ name: 'screenshot.PNG' })).toBe(true);
+    expect(isImageAttachment({ name: 'diagram.webp', contentType: null })).toBe(
+      true,
+    );
+  });
+
+  it('does not treat non-image files as images', () => {
+    expect(isImageAttachment({ name: 'notes.txt' })).toBe(false);
+    expect(
+      isImageAttachment({ name: 'clip.mp4', contentType: 'video/mp4' }),
+    ).toBe(false);
   });
 });
 

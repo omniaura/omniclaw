@@ -32,7 +32,7 @@ export function renderLogsContent(state: WebStateProvider): string {
     `<div class="logs-toolbar-center">` +
     // Search input
     `<div class="logs-search">` +
-    `<input type="text" id="logs-search-input" placeholder="Search logs (regex supported)…" spellcheck="false" autocomplete="off">` +
+    `<input type="text" id="logs-search-input" placeholder="Search logs…" spellcheck="false" autocomplete="off">` +
     `<label class="logs-search-option"><input type="checkbox" id="logs-regex-toggle"> regex</label>` +
     `</div>` +
     `</div>` +

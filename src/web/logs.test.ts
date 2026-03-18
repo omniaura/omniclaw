@@ -75,7 +75,7 @@ describe('renderLogsContent', () => {
   it('renders search input', () => {
     const html = renderLogsContent(makeState());
     expect(html).toContain('logs-search-input');
-    expect(html).toContain('regex supported');
+    expect(html).toContain('Search logs');
   });
 
   it('renders level filter buttons', () => {
