@@ -1,10 +1,6 @@
 {
   "permissions": {
-    "allow": [
-      "Read(path:.env.example)"
-    ],
-    "deny": [
-      "Read(path:.env)"
-    ]
+    "allow": ["Read(path:.env.example)"],
+    "deny": ["Read(path:.env)"]
   }
 }

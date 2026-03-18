@@ -9,12 +9,14 @@ disable-model-invocation: true
 This skill migrates OmniClaw from Apple Container (macOS-only) to Docker for cross-platform support (macOS and Linux).
 
 **What this changes:**
+
 - Container runtime: Apple Container → Docker
 - Mount syntax: `--mount type=bind,...,readonly` → `-v path:path:ro`
 - Startup check: `container system status` → `docker info`
 - Build commands: `container build/run` → `docker build/run`
 
 **What stays the same:**
+
 - Dockerfile (already Docker-compatible)
 - Agent runner code
 - Mount security/allowlist validation
@@ -29,6 +31,7 @@ docker --version && docker info >/dev/null 2>&1 && echo "Docker ready" || echo "
 ```
 
 If Docker is not installed:
+
 - **macOS**: Download from https://docker.com/products/docker-desktop
 - **Linux**: `curl -fsSL https://get.docker.com | sh && sudo systemctl start docker`
 
@@ -50,20 +53,20 @@ Edit `src/container-runner.ts`:
 
 ```typescript
 // Before:
-    // Apple Container only supports directory mounts, not file mounts
+// Apple Container only supports directory mounts, not file mounts
 
 // After:
-    // Docker bind mounts work with both files and directories
+// Docker bind mounts work with both files and directories
 ```
 
 ### 1c. Update env workaround comment (around line 120)
 
 ```typescript
 // Before:
-  // Environment file directory (workaround for Apple Container -i env var bug)
+// Environment file directory (workaround for Apple Container -i env var bug)
 
 // After:
-  // Environment file directory (keeps credentials out of process listings)
+// Environment file directory (keeps credentials out of process listings)
 ```
 
 ### 1d. Update buildContainerArgs function
@@ -114,15 +117,33 @@ function ensureDockerRunning(): void {
     logger.debug('Docker daemon is running');
   } catch {
     logger.error('Docker daemon is not running');
-    console.error('\n╔════════════════════════════════════════════════════════════════╗');
-    console.error('║  FATAL: Docker is not running                                  ║');
-    console.error('║                                                                ║');
-    console.error('║  Agents cannot run without Docker. To fix:                     ║');
-    console.error('║  macOS: Start Docker Desktop                                   ║');
-    console.error('║  Linux: sudo systemctl start docker                            ║');
-    console.error('║                                                                ║');
-    console.error('║  Install from: https://docker.com/products/docker-desktop      ║');
-    console.error('╚════════════════════════════════════════════════════════════════╝\n');
+    console.error(
+      '\n╔════════════════════════════════════════════════════════════════╗',
+    );
+    console.error(
+      '║  FATAL: Docker is not running                                  ║',
+    );
+    console.error(
+      '║                                                                ║',
+    );
+    console.error(
+      '║  Agents cannot run without Docker. To fix:                     ║',
+    );
+    console.error(
+      '║  macOS: Start Docker Desktop                                   ║',
+    );
+    console.error(
+      '║  Linux: sudo systemctl start docker                            ║',
+    );
+    console.error(
+      '║                                                                ║',
+    );
+    console.error(
+      '║  Install from: https://docker.com/products/docker-desktop      ║',
+    );
+    console.error(
+      '╚════════════════════════════════════════════════════════════════╝\n',
+    );
     throw new Error('Docker is required but not running');
   }
 }
@@ -132,10 +153,10 @@ function ensureDockerRunning(): void {
 
 ```typescript
 // Before:
-  ensureContainerSystemRunning();
+ensureContainerSystemRunning();
 
 // After:
-  ensureDockerRunning();
+ensureDockerRunning();
 ```
 
 ## 3. Update Build Script
@@ -168,19 +189,20 @@ echo "  echo '{...}' | docker run -i ${IMAGE_NAME}:${TAG}"
 
 Update references in documentation files:
 
-| File | Find | Replace |
-|------|------|---------|
-| `CLAUDE.md` | "Apple Container (Linux VMs)" | "Docker containers" |
-| `README.md` | "Apple containers" | "Docker containers" |
-| `README.md` | "Apple Container" | "Docker" |
-| `README.md` | Requirements section | Update to show Docker instead |
-| `docs/REQUIREMENTS.md` | "Apple Container" | "Docker" |
-| `docs/SPEC.md` | "APPLE CONTAINER" | "DOCKER CONTAINER" |
-| `docs/SPEC.md` | All Apple Container references | Docker equivalents |
+| File                   | Find                           | Replace                       |
+| ---------------------- | ------------------------------ | ----------------------------- |
+| `CLAUDE.md`            | "Apple Container (Linux VMs)"  | "Docker containers"           |
+| `README.md`            | "Apple containers"             | "Docker containers"           |
+| `README.md`            | "Apple Container"              | "Docker"                      |
+| `README.md`            | Requirements section           | Update to show Docker instead |
+| `docs/REQUIREMENTS.md` | "Apple Container"              | "Docker"                      |
+| `docs/SPEC.md`         | "APPLE CONTAINER"              | "DOCKER CONTAINER"            |
+| `docs/SPEC.md`         | All Apple Container references | Docker equivalents            |
 
 ### Key README.md updates:
 
 **Requirements section:**
+
 ```markdown
 ## Requirements
 
@@ -191,6 +213,7 @@ Update references in documentation files:
 ```
 
 **FAQ - "Why Docker?":**
+
 ```markdown
 **Why Docker?**
 
@@ -198,6 +221,7 @@ Docker provides cross-platform support (macOS and Linux), a large ecosystem, and
 ```
 
 **FAQ - "Can I run this on Linux?":**
+
 ```markdown
 **Can I run this on Linux?**
 
@@ -220,9 +244,11 @@ docker --version && docker info >/dev/null 2>&1 && echo "Docker is running" || e
 \`\`\`
 
 If not installed or not running, tell the user:
+
 > Docker is required for running agents in isolated environments.
 >
 > **macOS:**
+>
 > 1. Download Docker Desktop from https://docker.com/products/docker-desktop
 > 2. Install and start Docker Desktop
 > 3. Wait for the whale icon in the menu bar to stop animating
@@ -231,7 +257,7 @@ If not installed or not running, tell the user:
 > \`\`\`bash
 > curl -fsSL https://get.docker.com | sh
 > sudo systemctl start docker
-> sudo usermod -aG docker $USER  # Then log out and back in
+> sudo usermod -aG docker $USER # Then log out and back in
 > \`\`\`
 >
 > Let me know when you've completed these steps.
@@ -244,6 +270,7 @@ docker run --rm hello-world
 ```
 
 Update build verification:
+
 ```markdown
 Verify the build succeeded:
 
@@ -259,15 +286,16 @@ Update troubleshooting section to reference Docker commands.
 
 Replace all `container` commands with `docker` equivalents:
 
-| Before | After |
-|--------|-------|
-| `container run` | `docker run` |
-| `container system status` | `docker info` |
-| `container builder prune` | `docker builder prune` |
-| `container images` | `docker images` |
-| `--mount type=bind,source=...,readonly` | `-v ...:ro` |
+| Before                                  | After                  |
+| --------------------------------------- | ---------------------- |
+| `container run`                         | `docker run`           |
+| `container system status`               | `docker info`          |
+| `container builder prune`               | `docker builder prune` |
+| `container images`                      | `docker images`        |
+| `--mount type=bind,source=...,readonly` | `-v ...:ro`            |
 
 Update the architecture diagram header:
+
 ```
 Host (macOS/Linux)                    Container (Docker)
 ```
@@ -328,17 +356,20 @@ npm run dev
 ## Troubleshooting
 
 **Docker not running:**
+
 - macOS: Start Docker Desktop from Applications
 - Linux: `sudo systemctl start docker`
 - Verify: `docker info`
 
 **Permission denied on Docker socket (Linux):**
+
 ```bash
 sudo usermod -aG docker $USER
 # Log out and back in
 ```
 
 **Image build fails:**
+
 ```bash
 # Clean rebuild
 docker builder prune -af
@@ -350,14 +381,14 @@ Check directory permissions on the host. The container runs as uid 1000.
 
 ## Summary of Changed Files
 
-| File | Type of Change |
-|------|----------------|
-| `src/container-runner.ts` | Mount syntax, spawn command, comments |
-| `src/index.ts` | Startup check function |
-| `container/build.sh` | Build and run commands |
-| `CLAUDE.md` | Quick context |
-| `README.md` | Requirements, FAQ |
-| `docs/REQUIREMENTS.md` | Architecture references |
-| `docs/SPEC.md` | Architecture diagram, tech stack |
-| `.claude/skills/setup/SKILL.md` | Installation instructions |
-| `.claude/skills/debug/SKILL.md` | Debug commands |
+| File                            | Type of Change                        |
+| ------------------------------- | ------------------------------------- |
+| `src/container-runner.ts`       | Mount syntax, spawn command, comments |
+| `src/index.ts`                  | Startup check function                |
+| `container/build.sh`            | Build and run commands                |
+| `CLAUDE.md`                     | Quick context                         |
+| `README.md`                     | Requirements, FAQ                     |
+| `docs/REQUIREMENTS.md`          | Architecture references               |
+| `docs/SPEC.md`                  | Architecture diagram, tech stack      |
+| `.claude/skills/setup/SKILL.md` | Installation instructions             |
+| `.claude/skills/debug/SKILL.md` | Debug commands                        |

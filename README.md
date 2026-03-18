@@ -64,6 +64,7 @@ Talk to your assistant with the trigger word (default: `@Omni`):
 ```
 
 From the main channel (your self-chat), you can manage groups and tasks:
+
 ```
 @Omni list all scheduled tasks across groups
 @Omni pause the Monday briefing task
@@ -96,14 +97,17 @@ Users then run `/add-telegram` on their fork and get clean code that does exactl
 Skills we'd love to see:
 
 **Communication Channels**
+
 - `/add-telegram` - Add Telegram as channel. Should give the user option to replace WhatsApp or add as additional channel. Also should be possible to add it as a control channel (where it can trigger actions) or just a channel that can be used in actions triggered elsewhere
 - `/add-slack` - Add Slack
 - `/add-discord` - Add Discord
 
 **Platform Support**
+
 - `/setup-windows` - Windows via WSL2 + Docker
 
 **Session Management**
+
 - `/add-clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
 
 ## Requirements
@@ -122,6 +126,7 @@ WhatsApp (baileys) --> SQLite --> Polling loop --> Container (Claude Agent SDK) 
 Single Node.js process. Agents execute in isolated Linux containers with mounted directories. Per-group message queue with concurrency control. IPC via filesystem.
 
 Key files:
+
 - `src/index.ts` - Orchestrator: state, message loop, agent invocation
 - `src/channels/whatsapp.ts` - WhatsApp connection, auth, send/receive
 - `src/ipc.ts` - IPC watcher and task processing

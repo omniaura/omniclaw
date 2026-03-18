@@ -17,7 +17,12 @@ describe('voice-transcription skill package', () => {
   });
 
   it('has all files declared in adds', () => {
-    const transcriptionFile = path.join(skillDir, 'add', 'src', 'transcription.ts');
+    const transcriptionFile = path.join(
+      skillDir,
+      'add',
+      'src',
+      'transcription.ts',
+    );
     expect(fs.existsSync(transcriptionFile)).toBe(true);
 
     const content = fs.readFileSync(transcriptionFile, 'utf-8');
@@ -29,16 +34,48 @@ describe('voice-transcription skill package', () => {
   });
 
   it('has all files declared in modifies', () => {
-    const whatsappFile = path.join(skillDir, 'modify', 'src', 'channels', 'whatsapp.ts');
-    const whatsappTestFile = path.join(skillDir, 'modify', 'src', 'channels', 'whatsapp.test.ts');
+    const whatsappFile = path.join(
+      skillDir,
+      'modify',
+      'src',
+      'channels',
+      'whatsapp.ts',
+    );
+    const whatsappTestFile = path.join(
+      skillDir,
+      'modify',
+      'src',
+      'channels',
+      'whatsapp.test.ts',
+    );
 
     expect(fs.existsSync(whatsappFile)).toBe(true);
     expect(fs.existsSync(whatsappTestFile)).toBe(true);
   });
 
   it('has intent files for modified files', () => {
-    expect(fs.existsSync(path.join(skillDir, 'modify', 'src', 'channels', 'whatsapp.ts.intent.md'))).toBe(true);
-    expect(fs.existsSync(path.join(skillDir, 'modify', 'src', 'channels', 'whatsapp.test.ts.intent.md'))).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(
+          skillDir,
+          'modify',
+          'src',
+          'channels',
+          'whatsapp.ts.intent.md',
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(
+          skillDir,
+          'modify',
+          'src',
+          'channels',
+          'whatsapp.test.ts.intent.md',
+        ),
+      ),
+    ).toBe(true);
   });
 
   it('modified whatsapp.ts preserves core structure', () => {
@@ -73,7 +110,9 @@ describe('voice-transcription skill package', () => {
     );
 
     // Transcription imports
-    expect(content).toContain("import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js'");
+    expect(content).toContain(
+      "import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js'",
+    );
 
     // Voice message handling
     expect(content).toContain('isVoiceMessage(msg)');

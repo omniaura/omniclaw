@@ -73,6 +73,7 @@ cd container && ./build.sh
 ```
 
 **If the build fails:**
+
 - Read `logs/setup.log` or check the terminal output for errors
 - Common issues:
   - Network timeout downloading Graphite → retry the build
@@ -100,6 +101,7 @@ Tell the user:
 > Graphite needs a GitHub token to authenticate. You can use the same token configured for OmniClaw.
 >
 > If you haven't set up GitHub integration yet:
+>
 > 1. Go to https://github.com/settings/tokens (click **Tokens (classic)**)
 > 2. Generate a new **classic** token with the **`repo`** scope
 > 3. Add it to `.env`: `GITHUB_TOKEN=<token>`
@@ -114,6 +116,7 @@ Wait for confirmation, then verify the token is in `.env`.
 Graphite authentication is handled automatically by the container entrypoint script.
 
 When a container starts:
+
 1. The entrypoint sources environment variables (including `GITHUB_TOKEN`)
 2. If Graphite CLI is installed and not authenticated, it runs: `echo "$GITHUB_TOKEN" | gt auth --token -`
 3. This happens on every container start, so authentication is always fresh
@@ -142,6 +145,7 @@ docker exec "$CONTAINER" gt auth status
 ```
 
 Expected output:
+
 ```text
 @withgraphite/graphite-cli@1.7.x
 ✓ Authenticated as <your-github-username>
@@ -157,9 +161,10 @@ When containers start, skills from `container/skills/` are automatically availab
 
 Tell the user:
 
-> ✅ *Graphite CLI is now installed and authenticated!*
+> ✅ _Graphite CLI is now installed and authenticated!_
 >
 > You can now use Graphite commands inside the container:
+>
 > - `gt stack submit` - Submit a stack of PRs
 > - `gt stack restack` - Rebase the stack
 > - `gt stack` - View current stack
@@ -176,6 +181,7 @@ Tell the user:
 Graphite installation didn't work or binary isn't in PATH.
 
 Fix:
+
 ```bash
 # Manually install in running container
 CONTAINER=$(docker ps --filter "label=omniclaw.group" --format "{{.Names}}" | head -1)
@@ -193,6 +199,7 @@ docker exec "$CONTAINER" bash -c "curl -fsSL https://graphite.dev/install.sh | s
 After rebuilding the image, existing containers need to be recreated.
 
 Restart the service:
+
 ```bash
 launchctl kickstart -k gui/$(id -u)/com.omniclaw
 ```

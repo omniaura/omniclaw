@@ -320,7 +320,7 @@ CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
 
 ANTHROPIC_API_KEY=sk-ant-api03-...
 
-```
+````
 
 Only auth and selected runtime variables are extracted to per-runtime files under
 `data/env/<runtime-folder>/env` and mounted into containers at
@@ -348,7 +348,7 @@ CODEX_API_KEY=your_openai_api_key
 
 # Optional: Override the default model
 CODEX_MODEL=gpt-5.3-codex
-```
+````
 
 The Codex runtime starts `codex --dangerously-bypass-approvals-and-sandbox app-server` inside the container and talks to it over JSON-RPC/stdio. Thread configuration keeps `never` approval, and each turn declares the container as an `externalSandbox` so Codex does not try to apply its native sandbox inside OmniClaw's container sandbox. OmniClaw persists the provider thread id as the session id for explicit `thread/resume` on follow-up turns.
 

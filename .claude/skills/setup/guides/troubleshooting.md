@@ -3,6 +3,7 @@
 ## Service not starting
 
 Check `logs/omniclaw.error.log`. Common causes:
+
 - Wrong Node/bun path in plist/unit file → re-run step 10 of fresh install
 - Missing `.env` → re-run step 4
 - Missing WhatsApp auth → re-run step 5
@@ -24,6 +25,7 @@ If `loginctl enable-linger` fails with a permissions error, it may need sudo or 
 ## Container agent fails ("Claude Code process exited with code 1")
 
 Ensure container runtime is running:
+
 - Apple Container: `container system start`
 - Docker: `open -a Docker`
 
@@ -51,6 +53,7 @@ bun run build && launchctl kickstart -k gui/$(id -u)/com.omniclaw
 Check `logs/auto-update.log`. Then verify the scheduler is loaded:
 
 **macOS:**
+
 ```bash
 launchctl list | grep omniclaw.autoupdate
 # If missing, load it:
@@ -58,6 +61,7 @@ launchctl load ~/Library/LaunchAgents/com.omniclaw.autoupdate.plist
 ```
 
 **Linux:**
+
 ```bash
 systemctl --user status omniclaw-autoupdate.timer
 systemctl --user list-timers | grep omniclaw
@@ -70,6 +74,7 @@ systemctl --user start omniclaw-autoupdate.service
 If the scheduler is missing entirely: re-run step 10b of fresh install.
 
 Test the script directly (both platforms):
+
 ```bash
 bash container/auto-update.sh
 ```

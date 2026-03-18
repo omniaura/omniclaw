@@ -24,6 +24,7 @@ container run -i --rm --entrypoint wc omniclaw-agent:latest -l /app/src/index.ts
 ```
 
 Stale or errors → flush cache and rebuild:
+
 ```bash
 container builder stop && container builder rm && container builder start
 ./container/build.sh
@@ -90,6 +91,7 @@ These require explicit action — existing agents are unaffected by default.
 Agents can see open PRs, issues, and review comments in their system prompt. See [advanced-setup.md](advanced-setup.md) for full config.
 
 Quick setup:
+
 1. Ensure `GITHUB_TOKEN` is in `.env`
 2. Create `data/github-watches.json` with agent → repo mappings
 3. Restart the service
@@ -121,6 +123,7 @@ Add to `.env`: `OPENCODE_MODEL=anthropic/claude-sonnet-4-5`
 ### Multiple Discord bots
 
 Add to `.env`:
+
 ```
 DISCORD_BOT_IDS=CLAUDE,OPENCODE
 DISCORD_BOT_CLAUDE_TOKEN=<existing>

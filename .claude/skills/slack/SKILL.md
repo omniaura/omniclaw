@@ -22,6 +22,7 @@ After creating the app:
 ### 3. Set Environment Variables
 
 Add to `.env`:
+
 ```
 SLACK_BOT_TOKEN=xoxb-your-token
 SLACK_APP_TOKEN=xapp-your-token
@@ -49,6 +50,7 @@ systemctl --user restart omniclaw                   # Linux
 ```
 
 Check logs for `Slack bot connected`:
+
 ```bash
 grep -i slack logs/omniclaw.log | tail -5
 ```
@@ -80,12 +82,12 @@ Requires `SLACK_BOT_TOKEN` env var.
 
 ## Troubleshooting
 
-| Issue | Fix |
-|-------|-----|
-| "Failed to connect Slack bot" | Check both `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` are set |
-| Bot doesn't respond in channel | Verify the bot is invited to the channel and a `channel_subscriptions` row exists |
-| "Message from unregistered Slack channel" in logs | Add a subscription for that channel JID |
-| Socket disconnects | Slack reconnects automatically; check network if persistent |
+| Issue                                             | Fix                                                                               |
+| ------------------------------------------------- | --------------------------------------------------------------------------------- |
+| "Failed to connect Slack bot"                     | Check both `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` are set                        |
+| Bot doesn't respond in channel                    | Verify the bot is invited to the channel and a `channel_subscriptions` row exists |
+| "Message from unregistered Slack channel" in logs | Add a subscription for that channel JID                                           |
+| Socket disconnects                                | Slack reconnects automatically; check network if persistent                       |
 
 ## Files
 
