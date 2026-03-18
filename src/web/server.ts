@@ -124,14 +124,17 @@ export function startWebServer(
         req,
         url.pathname,
         bindHostname,
-        trustLanDiscoveryAdmin,
+        // When no auth is configured, implicitly trust private-network requests
+        // so WiFi-based discovery works out of the box without WEB_UI_USER/WEB_UI_PASS.
+        true, // no auth configured → implicitly trust private network
       )
     ) {
-      // Discovery admin routes MUST have auth — reject if credentials not configured
+      // Discovery admin routes from the public internet MUST have auth.
+      // Private-network requests (loopback, LAN) are allowed without credentials.
       return new Response(
         JSON.stringify({
           error:
-            'Discovery admin routes require WEB_UI_USER/WEB_UI_PASS to be configured',
+            'Discovery admin routes require authentication (set WEB_UI_USER/WEB_UI_PASS or access from a private network)',
         }),
         {
           status: 403,
