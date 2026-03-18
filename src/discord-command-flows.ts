@@ -35,6 +35,7 @@ interface DiscordFlowFile {
 
 const COMMANDS_FILENAME = 'discord-commands.json';
 const COMMAND_NAME_PATTERN = /^[a-z0-9_-]{1,32}$/;
+const MAX_PROMPT_LENGTH = 4000;
 
 const BUILTIN_COMMANDS: DiscordFlowDefinition[] = [
   {
@@ -185,6 +186,18 @@ function normalizeFlow(
     logger.warn({ source, name }, 'Ignoring Discord flow with empty prompt');
     return null;
   }
+  if (prompt.length > MAX_PROMPT_LENGTH) {
+    logger.warn(
+      {
+        source,
+        name,
+        promptLength: prompt.length,
+        maxPromptLength: MAX_PROMPT_LENGTH,
+      },
+      'Ignoring Discord flow with oversized prompt',
+    );
+    return null;
+  }
 
   const options = Array.isArray(record.options)
     ? record.options
@@ -259,22 +272,6 @@ export function getDiscordFlowDefinitionsForGroup(
   }
 
   return [...commands.values()].sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function optionTypeToDiscord(
-  type: DiscordFlowOptionType | undefined,
-):
-  | ApplicationCommandOptionType.String
-  | ApplicationCommandOptionType.Integer
-  | ApplicationCommandOptionType.Boolean {
-  switch (type) {
-    case 'integer':
-      return ApplicationCommandOptionType.Integer;
-    case 'boolean':
-      return ApplicationCommandOptionType.Boolean;
-    default:
-      return ApplicationCommandOptionType.String;
-  }
 }
 
 export function buildDiscordSlashCommandPayloads(

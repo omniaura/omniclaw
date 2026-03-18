@@ -118,6 +118,37 @@ describe('discord command flows', () => {
     }
   });
 
+  it('ignores custom commands with oversized prompts', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-flows-'));
+    const groupsDir = path.join(tempRoot, 'groups');
+
+    try {
+      fs.mkdirSync(path.join(groupsDir, 'test-agent'), { recursive: true });
+      fs.writeFileSync(
+        path.join(groupsDir, 'test-agent', 'discord-commands.json'),
+        JSON.stringify({
+          commands: [
+            {
+              name: 'too-big',
+              description: 'Oversized prompt',
+              prompt: 'x'.repeat(4001),
+            },
+          ],
+        }),
+      );
+
+      const commands = getDiscordFlowDefinitionsForGroup(
+        makeGroup(),
+        groupsDir,
+      );
+      expect(
+        commands.find((command) => command.name === 'too-big'),
+      ).toBeUndefined();
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('builds slash payloads with Discord option types', () => {
     const payloads = buildDiscordSlashCommandPayloads([makeGroup()]);
     const mergemaster = payloads.find(
