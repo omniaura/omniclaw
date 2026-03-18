@@ -48,27 +48,6 @@ export function getAttachmentWorkspaceFolder(
   return workspaceFolder;
 }
 
-const IMAGE_ATTACHMENT_EXTENSIONS = new Set([
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.webp',
-  '.bmp',
-  '.svg',
-  '.heic',
-  '.heif',
-  '.avif',
-]);
-
-export function isImageAttachment(attachment: {
-  contentType?: string | null;
-  name?: string | null;
-}): boolean {
-  if (attachment.contentType?.startsWith('image/')) return true;
-  const ext = path.extname(attachment.name || '').toLowerCase();
-  return IMAGE_ATTACHMENT_EXTENSIONS.has(ext);
-}
 
 function getAttachmentMediaDir(
   group: Pick<RegisteredGroup, 'folder' | 'channelFolder'>,
