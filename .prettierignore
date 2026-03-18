@@ -1,0 +1,23 @@
+# Dependencies & build
+node_modules/
+dist/
+
+# Lock files
+bun.lock
+package-lock.json
+
+# Data & runtime
+store/
+data/
+logs/
+*.db
+
+# Temporary PR/triage working files (not shipped)
+pr-body*.md
+pr-comment*.md
+triage-*.md
+triage-comments/
+issue-body.md
+
+# Repo tokens (generated)
+repo-tokens/

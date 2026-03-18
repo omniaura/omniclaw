@@ -22,10 +22,10 @@ import { fetchTimeSeriesMetrics } from './s3-analytics/fetcher.ts';
 const metrics = await fetchTimeSeriesMetrics();
 
 // Access chart-ready data
-console.log(metrics.mrr);              // Monthly recurring revenue over time
-console.log(metrics.subscribers);       // Subscriber count over time
-console.log(metrics.dau);              // Daily active users over time
-console.log(metrics.conversion_rate);  // Conversion rate trends
+console.log(metrics.mrr); // Monthly recurring revenue over time
+console.log(metrics.subscribers); // Subscriber count over time
+console.log(metrics.dau); // Daily active users over time
+console.log(metrics.conversion_rate); // Conversion rate trends
 ```
 
 ### Available Metrics

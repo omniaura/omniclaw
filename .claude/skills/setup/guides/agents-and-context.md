@@ -184,11 +184,11 @@ This is automatic — no configuration needed. The data comes from the agent's `
 
 Messages now carry structured sender identity fields:
 
-| Field | Column | Example |
-|-------|--------|---------|
-| Platform | `sender_platform` | `discord`, `whatsapp`, `telegram`, `slack`, `ipc`, `system` |
-| Immutable ID | `sender_user_id` | `discord:123456789`, `whatsapp:15551234567` |
-| Display name | `sender_name` | `Peyton` (mutable, for display only) |
+| Field        | Column            | Example                                                     |
+| ------------ | ----------------- | ----------------------------------------------------------- |
+| Platform     | `sender_platform` | `discord`, `whatsapp`, `telegram`, `slack`, `ipc`, `system` |
+| Immutable ID | `sender_user_id`  | `discord:123456789`, `whatsapp:15551234567`                 |
+| Display name | `sender_name`     | `Peyton` (mutable, for display only)                        |
 
 Sender IDs are canonicalized to `<platform>:<immutable-id>` format across all adapters. The `sender_id` attribute is also exposed in the `<message>` XML that agents receive, alongside `sender` (display name).
 
@@ -212,6 +212,7 @@ grep 'senderIdentity' logs/omniclaw.log | tail -20
 Agents can receive a `# GitHub Context` block in their system prompt showing open PRs, issues, and review comments for configured repos.
 
 Requires:
+
 - `GITHUB_TOKEN` in `.env`
 - `data/github-watches.json` with agent → repo mappings (see [advanced-setup.md](advanced-setup.md))
 
@@ -351,6 +352,7 @@ The `registered_groups.folder` column has a UNIQUE constraint, so you **cannot**
    ```
 
    Create the directories:
+
    ```bash
    mkdir -p groups/agents/<name>
    mkdir -p groups/servers/<server>/<category>/<channel>

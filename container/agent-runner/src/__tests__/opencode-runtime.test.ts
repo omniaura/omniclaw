@@ -99,7 +99,8 @@ describe('classifyPromptResponse', () => {
   it('falls back to a synthetic reply for fresh empty responses', () => {
     expect(classifyPromptResponse(null, false)).toEqual({
       retryFreshSession: false,
-      finalText: 'I processed your message but did not generate a text response.',
+      finalText:
+        'I processed your message but did not generate a text response.',
     });
   });
 

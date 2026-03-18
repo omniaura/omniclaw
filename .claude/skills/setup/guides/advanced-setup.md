@@ -7,6 +7,7 @@ Ask: Do you want the agent to push branches and create pull requests?
 If yes: user needs a GitHub **classic** token with `repo` scope from https://github.com/settings/tokens
 
 Once they provide it, use the **Write tool** to append to `.env` (never echo tokens via shell — it leaks into shell history):
+
 ```dotenv
 GITHUB_TOKEN=<token>
 ```
@@ -48,6 +49,7 @@ Create `data/github-watches.json`:
 For real-time GitHub event notifications (instead of waiting for cache expiry), set up a webhook:
 
 1. Add webhook secret to `.env`:
+
    ```dotenv
    GITHUB_WEBHOOK_SECRET=<your-secret>
    ```
@@ -69,11 +71,13 @@ Ask: Do you want to add a Discord agent?
 ### Bot token
 
 User needs a Discord bot token:
+
 1. https://discord.com/developers/applications → New application → Bot → Reset Token
 2. Under Bot → Privileged Gateway Intents, enable **Presence Intent** AND **Message Content Intent**
 3. Invite via OAuth2 → URL Generator (scopes: `bot`, permissions: `Send Messages`, `Read Message History`)
 
 Use the **Write tool** to append to `.env` (never echo tokens):
+
 ```dotenv
 DISCORD_BOT_IDS=<BOT_ID>
 DISCORD_BOT_<BOT_ID>_TOKEN=<token>
@@ -100,6 +104,7 @@ JID format: `dc:<channel_id>`. Ask user to right-click the channel → Copy Chan
 ```
 
 Restart the service:
+
 ```bash
 launchctl kickstart -k gui/$(id -u)/com.omniclaw
 ```
@@ -120,6 +125,7 @@ sqlite3 store/messages.db \
 ```
 
 Create the corresponding directories under `groups/`:
+
 ```bash
 mkdir -p groups/agents/<name>
 mkdir -p groups/servers/<server>/<category>/<channel>
