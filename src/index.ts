@@ -1292,6 +1292,10 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
 
   let hadError = false;
   let outputSentToUser = false;
+  // Edited-message streaming: a single message that gets updated with intermediate tool calls
+  let intermediateMessageId: string | null = null;
+  const streamIntermediates =
+    !!group.containerConfig?.streamIntermediates && !!channel.editMessage;
 
   // Patterns that indicate system/auth errors — never send these to channels
   // Adopted from [Upstream PR #298] - Prevents infinite loops from auth failures
@@ -1361,6 +1365,36 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
         // Adopted from [Upstream PR #243] - Critical stability fix
         try {
           if (result.intermediate) {
+            if (streamIntermediates && result.result) {
+              const raw =
+                typeof result.result === 'string'
+                  ? result.result
+                  : JSON.stringify(result.result);
+              const text = raw
+                .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+                .trim();
+              if (!text) return;
+              try {
+                if (!intermediateMessageId) {
+                  // First intermediate: send a new standalone message
+                  const id = await channel.sendMessage(
+                    chatJid,
+                    text.slice(0, 2000),
+                  );
+                  if (id && typeof id === 'string')
+                    intermediateMessageId = id;
+                } else {
+                  // Subsequent intermediates: edit that same status message
+                  await channel.editMessage!(
+                    chatJid,
+                    intermediateMessageId,
+                    text.slice(0, 2000),
+                  );
+                }
+              } catch (err) {
+                log.debug({ err }, 'Intermediate streaming failed (non-fatal)');
+              }
+            }
             return;
           }
 
@@ -1423,6 +1457,8 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
                 }
               }
             }
+            // Reset intermediate message so the next user message gets a fresh status message
+            intermediateMessageId = null;
             // Only reset idle timer on actual results, not session-update markers (result: null)
             resetIdleTimer();
           }
