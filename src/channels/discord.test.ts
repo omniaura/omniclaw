@@ -77,25 +77,74 @@ describe('getAttachmentWorkspaceFolder', () => {
   });
 });
 
+// --- isImageAttachment ---
+
 describe('isImageAttachment', () => {
-  it('detects image attachments from content type', () => {
+  it('matches when contentType starts with image/', () => {
     expect(
-      isImageAttachment({ name: 'screenshot.bin', contentType: 'image/png' }),
+      isImageAttachment({ contentType: 'image/png', name: 'photo.png' }),
+    ).toBe(true);
+    expect(
+      isImageAttachment({ contentType: 'image/jpeg', name: 'photo.jpg' }),
+    ).toBe(true);
+    expect(
+      isImageAttachment({ contentType: 'image/gif', name: 'anim.gif' }),
+    ).toBe(true);
+    expect(
+      isImageAttachment({ contentType: 'image/webp', name: 'img.webp' }),
     ).toBe(true);
   });
 
-  it('falls back to file extension when content type is missing', () => {
-    expect(isImageAttachment({ name: 'screenshot.PNG' })).toBe(true);
-    expect(isImageAttachment({ name: 'diagram.webp', contentType: null })).toBe(
+  it('rejects when contentType is a known non-image type', () => {
+    expect(
+      isImageAttachment({ contentType: 'application/pdf', name: 'doc.pdf' }),
+    ).toBe(false);
+    expect(
+      isImageAttachment({ contentType: 'text/plain', name: 'notes.txt' }),
+    ).toBe(false);
+    expect(
+      isImageAttachment({ contentType: 'video/mp4', name: 'clip.mp4' }),
+    ).toBe(false);
+  });
+
+  it('falls back to extension when contentType is null', () => {
+    expect(
+      isImageAttachment({ contentType: null, name: 'screenshot.png' }),
+    ).toBe(true);
+    expect(isImageAttachment({ contentType: null, name: 'photo.jpg' })).toBe(
+      true,
+    );
+    expect(isImageAttachment({ contentType: null, name: 'image.jpeg' })).toBe(
+      true,
+    );
+    expect(isImageAttachment({ contentType: null, name: 'anim.gif' })).toBe(
+      true,
+    );
+    expect(isImageAttachment({ contentType: null, name: 'pic.webp' })).toBe(
       true,
     );
   });
 
-  it('does not treat non-image files as images', () => {
-    expect(isImageAttachment({ name: 'notes.txt' })).toBe(false);
-    expect(
-      isImageAttachment({ name: 'clip.mp4', contentType: 'video/mp4' }),
-    ).toBe(false);
+  it('falls back to extension when contentType is undefined', () => {
+    expect(isImageAttachment({ name: 'screenshot.png' })).toBe(true);
+    expect(isImageAttachment({ name: 'doc.pdf' })).toBe(false);
+  });
+
+  it('rejects non-image extensions when contentType is null', () => {
+    expect(isImageAttachment({ contentType: null, name: 'file.txt' })).toBe(
+      false,
+    );
+    expect(isImageAttachment({ contentType: null, name: 'app.exe' })).toBe(
+      false,
+    );
+    expect(isImageAttachment({ contentType: null, name: 'data.json' })).toBe(
+      false,
+    );
+  });
+
+  it('handles missing name when contentType is null', () => {
+    expect(isImageAttachment({ contentType: null })).toBe(false);
+    expect(isImageAttachment({ contentType: null, name: null })).toBe(false);
   });
 });
 
