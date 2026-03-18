@@ -48,6 +48,28 @@ export function getAttachmentWorkspaceFolder(
   return workspaceFolder;
 }
 
+const IMAGE_ATTACHMENT_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.bmp',
+  '.svg',
+  '.heic',
+  '.heif',
+  '.avif',
+]);
+
+export function isImageAttachment(attachment: {
+  contentType?: string | null;
+  name?: string | null;
+}): boolean {
+  if (attachment.contentType?.startsWith('image/')) return true;
+  const ext = path.extname(attachment.name || '').toLowerCase();
+  return IMAGE_ATTACHMENT_EXTENSIONS.has(ext);
+}
+
 function getAttachmentMediaDir(
   group: Pick<RegisteredGroup, 'folder' | 'channelFolder'>,
 ): string {
@@ -881,7 +903,7 @@ export class DiscordChannel implements Channel {
     if (message.attachments.size > 0) {
       const parts: string[] = [];
       for (const [, a] of message.attachments) {
-        if (a.contentType?.startsWith('image/')) {
+        if (isImageAttachment(a)) {
           try {
             const mediaDir = getAttachmentMediaDir(group);
             fs.mkdirSync(mediaDir, { recursive: true });
