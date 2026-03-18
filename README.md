@@ -3,182 +3,302 @@
 </p>
 
 <p align="center">
-  Personal Claude assistant from the Omni ecosystem. Runs securely in containers with filesystem isolation.
+  Multi-channel agent orchestration with container isolation, scheduled tasks, and an operational web UI.
 </p>
 
 <p align="center">
   <a href="https://github.com/omniaura/omniclaw">GitHub</a>&nbsp; • &nbsp;
-  <a href="https://discord.gg/VGWXrf8x"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
-  <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
+  <a href="https://discord.gg/ENharzMzbs"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
+  <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="Repository token footprint badge" valign="middle"></a>
 </p>
 
-**OmniClaw** is a personal Claude assistant built for security, simplicity, and extensibility.
+OmniClaw is no longer just a personal chat bot wrapper.
 
-One process. A handful of files. Agents run in actual Linux containers with filesystem isolation, not behind permission checks.
+It is a multi-agent orchestrator for running AI agents across chat surfaces, web operations, scheduled workflows, and trusted peer machines. The core is still one Bun process, but the surrounding system now includes isolated runtimes, layered context, a live Datastar web UI, task execution, peer discovery, and cross-agent messaging.
+
+If old NanoClaw/early OmniClaw was "Claude in WhatsApp with containers," current OmniClaw is "run and manage a network of agents with real operational tooling."
+
+## Why OmniClaw Exists
+
+Most agent systems force a bad tradeoff:
+
+- toy bots are easy to run but have no isolation, observability, or operational control
+- enterprise frameworks add layers of queues, services, dashboards, and abstractions until nobody can reason about them end to end
+
+OmniClaw aims for the middle path:
+
+- one orchestrator you can still understand
+- real container boundaries instead of pretend permissions
+- multiple agents, channels, runtimes, and machines without turning into platform sludge
+- enough web UI and state to operate the system daily
+- enough flexibility to evolve toward a true software factory
+
+## What OmniClaw Does
+
+- Runs AI agents behind Apple Container or Docker with explicit mounts and runtime-specific credential allowlists
+- Routes messages from WhatsApp, Discord, Telegram, and Slack into agent-specific workspaces and context layers
+- Manages multiple agents per server/channel topology instead of assuming one bot equals one workspace
+- Ships a built-in operations UI for topology, logs, tasks, conversations, context editing, network discovery, and system status
+- Runs scheduled work as first-class agent tasks with logs, controls, and message delivery
+- Supports cross-agent messaging and trusted peer discovery so instances can collaborate across machines
+- Keeps state in SQLite and uses file-based IPC so the host process stays understandable and debuggable
+
+## What It Feels Like To Use
+
+You can use OmniClaw as:
+
+- a personal assistant reachable from multiple chat platforms
+- an always-on engineer that can inspect repos, open PRs, and follow up later via scheduled tasks
+- a team of named agents with different runtimes, channel coverage, and context layers
+- an operations surface for running agents through the web UI instead of hoping a terminal log explains everything
+- a foundation for more autonomous software-factory workflows over time
 
 ## Quick Start
 
 ```bash
 git clone https://github.com/omniaura/omniclaw.git
 cd omniclaw
+bun install
 claude
 ```
 
-Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup, service configuration.
+For first-time setup, run `/setup` inside Claude Code.
 
-## Philosophy
+If you are developing locally instead of using the setup skill, the main entry points are:
 
-**Small enough to understand.** One process, a few source files. No microservices, no message queues, no abstraction layers. Have Claude Code walk you through it.
-
-**Secure by isolation.** Agents run in Linux containers (Apple Container on macOS, or Docker). They can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
-
-**Built for one user.** This isn't a framework. It's working software that fits my exact needs. You fork it and have Claude Code make it match your exact needs.
-
-**Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that this is safe.
-
-**AI-native.** No installation wizard; Claude Code guides setup. No monitoring dashboard; ask Claude what's happening. No debugging tools; describe the problem, Claude fixes it.
-
-**Skills over features.** Contributors shouldn't add features (e.g. support for Telegram) to the codebase. Instead, they contribute [claude code skills](https://code.claude.com/docs/en/skills) like `/add-telegram` that transform your fork. You end up with clean code that does exactly what you need.
-
-**Best harness, best model.** This runs on Claude Agent SDK, which means you're running Claude Code directly. The harness matters. A bad harness makes even smart models seem dumb, a good harness gives them superpowers. Claude Code is (IMO) the best harness available.
-
-## What It Supports
-
-- **WhatsApp I/O** - Message Claude from your phone
-- **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted
-- **Main channel** - Your private channel (self-chat) for admin control; every other group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
-- **Web access** - Search and fetch content
-- **Container isolation** - Agents sandboxed in Apple Container (macOS) or Docker (macOS/Linux)
-- **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks (first personal AI assistant to support this)
-- **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
-
-## Usage
-
-Talk to your assistant with the trigger word (default: `@Omni`):
-
+```bash
+bun run dev
+bun run typecheck
+bun test
+./container/build.sh
 ```
-@Omni send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
-@Omni review the git history for the past week each Friday and update the README if there's drift
-@Omni every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
-```
-
-From the main channel (your self-chat), you can manage groups and tasks:
-
-```
-@Omni list all scheduled tasks across groups
-@Omni pause the Monday briefing task
-@Omni join the Family Chat group
-```
-
-## Customizing
-
-There are no configuration files to learn. Just tell Claude Code what you want:
-
-- "Change the trigger word to @Bob"
-- "Remember in the future to make responses shorter and more direct"
-- "Add a custom greeting when I say good morning"
-- "Store conversation summaries weekly"
-
-Or run `/customize` for guided changes.
-
-The codebase is small enough that Claude can safely modify it.
-
-## Contributing
-
-**Don't add features. Add skills.**
-
-If you want to add Telegram support, don't create a PR that adds Telegram alongside WhatsApp. Instead, contribute a skill file (`.claude/skills/add-telegram/SKILL.md`) that teaches Claude Code how to transform your OmniClaw installation to use Telegram.
-
-Users then run `/add-telegram` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
-
-### RFS (Request for Skills)
-
-Skills we'd love to see:
-
-**Communication Channels**
-
-- `/add-telegram` - Add Telegram as channel. Should give the user option to replace WhatsApp or add as additional channel. Also should be possible to add it as a control channel (where it can trigger actions) or just a channel that can be used in actions triggered elsewhere
-- `/add-slack` - Add Slack
-- `/add-discord` - Add Discord
-
-**Platform Support**
-
-- `/setup-windows` - Windows via WSL2 + Docker
-
-**Session Management**
-
-- `/add-clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
 
 ## Requirements
 
 - macOS or Linux
-- Node.js 22 LTS+ (22.12.0 or newer)
-- [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+- Bun 1.3+
+- [Claude Code](https://claude.ai/download) for setup/customization workflows
+- [Apple Container](https://github.com/apple/container) on macOS or Docker on macOS/Linux
+
+## Core Concepts
+
+### Agents, not just groups
+
+OmniClaw now routes channels to agents. An agent has:
+
+- an `id`, `name`, `folder`, backend, and runtime
+- one or more subscribed chats/channels
+- optional server/category/agent context folders
+- an isolated workspace and persisted session state
+
+Multiple chats can map to the same agent, and one server can host multiple agents.
+
+### Layered context
+
+Context is no longer just a single per-group file. OmniClaw supports layered `CLAUDE.md` context at multiple scopes:
+
+- server
+- category
+- channel
+- agent
+
+This lets one agent inherit shared instructions while still keeping channel-specific memory and files isolated.
+
+### Multiple runtimes
+
+Agents can run with different runtimes depending on the task and credentials you provide:
+
+- `claude-agent-sdk`
+- `opencode` (supported, newer and less proven than Claude Agent SDK)
+- `codex` (supported, newer and less proven than Claude Agent SDK)
+
+### Built-in web UI
+
+The web UI is not a demo page. It is the operational surface for the system and includes:
+
+- Dashboard with topology graph and live stats
+- Agents directory and agent detail pages
+- Conversations browser
+- Context viewer/editor
+- Tasks page with create/pause/resume/delete flows
+- Live logs and IPC inspector
+- Network discovery and peer management
+- System status and runtime visibility
+
+The UI is server-rendered with Datastar and uses SSE for live updates, which keeps the stack simple while still supporting live logs, topology updates, and task state changes.
+
+### Multi-agent coordination
+
+OmniClaw supports agent-to-agent collaboration patterns directly:
+
+- agents can message each other through the registry and routing layer
+- multiple agents can share a server while keeping distinct identities and context
+- heartbeat and scheduled tasks let agents do background work without a human prompting every step
+- trusted peers extend this model across more than one OmniClaw instance
 
 ## Architecture
 
+```text
+Messaging channels -> router/orchestrator -> group queue -> container backend -> agent runtime
+                         |                    |                |
+                         v                    v                v
+                      SQLite              task scheduler    file IPC
+                         |
+                         v
+                   Datastar web UI
 ```
-WhatsApp (baileys) --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+
+Key modules:
+
+- `src/index.ts` - orchestrator, startup, routing, web state, scheduler wiring
+- `src/channels/` - WhatsApp, Discord, Telegram, Slack adapters
+- `src/backends/` - Apple Container and Docker execution backends
+- `src/group-queue.ts` - per-folder execution lanes and concurrency limits
+- `src/ipc.ts` - agent IPC watcher and command handling
+- `src/task-scheduler.ts` - cron, interval, and one-shot task execution
+- `src/db.ts` - SQLite persistence for agents, channels, messages, tasks, and state
+- `src/web/` - web UI pages, image proxy/cache, SSE streams, logs, and network screens
+- `src/discovery/` - trusted peer auth, pairing, remote agent discovery, and sync helpers
+
+## Security Model
+
+OmniClaw is designed around containment, not prompt-only policy.
+
+- Agents run in isolated containers, not in the host process
+- The project root is mounted read-only
+- Writable mounts are explicit and limited
+- Runtime credentials are allowlisted per backend/runtime
+- `.env` and other sensitive files are blocked with multiple layers of defense
+- Path traversal protections are applied across file and IPC entry points
+- Discovery peer auth signs and validates requests instead of trusting the LAN blindly
+
+See `docs/SECURITY.md` for the full model.
+
+## Channel Support
+
+Built into the main codebase today:
+
+- WhatsApp via Baileys
+- Discord via discord.js
+- Telegram via grammy
+- Slack via Bolt
+
+OmniClaw also supports multi-bot routing where a platform has more than one configured bot identity.
+
+## Scheduling and Automation
+
+Scheduled tasks are first-class:
+
+- cron schedules
+- interval schedules
+- one-time schedules
+- task run logs
+- pause/resume/delete controls
+- optional message delivery back into the originating chat
+
+Tasks run as full agents with the same tool access and isolation model as interactive sessions.
+
+## Trusted Peer Discovery
+
+OmniClaw instances can discover and trust each other on the network.
+
+Once paired, peers can:
+
+- expose remote agent inventories
+- proxy remote avatar and chat icon assets safely
+- appear in the web UI's network and agent views
+
+This is intended for trusted OmniClaw-to-OmniClaw collaboration, not anonymous federation.
+
+## Direction
+
+OmniClaw is heading toward a software factory model:
+
+- web UI as the day-to-day operations surface
+- richer agent collaboration patterns
+- multi-machine orchestration without giving up a single understandable source of truth
+- mixing runtimes and models for cost/performance tradeoffs
+- autonomous engineering workflows that dogfood OmniClaw on OmniClaw itself
+
+## Configuration Notes
+
+OmniClaw still prefers code and AI-guided setup over sprawling config files, but it is no longer accurate to describe it as having almost no configuration.
+
+Common environment-driven areas now include:
+
+- channel credentials and multi-bot IDs
+- web UI auth, host, port, and CORS
+- container image, memory, and timeout limits
+- runtime model selection
+- discovery and trusted-LAN settings
+- GitHub webhook integration
+- roster scope and role filters
+
+The committed `.env.example` is intentionally minimal; setup and upgrade skills document the supported variables in more detail.
+
+## Development
+
+Useful commands:
+
+```bash
+bun run dev
+bun run build
+bun run typecheck
+bun run format:check
+bun test
 ```
 
-Single Node.js process. Agents execute in isolated Linux containers with mounted directories. Per-group message queue with concurrency control. IPC via filesystem.
+If you change container runner sources, rebuild the agent image:
 
-Key files:
+```bash
+./container/build.sh
+```
 
-- `src/index.ts` - Orchestrator: state, message loop, agent invocation
-- `src/channels/whatsapp.ts` - WhatsApp connection, auth, send/receive
-- `src/ipc.ts` - IPC watcher and task processing
-- `src/router.ts` - Message formatting and outbound routing
-- `src/group-queue.ts` - Per-group queue with global concurrency limit
-- `src/backends/` - Pluggable backend system (Apple Container, Docker)
-- `src/ipc-snapshots.ts` - Task and group snapshot utilities for IPC
-- `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
-- `groups/*/CLAUDE.md` - Per-group memory
+For Apple Container builds, flush build cache aggressively when debugging stale images:
+
+```bash
+container builder stop && container builder rm && container builder start
+./container/build.sh
+```
+
+## Contributing
+
+Good contributions:
+
+- security fixes
+- bug fixes
+- clearer documentation
+- better tests
+- web UI improvements that match the current architecture
+- operational improvements for runtimes, routing, scheduling, and discovery
+
+Please do not assume the project is WhatsApp-only, skill-only, or "just a forkable personal bot" anymore. Multi-channel support, web UI, peer discovery, multi-agent routing, and runtime flexibility are already core parts of the product.
 
 ## FAQ
 
-**Why WhatsApp and not Telegram/Signal/etc?**
+### Is this still a single-process system?
 
-Because I use WhatsApp. Fork it and run a skill to change it. That's the whole point.
+Yes. The orchestrator is still one Bun process. Isolation comes from the container boundary and file-based IPC, not from splitting the host app into microservices.
 
-**Why Apple Container instead of Docker?**
+### Can I use this without the web UI?
 
-On macOS, Apple Container is lightweight, fast, and optimized for Apple silicon. But Docker is also fully supported—during `/setup`, you can choose which runtime to use. On Linux, Docker is used automatically.
+Yes, but the web UI is now an important built-in operational surface for logs, tasks, conversations, context, and peer management.
 
-**Can I run this on Linux?**
+### Does OmniClaw only support Claude?
 
-Yes. Run `/setup` and it will automatically configure Docker as the container runtime. Thanks to [@dotsetgreg](https://github.com/dotsetgreg) for contributing the `/convert-to-docker` skill.
+No. Claude Agent SDK remains a primary runtime, but the codebase also supports OpenCode and Codex runtimes.
 
-**Is this secure?**
+### Can I run it on Linux?
 
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. You should still review what you're running, but the codebase is small enough that you actually can. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
+Yes. Docker is the normal backend on Linux.
 
-**Why no configuration files?**
+### Why does the README still mention Claude Code setup?
 
-We don't want configuration sprawl. Every user should customize it to so that the code matches exactly what they want rather than configuring a generic system. If you like having config files, tell Claude to add them.
-
-**How do I debug issues?**
-
-Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach.
-
-**Why isn't the setup working for me?**
-
-I don't know. Run `claude`, then run `/debug`. If claude finds an issue that is likely affecting other users, open a PR to modify the setup SKILL.md.
-
-**What changes will be accepted into the codebase?**
-
-Security fixes, bug fixes, and clear improvements to the base configuration. That's it.
-
-Everything else (new capabilities, OS compatibility, hardware support, enhancements) should be contributed as skills.
-
-This keeps the base system minimal and lets every user customize their installation without inheriting features they don't want.
+Because `/setup`, `/customize`, and `/debug` are still the intended onboarding path for many users, even though the codebase has grown far beyond the original minimal WhatsApp-only setup.
 
 ## Community
 
-Questions? Ideas? [Join the Discord](https://discord.gg/VGWXrf8x).
+Questions or ideas? [Join the Discord](https://discord.gg/ENharzMzbs).
 
 ## License
 
