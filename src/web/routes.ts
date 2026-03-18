@@ -6,6 +6,7 @@ import { assertPathWithin } from '../path-security.js';
 import type { ScheduledTask } from '../types.js';
 import type { WebStateProvider } from './types.js';
 import { serveCachedRemoteImage } from './image-cache.js';
+import { sanitizeAvatarUrl, containsTelegramToken } from './sanitize-avatar.js';
 import { renderAgentDetail, buildAgentDetailData } from './agent-detail.js';
 import { renderConversations } from './conversations.js';
 import {
@@ -737,7 +738,7 @@ function handleGetAgentAvatar(
   const agent = agents[agentId];
   if (!agent) return json({ error: 'Agent not found' }, 404);
   return json({
-    avatarUrl: agent.avatarUrl || null,
+    avatarUrl: sanitizeAvatarUrl(agent.avatarUrl),
     avatarSource: agent.avatarSource || null,
   });
 }
@@ -830,6 +831,14 @@ async function handleSetAgentAvatar(
   if (source && !VALID_AVATAR_SOURCES.has(source as string)) {
     return json(
       { error: '"source" must be discord | telegram | slack | custom' },
+      400,
+    );
+  }
+
+  // Reject URLs that contain embedded Telegram bot tokens.
+  if (url && containsTelegramToken(url as string)) {
+    return json(
+      { error: 'URL contains an embedded credential and cannot be stored' },
       400,
     );
   }

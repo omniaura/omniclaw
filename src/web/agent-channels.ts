@@ -1,6 +1,7 @@
 import type { WebStateProvider } from './types.js';
 import { escapeHtml } from './shared.js';
 import type { RemotePeerAgents } from '../discovery/types.js';
+import { sanitizeAvatarUrl } from './sanitize-avatar.js';
 
 export interface ChannelInfo {
   jid: string;
@@ -89,7 +90,7 @@ export function buildAgentChannelData(
       isAdmin: a.isAdmin,
       serverFolder: a.serverFolder,
       agentContextFolder: a.agentContextFolder,
-      avatarUrl: a.avatarUrl,
+      avatarUrl: sanitizeAvatarUrl(a.avatarUrl) ?? undefined,
       serverIconUrl,
       channels,
     };
@@ -105,7 +106,7 @@ export function buildAgentChannelData(
       isAdmin: !!agent.isAdmin,
       serverFolder: agent.serverFolder,
       agentContextFolder: agent.agentContextFolder,
-      avatarUrl: agent.avatarUrl,
+      avatarUrl: sanitizeAvatarUrl(agent.avatarUrl) ?? undefined,
       remoteInstanceId: peer.instanceId,
       remoteInstanceName: peer.instanceName,
       remoteHost: peer.host,

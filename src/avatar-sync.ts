@@ -1,6 +1,11 @@
+import fs from 'fs';
+import path from 'path';
+
+import { GROUPS_DIR } from './config.js';
 import { logger } from './logger.js';
 import { updateAgentAvatar } from './db.js';
 import type { Agent, Channel } from './types.js';
+import { containsTelegramToken } from './web/sanitize-avatar.js';
 
 type AvatarSource = 'discord' | 'telegram' | 'slack';
 type AvatarSubscription = {
@@ -173,9 +178,21 @@ export async function syncAvatars(
 
     try {
       const url = await candidate.channel.getAvatarUrl();
-      if (url && url !== agent.avatarUrl) {
-        updateAgentAvatar(agent.id, url, candidate.platform);
-        agent.avatarUrl = url;
+      if (!url) continue;
+
+      // For Telegram URLs that contain the bot token, download the image
+      // and store a local path. This prevents the token from leaking
+      // through API responses, DB backups, or peer sync.
+      let storedUrl = url;
+      if (containsTelegramToken(url)) {
+        const localPath = await downloadAvatarLocally(url, agent.folder);
+        if (!localPath) continue;
+        storedUrl = localPath;
+      }
+
+      if (storedUrl !== agent.avatarUrl) {
+        updateAgentAvatar(agent.id, storedUrl, candidate.platform);
+        agent.avatarUrl = storedUrl;
         agent.avatarSource = candidate.platform;
         logger.info(
           {
@@ -192,5 +209,38 @@ export async function syncAvatars(
         'Failed to sync avatar',
       );
     }
+  }
+}
+
+/**
+ * Download a remote avatar image and save it locally under the agent's
+ * group folder. Returns the local path suitable for storage in the DB
+ * (e.g., "/avatars/{folder}/avatar.png"), or null on failure.
+ */
+async function downloadAvatarLocally(
+  url: string,
+  agentFolder: string,
+): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      logger.warn(
+        { status: response.status, agentFolder },
+        'Failed to download avatar image',
+      );
+      return null;
+    }
+
+    const dir = path.join(GROUPS_DIR, agentFolder);
+    fs.mkdirSync(dir, { recursive: true });
+
+    const filePath = path.join(dir, 'avatar.png');
+    const bytes = Buffer.from(await response.arrayBuffer());
+    fs.writeFileSync(filePath, bytes);
+
+    return `/avatars/${agentFolder}/avatar.png`;
+  } catch (err) {
+    logger.warn({ err, agentFolder }, 'Failed to download avatar locally');
+    return null;
   }
 }
