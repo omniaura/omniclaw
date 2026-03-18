@@ -35,9 +35,7 @@ function makeState(): WebStateProvider {
   };
 }
 
-function makeSettingsData(
-  overrides: Partial<SettingsData> = {},
-): SettingsData {
+function makeSettingsData(overrides: Partial<SettingsData> = {}): SettingsData {
   return {
     general: {
       assistantName: 'TestBot',
@@ -371,6 +369,16 @@ describe('GET /api/settings route', () => {
     expect(data).toHaveProperty('general');
     expect(data).toHaveProperty('containers');
     expect(data).toHaveProperty('channels');
+  });
+
+  it('returns 405 for non-GET methods', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/api/settings', { method: 'POST' }),
+      makeState(),
+    );
+    expect(res.status).toBe(405);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('Method not allowed');
   });
 });
 

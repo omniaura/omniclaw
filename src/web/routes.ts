@@ -103,7 +103,10 @@ export function handleRequest(
   // --- API routes ---
   if (pathname === '/api/health')
     return json(buildHealthData(state, sseClientCount ?? 0));
-  if (pathname === '/api/settings') return json(buildSettingsData());
+  if (pathname === '/api/settings') {
+    if (method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+    return json(buildSettingsData());
+  }
   if (pathname === '/api/agents') return handleGetAgents(state);
 
   // Tasks — CRUD

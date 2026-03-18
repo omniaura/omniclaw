@@ -142,7 +142,7 @@ export function buildSettingsData(): SettingsData {
     },
     roster: {
       scope: CHANNEL_ROSTER_SCOPE,
-      roleFilters: CHANNEL_ROSTER_ROLE_FILTERS,
+      roleFilters: [...CHANNEL_ROSTER_ROLE_FILTERS],
       cacheTtlMs: CHANNEL_ROSTER_CACHE_TTL_MS,
       refreshIntervalMs: ROSTER_REFRESH_INTERVAL,
     },
@@ -252,7 +252,10 @@ export function renderSettingsContent(data?: SettingsData): string {
           'startup timeout',
           formatMs(settings.containers.startupTimeoutMs),
         ) +
-        settingRow('idle timeout', formatMs(settings.containers.idleTimeoutMs)) +
+        settingRow(
+          'idle timeout',
+          formatMs(settings.containers.idleTimeoutMs),
+        ) +
         settingRow(
           'max output',
           formatBytes(settings.containers.maxOutputSize),
