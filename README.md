@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  Multi-channel AI agent orchestrator with container isolation, a live web UI, scheduling, and trusted peer discovery.
+  Agent infrastructure for the software factory era: multi-channel, multi-agent, container-isolated, and built to operate itself.
 </p>
 
 <p align="center">
@@ -12,17 +12,46 @@
   <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
 </p>
 
-OmniClaw is a Bun-based agent system for running Claude Code, OpenCode, and Codex-style agents behind real container boundaries. It routes messages from WhatsApp, Discord, Telegram, and Slack into isolated agent workspaces, exposes a Datastar-powered web dashboard, and can coordinate scheduled tasks plus trusted remote peers.
+OmniClaw is no longer just a personal chat bot wrapper.
+
+It is a multi-agent control plane for running AI engineers across chat surfaces, web operations, scheduled workflows, and trusted peer machines. The core orchestrator is one Bun process, but the system around it now looks much closer to an agent operating environment: isolated runtimes, layered context, a live Datastar web UI, task execution, peer discovery, cross-agent messaging, and the beginnings of a software factory.
+
+If old NanoClaw/early OmniClaw was "Claude in WhatsApp with containers," current OmniClaw is "run and manage a network of agents with real operational tooling."
+
+## Why OmniClaw Exists
+
+Most agent systems force a bad tradeoff:
+
+- toy bots are easy to run but have no isolation, observability, or operational control
+- enterprise frameworks add layers of queues, services, dashboards, and abstractions until nobody can reason about them end to end
+
+OmniClaw aims for the middle path:
+
+- one orchestrator you can still understand
+- real container boundaries instead of pretend permissions
+- multiple agents, channels, runtimes, and machines without turning into platform sludge
+- enough web UI and state to operate the system daily
+- enough flexibility to evolve toward a true software factory
 
 ## What OmniClaw Does
 
-- Runs one orchestrator process with SQLite state, per-agent routing, and file-based IPC
-- Supports WhatsApp, Discord, Telegram, and Slack, including multi-bot routing for Discord and Slack
-- Executes agents in Apple Container or Docker with explicit mounts and runtime-specific credential allowlists
-- Ships a live web UI for dashboard, agents, tasks, logs, conversations, context files, IPC, network discovery, system health, and settings
-- Supports recurring and one-shot scheduled tasks with run logs and task controls
-- Supports trusted peer discovery so OmniClaw instances can authenticate each other and share remote agent topology
-- Preserves layered context across server, category, channel, and agent folders via `CLAUDE.md`
+- Runs AI agents behind Apple Container or Docker with explicit mounts and runtime-specific credential allowlists
+- Routes messages from WhatsApp, Discord, Telegram, and Slack into agent-specific workspaces and context layers
+- Manages multiple agents per server/channel topology instead of assuming one bot equals one workspace
+- Ships a built-in operations UI for topology, logs, tasks, conversations, context editing, network discovery, system status, and settings
+- Runs scheduled work as first-class agent tasks with logs, controls, and message delivery
+- Supports cross-agent messaging and trusted peer discovery so instances can collaborate across machines
+- Keeps state in SQLite and uses file-based IPC so the host process stays understandable and debuggable
+
+## What It Feels Like To Use
+
+You can use OmniClaw as:
+
+- a personal assistant reachable from multiple chat platforms
+- an always-on engineer that can inspect repos, open PRs, and follow up later via scheduled tasks
+- a team of named agents with different runtimes, channel coverage, and context layers
+- an operations surface for running agents through the web UI instead of hoping a terminal log explains everything
+- a foundation for autonomous backlog -> implementation -> review loops
 
 ## Quick Start
 
@@ -85,7 +114,7 @@ Agents can run with different runtimes depending on the task and credentials you
 
 ### Built-in web UI
 
-The web UI is no longer optional or hypothetical. It is part of the product and includes:
+The web UI is not a demo page. It is the operational surface for the system and includes:
 
 - Dashboard with topology graph and live stats
 - Agents directory and agent detail pages
@@ -96,7 +125,16 @@ The web UI is no longer optional or hypothetical. It is part of the product and 
 - Network discovery and peer management
 - System and settings pages
 
-The UI is server-rendered with Datastar and uses SSE for live updates.
+The UI is server-rendered with Datastar and uses SSE for live updates, which keeps the stack simple while still supporting live logs, topology updates, and task state changes.
+
+### Multi-agent coordination
+
+OmniClaw supports agent-to-agent collaboration patterns directly:
+
+- agents can message each other through the registry and routing layer
+- multiple agents can share a server while keeping distinct identities and context
+- heartbeat and scheduled tasks let agents do background work without a human prompting every step
+- trusted peers extend this model across more than one OmniClaw instance
 
 ## Architecture
 
@@ -173,6 +211,16 @@ Once paired, peers can:
 
 This is intended for trusted OmniClaw-to-OmniClaw collaboration, not anonymous federation.
 
+## Direction
+
+OmniClaw is heading toward a software factory model:
+
+- web UI as the day-to-day control plane
+- richer agent collaboration patterns
+- multi-machine orchestration without giving up a single understandable source of truth
+- mixing runtimes and models for cost/performance tradeoffs
+- autonomous engineering workflows that dogfood OmniClaw on OmniClaw itself
+
 ## Configuration Notes
 
 OmniClaw still prefers code and AI-guided setup over sprawling config files, but it is no longer accurate to describe it as having almost no configuration.
@@ -225,7 +273,7 @@ Good contributions:
 - web UI improvements that match the current architecture
 - operational improvements for runtimes, routing, scheduling, and discovery
 
-Please do not assume the project is WhatsApp-only or skill-only anymore. Multi-channel support, web UI, and peer discovery are already core parts of the product.
+Please do not assume the project is WhatsApp-only, skill-only, or "just a forkable personal bot" anymore. Multi-channel support, web UI, peer discovery, multi-agent routing, and runtime flexibility are already core parts of the product.
 
 ## FAQ
 
