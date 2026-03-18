@@ -1,13 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+import { describe, it, expect } from 'bun:test';
 
-import {
-  mapTasksForSnapshot,
-  writeTasksSnapshot,
-  writeGroupsSnapshot,
-} from './ipc-snapshots.js';
+import { mapTasksForSnapshot } from './ipc-snapshots.js';
 import type { ScheduledTask } from './types.js';
 
 function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
@@ -69,22 +62,9 @@ describe('ipc-snapshots', () => {
     });
   });
 
-  describe('writeTasksSnapshot', () => {
-    let tmpDir: string;
-
-    beforeEach(() => {
-      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-ipc-test-'));
-    });
-
-    afterEach(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    });
-
+  describe('task visibility filtering', () => {
     it('filters tasks for non-main groups', () => {
       const groupFolder = 'alpha';
-      const ipcDir = path.join(tmpDir, 'ipc', groupFolder);
-      fs.mkdirSync(ipcDir, { recursive: true });
-
       const allTasks = [
         {
           id: 't1',
@@ -154,7 +134,7 @@ describe('ipc-snapshots', () => {
     });
   });
 
-  describe('writeGroupsSnapshot', () => {
+  describe('group visibility filtering', () => {
     it('returns empty groups array for non-main groups without subscriptions', () => {
       const groups = [
         { jid: 'j1', name: 'G1', lastActivity: '', isRegistered: true },
