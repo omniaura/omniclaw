@@ -79,12 +79,12 @@ describe('serveCachedRemoteImage', () => {
     try {
       const response = await serveCachedRemoteImage(
         'cache-key',
-        async () => 'https://example.test/avatar.png?token=secret',
+        async () => 'https://93.184.216.34/avatar.png?token=secret',
         {
           cacheDir: testImageCacheDir,
           fetchImpl: (async () => {
             throw new Error(
-              'request to https://example.test/avatar.png?token=secret failed',
+              'request to https://93.184.216.34/avatar.png?token=secret failed',
             );
           }) as RemoteImageFetch,
         },
@@ -92,9 +92,9 @@ describe('serveCachedRemoteImage', () => {
 
       expect(response).toBeNull();
       expect(records).toHaveLength(1);
-      expect(records[0].imageUrl).toBe('https://example.test/avatar.png');
+      expect(records[0].imageUrl).toBe('https://93.184.216.34/avatar.png');
       expect(records[0].errorMessage).toBe(
-        'request to https://example.test/avatar.png failed',
+        'request to https://93.184.216.34/avatar.png failed',
       );
     } finally {
       clearTestImageCache(testImageCacheDir);
@@ -110,9 +110,65 @@ describe('validateRemoteImageUrl', () => {
     ).resolves.toBe('loopback host is not allowed');
   });
 
+  it('rejects IPv6 loopback hosts', async () => {
+    await expect(
+      validateRemoteImageUrl('http://[::1]/avatar.png'),
+    ).resolves.toBe('private address is not allowed');
+  });
+
+  it('rejects IPv6-mapped IPv4 hosts written in hex', async () => {
+    await expect(
+      validateRemoteImageUrl('http://[::ffff:7f00:1]/avatar.png'),
+    ).resolves.toBe('private address is not allowed');
+  });
+
   it('rejects private ip ranges', async () => {
     await expect(
       validateRemoteImageUrl('http://169.254.169.254/latest/meta-data'),
     ).resolves.toBe('private address is not allowed');
+  });
+
+  it('rejects RFC1918 10/8 addresses', async () => {
+    await expect(
+      validateRemoteImageUrl('http://10.0.0.1/avatar.png'),
+    ).resolves.toBe('private address is not allowed');
+  });
+
+  it('rejects embedded credentials', async () => {
+    await expect(
+      validateRemoteImageUrl('http://user:pass@example.com/avatar.png'),
+    ).resolves.toBe('embedded credentials are not allowed');
+  });
+
+  it('rejects unsupported protocols', async () => {
+    await expect(validateRemoteImageUrl('file:///etc/passwd')).resolves.toBe(
+      'unsupported protocol',
+    );
+  });
+
+  it('fails closed when DNS lookup cannot verify the host', async () => {
+    await expect(
+      validateRemoteImageUrl('https://cdn.example.com/avatar.png', {
+        lookupHostAddresses: async () => {
+          throw new Error('dns down');
+        },
+      }),
+    ).resolves.toBe('dns lookup failed - cannot verify host safety');
+  });
+
+  it('rejects hostnames that resolve to private addresses', async () => {
+    await expect(
+      validateRemoteImageUrl('https://cdn.example.com/avatar.png', {
+        lookupHostAddresses: async () => ['::ffff:7f00:1'],
+      }),
+    ).resolves.toBe('resolved private address is not allowed');
+  });
+
+  it('accepts public https urls', async () => {
+    await expect(
+      validateRemoteImageUrl('https://cdn.example.com/avatar.png', {
+        lookupHostAddresses: async () => ['93.184.216.34'],
+      }),
+    ).resolves.toBeNull();
   });
 });
