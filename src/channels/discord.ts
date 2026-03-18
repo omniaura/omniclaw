@@ -48,7 +48,6 @@ export function getAttachmentWorkspaceFolder(
   return workspaceFolder;
 }
 
-
 function getAttachmentMediaDir(
   group: Pick<RegisteredGroup, 'folder' | 'channelFolder'>,
 ): string {
