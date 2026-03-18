@@ -373,7 +373,11 @@ export function startWebServer(
       // Handle parametric pages (e.g., agent-detail?id=xxx)
       if (pageName === 'agent-detail') {
         const agentId = url.searchParams.get('id') || '';
-        const data = buildAgentDetailData(agentId, state);
+        const data = buildAgentDetailData(
+          agentId,
+          state,
+          await getRemotePeers(),
+        );
         const title = data ? data.name : 'Agent Not Found';
         const qs = agentId ? `?id=${encodeURIComponent(agentId)}` : '';
         return ServerSentEventGenerator.stream(

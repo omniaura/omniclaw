@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach } from 'bun:test';
 import { startWebServer, type WebServerHandle } from './server.js';
 import type { WebStateProvider, QueueStats } from './types.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
+import type { RemotePeerAgents } from '../discovery/types.js';
 import {
   buildAgentDetailData,
   renderAgentDetailContent,
@@ -59,6 +60,34 @@ const testChats = [
     jid: 'dc:456',
     name: 'dev-chat',
     last_message_time: '2026-03-01T12:02:00.000Z',
+  },
+];
+
+const remotePeers: RemotePeerAgents[] = [
+  {
+    instanceId: 'peer-1',
+    instanceName: 'orangepi5',
+    online: true,
+    host: '10.0.0.12',
+    port: 7777,
+    agents: [
+      {
+        id: 'remote:agent',
+        name: 'Remote Agent',
+        folder: 'agents/remote',
+        backend: 'docker',
+        agentRuntime: 'opencode',
+        avatarUrl: 'https://example.test/remote.png',
+        channels: [
+          {
+            jid: 'dc:999',
+            displayName: 'Remote Channel',
+            channelFolder: 'servers/remote/spec',
+            categoryFolder: 'servers/remote',
+          },
+        ],
+      },
+    ],
   },
 ];
 
@@ -175,6 +204,21 @@ describe('buildAgentDetailData', () => {
     expect(data!.description).toBe('Main admin bot');
     expect(data!.serverFolder).toBe('servers/test-server');
     expect(data!.agentContextFolder).toBe('agents/test');
+  });
+
+  it('returns remote agent data when the ID matches a trusted peer agent', () => {
+    const data = buildAgentDetailData(
+      'peer-1:remote:agent',
+      makeState(),
+      remotePeers,
+    );
+    expect(data).not.toBeNull();
+    expect(data!.id).toBe('peer-1:remote:agent');
+    expect(data!.name).toBe('Remote Agent');
+    expect(data!.remoteInstanceId).toBe('peer-1');
+    expect(data!.remoteInstanceName).toBe('orangepi5');
+    expect(data!.channels).toHaveLength(1);
+    expect(data!.tasks).toHaveLength(0);
   });
 });
 
@@ -318,6 +362,20 @@ describe('renderAgentDetailContent', () => {
     const html = renderAgentDetailContent(data, 'test-agent');
     expect(html).toContain('ad-avatar-placeholder');
     expect(html).toContain('T'); // First letter of "Test Agent"
+  });
+
+  it('renders remote avatar and peer badge for remote agents', () => {
+    const data = buildAgentDetailData(
+      'peer-1:remote:agent',
+      makeState(),
+      remotePeers,
+    )!;
+    const html = renderAgentDetailContent(data, 'peer-1:remote:agent');
+    expect(html).toContain('badge-remote');
+    expect(html).toContain('orangepi5');
+    expect(html).toContain(
+      '/api/discovery/peers/peer-1/agents/remote%3Aagent/avatar/image',
+    );
   });
 });
 

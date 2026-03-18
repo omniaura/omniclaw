@@ -170,9 +170,7 @@ export function handleRequest(
       pathname.slice('/api/agents/'.length, -'/detail'.length),
     );
     if (!agentId) return json({ error: 'Missing agent ID' }, 400);
-    const data = buildAgentDetailData(agentId, state);
-    if (!data) return json({ error: 'Agent not found' }, 404);
-    return json(data);
+    return handleGetAgentDetail(agentId, state);
   }
 
   // --- Dashboard ---
@@ -224,9 +222,7 @@ export function handleRequest(
   // --- Agent Detail ---
   if (pathname === '/agents') {
     const agentId = url.searchParams.get('id') || '';
-    return new Response(renderAgentDetail(agentId, state), {
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
-    });
+    return handleAgentDetailPage(agentId, state);
   }
 
   // --- Agent avatar endpoints ---
@@ -301,6 +297,30 @@ async function handleAgentsListPage(
   return new Response(renderAgentsPageWithRemote(state, remotePeers), {
     headers: { 'Content-Type': 'text/html; charset=utf-8' },
   });
+}
+
+async function handleAgentDetailPage(
+  agentId: string,
+  state: WebStateProvider,
+): Promise<Response> {
+  const remotePeers = discoveryContext
+    ? await fetchTrustedRemoteAgents(discoveryContext)
+    : [];
+  return new Response(renderAgentDetail(agentId, state, remotePeers), {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  });
+}
+
+async function handleGetAgentDetail(
+  agentId: string,
+  state: WebStateProvider,
+): Promise<Response> {
+  const remotePeers = discoveryContext
+    ? await fetchTrustedRemoteAgents(discoveryContext)
+    : [];
+  const data = buildAgentDetailData(agentId, state, remotePeers);
+  if (!data) return json({ error: 'Agent not found' }, 404);
+  return json(data);
 }
 
 async function handleContextPage(state: WebStateProvider): Promise<Response> {
