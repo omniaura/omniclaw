@@ -70,6 +70,46 @@ From the main channel (your self-chat), you can manage groups and tasks:
 @Omni join the Family Chat group
 ```
 
+### Discord Slash Flows
+
+Discord bots can expose slash-command shortcuts that queue a reusable prompt into the current channel's agent. OmniClaw now ships with built-ins like `/mergemaster`, `/taskbooker`, and `/scheduler`.
+
+You can add your own channel or agent-specific slash flows by creating `discord-commands.json` in a runtime workspace folder such as `groups/<agent>/` or `groups/<channel-folder>/`:
+
+```json
+{
+  "commands": [
+    {
+      "name": "triage",
+      "description": "Run the issue triage flow",
+      "prompt": "Focus on {{repo}} and drive {{goal}} for the next {{duration_minutes}} minutes.",
+      "options": [
+        {
+          "name": "repo",
+          "description": "Repository to work in",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "goal",
+          "description": "Outcome to drive",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "duration_minutes",
+          "description": "Timebox in minutes",
+          "type": "integer",
+          "defaultValue": 30
+        }
+      ]
+    }
+  ]
+}
+```
+
+Command names must be lowercase Discord slash-command names (`a-z`, `0-9`, `_`, `-`). OmniClaw merges built-ins with runtime command files and syncs them per Discord guild on startup and subscription changes, so restart the bot after editing command files.
+
 ## Customizing
 
 There are no configuration files to learn. Just tell Claude Code what you want:

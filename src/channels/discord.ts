@@ -1,4 +1,5 @@
 import {
+  ChatInputCommandInteraction,
   Client,
   GatewayIntentBits,
   Partials,
@@ -21,6 +22,11 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  buildDiscordSlashCommandPayloads,
+  getDiscordFlowDefinitionsForGroup,
+  renderDiscordFlowPrompt,
+} from '../discord-command-flows.js';
+import {
   ASSISTANT_NAME,
   buildTriggerPattern,
   DATA_DIR,
@@ -35,7 +41,7 @@ import {
 } from '../db.js';
 import { logger } from '../logger.js';
 import { assertPathWithin } from '../path-security.js';
-import { Channel, RegisteredGroup } from '../types.js';
+import { Channel, NewMessage, RegisteredGroup } from '../types.js';
 import { splitMessage } from './utils.js';
 
 export function getAttachmentWorkspaceFolder(
@@ -169,6 +175,8 @@ export interface DiscordChannelOpts {
   botId: string;
   token: string;
   multiBotMode?: boolean;
+  onSyntheticMessage?: (message: NewMessage) => void;
+  registeredGroups?: () => Record<string, RegisteredGroup>;
   onReaction?: (
     chatJid: string,
     messageId: string,
@@ -216,7 +224,14 @@ export class DiscordChannel implements Channel {
           'Discord bot connected',
         );
         logger.info({ tag: readyClient.user.tag }, 'Discord bot ready');
-        resolve();
+        this.refreshSlashCommands()
+          .catch((err) => {
+            logger.warn(
+              { err, botId: this.botId },
+              'Failed to refresh slash commands',
+            );
+          })
+          .finally(() => resolve());
       });
 
       this.client.on(Events.MessageCreate, (message) => {
@@ -228,6 +243,13 @@ export class DiscordChannel implements Channel {
       this.client.on(Events.MessageReactionAdd, (reaction, user) => {
         this.handleReaction(reaction, user).catch((err) =>
           logger.error({ err }, 'Error handling Discord reaction'),
+        );
+      });
+
+      this.client.on(Events.InteractionCreate, (interaction) => {
+        if (!interaction.isChatInputCommand()) return;
+        this.handleSlashCommand(interaction).catch((err) =>
+          logger.error({ err }, 'Error handling Discord slash command'),
         );
       });
 
@@ -350,6 +372,43 @@ export class DiscordChannel implements Channel {
     this.connected = false;
     this.client.destroy();
     logger.info('Discord bot disconnected');
+  }
+
+  async refreshSlashCommands(): Promise<void> {
+    if (!this.connected) return;
+    const groups = this.opts.registeredGroups
+      ? Object.values(this.opts.registeredGroups()).filter(
+          (group) =>
+            group.discordBotId === this.botId && !!group.discordGuildId,
+        )
+      : [];
+
+    const guildGroups = new Map<string, RegisteredGroup[]>();
+    for (const group of groups) {
+      const guildId = group.discordGuildId;
+      if (!guildId) continue;
+      const bucket = guildGroups.get(guildId) || [];
+      bucket.push(group);
+      guildGroups.set(guildId, bucket);
+    }
+
+    for (const [guildId, guildScopedGroups] of guildGroups) {
+      try {
+        const guild = await this.client.guilds.fetch(guildId);
+        if (!guild) continue;
+        const commands = buildDiscordSlashCommandPayloads(guildScopedGroups);
+        await guild.commands.set(commands);
+        logger.info(
+          { botId: this.botId, guildId, count: commands.length },
+          'Discord slash commands synced',
+        );
+      } catch (err) {
+        logger.warn(
+          { err, botId: this.botId, guildId },
+          'Failed to sync guild slash commands',
+        );
+      }
+    }
   }
 
   /**
@@ -1079,6 +1138,96 @@ export class DiscordChannel implements Channel {
 
     const userName = user.displayName || user.username || 'Someone';
     this.opts.onReaction?.(chatJid, reaction.message.id, emoji, userName);
+  }
+
+  private async handleSlashCommand(
+    interaction: ChatInputCommandInteraction,
+  ): Promise<void> {
+    if (!interaction.inGuild()) {
+      await interaction.reply({
+        content: 'Slash flows are only available in registered guild channels.',
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const chatJid = `dc:${interaction.channelId}`;
+    const group = this.resolveGroupForChannel(chatJid);
+    if (!group) {
+      await interaction.reply({
+        content: 'This channel is not registered to an OmniClaw agent yet.',
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const command = getDiscordFlowDefinitionsForGroup(group).find(
+      (candidate) => candidate.name === interaction.commandName,
+    );
+    if (!command) {
+      await interaction.reply({
+        content:
+          'That slash flow is not configured for this channel. Add it to this workspace and restart or re-sync the bot.',
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const optionValues: Record<string, string | number | boolean | undefined> =
+      {};
+    for (const option of command.options || []) {
+      switch (option.type) {
+        case 'integer':
+          optionValues[option.name] =
+            interaction.options.getInteger(option.name) ?? undefined;
+          break;
+        case 'boolean':
+          optionValues[option.name] =
+            interaction.options.getBoolean(option.name) ?? undefined;
+          break;
+        default:
+          optionValues[option.name] =
+            interaction.options.getString(option.name) ?? undefined;
+          break;
+      }
+    }
+
+    const renderedPrompt = renderDiscordFlowPrompt(
+      command,
+      optionValues,
+    ).trim();
+    const timestamp = new Date().toISOString();
+    const senderName =
+      interaction.member && 'displayName' in interaction.member
+        ? interaction.member.displayName
+        : interaction.user.globalName || interaction.user.username;
+    const chatName =
+      interaction.channel && 'name' in interaction.channel
+        ? interaction.channel.name || chatJid
+        : chatJid;
+
+    storeChatMetadata(
+      chatJid,
+      timestamp,
+      chatName,
+      interaction.guildId || undefined,
+    );
+    this.opts.onSyntheticMessage?.({
+      id: `slash-${interaction.id}`,
+      chat_jid: chatJid,
+      sender: `discord:${interaction.user.id}`,
+      sender_name: senderName,
+      content: `${group.trigger || `@${ASSISTANT_NAME}`} ${renderedPrompt}`,
+      timestamp,
+      is_from_me: false,
+      sender_platform: 'discord',
+      sender_user_id: interaction.user.id,
+    });
+
+    await interaction.reply({
+      content: `Queued "/${command.name}" for ${group.name}.`,
+      ephemeral: true,
+    });
   }
 
   private cleanupOldMedia(
