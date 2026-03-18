@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  Agent infrastructure for the software factory era: multi-channel, multi-agent, container-isolated, and built to operate itself.
+  Multi-channel agent orchestration with container isolation, scheduled tasks, and an operational web UI.
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
 
 OmniClaw is no longer just a personal chat bot wrapper.
 
-It is a multi-agent control plane for running AI engineers across chat surfaces, web operations, scheduled workflows, and trusted peer machines. The core orchestrator is one Bun process, but the system around it now looks much closer to an agent operating environment: isolated runtimes, layered context, a live Datastar web UI, task execution, peer discovery, cross-agent messaging, and the beginnings of a software factory.
+It is a multi-agent orchestrator for running AI agents across chat surfaces, web operations, scheduled workflows, and trusted peer machines. The core is still one Bun process, but the surrounding system now includes isolated runtimes, layered context, a live Datastar web UI, task execution, peer discovery, and cross-agent messaging.
 
 If old NanoClaw/early OmniClaw was "Claude in WhatsApp with containers," current OmniClaw is "run and manage a network of agents with real operational tooling."
 
@@ -51,7 +51,7 @@ You can use OmniClaw as:
 - an always-on engineer that can inspect repos, open PRs, and follow up later via scheduled tasks
 - a team of named agents with different runtimes, channel coverage, and context layers
 - an operations surface for running agents through the web UI instead of hoping a terminal log explains everything
-- a foundation for autonomous backlog -> implementation -> review loops
+- a foundation for more autonomous software-factory workflows over time
 
 ## Quick Start
 
@@ -109,8 +109,8 @@ This lets one agent inherit shared instructions while still keeping channel-spec
 Agents can run with different runtimes depending on the task and credentials you provide:
 
 - `claude-agent-sdk`
-- `opencode` (supported, newer path)
-- `codex` (supported, newer path)
+- `opencode` (supported, newer and less proven than Claude Agent SDK)
+- `codex` (supported, newer and less proven than Claude Agent SDK)
 
 ### Built-in web UI
 
@@ -206,7 +206,6 @@ Once paired, peers can:
 
 - expose remote agent inventories
 - proxy remote avatar and chat icon assets safely
-- sync context metadata
 - appear in the web UI's network and agent views
 
 This is intended for trusted OmniClaw-to-OmniClaw collaboration, not anonymous federation.
@@ -215,7 +214,7 @@ This is intended for trusted OmniClaw-to-OmniClaw collaboration, not anonymous f
 
 OmniClaw is heading toward a software factory model:
 
-- web UI as the day-to-day control plane
+- web UI as the day-to-day operations surface
 - richer agent collaboration patterns
 - multi-machine orchestration without giving up a single understandable source of truth
 - mixing runtimes and models for cost/performance tradeoffs
