@@ -24,7 +24,11 @@ function getClient(): WebClient {
   return new WebClient(token);
 }
 
-async function readMessages(channel: string, limit: number = 10, oldest?: string) {
+async function readMessages(
+  channel: string,
+  limit: number = 10,
+  oldest?: string,
+) {
   const client = getClient();
 
   try {
@@ -34,17 +38,24 @@ async function readMessages(channel: string, limit: number = 10, oldest?: string
       oldest,
     });
 
-    console.log(JSON.stringify({
-      ok: true,
-      messages: result.messages,
-      has_more: result.has_more,
-    }, null, 2));
-
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          messages: result.messages,
+          has_more: result.has_more,
+        },
+        null,
+        2,
+      ),
+    );
   } catch (error: any) {
-    console.error(JSON.stringify({
-      ok: false,
-      error: error.message,
-    }));
+    console.error(
+      JSON.stringify({
+        ok: false,
+        error: error.message,
+      }),
+    );
     process.exit(1);
   }
 }
@@ -59,17 +70,24 @@ async function sendMessage(channel: string, text: string, thread_ts?: string) {
       thread_ts,
     });
 
-    console.log(JSON.stringify({
-      ok: true,
-      ts: result.ts,
-      channel: result.channel,
-    }, null, 2));
-
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          ts: result.ts,
+          channel: result.channel,
+        },
+        null,
+        2,
+      ),
+    );
   } catch (error: any) {
-    console.error(JSON.stringify({
-      ok: false,
-      error: error.message,
-    }));
+    console.error(
+      JSON.stringify({
+        ok: false,
+        error: error.message,
+      }),
+    );
     process.exit(1);
   }
 }
@@ -83,16 +101,23 @@ async function readThread(channel: string, thread_ts: string) {
       ts: thread_ts,
     });
 
-    console.log(JSON.stringify({
-      ok: true,
-      messages: result.messages,
-    }, null, 2));
-
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          messages: result.messages,
+        },
+        null,
+        2,
+      ),
+    );
   } catch (error: any) {
-    console.error(JSON.stringify({
-      ok: false,
-      error: error.message,
-    }));
+    console.error(
+      JSON.stringify({
+        ok: false,
+        error: error.message,
+      }),
+    );
     process.exit(1);
   }
 }
@@ -105,23 +130,30 @@ async function listChannels() {
       types: 'public_channel,private_channel',
     });
 
-    const channels = result.channels?.map(ch => ({
+    const channels = result.channels?.map((ch) => ({
       id: ch.id,
       name: ch.name,
       is_private: ch.is_private,
       is_member: ch.is_member,
     }));
 
-    console.log(JSON.stringify({
-      ok: true,
-      channels,
-    }, null, 2));
-
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          channels,
+        },
+        null,
+        2,
+      ),
+    );
   } catch (error: any) {
-    console.error(JSON.stringify({
-      ok: false,
-      error: error.message,
-    }));
+    console.error(
+      JSON.stringify({
+        ok: false,
+        error: error.message,
+      }),
+    );
     process.exit(1);
   }
 }
@@ -151,7 +183,7 @@ const command = positionals[0];
       await readMessages(
         values.channel,
         values.limit ? parseInt(values.limit) : 10,
-        values.oldest
+        values.oldest,
       );
       break;
 

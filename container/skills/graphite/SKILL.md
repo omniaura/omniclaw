@@ -104,6 +104,7 @@ gt stack submit
 ```
 
 This creates 3 PRs:
+
 1. Database changes (based on main)
 2. API endpoints (based on #1)
 3. UI (based on #2)

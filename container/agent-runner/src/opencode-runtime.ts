@@ -830,7 +830,12 @@ export async function runOpenCodeRuntime(
           sessionId = freshSession.sessionId;
           isResumedSession = false;
           log(`Created replacement session: ${sessionId}`);
-          await injectSystemContext(client, sessionId, containerInput, forcedModel);
+          await injectSystemContext(
+            client,
+            sessionId,
+            containerInput,
+            forcedModel,
+          );
           continue;
         }
 

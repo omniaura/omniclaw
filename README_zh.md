@@ -67,6 +67,7 @@ claude
 ```
 
 在主频道（你的self-chat）中，可以管理群组和任务：
+
 ```
 @Andy 列出所有群组的计划任务
 @Andy 暂停周一简报任务
@@ -99,14 +100,17 @@ claude
 我们希望看到的技能：
 
 **通信渠道**
+
 - `/add-telegram` - 添加 Telegram 作为渠道。应提供选项让用户选择替换 WhatsApp 或作为额外渠道添加。也应能将其添加为控制渠道（可以触发动作）或仅作为被其他地方触发的动作所使用的渠道。
 - `/add-slack` - 添加 Slack
 - `/add-discord` - 添加 Discord
 
 **平台支持**
+
 - `/setup-windows` - 通过 WSL2 + Docker 支持 Windows
 
 **会话管理**
+
 - `/add-clear` - 添加一个 `/clear` 命令，用于压缩会话（在同一会话中总结上下文，同时保留关键信息）。这需要研究如何通过 Claude Agent SDK 以编程方式触发压缩。
 
 ## 系统要求
@@ -125,6 +129,7 @@ WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) -->
 单一 Node.js 进程。智能体在具有挂载目录的隔离 Linux 容器中执行。每个群组独立的消息队列，带全局并发控制。通过文件系统进行进程间通信（IPC）。
 
 关键文件：
+
 - `src/index.ts` - 编排器：状态管理、消息循环、智能体调用
 - `src/channels/whatsapp.ts` - WhatsApp 连接、认证、收发消息
 - `src/ipc.ts` - IPC 监听与任务处理

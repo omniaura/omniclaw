@@ -274,9 +274,7 @@ export function startWebServer(
           sseClients.add(nextClient);
           logger.debug({ sseClients: sseClients.size }, 'SSE client connected');
 
-          stream.patchElements(
-            renderStatusBadge('connected', 'connected'),
-          );
+          stream.patchElements(renderStatusBadge('connected', 'connected'));
           patchSnapshot(nextClient, state);
         },
         {

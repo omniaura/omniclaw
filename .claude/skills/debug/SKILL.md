@@ -28,12 +28,12 @@ src/backends/local-backend.ts          container/agent-runner/
 
 ## Log Locations
 
-| Log | Location | Content |
-|-----|----------|---------|
-| **Main app logs** | `logs/omniclaw.log` | Host-side messaging, routing, container spawning |
-| **Main app errors** | `logs/omniclaw.error.log` | Host-side errors |
-| **Container run logs** | `groups/{folder}/logs/container-*.log` | Per-run: input, mounts, stderr, stdout |
-| **Claude sessions** | `~/.claude/projects/` | Claude Code session history |
+| Log                    | Location                               | Content                                          |
+| ---------------------- | -------------------------------------- | ------------------------------------------------ |
+| **Main app logs**      | `logs/omniclaw.log`                    | Host-side messaging, routing, container spawning |
+| **Main app errors**    | `logs/omniclaw.error.log`              | Host-side errors                                 |
+| **Container run logs** | `groups/{folder}/logs/container-*.log` | Per-run: input, mounts, stderr, stdout           |
+| **Claude sessions**    | `~/.claude/projects/`                  | Claude Code session history                      |
 
 ## Enabling Debug Logging
 
@@ -53,6 +53,7 @@ systemctl --user edit omniclaw
 ```
 
 Debug level shows:
+
 - Full mount configurations
 - Container command arguments
 - Real-time container stderr
@@ -66,10 +67,13 @@ Debug level shows:
 Common causes:
 
 #### Missing Authentication
+
 ```
 Invalid API key · Please run /login
 ```
+
 **Fix:** Ensure `.env` file exists with either OAuth token or API key:
+
 ```bash
 # Should show one of:
 # CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...  (subscription)
@@ -77,9 +81,11 @@ Invalid API key · Please run /login
 ```
 
 #### Root User Restriction
+
 ```
 --dangerously-skip-permissions cannot be used with root/sudo privileges
 ```
+
 **Fix:** Container must run as non-root user. Check Dockerfile has `USER node`.
 
 ### 2. Environment Variables Not Passing
@@ -87,6 +93,7 @@ Invalid API key · Please run /login
 The system extracts only authentication variables (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) from `.env` and mounts them for sourcing inside the container.
 
 To verify env vars are reaching the container:
+
 ```bash
 # Docker
 docker run --rm \
@@ -104,6 +111,7 @@ echo '{}' | container run -i \
 ### 3. Mount Issues
 
 To check what's mounted inside a container:
+
 ```bash
 # Docker
 docker run --rm --entrypoint /bin/bash omniclaw-agent:latest -c 'ls -la /workspace/'
@@ -113,6 +121,7 @@ container run --rm --entrypoint /bin/bash omniclaw-agent:latest -c 'ls -la /work
 ```
 
 Expected structure:
+
 ```
 /workspace/
 ├── env-dir/env           # Environment file (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)
@@ -136,11 +145,12 @@ The container runs as user `node` (uid 1000). All of `/workspace/` and `/app/` s
 **Root cause:** The SDK looks for sessions at `$HOME/.claude/projects/`. Inside the container, `HOME=/home/node`, so it looks at `/home/node/.claude/projects/`.
 
 **Fix:** Ensure `local-backend.ts` mounts to `/home/node/.claude/`:
+
 ```typescript
 mounts.push({
   hostPath: claudeDir,
-  containerPath: '/home/node/.claude',  // NOT /root/.claude
-  readonly: false
+  containerPath: '/home/node/.claude', // NOT /root/.claude
+  readonly: false,
 });
 ```
 
@@ -149,12 +159,14 @@ mounts.push({
 Systemd user services are killed when the last login session ends unless lingering is enabled.
 
 **Diagnose:**
+
 ```bash
 loginctl show-user $(whoami) | grep Linger
 # Linger=no means services die on logout
 ```
 
 **Fix:**
+
 ```bash
 loginctl enable-linger $(whoami)
 ```
@@ -168,6 +180,7 @@ If an MCP server fails to start, the agent may exit. Check the container logs fo
 ### 8. OpenCode Session Looks Healthy But Replies Are Empty
 
 Symptom pattern in `logs/omniclaw.log`:
+
 ```text
 [opencode-runtime] Created new session: ...
 [opencode-runtime] Injected system context
@@ -179,12 +192,14 @@ Symptom pattern in `logs/omniclaw.log`:
 Important: if this happens on a brand new session, the root cause is not stale session resume alone.
 
 Known real-world case:
+
 - Remote Linux OpenCode agent worked normally
 - Local macOS OpenCode agent created fresh sessions but still returned empty assistant parts
 - The local base OpenCode auth store contained mixed providers (`anthropic` + `openai`)
 - The working remote auth store contained only `openai`
 
 What to check:
+
 ```bash
 # Session persistence
 sqlite3 store/messages.db "SELECT group_folder, session_id, created_at FROM sessions WHERE group_folder LIKE 'ocpeyton-discord__dispatch__%';"
@@ -203,6 +218,7 @@ PY
 ```
 
 Recovery order:
+
 ```bash
 # 1. Stop omniclaw so files are not recreated mid-delete
 launchctl bootout gui/$(id -u)/com.omniclaw          # macOS
@@ -227,6 +243,7 @@ systemctl --user start omniclaw                                              # L
 ```
 
 Notes:
+
 - If the remote agent works and the local one does not, compare `auth.json` provider keys first.
 - Do not assume session corruption if the failure reproduces on a fresh session.
 - OpenCode reasoning should not be sent to users; only user-facing text parts should be forwarded.
@@ -261,6 +278,7 @@ bun run build
 ## Manual Container Testing
 
 ### Test the full agent flow:
+
 ```bash
 # Set up env file
 mkdir -p data/env groups/test
@@ -275,6 +293,7 @@ echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isMai
 ```
 
 ### Interactive shell in container:
+
 ```bash
 docker run --rm -it --entrypoint /bin/bash omniclaw-agent:latest   # Docker
 container run --rm -it --entrypoint /bin/bash omniclaw-agent:latest  # Apple Container
@@ -322,6 +341,7 @@ container builder stop && container builder rm && container builder start
 Claude sessions are stored per-group in `data/sessions/{group}/.claude/` for security isolation.
 
 **Critical:** The mount path must match the container user's HOME directory:
+
 - Container user: `node`
 - Container HOME: `/home/node`
 - Mount target: `/home/node/.claude/` (NOT `/root/.claude/`)
@@ -345,12 +365,13 @@ sqlite3 store/messages.db "DELETE FROM sessions WHERE group_folder = '{groupFold
 
 OmniClaw uses **two completely different identifiers** for Discord bots — they must not be confused:
 
-| Identifier | Where it lives | Example | Used for |
-|---|---|---|---|
-| **Internal bot key** | `DISCORD_BOT_IDS` in `.env` | `PRIMARY`, `OCPEYTON` | OmniClaw routing |
+| Identifier               | Where it lives                           | Example               | Used for          |
+| ------------------------ | ---------------------------------------- | --------------------- | ----------------- |
+| **Internal bot key**     | `DISCORD_BOT_IDS` in `.env`              | `PRIMARY`, `OCPEYTON` | OmniClaw routing  |
 | **Discord snowflake ID** | Discord Developer Portal → App → General | `1476396931709276191` | Discord's own API |
 
 The internal bot key must match exactly across:
+
 - `DISCORD_BOT_IDS=PRIMARY,OCPEYTON`
 - `DISCORD_BOT_<KEY>_TOKEN=<token>` (e.g., `DISCORD_BOT_OCPEYTON_TOKEN`)
 - `channel_subscriptions.discord_bot_id` in SQLite

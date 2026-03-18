@@ -62,20 +62,22 @@ WHERE id IN ('clayton-discord', 'landing-astro-discord');
 
 OmniClaw uses **two completely different identifiers** for Discord bots:
 
-| Identifier | Where it lives | Example | Used for |
-|---|---|---|---|
-| **Internal bot key** | `DISCORD_BOT_IDS` in `.env` | `PRIMARY`, `OCPEYTON` | OmniClaw routing |
+| Identifier               | Where it lives                           | Example               | Used for          |
+| ------------------------ | ---------------------------------------- | --------------------- | ----------------- |
+| **Internal bot key**     | `DISCORD_BOT_IDS` in `.env`              | `PRIMARY`, `OCPEYTON` | OmniClaw routing  |
 | **Discord snowflake ID** | Discord Developer Portal → App → General | `1476396931709276191` | Discord's own API |
 
 The `channel_subscriptions.discord_bot_id` column stores the **internal bot key** — the human-readable alias you defined in `DISCORD_BOT_IDS`. It must never contain a numeric Discord snowflake ID. If you accidentally write a numeric ID there, OmniClaw's routing will silently fall back to `DISCORD_DEFAULT_BOT_ID` for every message and scheduled task.
 
 To verify:
+
 ```bash
 # These should match keys in DISCORD_BOT_IDS, not numeric IDs
 sqlite3 store/messages.db "SELECT DISTINCT discord_bot_id FROM channel_subscriptions WHERE discord_bot_id IS NOT NULL"
 ```
 
 If you see numeric IDs, fix them:
+
 ```bash
 sqlite3 store/messages.db "UPDATE channel_subscriptions SET discord_bot_id = 'OCPEYTON' WHERE discord_bot_id = '1476396931709276191'"
 ```
@@ -85,6 +87,7 @@ sqlite3 store/messages.db "UPDATE channel_subscriptions SET discord_bot_id = 'OC
 ### 4. `is_primary` controls more than routing — it controls channel name resolution
 
 `is_primary` determines:
+
 - Which Discord bot handles the channel (sends messages, reactions)
 - Which agent's name is used as the display name when building channel lists
 - Which subscriptions fire as a fallback when no trigger is explicitly matched
@@ -117,6 +120,7 @@ SELECT channel_jid, agent_id, trigger_pattern, is_primary, channel_folder FROM c
 ```
 
 Look for:
+
 - Multiple agent entries that are really the same persona (different channel, same trigger/bot)
 - Agents with `agent_context_folder` = NULL (identity will be wrong)
 - Channels where `is_primary` isn't set correctly
@@ -286,6 +290,7 @@ launchctl load ~/Library/LaunchAgents/com.omniclaw.plist
 ```
 
 Ask each agent: "what are your debug info / loaded contexts?" — verify:
+
 - Identity name matches the persona (not the DB agent name)
 - `/workspace/agent/CLAUDE.md` appears in loaded contexts
 - Channel list shows real channel names, not agent names

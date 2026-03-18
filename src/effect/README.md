@@ -7,30 +7,36 @@ This directory contains a proof-of-concept implementation of Effect.ts for OmniC
 This POC shows how Effect.ts can improve reliability and maintainability for message handling:
 
 ### 1. **Automatic Retries**
+
 ```typescript
 // Before (manual retry logic in group-queue.ts)
 if (!success) {
   state.retryCount++;
   const delayMs = BASE_RETRY_MS * Math.pow(2, state.retryCount - 1);
-  setTimeout(() => { /* retry */ }, delayMs);
+  setTimeout(() => {
+    /* retry */
+  }, delayMs);
 }
 
 // After (declarative retry policy)
 Effect.retry(
-  Schedule.exponential(baseRetryDelayMs)
-    .pipe(Schedule.compose(Schedule.recurs(maxRetries)))
-)
+  Schedule.exponential(baseRetryDelayMs).pipe(
+    Schedule.compose(Schedule.recurs(maxRetries)),
+  ),
+);
 ```
 
 ### 2. **Timeout Protection**
+
 ```typescript
 // Automatically timeout long-running operations
 sendMessageCore(groupJid, text, backend, groupFolder).pipe(
-  Effect.timeout(sendTimeoutMs)
-)
+  Effect.timeout(sendTimeoutMs),
+);
 ```
 
 ### 3. **Type-Safe Errors**
+
 ```typescript
 // Explicit error types instead of try/catch
 type MessageResult = Effect.Effect<
@@ -44,15 +50,16 @@ Effect.match(result, {
   onFailure: (error) => {
     switch (error._tag) {
       case 'MessageSendError':
-        // Handle send error
+      // Handle send error
       case 'ConcurrencyLimitError':
-        // Handle concurrency error
+      // Handle concurrency error
     }
-  }
+  },
 });
 ```
 
 ### 4. **Dependency Injection**
+
 ```typescript
 // Easy to test with mock backends
 const testLayer = MessageQueueLive({
@@ -60,16 +67,16 @@ const testLayer = MessageQueueLive({
   maxRetries: 2,
 });
 
-const program = queue.sendMessage('group1', 'test')
+const program = queue
+  .sendMessage('group1', 'test')
   .pipe(Effect.provide(testLayer));
 ```
 
 ### 5. **Structured Concurrency**
+
 ```typescript
 // Guaranteed cleanup and resource management
-Effect.ensuring(
-  Ref.update(activeCount, (n) => n - 1)
-)
+Effect.ensuring(Ref.update(activeCount, (n) => n - 1));
 ```
 
 ## Files
@@ -85,6 +92,7 @@ bun test src/effect/message-queue.test.ts
 ```
 
 All 7 tests pass, demonstrating:
+
 - Successful message sending
 - Automatic retry on transient failures
 - Failure after max retries exhausted
@@ -104,6 +112,7 @@ If this POC is approved, we can:
 ## Performance
 
 Effect adds minimal overhead:
+
 - Retry logic is lazy and only executes when needed
 - Ref updates are atomic and fast
 - Schedule compositions are efficient

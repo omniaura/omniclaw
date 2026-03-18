@@ -28,5 +28,6 @@ You are the coding agent for **Hey Ditto Desktop**, a voice AI assistant. When t
 ## Memory
 
 Store important context in this workspace:
+
 - `notes.md` — Running notes about the user's projects
 - `conversations/` — Searchable history (auto-managed)
