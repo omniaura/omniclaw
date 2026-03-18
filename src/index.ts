@@ -101,6 +101,11 @@ import { parseScopedSlackJid } from './slack-jid.js';
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import {
+  parseTelegramApiFileUrl,
+  parseTelegramFileDescriptor,
+  sanitizeTelegramAvatarUrl,
+} from './telegram-avatar.js';
+import {
   findChannel,
   formatMessages,
   formatOutbound,
@@ -438,6 +443,42 @@ async function resolveChatImageUrl(chatJid: string): Promise<string | null> {
   const channel = findChannelForJid(chatJid, preferredBotId);
   if (!channel?.getChatAvatarUrl) return null;
   return channel.getChatAvatarUrl(chatJid);
+}
+
+async function resolveAgentAvatarUrl(
+  _agentId: string,
+  avatarUrl: string,
+  avatarSource?: Agent['avatarSource'],
+): Promise<string | null> {
+  if (avatarSource !== 'telegram') return avatarUrl;
+
+  const descriptor = parseTelegramFileDescriptor(avatarUrl);
+  const parsedUrl = descriptor ? null : parseTelegramApiFileUrl(avatarUrl);
+  const botId = descriptor?.botId || parsedUrl?.botId;
+  if (!botId) return avatarUrl;
+
+  const channel = channels.find(
+    (candidate) =>
+      candidate.name === 'telegram' &&
+      candidate.botId === botId &&
+      candidate.resolveStoredAvatarUrl,
+  );
+  if (!channel?.resolveStoredAvatarUrl) return avatarUrl;
+
+  return channel.resolveStoredAvatarUrl(avatarUrl);
+}
+
+function sanitizePersistedTelegramAvatarUrls(): void {
+  for (const agent of Object.values(agents)) {
+    const safeAvatarUrl = sanitizeTelegramAvatarUrl(
+      agent.avatarUrl,
+      agent.avatarSource,
+    );
+    if (!safeAvatarUrl || safeAvatarUrl === agent.avatarUrl) continue;
+
+    updateAgentAvatar(agent.id, safeAvatarUrl, agent.avatarSource || null);
+    agent.avatarUrl = safeAvatarUrl;
+  }
 }
 
 async function resolveDiscordGuildImageUrl(
@@ -2261,6 +2302,7 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  sanitizePersistedTelegramAvatarUrls();
 
   const webState: WebStateProvider = {
     getAgents: () => agents,
@@ -2299,14 +2341,20 @@ async function main(): Promise<void> {
       fs.writeFileSync(resolved, content, 'utf-8');
     },
     updateAgentAvatar: (agentId, url, source) => {
-      updateAgentAvatar(agentId, url, source);
+      const safeUrl = sanitizeTelegramAvatarUrl(
+        url || undefined,
+        source || undefined,
+      );
+      updateAgentAvatar(agentId, safeUrl || null, source);
       if (agents[agentId]) {
-        agents[agentId].avatarUrl = url || undefined;
+        agents[agentId].avatarUrl = safeUrl || undefined;
         agents[agentId].avatarSource =
           (source as Agent['avatarSource']) || undefined;
       }
     },
     resolveChatImage: (chatJid) => resolveChatImageUrl(chatJid),
+    resolveAgentAvatarUrl: (agentId, avatarUrl, avatarSource) =>
+      resolveAgentAvatarUrl(agentId, avatarUrl, avatarSource),
     resolveDiscordGuildImage: (guildId, botId) =>
       resolveDiscordGuildImageUrl(guildId, botId),
   };
