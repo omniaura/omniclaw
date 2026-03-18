@@ -1722,6 +1722,7 @@ async function runAgent(
         agentContextFolder: group.agentContextFolder,
         githubContext,
         githubActivityDelta,
+        mcpServers: group.containerConfig?.mcpServers,
       },
       (proc, containerName) =>
         queue.registerProcess(

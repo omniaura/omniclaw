@@ -64,6 +64,8 @@ interface ContainerInput {
   githubContext?: string;
   /** GitHub activity delta digest (events since last user message in this channel). */
   githubActivityDelta?: string;
+  /** Extra MCP servers to inject alongside the built-in omniclaw server (SSE/HTTP). */
+  mcpServers?: Record<string, Record<string, unknown>>;
 }
 
 interface ContainerOutput {
@@ -1005,6 +1007,7 @@ async function runQuery(
               : {}),
           },
         },
+        ...(containerInput.mcpServers || {}),
       },
       hooks: {
         PreCompact: [

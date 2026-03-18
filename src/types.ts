@@ -39,6 +39,8 @@ export interface ContainerConfig {
   timeout?: number; // Default: 300000 (5 minutes)
   memory?: number; // Container memory in MB. Default: 4096
   networkMode?: 'full' | 'none'; // Default: 'none' for non-main, 'full' for main
+  /** Extra MCP servers to inject into the agent runtime (SSE/HTTP). Keyed by server name. */
+  mcpServers?: Record<string, Record<string, unknown>>;
 }
 
 export type BackendType = 'apple-container' | 'docker';
