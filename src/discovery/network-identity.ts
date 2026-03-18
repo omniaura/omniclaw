@@ -6,6 +6,10 @@ import type { DiscoveryNetworkIdentity } from './types.js';
 const MAC_NETWORKSETUP_PATH = '/usr/sbin/networksetup';
 const MAC_SYSTEM_PROFILER_PATH = '/usr/sbin/system_profiler';
 const MAC_WDUTIL_PATH = '/usr/bin/wdutil';
+const NETWORK_IDENTITY_ENV = {
+  PATH: process.env.PATH,
+  HOME: process.env.HOME,
+};
 
 export async function detectCurrentNetwork(): Promise<DiscoveryNetworkIdentity | null> {
   switch (process.platform) {
@@ -51,11 +55,15 @@ async function detectMacWifiNetwork(): Promise<DiscoveryNetworkIdentity | null> 
   }
 
   const wdutilSsid = parseWdutilSsid(
+    // `wdutil info` often requires elevated privileges on macOS, so this is a
+    // best-effort final fallback after the more common non-root paths.
     await runCommand([MAC_WDUTIL_PATH, 'info']),
   );
   if (wdutilSsid) {
     return toWifiIdentity(wdutilSsid);
   }
+
+  logger.warn('All macOS Wi-Fi detection methods exhausted');
 
   return null;
 }
@@ -142,6 +150,8 @@ function parseSystemProfilerSsid(output: string): string | null {
     if (!inCurrentNetworkSection) continue;
     if (!/^\s/.test(line)) break;
 
+    // Older `system_profiler` output sometimes nests the SSID as a section
+    // heading under "Current Network Information" instead of an `SSID :` line.
     const sectionMatch = line.match(/^\s{2,}(.+):\s*$/);
     if (sectionMatch?.[1]) {
       return normalizeSsid(sectionMatch[1]);
@@ -172,7 +182,7 @@ async function runCommand(cmd: string[], logErrors = true): Promise<string> {
     const proc = Bun.spawn(cmd, {
       stdout: 'pipe',
       stderr: 'pipe',
-      env: process.env,
+      env: NETWORK_IDENTITY_ENV,
     });
 
     const timeout = new Promise<never>((_, reject) =>
