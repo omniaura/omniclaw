@@ -1,7 +1,10 @@
 ## Summary
-- let `CI` run via `workflow_dispatch` so automation can explicitly kick it off for bot-created branches
-- use a GitHub App token in the dependency-update workflows when available so auto-created PRs trigger normal `pull_request` checks
-- fall back to dispatching `ci.yml` manually when only the default `GITHUB_TOKEN` is available, and grant the workflows `actions: write` for that path
+- treat Discord attachments as images when their filename extension is image-like, even if Discord omits `contentType`
+- keep the existing content-type path first, then fall back to extension-based detection for common image formats
+- add regression coverage for missing-content-type image attachments in `src/channels/discord.test.ts`
 
 ## Testing
-- `for f in .github/workflows/*.yml; do yq eval '.' "$f" > /dev/null || exit 1; done`
+- `bun test src/channels/discord.test.ts`
+- `bun run typecheck`
+
+Follow-up hardening for the Discord image attachment path from #254.
