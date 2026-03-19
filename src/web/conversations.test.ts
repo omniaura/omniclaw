@@ -116,6 +116,14 @@ function makeState(
     getQueueDetails: () => [],
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
+    searchMessages: (query, chatJid, limit) => {
+      const q = query.toLowerCase();
+      let results = testMessages.filter((m) =>
+        m.content.toLowerCase().includes(q),
+      );
+      if (chatJid) results = results.filter((m) => m.chat_jid === chatJid);
+      return limit ? results.slice(0, limit) : results;
+    },
     createTask: () => {},
     updateTask: () => {},
     deleteTask: () => {},
@@ -233,6 +241,16 @@ describe('conversations page', () => {
     // Has active conversations link
     expect(html).toContain('href="/conversations"');
   });
+
+  it('renders search tabs', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/conversations');
+    const html = await res.text();
+    expect(html).toContain('tab-filter');
+    expect(html).toContain('tab-search');
+    expect(html).toContain('msg-search');
+    expect(html).toContain('search-results');
+  });
 });
 
 describe('dashboard navigation', () => {
@@ -289,5 +307,81 @@ describe('messages API for conversations', () => {
     expect(chats).toHaveLength(2);
     expect(chats[0].name).toBe('general');
     expect(chats[1].name).toBe('dev-chat');
+  });
+});
+
+describe('message search API', () => {
+  it('returns matching messages across all chats', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/messages/search?q=Hello');
+    expect(res.status).toBe(200);
+    const results = (await res.json()) as Array<{ content: string }>;
+    expect(results).toHaveLength(2);
+    expect(results.some((r) => r.content.includes('Alice'))).toBe(true);
+    expect(results.some((r) => r.content.includes('bot'))).toBe(true);
+  });
+
+  it('filters by chatJid', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch(
+      '/api/messages/search?q=Hello&chatJid=dc:123',
+    );
+    expect(res.status).toBe(200);
+    const results = (await res.json()) as Array<{ chat_jid: string }>;
+    expect(results).toHaveLength(2);
+    expect(results.every((r) => r.chat_jid === 'dc:123')).toBe(true);
+  });
+
+  it('returns empty for no matches', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/messages/search?q=nonexistent');
+    expect(res.status).toBe(200);
+    const results = (await res.json()) as Array<unknown>;
+    expect(results).toHaveLength(0);
+  });
+
+  it('returns 400 for missing query', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/messages/search');
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('Missing search query');
+  });
+
+  it('returns 400 for empty query', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/messages/search?q=');
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for whitespace-only query', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/messages/search?q=%20%20');
+    expect(res.status).toBe(400);
+  });
+
+  it('respects limit parameter', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/messages/search?q=Hello&limit=1');
+    expect(res.status).toBe(200);
+    const results = (await res.json()) as Array<unknown>;
+    expect(results).toHaveLength(1);
+  });
+
+  it('case-insensitive search', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/messages/search?q=hello');
+    expect(res.status).toBe(200);
+    const results = (await res.json()) as Array<{ content: string }>;
+    expect(results).toHaveLength(2);
+  });
+
+  it('finds messages with partial matches', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/messages/search?q=another');
+    expect(res.status).toBe(200);
+    const results = (await res.json()) as Array<{ sender_name: string }>;
+    expect(results).toHaveLength(1);
+    expect(results[0].sender_name).toBe('Bob');
   });
 });

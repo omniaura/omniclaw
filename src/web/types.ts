@@ -42,6 +42,15 @@ export interface WebStateProvider {
   getIpcEvents(count?: number): IpcEvent[];
   /** Execution history for a specific task. */
   getTaskRunLogs(taskId: string, limit?: number): TaskRunLog[];
+  /** Search messages by content, optionally within a specific chat. */
+  searchMessages(query: string, chatJid?: string, limit?: number): Array<{
+    id: string;
+    chat_jid: string;
+    sender: string;
+    sender_name: string;
+    content: string;
+    timestamp: string;
+  }>;
 
   // ---- Task mutations ----
   createTask(

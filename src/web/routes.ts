@@ -168,6 +168,8 @@ export function handleRequest(
   }
 
   if (pathname === '/api/chats') return handleGetChats(state);
+  if (pathname === '/api/messages/search')
+    return handleSearchMessages(url, state);
   if (pathname.startsWith('/api/messages/'))
     return handleGetMessages(url, state);
   if (pathname === '/api/stats') return handleGetStats(state);
@@ -627,6 +629,19 @@ function handleDeleteTask(taskId: string, state: WebStateProvider): Response {
 
 function handleGetChats(state: WebStateProvider): Response {
   return json(state.getChats());
+}
+
+function handleSearchMessages(url: URL, state: WebStateProvider): Response {
+  const query = url.searchParams.get('q') || '';
+  if (!query.trim()) return json({ error: 'Missing search query' }, 400);
+
+  const chatJid = url.searchParams.get('chatJid') || undefined;
+  const limit = Math.min(
+    Math.max(1, parseInt(url.searchParams.get('limit') || '50', 10) || 50),
+    200,
+  );
+  const results = state.searchMessages(query, chatJid, limit);
+  return json(results);
 }
 
 function handleGetMessages(url: URL, state: WebStateProvider): Response {
