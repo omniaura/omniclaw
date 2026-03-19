@@ -5,7 +5,7 @@
     "": {
       "name": "nanoclaw-agent-runner",
       "dependencies": {
-        "@anthropic-ai/claude-agent-sdk": "^0.2.77",
+        "@anthropic-ai/claude-agent-sdk": "^0.2.79",
         "@modelcontextprotocol/sdk": "^1.27.1",
         "@opencode-ai/sdk": "^1.2.27",
         "cron-parser": "^5.0.0",
@@ -18,7 +18,7 @@
     },
   },
   "packages": {
-    "@anthropic-ai/claude-agent-sdk": ["@anthropic-ai/claude-agent-sdk@0.2.77", "", { "optionalDependencies": { "@img/sharp-darwin-arm64": "^0.34.2", "@img/sharp-darwin-x64": "^0.34.2", "@img/sharp-linux-arm": "^0.34.2", "@img/sharp-linux-arm64": "^0.34.2", "@img/sharp-linux-x64": "^0.34.2", "@img/sharp-linuxmusl-arm64": "^0.34.2", "@img/sharp-linuxmusl-x64": "^0.34.2", "@img/sharp-win32-arm64": "^0.34.2", "@img/sharp-win32-x64": "^0.34.2" }, "peerDependencies": { "zod": "^4.0.0" } }, "sha512-t+R1BW3ahCFMNM7/8WJq7+Gw9KPA9Cl7UUK8fWPokJZ75cf/xwEd9MqB+MVNoQT45dJiom/wxybT7tqYPkCqyg=="],
+    "@anthropic-ai/claude-agent-sdk": ["@anthropic-ai/claude-agent-sdk@0.2.79", "", { "optionalDependencies": { "@img/sharp-darwin-arm64": "^0.34.2", "@img/sharp-darwin-x64": "^0.34.2", "@img/sharp-linux-arm": "^0.34.2", "@img/sharp-linux-arm64": "^0.34.2", "@img/sharp-linux-x64": "^0.34.2", "@img/sharp-linuxmusl-arm64": "^0.34.2", "@img/sharp-linuxmusl-x64": "^0.34.2", "@img/sharp-win32-arm64": "^0.34.2", "@img/sharp-win32-x64": "^0.34.2" }, "peerDependencies": { "zod": "^4.0.0" } }, "sha512-4HmjT2pzjcYSXGxe18L0D1+5GEak3bk25C2H9GlKFnOeCkYAHG4cla4U/rn+v+S2Ecv5m/hsNQ1hDbzg4Ns7rA=="],
 
     "@hono/node-server": ["@hono/node-server@1.19.9", "", { "peerDependencies": { "hono": "^4" } }, "sha512-vHL6w3ecZsky+8P5MD+eFfaGTyCeOHUIFYMGpQGbrBTSmNNoxv0if69rEZ5giu36weC5saFuznL411gRX7bJDw=="],
 
