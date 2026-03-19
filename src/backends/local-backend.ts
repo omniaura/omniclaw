@@ -393,6 +393,12 @@ export function buildVolumeMounts(
       'OPENCODE_MODEL',
       'OPENCODE_PROVIDER',
       'OPENCODE_MODEL_ID',
+      // Firebase / Google Cloud
+      'GOOGLE_APPLICATION_CREDENTIALS',
+      'FIREBASE_PROJECT_ID',
+      'FIREBASE_CLIENT_EMAIL',
+      'FIREBASE_PRIVATE_KEY',
+      'GCLOUD_PROJECT',
       ...(agentRuntime === 'codex'
         ? ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_MODEL']
         : []),
