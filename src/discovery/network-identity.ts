@@ -4,6 +4,7 @@ import { logger } from '../logger.js';
 import type { DiscoveryNetworkIdentity } from './types.js';
 
 const MAC_NETWORKSETUP_PATH = '/usr/sbin/networksetup';
+const MAC_IPCONFIG_PATH = '/usr/sbin/ipconfig';
 const MAC_SYSTEM_PROFILER_PATH = '/usr/sbin/system_profiler';
 const MAC_WDUTIL_PATH = '/usr/bin/wdutil';
 const NETWORK_IDENTITY_ENV = {
@@ -39,6 +40,13 @@ async function detectMacWifiNetwork(): Promise<DiscoveryNetworkIdentity | null> 
     );
     if (networksetupSsid) {
       return toWifiIdentity(networksetupSsid);
+    }
+
+    const ipconfigSsid = parseIpconfigSsid(
+      await runCommand([MAC_IPCONFIG_PATH, 'getsummary', device]),
+    );
+    if (ipconfigSsid) {
+      return toWifiIdentity(ipconfigSsid);
     }
   }
 
@@ -161,6 +169,11 @@ function parseSystemProfilerSsid(output: string): string | null {
   }
 
   return null;
+}
+
+function parseIpconfigSsid(output: string): string | null {
+  const match = output.match(/^\s*SSID\s*:\s*(.+)$/im);
+  return normalizeSsid(match?.[1] ?? null);
 }
 
 function parseWdutilSsid(output: string): string | null {

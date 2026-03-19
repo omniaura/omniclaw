@@ -80,6 +80,10 @@ describe('network identity detection', () => {
         });
       }
 
+      if (cmd[0] === '/usr/sbin/ipconfig') {
+        return createProcess({ stdout: '' });
+      }
+
       if (cmd[0] === '/usr/sbin/system_profiler') {
         return createProcess({
           stdout:
@@ -98,13 +102,53 @@ describe('network identity detection', () => {
     });
   });
 
+  it('detects the SSID from ipconfig before invoking system_profiler', async () => {
+    spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
+      if (cmd.includes('-listallhardwareports')) {
+        return createProcess({
+          stdout:
+            'Hardware Port: Wi-Fi\nDevice: en0\nEthernet Address: aa:bb:cc:dd:ee:ff\n',
+        });
+      }
+
+      if (cmd.includes('-getairportnetwork')) {
+        return createProcess({
+          stdout: 'You are not associated with an AirPort network.\n',
+        });
+      }
+
+      if (cmd[0] === '/usr/sbin/ipconfig') {
+        return createProcess({
+          stdout: 'SSID : Office WiFi\nSecurity : WPA3\n',
+        });
+      }
+
+      if (cmd[0] === '/usr/sbin/system_profiler') {
+        throw new Error(
+          'system_profiler should not run when ipconfig succeeds',
+        );
+      }
+
+      throw new Error(`Unexpected command: ${cmd.join(' ')}`);
+    }) as typeof Bun.spawn);
+
+    const result = await detectCurrentNetwork();
+
+    expect(result).toEqual({ id: 'wifi:Office WiFi', label: 'Office WiFi' });
+  });
+
   it('falls back to wdutil when the older macOS commands fail', async () => {
     spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
       if (cmd.includes('-listallhardwareports')) {
         return createProcess({
-          stdout: '',
-          stderr: 'networksetup unavailable',
-          exitCode: 1,
+          stdout:
+            'Hardware Port: Wi-Fi\nDevice: en0\nEthernet Address: aa:bb:cc:dd:ee:ff\n',
+        });
+      }
+
+      if (cmd.includes('-getairportnetwork')) {
+        return createProcess({
+          stdout: 'You are not associated with an AirPort network.\n',
         });
       }
 
@@ -114,6 +158,10 @@ describe('network identity detection', () => {
           stderr: 'permission denied',
           exitCode: 1,
         });
+      }
+
+      if (cmd[0] === '/usr/sbin/ipconfig') {
+        return createProcess({ stdout: '' });
       }
 
       if (cmd[0] === '/usr/bin/wdutil') {
@@ -132,9 +180,14 @@ describe('network identity detection', () => {
     spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
       if (cmd.includes('-listallhardwareports')) {
         return createProcess({
-          stdout: '',
-          stderr: 'networksetup unavailable',
-          exitCode: 1,
+          stdout:
+            'Hardware Port: Wi-Fi\nDevice: en0\nEthernet Address: aa:bb:cc:dd:ee:ff\n',
+        });
+      }
+
+      if (cmd.includes('-getairportnetwork')) {
+        return createProcess({
+          stdout: 'You are not associated with an AirPort network.\n',
         });
       }
 
@@ -142,6 +195,14 @@ describe('network identity detection', () => {
         return createProcess({
           stdout: '',
           stderr: 'system profiler unavailable',
+          exitCode: 1,
+        });
+      }
+
+      if (cmd[0] === '/usr/sbin/ipconfig') {
+        return createProcess({
+          stdout: '',
+          stderr: 'ipconfig unavailable',
           exitCode: 1,
         });
       }
