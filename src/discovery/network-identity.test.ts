@@ -141,9 +141,14 @@ describe('network identity detection', () => {
     spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
       if (cmd.includes('-listallhardwareports')) {
         return createProcess({
-          stdout: '',
-          stderr: 'networksetup unavailable',
-          exitCode: 1,
+          stdout:
+            'Hardware Port: Wi-Fi\nDevice: en0\nEthernet Address: aa:bb:cc:dd:ee:ff\n',
+        });
+      }
+
+      if (cmd.includes('-getairportnetwork')) {
+        return createProcess({
+          stdout: 'You are not associated with an AirPort network.\n',
         });
       }
 
@@ -175,9 +180,14 @@ describe('network identity detection', () => {
     spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
       if (cmd.includes('-listallhardwareports')) {
         return createProcess({
-          stdout: '',
-          stderr: 'networksetup unavailable',
-          exitCode: 1,
+          stdout:
+            'Hardware Port: Wi-Fi\nDevice: en0\nEthernet Address: aa:bb:cc:dd:ee:ff\n',
+        });
+      }
+
+      if (cmd.includes('-getairportnetwork')) {
+        return createProcess({
+          stdout: 'You are not associated with an AirPort network.\n',
         });
       }
 
