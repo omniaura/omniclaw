@@ -525,12 +525,14 @@ export class FakeState implements WebStateProvider {
     content: string;
     timestamp: string;
   }> {
-    const q = query.toLowerCase();
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
     const clampedLimit = Math.min(Math.max(1, limit ?? 50), 200);
     let results = this.messages.filter((m) =>
       m.content.toLowerCase().includes(q),
     );
     if (chatJid) results = results.filter((m) => m.chat_jid === chatJid);
+    results = results.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     return results.slice(0, clampedLimit);
   }
 

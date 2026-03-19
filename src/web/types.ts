@@ -43,7 +43,11 @@ export interface WebStateProvider {
   /** Execution history for a specific task. */
   getTaskRunLogs(taskId: string, limit?: number): TaskRunLog[];
   /** Search messages by content, optionally within a specific chat. */
-  searchMessages(query: string, chatJid?: string, limit?: number): Array<{
+  searchMessages(
+    query: string,
+    chatJid?: string,
+    limit?: number,
+  ): Array<{
     id: string;
     chat_jid: string;
     sender: string;

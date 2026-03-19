@@ -2319,7 +2319,8 @@ async function main(): Promise<void> {
     getQueueDetails: () => queue.getDetailedStats(),
     getIpcEvents: (count) => ipcEvents.recent(count),
     getTaskRunLogs: (taskId, limit) => getTaskRunLogs(taskId, limit),
-    searchMessages: (query, chatJid, limit) => dbSearchMessages(query, chatJid, limit),
+    searchMessages: (query, chatJid, limit) =>
+      dbSearchMessages(query, chatJid, limit),
     createTask: (task) => dbCreateTask(task),
     updateTask: (id, updates) => dbUpdateTask(id, updates),
     deleteTask: (id) => dbDeleteTask(id),

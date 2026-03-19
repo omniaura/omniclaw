@@ -384,4 +384,45 @@ describe('message search API', () => {
     expect(results).toHaveLength(1);
     expect(results[0].sender_name).toBe('Bob');
   });
+
+  it('treats percent and underscore literally in search queries', async () => {
+    const messages = [
+      ...testMessages,
+      {
+        id: 'msg-like-pattern',
+        chat_jid: 'dc:123',
+        sender: 'charlie',
+        sender_name: 'Charlie',
+        content: '100%_literal_match',
+        timestamp: '2026-03-01T12:03:00.000Z',
+      },
+    ];
+    handle = startWebServer(
+      testConfig(),
+      makeState({
+        getMessages: (chatJid, _since, limit) => {
+          const filtered = messages.filter((m) => m.chat_jid === chatJid);
+          return limit ? filtered.slice(0, limit) : filtered;
+        },
+        searchMessages: (query, chatJid, limit) => {
+          const q = query.trim().toLowerCase();
+          if (!q) return [];
+          let results = messages.filter((m) =>
+            m.content.toLowerCase().includes(q),
+          );
+          if (chatJid) results = results.filter((m) => m.chat_jid === chatJid);
+          results = results.sort((a, b) =>
+            b.timestamp.localeCompare(a.timestamp),
+          );
+          return limit ? results.slice(0, limit) : results;
+        },
+      }),
+    );
+
+    const res = await authedFetch('/api/messages/search?q=%25_');
+
+    expect(res.status).toBe(200);
+    const results = (await res.json()) as Array<{ id: string }>;
+    expect(results.map((r) => r.id)).toContain('msg-like-pattern');
+  });
 });
