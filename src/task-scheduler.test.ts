@@ -789,14 +789,7 @@ describe('execution lease tracking', () => {
       context_mode: 'isolated',
       created_at: old,
     });
-    // Manually set executing_since to an old timestamp
     markTaskExecuting('stale-task');
-    // Overwrite with old timestamp directly
-    const { db } = require('./db.js');
-    // Use the internal db to set an old executing_since
-    const dbObj = (globalThis as any).__omniclaw_test_db;
-
-    // Instead, create a fresh task and use the DB-level query
     createTask({
       id: 'fresh-task',
       group_folder: 'test',
