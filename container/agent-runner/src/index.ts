@@ -980,6 +980,7 @@ async function runQuery(
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
       mcpServers: {
+        ...(containerInput.mcpServers || {}),
         omniclaw: {
           command: 'bun',
           args: [mcpServerPath],
@@ -1007,7 +1008,6 @@ async function runQuery(
               : {}),
           },
         },
-        ...(containerInput.mcpServers || {}),
       },
       hooks: {
         PreCompact: [

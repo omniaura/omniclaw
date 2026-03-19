@@ -158,6 +158,9 @@ export function buildVolumeMounts(
     homeDir?: string;
     projectRoot?: string;
   },
+  options?: {
+    allowGcpCredentials?: boolean;
+  },
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const homeDir = pathOverrides?.homeDir || getHomeDir();
@@ -393,21 +396,20 @@ export function buildVolumeMounts(
       'OPENCODE_MODEL',
       'OPENCODE_PROVIDER',
       'OPENCODE_MODEL_ID',
-      // Firebase / Google Cloud
-      'GOOGLE_APPLICATION_CREDENTIALS',
-      'FIREBASE_PROJECT_ID',
-      'FIREBASE_CLIENT_EMAIL',
-      'FIREBASE_PRIVATE_KEY',
-      'GCLOUD_PROJECT',
       ...(agentRuntime === 'codex'
         ? ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_MODEL']
         : []),
+      ...(options?.allowGcpCredentials
+        ? [
+            'GOOGLE_APPLICATION_CREDENTIALS',
+            'FIREBASE_PROJECT_ID',
+            'FIREBASE_CLIENT_EMAIL',
+            'FIREBASE_PRIVATE_KEY',
+            'GCLOUD_PROJECT',
+          ]
+        : []),
     ];
-    const filteredLines = envContent.split('\n').filter((line) => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) return false;
-      return allowedVars.some((v) => trimmed.startsWith(`${v}=`));
-    });
+    const filteredLines = extractAllowedEnvBlocks(envContent, allowedVars);
 
     if (filteredLines.length > 0) {
       fs.writeFileSync(
@@ -469,6 +471,40 @@ export function buildVolumeMounts(
   }
 
   return mounts;
+}
+
+function extractAllowedEnvBlocks(
+  envContent: string,
+  allowedVars: string[],
+): string[] {
+  const allowed = new Set(allowedVars);
+  const lines = envContent.split('\n');
+  const blocks: string[] = [];
+  let currentKey: string | null = null;
+  let currentLines: string[] = [];
+
+  const flush = () => {
+    if (currentKey && allowed.has(currentKey) && currentLines.length > 0) {
+      blocks.push(currentLines.join('\n'));
+    }
+    currentKey = null;
+    currentLines = [];
+  };
+
+  for (const line of lines) {
+    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (match) {
+      flush();
+      currentKey = match[1];
+      currentLines = [line];
+      continue;
+    }
+
+    if (currentKey) currentLines.push(line);
+  }
+
+  flush();
+  return blocks;
 }
 
 function makeContainerName(baseFolder: string, runtimeFolder: string): string {
@@ -580,6 +616,8 @@ export class LocalBackend implements AgentBackend {
         categoryFolder: input.categoryFolder,
         agentContextFolder: input.agentContextFolder,
       },
+      undefined,
+      { allowGcpCredentials: !!containerCfg?.allowGcpCredentials },
     );
     const containerName = makeContainerName(folder, runtimeFolder);
     const effectiveNetwork =

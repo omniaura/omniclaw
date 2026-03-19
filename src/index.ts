@@ -1294,8 +1294,11 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   let outputSentToUser = false;
   // Edited-message streaming: a single message that gets updated with intermediate tool calls
   let intermediateMessageId: string | null = null;
-  const streamIntermediates =
-    !!group.containerConfig?.streamIntermediates && !!channel.editMessage;
+  const intermediateChannel =
+    group.containerConfig?.streamIntermediates && channel?.editMessage
+      ? channel
+      : null;
+  const streamIntermediates = !!intermediateChannel;
 
   // Patterns that indicate system/auth errors — never send these to channels
   // Adopted from [Upstream PR #298] - Prevents infinite loops from auth failures
@@ -1365,7 +1368,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
         // Adopted from [Upstream PR #243] - Critical stability fix
         try {
           if (result.intermediate) {
-            if (streamIntermediates && result.result) {
+            if (intermediateChannel && result.result) {
               const raw =
                 typeof result.result === 'string'
                   ? result.result
@@ -1377,15 +1380,14 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
               try {
                 if (!intermediateMessageId) {
                   // First intermediate: send a new standalone message
-                  const id = await channel.sendMessage(
+                  const id = await intermediateChannel.sendMessage(
                     chatJid,
                     text.slice(0, 2000),
                   );
-                  if (id && typeof id === 'string')
-                    intermediateMessageId = id;
+                  if (id && typeof id === 'string') intermediateMessageId = id;
                 } else {
                   // Subsequent intermediates: edit that same status message
-                  await channel.editMessage!(
+                  await intermediateChannel.editMessage!(
                     chatJid,
                     intermediateMessageId,
                     text.slice(0, 2000),
