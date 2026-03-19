@@ -513,6 +513,29 @@ export class FakeState implements WebStateProvider {
     return logs.slice(0, limit ?? 20);
   }
 
+  searchMessages(
+    query: string,
+    chatJid?: string,
+    limit?: number,
+  ): Array<{
+    id: string;
+    chat_jid: string;
+    sender: string;
+    sender_name: string;
+    content: string;
+    timestamp: string;
+  }> {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const clampedLimit = Math.min(Math.max(1, limit ?? 50), 200);
+    let results = this.messages.filter((m) =>
+      m.content.toLowerCase().includes(q),
+    );
+    if (chatJid) results = results.filter((m) => m.chat_jid === chatJid);
+    results = results.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    return results.slice(0, clampedLimit);
+  }
+
   createTask(
     task: Omit<ScheduledTask, 'last_run' | 'last_result' | 'executing_since'>,
   ): void {

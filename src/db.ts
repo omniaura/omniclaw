@@ -1052,6 +1052,51 @@ export function getMessagesSince(
   return rows.map(mapMessageRow);
 }
 
+/**
+ * Search messages by content across all chats or within a specific chat.
+ * Uses SQLite LIKE for substring matching (case-insensitive).
+ */
+export function searchMessages(
+  query: string,
+  chatJid?: string,
+  limit: number = 50,
+): NewMessage[] {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return [];
+
+  const escapedQuery = escapeSqlLikePattern(trimmedQuery);
+  const pattern = `%${escapedQuery}%`;
+  const clampedLimit = Math.min(Math.max(1, limit), 200);
+
+  if (chatJid) {
+    const sql = `
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, sender_platform, sender_user_id, mentions
+      FROM messages
+      WHERE chat_jid = ? AND content LIKE ? ESCAPE '\\' COLLATE NOCASE
+      ORDER BY timestamp DESC
+      LIMIT ?
+    `;
+    const rows = db
+      .prepare(sql)
+      .all(chatJid, pattern, clampedLimit) as MessageRow[];
+    return rows.map(mapMessageRow);
+  }
+
+  const sql = `
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, sender_platform, sender_user_id, mentions
+    FROM messages
+    WHERE content LIKE ? ESCAPE '\\' COLLATE NOCASE
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `;
+  const rows = db.prepare(sql).all(pattern, clampedLimit) as MessageRow[];
+  return rows.map(mapMessageRow);
+}
+
+function escapeSqlLikePattern(value: string): string {
+  return value.replace(/([\\%_])/g, '\\$1');
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result' | 'executing_since'>,
 ): void {

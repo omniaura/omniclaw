@@ -50,6 +50,7 @@ function makeState(
     getQueueDetails: () => [],
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
+    searchMessages: () => [],
     createTask: () => {},
     updateTask: () => {},
     deleteTask: () => {},
