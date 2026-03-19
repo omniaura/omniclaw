@@ -360,6 +360,23 @@ export class DiscordChannel implements Channel {
     }
   }
 
+  async editMessage(
+    jid: string,
+    messageId: string,
+    text: string,
+  ): Promise<void> {
+    const channel = await resolveChannel(this.client, jid);
+    if (!channel || !('messages' in channel)) return;
+    try {
+      const msg = await (channel as TextChannel | DMChannel).messages.fetch(
+        messageId,
+      );
+      await msg.edit(text.slice(0, 2000));
+    } catch (err) {
+      logger.warn({ jid, messageId, err }, 'Failed to edit Discord message');
+    }
+  }
+
   async getAvatarUrl(): Promise<string | null> {
     if (!this.connected || !this.client.user) return null;
     try {

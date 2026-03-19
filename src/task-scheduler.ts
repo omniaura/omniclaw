@@ -219,6 +219,7 @@ async function runTask(
           channelFolder: group.channelFolder,
           categoryFolder: group.categoryFolder,
           agentContextFolder: group.agentContextFolder,
+          mcpServers: group.containerConfig?.mcpServers,
         },
         (proc, containerName) =>
           deps.onProcess(

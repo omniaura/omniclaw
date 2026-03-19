@@ -39,6 +39,12 @@ export interface ContainerConfig {
   timeout?: number; // Default: 300000 (5 minutes)
   memory?: number; // Container memory in MB. Default: 4096
   networkMode?: 'full' | 'none'; // Default: 'none' for non-main, 'full' for main
+  /** Extra MCP servers to inject into the agent runtime (SSE/HTTP). Keyed by server name. */
+  mcpServers?: Record<string, Record<string, unknown>>;
+  /** Explicitly allow Firebase/GCP credentials to flow into the local backend env mount. */
+  allowGcpCredentials?: boolean;
+  /** Stream intermediate agent outputs (tool calls, thinking) via an edited status message. */
+  streamIntermediates?: boolean;
 }
 
 export type BackendType = 'apple-container' | 'docker';
@@ -164,6 +170,8 @@ export interface Channel {
   // Thread handles are opaque — callers store the value from createThread and pass it to sendToThread.
   createThread?(jid: string, messageId: string, name: string): Promise<unknown>;
   sendToThread?(thread: unknown, text: string): Promise<void>;
+  // Optional: edit an existing message in-place.
+  editMessage?(jid: string, messageId: string, text: string): Promise<void>;
   // Optional: add/remove emoji reactions on messages.
   addReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
   removeReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
