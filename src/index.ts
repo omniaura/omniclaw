@@ -68,6 +68,7 @@ import {
   getChatGuildId,
   getGuildRoster,
   getMessagesSince,
+  searchMessages as dbSearchMessages,
   storeGuildRoster,
   getNewMessages,
   getRouterState,
@@ -594,6 +595,16 @@ function refreshChannelSubscriptions(): void {
 function invalidateChannelSubscriptions(): void {
   channelSubscriptionsDirty = true;
   mentionPatternCache.clear();
+  for (const channel of channels) {
+    if (channel instanceof DiscordChannel) {
+      channel.refreshSlashCommands().catch((err) => {
+        logger.warn(
+          { err, botId: channel.botId },
+          'Failed to refresh Discord slash commands',
+        );
+      });
+    }
+  }
 }
 
 function refreshRegisteredGroupsFromCanonicalState(): {
@@ -2357,6 +2368,8 @@ async function main(): Promise<void> {
     getQueueDetails: () => queue.getDetailedStats(),
     getIpcEvents: (count) => ipcEvents.recent(count),
     getTaskRunLogs: (taskId, limit) => getTaskRunLogs(taskId, limit),
+    searchMessages: (query, chatJid, limit) =>
+      dbSearchMessages(query, chatJid, limit),
     createTask: (task) => dbCreateTask(task),
     updateTask: (id, updates) => dbUpdateTask(id, updates),
     deleteTask: (id) => dbDeleteTask(id),
@@ -2770,6 +2783,8 @@ async function main(): Promise<void> {
                 botId: bot.id,
                 token: bot.token,
                 multiBotMode: DISCORD_BOTS.length > 1,
+                onSyntheticMessage: (message) => storeMessage(message),
+                registeredGroups: () => registeredGroups,
                 onReaction: async (chatJid, messageId, emoji, userName) => {
                   await handleReactionNotification(
                     chatJid,

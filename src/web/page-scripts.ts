@@ -1053,6 +1053,7 @@ function refreshTasks(){
       var tl=task.status==="active"?"Pause":"Resume";
       var ts2=task.status==="active"?"paused":"active";
       var ps=task.prompt.length>60?task.prompt.slice(0,57)+"\\u2026":task.prompt;
+      var sl=scheduleLabel(task.schedule_type,task.schedule_value);
       var nr=task.next_run?relTime(task.next_run):"\\u2014";
       var lr=task.last_run?relTime(task.last_run):"\\u2014";
       var lrc=task.last_result==="success"?"run-success":task.last_result==="error"?"run-error":"";
@@ -1061,7 +1062,7 @@ function refreshTasks(){
         +'<td class="td-agent" title="'+window.__esc(task.chat_jid)+'">'+window.__esc(task.group_folder)+'</td>'
         +'<td class="td-prompt" title="'+window.__esc(task.prompt)+'">'+window.__esc(ps)+'</td>'
         +'<td class="td-sched"><span class="sched-type badge badge-sm">'+window.__esc(task.schedule_type)+'</span> '
-        +'<span class="sched-label">'+window.__esc(task.schedule_value)+'</span></td>'
+        +'<span class="sched-label">'+window.__esc(sl)+'</span></td>'
         +'<td class="td-time" title="'+window.__esc(task.next_run||"")+'">'+window.__esc(nr)+'</td>'
         +'<td class="td-time '+lrc+'" title="'+window.__esc(task.last_run||"")+'">'+window.__esc(lr)+'</td>'
         +'<td><span class="badge badge-sm">'+window.__esc(task.context_mode)+'</span></td>'
@@ -1074,6 +1075,22 @@ function refreshTasks(){
     }).join("");
     applyFilter();
   }).catch(function(err){console.error("Failed to refresh tasks:",err);});
+}
+
+function scheduleLabel(type,value){
+  if(type==="interval"){
+    var ms=parseInt(value,10);
+    if(isNaN(ms))return value;
+    if(ms<1000)return ms+"ms";
+    if(ms<60000)return (ms/1000).toFixed(0)+"s";
+    if(ms<3600000)return (ms/60000).toFixed(0)+"m";
+    return (ms/3600000).toFixed(0)+"h";
+  }
+  if(type==="once"){
+    try{return new Date(value).toLocaleString();}
+    catch(e){return value;}
+  }
+  return value;
 }
 
 function relTime(iso){
@@ -1095,13 +1112,43 @@ function conversationsScript(): string {
     'var chatList=document.getElementById("chat-list");',
     'var convContent=document.getElementById("conv-content");',
     'var searchInput=document.getElementById("chat-search");',
+    'var msgSearchInput=document.getElementById("msg-search");',
     'var chatCountEl=document.getElementById("chat-count");',
+    'var searchResultsEl=document.getElementById("search-results");',
+    'var filterWrap=document.getElementById("filter-input-wrap");',
+    'var searchWrap=document.getElementById("search-input-wrap");',
+    'var tabFilter=document.getElementById("tab-filter");',
+    'var tabSearch=document.getElementById("tab-search");',
     'if(!chatList)return;',
-    'var currentJid=null;var messageCache={};var PAGE_SIZE=100;',
+    'var currentJid=null;var messageCache={};var PAGE_SIZE=100;var searchMode=false;var searchTimer=null;var currentSearchToken=0;',
+    '',
+    // Tab switching
+    'function updateConversationUrl(query,jid){',
+    '  var url=new URL(location.href);',
+    '  if(query&&query.trim()){url.searchParams.set("q",query.trim());}else{url.searchParams.delete("q");}',
+    '  if(jid){url.searchParams.set("chat",jid);}else{url.searchParams.delete("chat");}',
+    '  history.replaceState(null,"",url.pathname+(url.search?url.search:""));',
+    '}',
+    'function setMode(mode){',
+    '  searchMode=mode==="search";',
+    '  tabFilter.classList.toggle("active",!searchMode);',
+    '  tabSearch.classList.toggle("active",searchMode);',
+    '  filterWrap.style.display=searchMode?"none":"";',
+    '  searchWrap.style.display=searchMode?"":"none";',
+    '  chatList.style.display=searchMode?"none":"";',
+    '  chatCountEl.style.display=searchMode?"none":"";',
+    '  searchResultsEl.style.display=searchMode?"":"none";',
+    '  updateConversationUrl(searchMode?msgSearchInput.value:null,searchMode?null:currentJid);',
+    '  if(searchMode){msgSearchInput.focus();}else{searchInput.focus();}',
+    '}',
+    'tabFilter.addEventListener("click",function(){setMode("filter");});',
+    'tabSearch.addEventListener("click",function(){setMode("search");});',
     '',
     'var params=new URLSearchParams(location.search);',
     'var initChat=params.get("chat");',
-    'if(initChat){var ii=chatList.querySelector("[data-jid=\\""+CSS.escape(initChat)+"\\"]");',
+    'var initSearch=params.get("q");',
+    'if(initSearch){setMode("search");msgSearchInput.value=initSearch;doSearch(initSearch);}',
+    'else if(initChat){var ii=chatList.querySelector("[data-jid=\\""+CSS.escape(initChat)+"\\"]");',
     '  if(ii)setTimeout(function(){selectChat(initChat);},0);}',
     '',
     'searchInput.addEventListener("input",function(){',
@@ -1115,6 +1162,80 @@ function conversationsScript(): string {
     '  chatCountEl.textContent=vis+" chat"+(vis!==1?"s":"");',
     '});',
     '',
+    // Message search with debounce
+    'msgSearchInput.addEventListener("input",function(){',
+    '  var q=this.value;',
+    '  if(searchTimer)clearTimeout(searchTimer);',
+    '  if(!q.trim()){searchResultsEl.innerHTML="";updateConversationUrl(null,null);return;}',
+    '  searchTimer=setTimeout(function(){doSearch(q);},300);',
+    '});',
+    'msgSearchInput.addEventListener("keydown",function(e){',
+    '  if(e.key==="Enter"){e.preventDefault();if(searchTimer)clearTimeout(searchTimer);doSearch(this.value);}',
+    '});',
+    '',
+    'function doSearch(query){',
+    '  var trimmed=query.trim();',
+    '  if(!trimmed){searchResultsEl.innerHTML="";updateConversationUrl(null,null);return;}',
+    '  currentSearchToken+=1;var token=currentSearchToken;',
+    '  updateConversationUrl(trimmed,null);',
+    '  searchResultsEl.innerHTML=\'<div class="search-count">searching\\u2026</div>\';',
+    '  fetch("/api/messages/search?q="+encodeURIComponent(trimmed)+"&limit=50")',
+    '  .then(function(r){if(!r.ok)throw new Error("Failed");return r.json();})',
+    '  .then(function(results){',
+    '    if(token!==currentSearchToken)return;',
+    '    if(!Array.isArray(results)){searchResultsEl.innerHTML=\'<div class="search-count">error</div>\';return;}',
+    '    renderSearchResults(trimmed,results);',
+    '  }).catch(function(){if(token!==currentSearchToken)return;searchResultsEl.innerHTML=\'<div class="search-count">search failed</div>\';});',
+    '}',
+    '',
+    'function buildSearchSnippet(text,query){',
+    '  var lower=text.toLowerCase();var ql=query.toLowerCase();var idx=lower.indexOf(ql);',
+    '  if(idx===-1)return text.length>120?text.slice(0,117)+"\\u2026":text;',
+    '  var start=Math.max(0,idx-40);var end=Math.min(text.length,start+120);',
+    '  start=Math.max(0,Math.min(start,Math.max(0,end-120)));',
+    '  var snippet=text.slice(start,end);',
+    '  if(start>0)snippet="\\u2026"+snippet;',
+    '  if(end<text.length)snippet=snippet+"\\u2026";',
+    '  return snippet;',
+    '}',
+    'function renderSearchResults(query,results){',
+    '  var h=\'<div class="search-count">\'+results.length+\' result\'+(results.length!==1?"s":"")+\'</div>\';',
+    '  if(results.length===0){searchResultsEl.innerHTML=h;return;}',
+    '  for(var i=0;i<results.length;i++){',
+    '    var r=results[i];var sn=r.sender_name||r.sender||"Unknown";',
+    '    var text=r.content||"";var snippet=buildSearchSnippet(text,query);',
+    '    var time=new Date(r.timestamp).toLocaleString();',
+    '    h+=\'<div class="search-result" data-jid="\'+window.__esc(r.chat_jid)+\'" tabindex="0" role="button">\';',
+    "    h+='<div class=\"search-result-chat\">'+window.__esc(sn)+' in '+window.__esc(r.chat_jid)+'</div>';",
+    "    h+='<div class=\"search-result-text\">'+highlightMatch(snippet,query)+'</div>';",
+    "    h+='<div class=\"search-result-meta\">'+window.__esc(time)+'</div>';",
+    "    h+='</div>';",
+    '  }',
+    '  searchResultsEl.innerHTML=h;',
+    '}',
+    '',
+    'function highlightMatch(text,query){',
+    '  var escaped=window.__esc(text);var ql=query.toLowerCase();var tl=text.toLowerCase();',
+    '  var idx=tl.indexOf(ql);if(idx===-1)return escaped;',
+    '  var before=window.__esc(text.slice(0,idx));var match=window.__esc(text.slice(idx,idx+query.length));',
+    '  var after=window.__esc(text.slice(idx+query.length));',
+    '  return before+"<mark>"+match+"</mark>"+after;',
+    '}',
+    '',
+    // Click search result to jump to that conversation
+    'searchResultsEl.addEventListener("click",function(e){',
+    '  var item=e.target.closest(".search-result");if(!item)return;',
+    '  var jid=item.getAttribute("data-jid");if(!jid)return;',
+    '  setMode("filter");selectChat(jid);',
+    '});',
+    'searchResultsEl.addEventListener("keydown",function(e){',
+    '  if(e.key!=="Enter"&&e.key!==" ")return;',
+    '  var item=e.target.closest(".search-result");if(!item)return;',
+    '  e.preventDefault();',
+    '  var jid=item.getAttribute("data-jid");if(!jid)return;',
+    '  setMode("filter");selectChat(jid);',
+    '});',
+    '',
     'chatList.addEventListener("click",function(e){',
     '  var item=e.target.closest(".chat-item");if(!item)return;selectChat(item.getAttribute("data-jid"));',
     '});',
@@ -1124,7 +1245,7 @@ function conversationsScript(): string {
     '',
     'function selectChat(jid){',
     '  if(jid===currentJid)return;currentJid=jid;',
-    '  history.replaceState(null,"","/conversations?chat="+encodeURIComponent(jid));',
+    '  updateConversationUrl(null,jid);',
     '  chatList.querySelectorAll(".chat-item").forEach(function(el){',
     '    el.classList.toggle("selected",el.getAttribute("data-jid")===jid);',
     '  });',

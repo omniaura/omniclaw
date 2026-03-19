@@ -10,7 +10,11 @@ import type {
   ScheduledTask,
   TaskRunLog,
 } from '../types.js';
-import { handleRequest, resetDiscoveryContextForTests } from './routes.js';
+import {
+  createRemotePeerResolver,
+  handleRequest,
+  resetDiscoveryContextForTests,
+} from './routes.js';
 import type { WebStateProvider } from './types.js';
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
@@ -109,6 +113,7 @@ function makeState(
       tasks.delete(id);
     },
     getTaskRunLogs: () => [],
+    searchMessages: () => [],
     calculateNextRun: () => '2026-03-06T09:00:00.000Z',
     readContextFile: () => null,
     writeContextFile: () => {},
@@ -165,6 +170,35 @@ afterEach(() => {
   resetDiscoveryContextForTests();
 });
 
+describe('createRemotePeerResolver', () => {
+  it('memoizes the fetcher result for a single request flow', async () => {
+    let callCount = 0;
+    const expected = [
+      {
+        instanceId: 'peer-1',
+        instanceName: 'orangepi5',
+        online: true,
+        host: '10.0.0.12',
+        port: 7777,
+        agents: [],
+      },
+    ];
+    const resolveRemotePeers = createRemotePeerResolver(async () => {
+      callCount += 1;
+      return expected;
+    });
+
+    const [first, second] = await Promise.all([
+      resolveRemotePeers(),
+      resolveRemotePeers(),
+    ]);
+
+    expect(callCount).toBe(1);
+    expect(first).toBe(expected);
+    expect(second).toBe(expected);
+  });
+});
+
 describe('handleRequest avatar image proxy', () => {
   it('proxies remote avatar bytes for an agent', async () => {
     const testImageCacheDir = path.join(
@@ -180,7 +214,7 @@ describe('handleRequest avatar image proxy', () => {
         makeState({
           remoteImageCacheDir: testImageCacheDir,
           fetchRemoteImage: async (input: string | URL | Request) => {
-            expect(String(input)).toBe('https://example.test/avatar.png');
+            expect(String(input)).toBe('https://93.184.216.34/avatar.png');
             return new Response('avatar-bytes', {
               status: 200,
               headers: { 'Content-Type': 'image/png' },
@@ -188,7 +222,7 @@ describe('handleRequest avatar image proxy', () => {
           },
           getAgents: () => ({
             'test-agent': makeAgent({
-              avatarUrl: 'https://example.test/avatar.png',
+              avatarUrl: 'https://93.184.216.34/avatar.png',
               avatarSource: 'telegram',
             }),
           }),
@@ -200,6 +234,58 @@ describe('handleRequest avatar image proxy', () => {
     } finally {
       clearImageCache(testImageCacheDir);
     }
+  });
+
+  it('rejects custom avatar urls that target loopback hosts', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/api/agents/test-agent/avatar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'custom',
+          url: 'http://127.0.0.1:8080/private.png',
+        }),
+      }),
+      makeState({
+        getAgents: () => ({
+          'test-agent': makeAgent({
+            id: 'test-agent',
+            folder: 'test-agent',
+          }),
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: 'Avatar URL rejected: private address is not allowed',
+    });
+  });
+
+  it('rejects custom avatar urls that use IPv6-mapped loopback notation', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/api/agents/test-agent/avatar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'custom',
+          url: 'http://[::ffff:7f00:1]/private.png',
+        }),
+      }),
+      makeState({
+        getAgents: () => ({
+          'test-agent': makeAgent({
+            id: 'test-agent',
+            folder: 'test-agent',
+          }),
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: 'Avatar URL rejected: private address is not allowed',
+    });
   });
 
   it('redacts Telegram bot tokens from avatar metadata responses', async () => {
@@ -237,7 +323,7 @@ describe('handleRequest avatar image proxy', () => {
         makeState({
           remoteImageCacheDir: testImageCacheDir,
           fetchRemoteImage: async (input: string | URL | Request) => {
-            expect(String(input)).toBe('https://example.test/tg-avatar.png');
+            expect(String(input)).toBe('https://93.184.216.34/tg-avatar.png');
             return new Response('telegram-avatar', {
               status: 200,
               headers: { 'Content-Type': 'image/png' },
@@ -247,7 +333,7 @@ describe('handleRequest avatar image proxy', () => {
             expect(agentId).toBe('test-agent');
             expect(avatarSource).toBe('telegram');
             expect(avatarUrl).toBe('tg-file:123456:photos%2Ffile_42.jpg');
-            return 'https://example.test/tg-avatar.png';
+            return 'https://93.184.216.34/tg-avatar.png';
           },
           getAgents: () => ({
             'test-agent': makeAgent({
@@ -281,7 +367,7 @@ describe('handleRequest avatar image proxy', () => {
           ...makeState(makeAgent()),
           remoteImageCacheDir: testImageCacheDir,
           fetchRemoteImage: async (input: string | URL | Request) => {
-            expect(String(input)).toBe('https://example.test/tg-user.png');
+            expect(String(input)).toBe('https://93.184.216.34/tg-user.png');
             return new Response('tg-user', {
               status: 200,
               headers: { 'Content-Type': 'image/png' },
@@ -289,7 +375,7 @@ describe('handleRequest avatar image proxy', () => {
           },
           resolveChatImage: async (jid) => {
             expect(jid).toBe('tg:8401921193:1991174535');
-            return 'https://example.test/tg-user.png';
+            return 'https://93.184.216.34/tg-user.png';
           },
         },
       );
@@ -318,7 +404,7 @@ describe('handleRequest avatar image proxy', () => {
           remoteImageCacheDir: testImageCacheDir,
           fetchRemoteImage: async (input: string | URL | Request) => {
             expect(String(input)).toBe(
-              'https://example.test/discord-guild.png',
+              'https://93.184.216.34/discord-guild.png',
             );
             return new Response('guild-icon', {
               status: 200,
@@ -328,7 +414,7 @@ describe('handleRequest avatar image proxy', () => {
           resolveDiscordGuildImage: async (guildId, botId) => {
             expect(guildId).toBe('753336633083953213');
             expect(botId).toBe('OCPEYTON');
-            return 'https://example.test/discord-guild.png';
+            return 'https://93.184.216.34/discord-guild.png';
           },
         },
       );

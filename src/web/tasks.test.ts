@@ -76,6 +76,7 @@ function makeState(tasks: ScheduledTask[] = [makeTask()]): WebStateProvider {
     getQueueDetails: () => [],
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
+    searchMessages: () => [],
     createTask: () => {},
     updateTask: () => {},
     deleteTask: () => {},

@@ -49,3 +49,17 @@ describe('logs page script', () => {
     );
   });
 });
+
+describe('tasks page script', () => {
+  it('keeps friendly schedule labels when tasks refresh from the API', () => {
+    const script = allPageScripts().tasks;
+
+    expect(script).toContain('function scheduleLabel(type,value){');
+    expect(script).toContain(
+      'var sl=scheduleLabel(task.schedule_type,task.schedule_value);',
+    );
+    expect(script).toContain(
+      "+'<span class=\"sched-label\">'+window.__esc(sl)+'</span></td>'",
+    );
+  });
+});
