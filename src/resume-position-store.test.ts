@@ -150,8 +150,15 @@ describe('PersistentResumePositionStore', () => {
         store.set('alpha', '2026-03-03T00:00:00.000Z');
       }).not.toThrow();
       expect(store.get('alpha')).toBe('2026-03-03T00:00:00.000Z');
-      expect(records).toHaveLength(1);
+
+      expect(() => {
+        store.clear();
+      }).not.toThrow();
+      expect(store.getAll()).toEqual({});
+
+      expect(records).toHaveLength(2);
       expect(records[0]?.msg).toBe('Failed to persist resume positions');
+      expect(records[1]?.msg).toBe('Failed to persist resume positions');
     } finally {
       stop();
     }
