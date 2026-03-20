@@ -15,7 +15,7 @@ jobs:
       - name: Check for mixed skill + source changes
         run: |
           # Check if PR adds new skill files (not just modifies existing)
-          ADDED_SKILLS=$(git diff --name-only --diff-filter=A origin/main...HEAD | grep '^\.claude/skills/' || true)
+          ADDED_SKILLS=$(git diff --name-only --diff-filter=A origin/main...HEAD | grep '^\.agents/skills/' || true)
 
           # Check if PR touches source
           CHANGED=$(git diff --name-only origin/main...HEAD)

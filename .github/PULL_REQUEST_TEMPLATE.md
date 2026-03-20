@@ -1,6 +1,6 @@
 ## Type of Change
 
-- [ ] **Skill** - adds a new skill in `.claude/skills/`
+- [ ] **Skill** - adds a new skill in `.agents/skills/`
 - [ ] **Fix** - bug fix or security fix to source code
 - [ ] **Simplification** - reduces or simplifies source code
 
