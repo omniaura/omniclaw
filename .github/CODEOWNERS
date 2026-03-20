@@ -6,5 +6,4 @@
 /package.json @peyton-spencer
 /package-lock.json @peyton-spencer
 
-# Skills - open to contributors
-/.agents/skills/
+# Skills - open to contributors, no automatic code owner review
