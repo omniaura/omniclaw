@@ -100,6 +100,8 @@ export interface ContainerInput {
   githubContext?: string;
   /** GitHub activity delta digest (events since last user message in this channel). */
   githubActivityDelta?: string;
+  /** Auto-fetched context for GitHub PR/issue URLs detected in user messages. */
+  githubLinkedContext?: string;
   /** Extra MCP servers to inject into the agent runtime alongside the built-in omniclaw server. */
   mcpServers?: Record<string, Record<string, unknown>>;
 }

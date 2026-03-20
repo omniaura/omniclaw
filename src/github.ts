@@ -23,7 +23,7 @@ const MAX_LIST_LIMIT = 50;
 
 // --- Types for GitHub API responses ---
 
-interface GitHubPr {
+export interface GitHubPr {
   number: number;
   title: string;
   user: { login: string } | null;
@@ -38,7 +38,7 @@ interface GitHubPr {
   updated_at: string;
 }
 
-interface GitHubReviewComment {
+export interface GitHubReviewComment {
   user: { login: string } | null;
   body: string;
   path: string;
@@ -46,13 +46,13 @@ interface GitHubReviewComment {
   created_at: string;
 }
 
-interface GitHubReview {
+export interface GitHubReview {
   user: { login: string } | null;
   state: string;
   body: string | null;
 }
 
-interface GitHubIssue {
+export interface GitHubIssue {
   number: number;
   title: string;
   user: { login: string } | null;
@@ -149,7 +149,7 @@ export function getWatchesForAgent(
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
 
-async function githubFetch<T>(urlPath: string): Promise<T | null> {
+export async function githubFetch<T>(urlPath: string): Promise<T | null> {
   if (!GITHUB_TOKEN) {
     logger.warn('GITHUB_TOKEN not set — skipping GitHub API call');
     return null;
@@ -185,7 +185,7 @@ async function fetchOpenPrs(
   return prs || [];
 }
 
-async function fetchPrReviewComments(
+export async function fetchPrReviewComments(
   owner: string,
   repo: string,
   prNumber: number,
@@ -196,7 +196,7 @@ async function fetchPrReviewComments(
   return comments || [];
 }
 
-async function fetchPrReviews(
+export async function fetchPrReviews(
   owner: string,
   repo: string,
   prNumber: number,
@@ -219,7 +219,7 @@ async function fetchRecentIssues(
   return (issues || []).filter((i) => !i.pull_request);
 }
 
-async function fetchCombinedStatus(
+export async function fetchCombinedStatus(
   owner: string,
   repo: string,
   ref: string,
@@ -237,14 +237,14 @@ async function fetchCombinedStatus(
 
 // --- Markdown formatting ---
 
-function truncate(text: string | null | undefined, maxLen: number): string {
+export function truncate(text: string | null | undefined, maxLen: number): string {
   if (!text) return '';
   const cleaned = text.replace(/\r\n/g, '\n').trim();
   if (cleaned.length <= maxLen) return cleaned;
   return cleaned.slice(0, maxLen) + '…';
 }
 
-function formatPrMarkdown(
+export function formatPrMarkdown(
   pr: GitHubPr,
   reviews: GitHubReview[],
   comments: GitHubReviewComment[],
@@ -289,7 +289,7 @@ function formatPrMarkdown(
   return lines.join('\n');
 }
 
-function formatIssueMarkdown(issue: GitHubIssue): string {
+export function formatIssueMarkdown(issue: GitHubIssue): string {
   const author = issue.user?.login || 'unknown';
   const labels = issue.labels.map((l) => l.name).join(', ') || 'none';
   const assignee = issue.assignee?.login || 'unassigned';
