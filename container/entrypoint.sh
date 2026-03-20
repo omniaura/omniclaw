@@ -8,7 +8,14 @@ if ! id -un &>/dev/null 2>&1; then
 fi
 
 # Source environment variables from mounted env file
-[ -f /workspace/env-dir/env ] && export $(cat /workspace/env-dir/env | xargs)
+if [ -f /workspace/env-dir/env ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+    export "$line"
+  done < /workspace/env-dir/env
+fi
 
 # Cap JS heap to prevent OOM
 export NODE_OPTIONS="--max-old-space-size=2048"
