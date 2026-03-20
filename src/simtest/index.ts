@@ -89,7 +89,8 @@ console.log('║    GET  /remote-peers      — Remote sim snapshot    ║');
 console.log('║    POST /remote-peers/:id/logs — Inject remote log  ║');
 console.log('║                                                     ║');
 console.log('║  Scenarios: agent-overload, task-storm,             ║');
-console.log('║             error-cascade, idle-fleet, empty        ║');
+console.log('║             error-cascade, idle-fleet,              ║');
+console.log('║             multi-peer-transitions, empty           ║');
 console.log('╚══════════════════════════════════════════════════════╝');
 console.log('');
 
