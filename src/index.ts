@@ -1294,8 +1294,10 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   let outputSentToUser = false;
   // Edited-message streaming: a single message that gets updated with intermediate tool calls
   let intermediateMessageId: string | null = null;
+  // For channel-less JIDs: track last intermediate text so we can promote it on completion
+  let lastIpcIntermediateText: string | null = null;
   const streamIntermediates =
-    !!group.containerConfig?.streamIntermediates && !!channel.editMessage;
+    !!group.containerConfig?.streamIntermediates && !!channel?.editMessage;
 
   // Patterns that indicate system/auth errors — never send these to channels
   // Adopted from [Upstream PR #298] - Prevents infinite loops from auth failures
@@ -1365,7 +1367,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
         // Adopted from [Upstream PR #243] - Critical stability fix
         try {
           if (result.intermediate) {
-            if (streamIntermediates && result.result) {
+            if (result.result) {
               const raw =
                 typeof result.result === 'string'
                   ? result.result
@@ -1374,25 +1376,44 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
                 .replace(/<internal>[\s\S]*?<\/internal>/g, '')
                 .trim();
               if (!text) return;
-              try {
-                if (!intermediateMessageId) {
-                  // First intermediate: send a new standalone message
-                  const id = await channel.sendMessage(
-                    chatJid,
-                    text.slice(0, 2000),
-                  );
-                  if (id && typeof id === 'string')
-                    intermediateMessageId = id;
-                } else {
-                  // Subsequent intermediates: edit that same status message
-                  await channel.editMessage!(
-                    chatJid,
-                    intermediateMessageId,
-                    text.slice(0, 2000),
-                  );
+
+              if (!channel) {
+                // No channel — store in DB for IPC-based clients to poll
+                // Skip agent-runner boilerplate from promotion
+                if (!text.includes('If this was your final response')) {
+                  lastIpcIntermediateText = text.slice(0, 4000);
                 }
-              } catch (err) {
-                log.debug({ err }, 'Intermediate streaming failed (non-fatal)');
+                storeMessage({
+                  id: `ipc-wip-${chatJid}`,
+                  chat_jid: chatJid,
+                  sender: 'assistant:wip',
+                  sender_name: ASSISTANT_NAME,
+                  content: lastIpcIntermediateText,
+                  timestamp: new Date().toISOString(),
+                  is_from_me: true,
+                  sender_platform: 'ipc',
+                });
+              } else if (streamIntermediates) {
+                try {
+                  if (!intermediateMessageId) {
+                    // First intermediate: send a new standalone message
+                    const id = await channel.sendMessage(
+                      chatJid,
+                      text.slice(0, 2000),
+                    );
+                    if (id && typeof id === 'string')
+                      intermediateMessageId = id;
+                  } else {
+                    // Subsequent intermediates: edit that same status message
+                    await channel.editMessage!(
+                      chatJid,
+                      intermediateMessageId,
+                      text.slice(0, 2000),
+                    );
+                  }
+                } catch (err) {
+                  log.debug({ err }, 'Intermediate streaming failed (non-fatal)');
+                }
               }
             }
             return;
@@ -1455,6 +1476,21 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
                     typingInterval = null;
                   }
                 }
+              } else {
+                // No channel — store in DB for IPC-based clients to poll
+                storeMessage({
+                  id: `ipc-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                  chat_jid: targetJid,
+                  sender: 'assistant',
+                  sender_name: ASSISTANT_NAME,
+                  content: text,
+                  timestamp: new Date().toISOString(),
+                  is_from_me: true,
+                  sender_platform: 'ipc',
+                });
+                outputSentToUser = true;
+                if (replyAnchorMessageId) replyAnchorMessageId = null;
+                resetIdleTimer();
               }
             }
             // Reset intermediate message so the next user message gets a fresh status message
@@ -1466,6 +1502,22 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
           // [Upstream PR #354] Mark container as idle when it finishes work
           // (status: success with null result = session-update marker = idle-waiting)
           if (result.status === 'success') {
+            // For channel-less JIDs: the response was delivered via intermediates.
+            // Promote the last intermediate to a final response so IPC polling detects completion.
+            if (!channel && !outputSentToUser && lastIpcIntermediateText) {
+              storeMessage({
+                id: `ipc-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                chat_jid: chatJid,
+                sender: 'assistant',
+                sender_name: ASSISTANT_NAME,
+                content: lastIpcIntermediateText,
+                timestamp: new Date().toISOString(),
+                is_from_me: true,
+                sender_platform: 'ipc',
+              });
+              outputSentToUser = true;
+              lastIpcIntermediateText = null;
+            }
             queue.notifyIdle(dispatchJid);
             // Stop typing indicator when agent goes idle — otherwise the 8s
             // refresh loop keeps the indicator alive until the container exits,

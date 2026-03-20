@@ -18,6 +18,7 @@ import {
   setChannelSubscription,
   getTaskById,
   setRegisteredGroup,
+  storeMessage,
   updateTask,
 } from './db.js';
 import { findGroupByFolder } from './group-helpers.js';
@@ -290,6 +291,21 @@ export async function processMessageIpc(
     const isRegisteredTarget = !!targetGroup;
     if (isMain || isSelf || isRegisteredTarget) {
       await deps.sendMessage(msgChatJid, msgText, data.discord_bot_id);
+      // Self-message to a channel-less JID: the agent is sending its response
+      // but there's no channel adapter to deliver it. Store in DB so external
+      // IPC-based clients (e.g. ditto-desktop) can poll for it.
+      if (isSelf && !deps.findChannel?.(msgChatJid)) {
+        storeMessage({
+          id: `ipc-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          chat_jid: msgChatJid,
+          sender: 'assistant',
+          sender_name: targetGroup?.trigger?.replace(/^@/, '') || 'Assistant',
+          content: msgText,
+          timestamp: new Date().toISOString(),
+          is_from_me: true,
+          sender_platform: 'ipc',
+        });
+      }
       // Cross-group message: also wake up the target agent.
       // Pass sourceGroup so the notify message is tagged — the source
       // agent won't see its own IPC message echoed back at it.
