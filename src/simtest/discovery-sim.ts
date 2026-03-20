@@ -26,6 +26,28 @@ interface SimRemotePeer {
   stored: StoredPeer;
   state: FakeState;
   logs: SimRemoteLogRecord[];
+  logListeners: Set<(record: SimRemoteLogRecord) => void>;
+  online: boolean;
+}
+
+interface CreateRemotePeerParams {
+  instanceId: string;
+  name: string;
+  host: string;
+  address: string;
+  channelFolder: string;
+  online?: boolean;
+  status?: StoredPeer['status'];
+  logMessages?: string[];
+}
+
+interface SimRemotePeerSummary {
+  instanceId: string;
+  name: string;
+  online: boolean;
+  status: StoredPeer['status'];
+  agents: number;
+  logs: number;
 }
 
 class SimTrustStore {
@@ -33,6 +55,11 @@ class SimTrustStore {
   private pendingRequests: PairRequest[] = [];
 
   constructor(peers: SimRemotePeer[]) {
+    this.replacePeers(peers);
+  }
+
+  replacePeers(peers: SimRemotePeer[]): void {
+    this.peers.clear();
     for (const peer of peers) {
       this.peers.set(peer.discovered.instanceId, { ...peer.stored });
     }
@@ -170,6 +197,13 @@ class SimDiscoveryHandle {
     return new Map(this.peers);
   }
 
+  reset(peers: DiscoveredPeer[]): void {
+    this.peers.clear();
+    for (const peer of peers) {
+      this.peers.set(peer.instanceId, peer);
+    }
+  }
+
   setPeerOnline(instanceId: string, online: boolean): void {
     const peer = this.peers.get(instanceId);
     if (!peer) return;
@@ -257,16 +291,48 @@ class SimPeerClient implements PeerClientLike {
 
   async streamLogs(): Promise<Response> {
     const encoder = new TextEncoder();
-    const lines = this.peer.logs.slice(-50);
+    const peer = this.peer;
+    let cleanup: (() => void) | null = null;
+
     return new Response(
       new ReadableStream({
         start(controller) {
-          for (const record of lines) {
+          let closed = false;
+
+          const send = (record: SimRemoteLogRecord) => {
+            if (closed) return;
             controller.enqueue(
               encoder.encode(`event: log\ndata: ${JSON.stringify(record)}\n\n`),
             );
+          };
+
+          for (const record of peer.logs.slice(-50)) {
+            send(record);
           }
-          controller.close();
+
+          const onLog = (record: SimRemoteLogRecord) => {
+            send(record);
+          };
+
+          peer.logListeners.add(onLog);
+          controller.enqueue(encoder.encode(': connected\n\n'));
+
+          const heartbeat = setInterval(() => {
+            if (closed) return;
+            controller.enqueue(encoder.encode(': keepalive\n\n'));
+          }, 15000);
+
+          cleanup = () => {
+            if (closed) return;
+            closed = true;
+            clearInterval(heartbeat);
+            peer.logListeners.delete(onLog);
+          };
+
+          return cleanup;
+        },
+        cancel() {
+          cleanup?.();
         },
       }),
       {
@@ -315,6 +381,86 @@ function sha256(content: string): string {
   return createHash('sha256').update(content).digest('hex');
 }
 
+function createRemoteState(name: string, channelFolder: string): FakeState {
+  const state = new FakeState();
+  const agentId = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  state.addAgent({
+    id: agentId,
+    name,
+    backend: 'docker',
+    agentRuntime: 'opencode',
+  });
+  state.addChat(`sim:${channelFolder}`, `#${channelFolder}`);
+  state.addSubscription(`sim:${channelFolder}`, agentId, {
+    isPrimary: true,
+    channelFolder,
+  });
+  return state;
+}
+
+function createRemotePeer(params: CreateRemotePeerParams): SimRemotePeer {
+  const now = new Date().toISOString();
+  const state = createRemoteState(
+    `${params.name} Builder`,
+    params.channelFolder,
+  );
+  const status = params.status ?? 'trusted';
+
+  return {
+    discovered: {
+      instanceId: params.instanceId,
+      name: params.name,
+      host: params.host,
+      port: 3100,
+      addresses: [params.address],
+      version: 'simtest',
+      firstSeen: now,
+    },
+    stored: {
+      instanceId: params.instanceId,
+      name: params.name,
+      sharedSecret:
+        status === 'trusted' ? `sim-secret-${params.instanceId}` : null,
+      status,
+      host: params.host,
+      port: 3100,
+      approvedAt: status === 'trusted' ? now : null,
+      lastSeen: now,
+      createdAt: now,
+    },
+    state,
+    logs: (
+      params.logMessages ?? [
+        `${params.name} connected to the fleet`,
+        `${params.name} cache is warming up`,
+      ]
+    ).map((msg, index) => ({
+      time: new Date(Date.now() + index).toISOString(),
+      level: index === 0 ? 'info' : 'warn',
+      msg,
+      source: params.instanceId,
+    })),
+    logListeners: new Set(),
+    online: params.online ?? true,
+  };
+}
+
+function createDefaultRemotePeers(): SimRemotePeer[] {
+  return [
+    createRemotePeer({
+      instanceId: 'peer-remote-1',
+      name: 'Remote OmniClaw',
+      host: 'remote-sim.local',
+      address: '192.168.1.80',
+      channelFolder: 'remote',
+      logMessages: [
+        'Remote runner connected to the fleet',
+        'Remote builder cache is warming up',
+      ],
+    }),
+  ];
+}
+
 function buildPeerViews(
   discovery: SimDiscoveryHandle,
   trustStore: SimTrustStore,
@@ -357,86 +503,46 @@ function buildPeerViews(
   return peers;
 }
 
-function createDefaultRemotePeer(): SimRemotePeer {
-  const state = new FakeState();
-  state.addAgent({
-    id: 'remote-builder',
-    name: 'Remote Builder',
-    backend: 'docker',
-    agentRuntime: 'opencode',
-  });
-  state.addChat('sim:remote', '#remote');
-  state.addSubscription('sim:remote', 'remote-builder', {
-    isPrimary: true,
-    channelFolder: 'remote',
-  });
-
-  const now = new Date().toISOString();
-  return {
-    discovered: {
-      instanceId: 'peer-remote-1',
-      name: 'Remote OmniClaw',
-      host: 'remote-sim.local',
-      port: 3100,
-      addresses: ['192.168.1.80'],
-      version: 'simtest',
-      firstSeen: now,
-    },
-    stored: {
-      instanceId: 'peer-remote-1',
-      name: 'Remote OmniClaw',
-      sharedSecret: 'sim-remote-secret',
-      status: 'trusted',
-      host: 'remote-sim.local',
-      port: 3100,
-      approvedAt: now,
-      lastSeen: now,
-      createdAt: now,
-    },
-    state,
-    logs: [
-      {
-        time: now,
-        level: 'info',
-        msg: 'Remote runner connected to the fleet',
-        source: 'peer-remote-1',
-      },
-      {
-        time: now,
-        level: 'warn',
-        msg: 'Remote builder cache is warming up',
-        source: 'peer-remote-1',
-      },
-    ],
-  };
-}
-
 export interface SimDiscoveryEnvironment {
   context: DiscoveryRouteContext;
   getNetworkPageState(): NetworkPageState;
-  listRemotePeers(): Array<{
-    instanceId: string;
-    name: string;
-    online: boolean;
-    agents: number;
-    logs: number;
-  }>;
+  listRemotePeers(): SimRemotePeerSummary[];
   addRemoteLog(
     instanceId: string,
     record: Omit<SimRemoteLogRecord, 'time'> & { time?: string },
   ): void;
+  reset(): void;
+  addRemotePeer(params: CreateRemotePeerParams): void;
+  setPeerOnline(instanceId: string, online: boolean): void;
 }
 
 export function createSimDiscoveryEnvironment(
   state: FakeState,
 ): SimDiscoveryEnvironment {
-  const remotePeer = createDefaultRemotePeer();
-  const peers = new Map([[remotePeer.discovered.instanceId, remotePeer]]);
-  const trustStore = new SimTrustStore([remotePeer]);
-  const discovery = new SimDiscoveryHandle(
-    new Map([[remotePeer.discovered.instanceId, remotePeer.discovered]]),
-  );
+  const peers = new Map<string, SimRemotePeer>();
+  const trustStore = new SimTrustStore([]);
+  const discovery = new SimDiscoveryHandle(new Map());
   const runtime = new SimRuntimeController();
+
+  const syncStores = () => {
+    const currentPeers = Array.from(peers.values());
+    trustStore.replacePeers(currentPeers);
+    discovery.reset(
+      currentPeers
+        .filter((peer) => peer.stored.status !== 'revoked' && peer.online)
+        .map((peer) => peer.discovered),
+    );
+  };
+
+  const reset = () => {
+    peers.clear();
+    for (const peer of createDefaultRemotePeers()) {
+      peers.set(peer.discovered.instanceId, peer);
+    }
+    syncStores();
+  };
+
+  reset();
 
   const context: DiscoveryRouteContext = {
     instanceId: 'sim-local-instance',
@@ -469,7 +575,8 @@ export function createSimDiscoveryEnvironment(
       return Array.from(peers.values()).map((peer) => ({
         instanceId: peer.discovered.instanceId,
         name: peer.discovered.name,
-        online: discovery.getPeers().has(peer.discovered.instanceId),
+        online: peer.online,
+        status: peer.stored.status,
         agents: Object.keys(peer.state.getAgents()).length,
         logs: peer.logs.length,
       }));
@@ -477,12 +584,31 @@ export function createSimDiscoveryEnvironment(
     addRemoteLog(instanceId, record) {
       const peer = peers.get(instanceId);
       if (!peer) throw new Error(`Remote peer not found: ${instanceId}`);
-      peer.logs.push({
+      const entry = {
         time: record.time ?? new Date().toISOString(),
         level: record.level,
         msg: record.msg,
         source: record.source,
-      });
+      };
+      peer.logs.push(entry);
+      for (const listener of peer.logListeners) {
+        listener(entry);
+      }
+    },
+    reset,
+    addRemotePeer(params) {
+      const peer = createRemotePeer(params);
+      peers.set(peer.discovered.instanceId, peer);
+      syncStores();
+      if (params.online === false) {
+        discovery.setPeerOnline(peer.discovered.instanceId, false);
+      }
+    },
+    setPeerOnline(instanceId, online) {
+      const peer = peers.get(instanceId);
+      if (!peer) throw new Error(`Remote peer not found: ${instanceId}`);
+      peer.online = online;
+      syncStores();
     },
   };
 }

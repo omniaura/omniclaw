@@ -128,7 +128,7 @@ async function handleAdminRequest(
         'POST /remote-peers/:id/logs':
           'Append remote peer log { level, msg, source?, time? }',
         'POST /scenario/:name':
-          'Run predefined scenario (agent-overload, task-storm, error-cascade, idle-fleet, empty)',
+          'Run predefined scenario (agent-overload, task-storm, error-cascade, idle-fleet, multi-peer-transitions, empty)',
       },
     });
   }
@@ -179,6 +179,7 @@ async function handleAdminRequest(
   // ---- Reset ----
   if (path === '/reset' && method === 'POST') {
     state.reset();
+    discovery?.reset();
     broadcast(webServer, 'agent_status', { reset: true });
     broadcast(webServer, 'task_update', { reset: true });
     return json({ ok: true, message: 'State reset to seed data' });
@@ -470,7 +471,7 @@ async function handleAdminRequest(
   // ---- Predefined scenarios ----
   if (path.startsWith('/scenario/') && method === 'POST') {
     const scenario = path.slice('/scenario/'.length);
-    return runScenario(scenario, state, webServer);
+    return runScenario(scenario, state, webServer, discovery);
   }
 
   return json({ error: 'Not found' }, 404);
@@ -482,8 +483,10 @@ function runScenario(
   name: string,
   state: FakeState,
   webServer: WebServerHandle,
+  discovery?: SimDiscoveryEnvironment,
 ): Response {
   state.reset();
+  discovery?.reset();
 
   switch (name) {
     case 'agent-overload': {
@@ -616,6 +619,39 @@ function runScenario(
       return json({ ok: true, scenario: 'idle-fleet' });
     }
 
+    case 'multi-peer-transitions': {
+      if (!discovery) {
+        return json({ error: 'Remote peer simulation unavailable' }, 404);
+      }
+
+      discovery.addRemotePeer({
+        instanceId: 'peer-remote-2',
+        name: 'Build Farm East',
+        host: 'east-sim.local',
+        address: '192.168.1.81',
+        channelFolder: 'east',
+        logMessages: ['East worker accepted a queued build'],
+      });
+      discovery.addRemotePeer({
+        instanceId: 'peer-remote-3',
+        name: 'Build Farm West',
+        host: 'west-sim.local',
+        address: '192.168.1.82',
+        channelFolder: 'west',
+        logMessages: ['West worker drained its queue'],
+      });
+      discovery.setPeerOnline('peer-remote-3', false);
+
+      broadcast(webServer, 'agent_status', {
+        scenario: 'multi-peer-transitions',
+      });
+      return json({
+        ok: true,
+        scenario: 'multi-peer-transitions',
+        remotePeers: discovery.listRemotePeers(),
+      });
+    }
+
     case 'empty': {
       // Completely empty state — tests empty-state rendering
       state.agents = {};
@@ -646,6 +682,7 @@ function runScenario(
             'task-storm',
             'error-cascade',
             'idle-fleet',
+            'multi-peer-transitions',
             'empty',
           ],
         },
