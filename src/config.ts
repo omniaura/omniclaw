@@ -166,6 +166,9 @@ export const LOCAL_RUNTIME = process.env.LOCAL_RUNTIME || 'container';
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'omniclaw-agent:latest';
 export const CONTAINER_MEMORY = process.env.CONTAINER_MEMORY || '4G';
+export const SPLIT_EXECUTION = process.env.SPLIT_EXECUTION === 'true';
+export const EXEC_CONTAINER_MEMORY =
+  process.env.EXEC_CONTAINER_MEMORY || CONTAINER_MEMORY;
 export const CONTAINER_TIMEOUT = parseInt(
   process.env.CONTAINER_TIMEOUT || '7200000',
   10,

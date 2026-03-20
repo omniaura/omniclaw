@@ -2,5 +2,6 @@
 !Dockerfile
 !Dockerfile.base
 !entrypoint.sh
+!exec-shim.sh
 !agent-runner/
 !agent-runner/**
