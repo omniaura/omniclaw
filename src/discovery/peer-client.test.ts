@@ -89,12 +89,20 @@ describe('PeerClient', () => {
   });
 
   it('returns null for avatar fetch failures and defaults image content type', async () => {
-    const fetchMock = mock((url: string | URL | Request) => {
+    let iconRequestHeaders: Headers | null = null;
+
+    const fetchMock = mock((url: string | URL | Request, init?: RequestInit) => {
       const value = String(url);
       if (value.endsWith('/api/agents/agent-404/avatar/image')) {
         return Promise.resolve(new Response('missing', { status: 404 }));
       }
-      return Promise.resolve(new Response('icon-bytes'));
+
+      iconRequestHeaders = new Headers(init?.headers);
+      return Promise.resolve(
+        new Response(new Uint8Array([105, 99, 111, 110]), {
+          headers: {},
+        }),
+      );
     });
     globalThis.fetch = fetchMock as typeof fetch;
 
@@ -105,7 +113,8 @@ describe('PeerClient', () => {
     const icon = await client.getChatIcon('chat/room');
     expect(icon).not.toBeNull();
     expect(icon?.contentType).toBe('image/png');
-    expect(new Uint8Array(icon!.data)).toEqual(new TextEncoder().encode('icon-bytes'));
+    expect(new Uint8Array(icon!.data)).toEqual(new Uint8Array([105, 99, 111, 110]));
+    expect(iconRequestHeaders?.get('X-OmniClaw-Instance')).toBe('image-1');
   });
 
   it('rejects authenticated requests when the client is not paired', async () => {
@@ -135,7 +144,12 @@ describe('PeerClient', () => {
 
     const client = new PeerClient('peer.local', 3000, 'slow-1');
 
-    await expect((client as any).fetch('/slow', undefined, 5)).rejects.toThrow();
+    // Reach the timeout path directly because the public methods use the default timeout.
+    await expect(
+      (client as unknown as {
+        fetch: (path: string, init?: RequestInit, timeoutMs?: number | null) => Promise<Response>;
+      }).fetch('/slow', undefined, 5),
+    ).rejects.toThrow();
     expect(aborted).toBe(true);
   });
 
