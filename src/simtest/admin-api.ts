@@ -9,6 +9,7 @@ import type { IpcEventKind } from '../web/ipc-events.js';
 import type { WsEventType } from '../web/types.js';
 import type { WebServerHandle } from '../web/server.js';
 import { calculateNextRun } from '../schedule-utils.js';
+import type { SimDiscoveryEnvironment } from './discovery-sim.js';
 import type { FakeState } from './fake-state.js';
 
 export interface AdminApiConfig {
@@ -25,6 +26,7 @@ export function startAdminApi(
   config: AdminApiConfig,
   state: FakeState,
   webServer: WebServerHandle,
+  discovery?: SimDiscoveryEnvironment,
 ): AdminApiHandle {
   const hostname = config.hostname || '127.0.0.1';
 
@@ -56,6 +58,7 @@ export function startAdminApi(
           req,
           state,
           webServer,
+          discovery,
         );
         result.headers.set('Access-Control-Allow-Origin', '*');
         return result;
@@ -89,6 +92,7 @@ async function handleAdminRequest(
   req: Request,
   state: FakeState,
   webServer: WebServerHandle,
+  discovery?: SimDiscoveryEnvironment,
 ): Promise<Response> {
   const path = url.pathname;
 
@@ -120,6 +124,9 @@ async function handleAdminRequest(
           'Set queue stats { activeContainers?, idleContainers?, maxActive?, maxIdle? }',
         'POST /queue-details': 'Set queue details (array of GroupQueueDetail)',
         'POST /broadcast': 'Broadcast event to web UI { type, data }',
+        'GET /remote-peers': 'List simulated trusted remote peers',
+        'POST /remote-peers/:id/logs':
+          'Append remote peer log { level, msg, source?, time? }',
         'POST /scenario/:name':
           'Run predefined scenario (agent-overload, task-storm, error-cascade, idle-fleet, empty)',
       },
@@ -137,7 +144,36 @@ async function handleAdminRequest(
       ipcEvents: state.ipcEvents.length,
       queueStats: state.queueStats,
       queueDetails: state.queueDetails,
+      remotePeers: discovery?.listRemotePeers() ?? [],
     });
+  }
+
+  if (path === '/remote-peers' && method === 'GET') {
+    return json(discovery?.listRemotePeers() ?? []);
+  }
+
+  if (
+    path.startsWith('/remote-peers/') &&
+    path.endsWith('/logs') &&
+    method === 'POST'
+  ) {
+    if (!discovery)
+      return json({ error: 'Remote peer simulation unavailable' }, 404);
+    const instanceId = decodeURIComponent(
+      path.slice('/remote-peers/'.length, -'/logs'.length),
+    );
+    const body = (await req.json()) as Record<string, unknown>;
+    if (typeof body.level !== 'string' || typeof body.msg !== 'string') {
+      return json({ error: '"level" and "msg" are required' }, 400);
+    }
+    discovery.addRemoteLog(instanceId, {
+      level: body.level,
+      msg: body.msg,
+      source:
+        typeof body.source === 'string' ? body.source : `remote:${instanceId}`,
+      time: typeof body.time === 'string' ? body.time : undefined,
+    });
+    return json({ ok: true, instanceId }, 201);
   }
 
   // ---- Reset ----

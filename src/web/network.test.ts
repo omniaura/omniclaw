@@ -170,6 +170,7 @@ describe('renderPeerRows', () => {
     expect(html).toContain('<strong>Trusted &lt;Peer&gt;</strong>');
     expect(html).toContain('<span class="badge badge-admin">trusted</span>');
     expect(html).toContain('data-network-action="browse"');
+    expect(html).toContain('data-network-action="logs"');
     expect(html).toContain('data-network-action="sync"');
     expect(html).toContain('data-network-action="revoke"');
     expect(html).toContain('<span style="color:var(--green)">●</span>');

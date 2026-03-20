@@ -10,7 +10,11 @@ import { WEB_UI_PORT } from '../config.js';
 import { logger } from '../logger.js';
 import { listLocalContextFiles } from '../web/context-files.js';
 import type { WebStateProvider } from '../web/types.js';
-import { PeerClient, verifyPeerRequestSignature } from './peer-client.js';
+import {
+  PeerClient,
+  verifyPeerRequestSignature,
+  type PeerClientLike,
+} from './peer-client.js';
 import {
   encryptPairingSecret,
   generatePairingKeyPair,
@@ -26,6 +30,7 @@ import type {
   PairRequestBody,
   PeerView,
   RemotePeerAgents,
+  StoredPeer,
 } from './types.js';
 
 export interface DiscoveryRouteContext {
@@ -36,6 +41,10 @@ export interface DiscoveryRouteContext {
   discovery: DiscoveryHandle | null;
   state: WebStateProvider;
   runtime?: DiscoveryRuntimeController;
+  createPeerClient?: (
+    peer: Pick<StoredPeer, 'instanceId' | 'host' | 'port' | 'sharedSecret'>,
+    ctx: DiscoveryRouteContext,
+  ) => PeerClientLike | null;
   /** Callback to broadcast SSE events */
   broadcast?: (event: {
     type: string;
@@ -777,7 +786,7 @@ function handleRevokePeer(
 function getPeerClient(
   instanceId: string,
   ctx: DiscoveryRouteContext,
-): PeerClient | null {
+): PeerClientLike | null {
   if (ctx.runtime && !ctx.runtime.isRemoteAccessAllowed()) return null;
 
   const peer = ctx.trustStore.getPeer(instanceId);
@@ -791,6 +800,18 @@ function getPeerClient(
   if (!host || !port) return null;
 
   ctx.trustStore.updatePeerLastSeen(instanceId);
+  if (ctx.createPeerClient) {
+    return ctx.createPeerClient(
+      {
+        instanceId,
+        host,
+        port,
+        sharedSecret: peer.sharedSecret,
+      },
+      ctx,
+    );
+  }
+
   return new PeerClient(host, port, ctx.instanceId, peer.sharedSecret);
 }
 
@@ -821,6 +842,9 @@ async function handleProxyAgentAvatar(
 ): Promise<Response> {
   const client = getPeerClient(instanceId, ctx);
   if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+  if (!client.getAgentAvatarImage) {
+    return json({ error: 'Peer avatar proxy unavailable' }, 501);
+  }
 
   try {
     const result = await client.getAgentAvatarImage(agentId);
@@ -848,6 +872,9 @@ async function handleProxyChatIcon(
 ): Promise<Response> {
   const client = getPeerClient(instanceId, ctx);
   if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+  if (!client.getChatIcon) {
+    return json({ error: 'Peer chat icon proxy unavailable' }, 501);
+  }
 
   try {
     const result = await client.getChatIcon(jid);

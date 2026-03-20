@@ -465,4 +465,56 @@ describe('checkPeerAuth — body hash verification', () => {
     expect(body).toContain('event: log');
     expect(body).toContain('remote log');
   });
+
+  it('uses an injected peer client override when provided', async () => {
+    const req = new Request(
+      'http://localhost/api/discovery/peers/peer-1/agents',
+      {
+        method: 'GET',
+      },
+    );
+
+    const ctx = makeContext({
+      trustStore: {
+        getPeer: () => ({
+          instanceId: 'peer-1',
+          status: 'trusted',
+          sharedSecret: 'secret',
+          host: '127.0.0.1',
+          port: 6001,
+        }),
+        updatePeerLastSeen: () => {},
+      } as any,
+      createPeerClient: () => ({
+        getAgents: async () => [
+          {
+            id: 'remote-1',
+            name: 'Remote Agent',
+            folder: 'remote-1',
+            backend: 'sprites',
+            agentRuntime: 'opencode',
+            channels: [],
+          },
+        ],
+        getStats: async () => ({}),
+        streamLogs: async () => new Response(''),
+        getContextLayers: async () => ({}),
+        listContextFiles: async () => [],
+        writeContextFile: async () => ({ ok: true }),
+      }),
+    });
+
+    const res = await handleDiscoveryRequest(req, new URL(req.url), ctx);
+    expect(res).not.toBeNull();
+    expect(await (res as Response).json()).toEqual([
+      {
+        id: 'remote-1',
+        name: 'Remote Agent',
+        folder: 'remote-1',
+        backend: 'sprites',
+        agentRuntime: 'opencode',
+        channels: [],
+      },
+    ]);
+  });
 });

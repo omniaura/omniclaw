@@ -1549,6 +1549,8 @@ function networkScript(): string {
   return `
 var pollTimer=null;
 var syncPeerId=null;
+var remoteLogsSource=null;
+var remoteLogsPeerId=null;
 var networkClicksBound=false;
 var networkRoot=document.getElementById("network-root");
 var discoveryAvailable=networkRoot&&networkRoot.getAttribute("data-discovery-available")==="true";
@@ -1644,6 +1646,7 @@ function networkAction(action,id){
     return;
   }
   if(action==="browse"){browseRemoteAgents(id);return;}
+  if(action==="logs"){startRemoteLogs(id);return;}
   if(action==="sync"){openSyncPanel(id);return;}
   if(action==="close-sync"){closeSyncPanel();return;}
   if(action==="push"){syncFile("push",id);return;}
@@ -1676,6 +1679,7 @@ function renderPeerActions(peer){
   var id=window.__esc(peer.instanceId||"");
   if(peer.status==="trusted"){
     return '<button class="btn btn-sm" data-network-action="browse" data-network-id="'+id+'">Browse</button> '
+      +'<button class="btn btn-sm" data-network-action="logs" data-network-id="'+id+'">Logs</button> '
       +'<button class="btn btn-sm btn-primary" data-network-action="sync" data-network-id="'+id+'">Sync</button> '
       +'<button class="btn btn-sm btn-danger" data-network-action="revoke" data-network-id="'+id+'">Revoke</button>';
   }
@@ -1760,6 +1764,59 @@ function browseRemoteAgents(instanceId){
     }).catch(function(e){
       container.innerHTML='<div class="card"><div style="padding:2rem;text-align:center;color:var(--red)">Error: '+window.__esc(e.message)+'</div></div>';
     });
+}
+
+function setRemoteLogsStatus(message,isError){
+  var status=document.getElementById("remote-logs-status");
+  if(!status)return;
+  status.textContent=message;
+  status.style.color=isError?"var(--red)":"var(--text-muted)";
+}
+
+function appendRemoteLog(record){
+  var output=document.getElementById("remote-logs-output");if(!output)return;
+  var line=document.createElement("div");
+  line.className="log-line";
+  var level=String(record&&record.level||"info").toUpperCase();
+  var time=String(record&&record.time||record&&record.timestamp||"");
+  var source=String(record&&record.source||"remote");
+  var msg=String(record&&record.msg||record&&record.message||"");
+  line.textContent=(time?"["+time+"] ":"")+level+" "+source+" - "+msg;
+  output.appendChild(line);
+  while(output.childNodes.length>200)output.removeChild(output.firstChild);
+  output.scrollTop=output.scrollHeight;
+}
+
+function stopRemoteLogs(silent){
+  if(remoteLogsSource){
+    remoteLogsSource.close();
+    remoteLogsSource=null;
+  }
+  remoteLogsPeerId=null;
+  if(!silent)setRemoteLogsStatus("Remote log stream stopped.",false);
+}
+
+function startRemoteLogs(instanceId){
+  if(!instanceId)return;
+  if(remoteLogsPeerId===instanceId&&remoteLogsSource)return;
+  stopRemoteLogs(true);
+  remoteLogsPeerId=instanceId;
+  var output=document.getElementById("remote-logs-output");if(output)output.innerHTML="";
+  setRemoteLogsStatus("Connecting to remote log stream...",false);
+  remoteLogsSource=new EventSource("/api/discovery/peers/"+encodeURIComponent(instanceId)+"/logs");
+  remoteLogsSource.addEventListener("log",function(event){
+    try {
+      var payload=JSON.parse(event.data);
+      appendRemoteLog(payload);
+      setRemoteLogsStatus("Streaming remote logs from "+instanceId+".",false);
+    } catch (_) {
+      appendRemoteLog({level:"info",source:instanceId,msg:event.data});
+    }
+  });
+  remoteLogsSource.onerror=function(){
+    setRemoteLogsStatus("Remote log stream unavailable for "+instanceId+".",true);
+    stopRemoteLogs(true);
+  };
 }
 
 function openSyncPanel(instanceId){

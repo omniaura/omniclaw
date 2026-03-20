@@ -15,7 +15,25 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
-export class PeerClient {
+export interface PeerClientLike {
+  getAgents(): Promise<RemoteAgentSummary[]>;
+  getStats(): Promise<unknown>;
+  streamLogs(): Promise<Response>;
+  getContextLayers(params: Record<string, string>): Promise<unknown>;
+  listContextFiles(): Promise<ContextFileEntry[]>;
+  writeContextFile(
+    layerPath: string,
+    content: string,
+  ): Promise<{ ok: boolean }>;
+  getAgentAvatarImage?(
+    agentId: string,
+  ): Promise<{ data: ArrayBuffer; contentType: string } | null>;
+  getChatIcon?(
+    jid: string,
+  ): Promise<{ data: ArrayBuffer; contentType: string } | null>;
+}
+
+export class PeerClient implements PeerClientLike {
   private baseUrl: string;
   private instanceId: string;
   private sharedSecret: string | null;

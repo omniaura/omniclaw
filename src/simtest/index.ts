@@ -20,9 +20,11 @@
 
 import { parseArgs } from 'util';
 
+import { setDiscoveryContext } from '../web/routes.js';
 import { startWebServer } from '../web/server.js';
 import { FakeState } from './fake-state.js';
 import { startAdminApi } from './admin-api.js';
+import { createSimDiscoveryEnvironment } from './discovery-sim.js';
 
 const { values } = parseArgs({
   options: {
@@ -39,6 +41,7 @@ const hostname = values.hostname as string;
 
 // Create fake state with seed data
 const state = new FakeState();
+const discovery = createSimDiscoveryEnvironment(state);
 
 // Start the real web UI server (no auth in simtest mode)
 const webServer = startWebServer(
@@ -50,8 +53,16 @@ const webServer = startWebServer(
   state,
 );
 
+webServer.setNetworkPageState(discovery.getNetworkPageState);
+setDiscoveryContext(discovery.context, discovery.getNetworkPageState);
+
 // Start the admin API on a separate port
-const adminApi = startAdminApi({ port: adminPort, hostname }, state, webServer);
+const adminApi = startAdminApi(
+  { port: adminPort, hostname },
+  state,
+  webServer,
+  discovery,
+);
 
 console.log('');
 console.log('╔══════════════════════════════════════════════════════╗');
@@ -74,6 +85,8 @@ console.log('║    POST /scenario/:name    — Load a scenario        ║');
 console.log('║    POST /agents            — Add an agent           ║');
 console.log('║    POST /messages          — Inject a message       ║');
 console.log('║    POST /broadcast         — Push event to web UI   ║');
+console.log('║    GET  /remote-peers      — Remote sim snapshot    ║');
+console.log('║    POST /remote-peers/:id/logs — Inject remote log  ║');
 console.log('║                                                     ║');
 console.log('║  Scenarios: agent-overload, task-storm,             ║');
 console.log('║             error-cascade, idle-fleet, empty        ║');

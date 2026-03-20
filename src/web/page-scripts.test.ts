@@ -63,3 +63,22 @@ describe('tasks page script', () => {
     );
   });
 });
+
+describe('network page script', () => {
+  it('keeps remote log controls wired after peer refreshes', () => {
+    const script = allPageScripts().network;
+
+    expect(script).toContain(
+      'if(action==="logs"){startRemoteLogs(id);return;}',
+    );
+    expect(script).toContain('data-network-action="logs"');
+    expect(script).toContain('function startRemoteLogs(instanceId){');
+    expect(script).toContain(
+      'new EventSource("/api/discovery/peers/"+encodeURIComponent(instanceId)+"/logs")',
+    );
+    expect(script).toContain('function stopRemoteLogs(silent){');
+    expect(script).toContain(
+      'window.__cleanup=function(){if(pollTimer)clearInterval(pollTimer);stopRemoteLogs(true);};',
+    );
+  });
+});
