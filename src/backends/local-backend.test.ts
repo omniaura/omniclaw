@@ -371,6 +371,45 @@ describe('LocalBackend', () => {
       }
     });
 
+    it('strips comments and blank lines from exported env mounts', () => {
+      const fixture = createFixture();
+      try {
+        fs.writeFileSync(
+          path.join(fixture.tempProjectRoot, '.env'),
+          [
+            '# top-level comment',
+            'CLAUDE_MODEL=claude-opus-4-6',
+            '  # Bot identity map',
+            '',
+            'OPENCODE_MODEL=openai/gpt-5.4',
+            '',
+            'UNRELATED_SECRET=blocked',
+          ].join('\n') + '\n',
+        );
+
+        buildVolumeMounts(
+          { folder: fixture.groupFolder, name: 'Claude Test' } as any,
+          false,
+          false,
+          fixture.altRuntimeFolder,
+          'claude-agent-sdk',
+          undefined,
+          fixture.pathOverrides,
+        );
+
+        const claudeEnv = fs.readFileSync(
+          path.join(fixture.altEnvDir, 'env'),
+          'utf-8',
+        );
+        expect(claudeEnv).toContain('CLAUDE_MODEL=claude-opus-4-6');
+        expect(claudeEnv).toContain('OPENCODE_MODEL=openai/gpt-5.4');
+        expect(claudeEnv).not.toContain('# Bot identity map');
+        expect(claudeEnv).not.toContain('UNRELATED_SECRET=blocked');
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
     it('refreshes the cached agent-runner source when the source tree changes', () => {
       const fixture = createFixture();
       try {

@@ -500,7 +500,12 @@ function extractAllowedEnvBlocks(
       continue;
     }
 
-    if (currentKey) currentLines.push(line);
+    if (!currentKey) continue;
+
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+
+    currentLines.push(line);
   }
 
   flush();
