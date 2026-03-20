@@ -237,7 +237,10 @@ export async function fetchCombinedStatus(
 
 // --- Markdown formatting ---
 
-export function truncate(text: string | null | undefined, maxLen: number): string {
+export function truncate(
+  text: string | null | undefined,
+  maxLen: number,
+): string {
   if (!text) return '';
   const cleaned = text.replace(/\r\n/g, '\n').trim();
   if (cleaned.length <= maxLen) return cleaned;

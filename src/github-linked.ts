@@ -131,9 +131,7 @@ function formatLinkedIssueMarkdown(
   if (comments.length > 0) {
     lines.push(`- Comments (${comments.length}):`);
     for (const c of comments.slice(0, 5)) {
-      lines.push(
-        `  - ${c.user?.login || '?'}: ${truncate(c.body, 150)}`,
-      );
+      lines.push(`  - ${c.user?.login || '?'}: ${truncate(c.body, 150)}`);
     }
     if (comments.length > 5) {
       lines.push(`  - ... and ${comments.length - 5} more comments`);
@@ -179,11 +177,7 @@ async function fetchLinkedIssue(
     return fetchLinkedPr({ ...link, type: 'pull' });
   }
 
-  const comments = await fetchIssueComments(
-    link.owner,
-    link.repo,
-    link.number,
-  );
+  const comments = await fetchIssueComments(link.owner, link.repo, link.number);
   const markdown = formatLinkedIssueMarkdown(issue, comments);
   linkedCache.set(cacheKey, { markdown, fetchedAt: Date.now() });
   return markdown;

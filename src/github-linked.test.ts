@@ -79,21 +79,19 @@ describe('github-linked', () => {
     });
 
     it('ignores non-GitHub URLs', () => {
-      expect(
-        extractGitHubLinks('https://gitlab.com/org/repo/pull/1'),
-      ).toEqual([]);
+      expect(extractGitHubLinks('https://gitlab.com/org/repo/pull/1')).toEqual(
+        [],
+      );
     });
 
     it('ignores malformed GitHub URLs without a number', () => {
-      expect(
-        extractGitHubLinks('https://github.com/org/repo/pull/'),
-      ).toEqual([]);
+      expect(extractGitHubLinks('https://github.com/org/repo/pull/')).toEqual(
+        [],
+      );
     });
 
     it('handles http:// as well as https://', () => {
-      const links = extractGitHubLinks(
-        'http://github.com/org/repo/pull/5',
-      );
+      const links = extractGitHubLinks('http://github.com/org/repo/pull/5');
       expect(links).toHaveLength(1);
       expect(links[0].number).toBe(5);
     });
