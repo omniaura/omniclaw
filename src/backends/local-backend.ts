@@ -17,9 +17,11 @@ import {
   CONTAINER_STARTUP_TIMEOUT,
   CONTAINER_TIMEOUT,
   DATA_DIR,
+  EXEC_CONTAINER_MEMORY,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   LOCAL_RUNTIME,
+  SPLIT_EXECUTION,
   TIMEZONE,
 } from '../config.js';
 import { logger } from '../logger.js';
@@ -530,6 +532,7 @@ interface ContainerArgsOpts {
   isMain: boolean;
   networkMode?: 'full' | 'none';
   runtime?: string;
+  execContainerName?: string;
 }
 
 /** @internal Exported for testing */
@@ -539,6 +542,7 @@ export function buildContainerArgs({
   isMain,
   networkMode,
   runtime,
+  execContainerName,
 }: ContainerArgsOpts): string[] {
   const isDocker = (runtime ?? LOCAL_RUNTIME) === 'docker';
   const args: string[] = [
@@ -567,6 +571,17 @@ export function buildContainerArgs({
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Split-execution: tell the agent container which sidecar to exec into
+  if (execContainerName) {
+    args.push('-e', `EXEC_CONTAINER_NAME=${execContainerName}`);
+    // Add docker group so the bun user can access the Docker socket
+    const dockerGidProc = Bun.spawnSync(['stat', '-c', '%g', '/var/run/docker.sock']);
+    const dockerGid = dockerGidProc.stdout?.toString().trim();
+    if (dockerGid && /^\d+$/.test(dockerGid)) {
+      args.push('--group-add', dockerGid);
+    }
+  }
+
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's bun user (uid 1000),
   // or when getuid is unavailable (native Windows without WSL).
@@ -590,6 +605,123 @@ export function buildContainerArgs({
 
   args.push(CONTAINER_IMAGE);
   return args;
+}
+
+// ---------------------------------------------------------------------------
+// Split-execution: sidecar container for heavy workloads
+// ---------------------------------------------------------------------------
+
+function makeExecContainerName(agentContainerName: string): string {
+  return `${agentContainerName}-exec`;
+}
+
+/** Filter mounts to only include workspace/ipc paths needed by the exec container. */
+function filterMountsForExecContainer(mounts: VolumeMount[]): VolumeMount[] {
+  return mounts.filter(
+    (m) =>
+      m.containerPath.startsWith('/workspace/') ||
+      m.containerPath === '/app/src',
+  );
+}
+
+async function spawnExecutionContainer(
+  mounts: VolumeMount[],
+  agentContainerName: string,
+  isMain: boolean,
+  networkMode: 'full' | 'none',
+): Promise<{ name: string; cleanup: () => Promise<void> }> {
+  const execName = makeExecContainerName(agentContainerName);
+  const execMounts = filterMountsForExecContainer(mounts);
+
+  const args: string[] = [
+    'run',
+    '-d',
+    '--rm',
+    '--memory',
+    EXEC_CONTAINER_MEMORY,
+    '--name',
+    execName,
+    '--pids-limit',
+    '512',
+    '--security-opt',
+    'no-new-privileges:true',
+  ];
+
+  if (networkMode === 'none') {
+    args.push('--network', 'none');
+  }
+
+  args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Match agent container's user mapping
+  const hostUid = process.getuid?.();
+  const hostGid = process.getgid?.();
+  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+    args.push('--user', `${hostUid}:${hostGid}`);
+    args.push('-e', 'HOME=/home/bun');
+  }
+
+  for (const mount of execMounts) {
+    if (mount.readonly) {
+      args.push(
+        '--mount',
+        `type=bind,source=${mount.hostPath},target=${mount.containerPath},readonly`,
+      );
+    } else {
+      args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
+    }
+  }
+
+  // Source env (git config, tokens, etc.) then sleep forever.
+  // The entrypoint sources /workspace/env-dir/env and configures git/ssh.
+  // We reuse the same entrypoint but override the final command to sleep
+  // instead of running the agent runner.
+  args.push(
+    '--entrypoint',
+    '/bin/bash.real',
+    CONTAINER_IMAGE,
+    '-c',
+    [
+      // Source env vars (same as entrypoint.sh lines 11-18)
+      'if [ -f /workspace/env-dir/env ]; then',
+      '  while IFS= read -r line || [ -n "$line" ]; do',
+      '    [[ "$line" =~ ^[[:space:]]*$ ]] && continue',
+      '    [[ "$line" =~ ^[[:space:]]*# ]] && continue',
+      '    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue',
+      '    export "$line"',
+      '  done < /workspace/env-dir/env',
+      'fi',
+      // Configure git if GITHUB_TOKEN is available
+      'if [ -n "$GITHUB_TOKEN" ]; then gh auth setup-git 2>/dev/null || true; fi',
+      'exec sleep infinity',
+    ].join('; '),
+  );
+
+  const log = logger.child({ op: 'execContainer', name: execName });
+
+  const proc = Bun.spawn(['docker', ...args], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    const stderr = await new Response(proc.stderr).text();
+    throw new Error(`Failed to start execution container: ${stderr}`);
+  }
+
+  log.info('Execution sidecar started');
+
+  return {
+    name: execName,
+    cleanup: async () => {
+      log.debug('Stopping execution sidecar');
+      const stop = Bun.spawn(['docker', 'stop', '-t', '5', execName], {
+        stdout: 'ignore',
+        stderr: 'ignore',
+      });
+      await stop.exited;
+    },
+  };
 }
 
 export class LocalBackend implements AgentBackend {
@@ -627,11 +759,37 @@ export class LocalBackend implements AgentBackend {
     const containerName = makeContainerName(folder, runtimeFolder);
     const effectiveNetwork =
       containerCfg?.networkMode ?? (input.isMain ? 'full' : 'none');
+    // Split-execution: spawn sidecar and wire it into the agent container
+    let execContainer: { name: string; cleanup: () => Promise<void> } | null =
+      null;
+    if (SPLIT_EXECUTION && LOCAL_RUNTIME === 'docker') {
+      try {
+        execContainer = await spawnExecutionContainer(
+          mounts,
+          containerName,
+          input.isMain,
+          effectiveNetwork,
+        );
+        // Mount Docker socket so agent can `docker exec` into the sidecar
+        mounts.push({
+          hostPath: '/var/run/docker.sock',
+          containerPath: '/var/run/docker.sock',
+          readonly: false,
+        });
+      } catch (err) {
+        log.warn(
+          { err },
+          'Failed to start execution sidecar, falling back to single container',
+        );
+      }
+    }
+
     const containerArgs = buildContainerArgs({
       mounts,
       containerName,
       isMain: input.isMain,
       networkMode: effectiveNetwork,
+      execContainerName: execContainer?.name,
     });
     const configTimeout = containerCfg?.timeout || CONTAINER_TIMEOUT;
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
@@ -669,6 +827,7 @@ export class LocalBackend implements AgentBackend {
       });
     } catch (err) {
       log.error({ err }, 'Container spawn error');
+      if (execContainer) execContainer.cleanup().catch(() => {});
       return {
         status: 'error',
         result: null,
@@ -692,6 +851,10 @@ export class LocalBackend implements AgentBackend {
 
     const killOnTimeout = () => {
       log.error('Container timeout, stopping gracefully');
+      // Also stop the execution sidecar on timeout
+      if (execContainer) {
+        execContainer.cleanup().catch(() => {});
+      }
       const stopProc = Bun.spawn([LOCAL_RUNTIME, 'stop', containerName]);
       const killTimer = setTimeout(() => container.kill(9), 15000);
       stopProc.exited
@@ -760,6 +923,13 @@ export class LocalBackend implements AgentBackend {
     const exitCode = await container.exited;
     await stderrPromise;
     parser.cleanup();
+
+    // Clean up execution sidecar (fire-and-forget to not delay response)
+    if (execContainer) {
+      execContainer.cleanup().catch((err) => {
+        log.warn({ err }, 'Failed to stop execution sidecar');
+      });
+    }
 
     const duration = Date.now() - startTime;
     const state = parser.getState();
@@ -1126,7 +1296,8 @@ export class LocalBackend implements AgentBackend {
       // Names come from runtime output — reject any that don't match the
       // expected omniclaw-<safeName>-<hex/timestamp> format to prevent
       // CLI flag injection (e.g. a name like "--all").
-      const SAFE_CONTAINER_NAME = /^omniclaw-[a-zA-Z0-9_-]+-[a-f0-9-]+$/;
+      const SAFE_CONTAINER_NAME =
+        /^omniclaw-[a-zA-Z0-9_-]+-[a-f0-9-]+(-exec)?$/;
       const safeOrphans = orphans.filter((name) => {
         if (!SAFE_CONTAINER_NAME.test(name)) {
           logger.warn(

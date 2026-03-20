@@ -110,6 +110,13 @@ RUN ARCH="$(dpkg --print-architecture)" \
 ARG CODEX_VERSION=0.112.0
 RUN npm install -g "@openai/codex@${CODEX_VERSION}"
 
+# Install Docker CLI (for split-execution mode: agent proxies bash via docker exec).
+# Only the CLI binary (~50MB), not the daemon. Active only when EXEC_CONTAINER_NAME is set.
+RUN ARCH="$(dpkg --print-architecture)" \
+    && DOCKER_ARCH=$([ "$ARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-27.5.1.tgz" \
+    | tar -xz --strip-components=1 -C /usr/local/bin docker/docker
+
 # Create app directory used by derived images.
 WORKDIR /app
 
