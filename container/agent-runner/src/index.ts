@@ -64,6 +64,8 @@ interface ContainerInput {
   githubContext?: string;
   /** GitHub activity delta digest (events since last user message in this channel). */
   githubActivityDelta?: string;
+  /** Auto-fetched context for GitHub PR/issue URLs detected in user messages. */
+  githubLinkedContext?: string;
   /** Extra MCP servers to inject alongside the built-in omniclaw server (SSE/HTTP). */
   mcpServers?: Record<string, Record<string, unknown>>;
 }
@@ -904,6 +906,14 @@ async function runQuery(
     globalClaudeMd = globalClaudeMd
       ? globalClaudeMd + deltaBlock
       : containerInput.githubActivityDelta;
+  }
+
+  // Append auto-fetched GitHub context for linked PRs/issues in user messages
+  if (containerInput.githubLinkedContext) {
+    const linkedBlock = `\n\n${containerInput.githubLinkedContext}`;
+    globalClaudeMd = globalClaudeMd
+      ? globalClaudeMd + linkedBlock
+      : containerInput.githubLinkedContext;
   }
 
   // Discover additional directories for CLAUDE.md auto-loading:

@@ -128,6 +128,7 @@ import {
 } from './types.js';
 import { getGitHubContextForAgent } from './github.js';
 import { fetchGitHubDelta } from './github-delta.js';
+import { fetchGitHubLinkedContext } from './github-linked.js';
 import { startGitHubWebhookServer } from './github-webhooks.js';
 import type { GitHubWebhookNotification } from './github-webhooks.js';
 import { calculateNextRun } from './schedule-utils.js';
@@ -1497,6 +1498,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
           hadError = true;
         }
       },
+      missedMessages,
     );
   } finally {
     // Stop the typing keep-alive loop — must be in finally to prevent stuck
@@ -1630,6 +1632,7 @@ async function runAgent(
   chatJid: string,
   processKeyJid: string = chatJid,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  messageContents?: Array<{ content: string }>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
   const runtimeGroupFolder = getRuntimeGroupFolder(group.folder, processKeyJid);
@@ -1722,12 +1725,17 @@ async function runAgent(
     // Fetch GitHub context for this agent (cached, non-blocking on failure)
     let githubContext: string | undefined;
     let githubActivityDelta: string | undefined;
+    let githubLinkedContext: string | undefined;
     try {
-      // Fetch snapshot context and activity delta in parallel
-      const [snapshotResult, deltaResult] = await Promise.allSettled([
-        getGitHubContextForAgent(agentId),
-        fetchGitHubDelta(chatJid, new Date().toISOString()),
-      ]);
+      // Fetch snapshot context, activity delta, and linked PR/issue context in parallel
+      const [snapshotResult, deltaResult, linkedResult] =
+        await Promise.allSettled([
+          getGitHubContextForAgent(agentId),
+          fetchGitHubDelta(chatJid, new Date().toISOString()),
+          messageContents
+            ? fetchGitHubLinkedContext(messageContents)
+            : Promise.resolve(null),
+        ]);
       if (snapshotResult.status === 'fulfilled') {
         githubContext = snapshotResult.value ?? undefined;
       } else {
@@ -1742,6 +1750,14 @@ async function runAgent(
         logger.warn(
           { err: deltaResult.reason, chatJid },
           'Failed to fetch GitHub delta context',
+        );
+      }
+      if (linkedResult.status === 'fulfilled') {
+        githubLinkedContext = linkedResult.value ?? undefined;
+      } else {
+        logger.warn(
+          { err: linkedResult.reason, chatJid },
+          'Failed to fetch GitHub linked context',
         );
       }
     } catch (err) {
@@ -1771,6 +1787,7 @@ async function runAgent(
         agentContextFolder: group.agentContextFolder,
         githubContext,
         githubActivityDelta,
+        githubLinkedContext,
         mcpServers: group.containerConfig?.mcpServers,
       },
       (proc, containerName) =>
