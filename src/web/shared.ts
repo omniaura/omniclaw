@@ -117,6 +117,7 @@ export function renderShell(
     `</aside>` +
     `</div>` +
     `<button class="sidebar-reopen" id="btn-reopen-sidebar" title="Show logs">\u2261 logs</button>` +
+    shortcutHelpModal() +
     `<scr` +
     `ipt>${shellScript(pageScripts)}</scr` +
     `ipt>` +
@@ -282,6 +283,18 @@ function shellCSS(): string {
     `.form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:var(--accent)}`,
     `.form-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:.75rem}`,
     `.form-error{color:var(--red);font-size:11px;margin-top:4px}`,
+
+    // --- Keyboard Shortcut Help ---
+    `.shortcut-modal{width:480px}`,
+    `.shortcut-modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}`,
+    `.shortcut-modal-header h3{font-size:14px;font-weight:600;margin:0}`,
+    `.shortcut-sections{display:flex;flex-direction:column;gap:1rem}`,
+    `.shortcut-section-title{font-size:10px;font-weight:600;color:var(--accent);text-transform:lowercase;letter-spacing:.06em;margin-bottom:.5rem;padding-bottom:4px;border-bottom:1px solid var(--border)}`,
+    `.shortcut-row{display:flex;align-items:center;justify-content:space-between;padding:3px 0}`,
+    `.shortcut-keys{display:flex;align-items:center;gap:4px}`,
+    `.shortcut-keys kbd{display:inline-block;min-width:20px;text-align:center;padding:2px 6px;background:var(--bg);border:1px solid var(--border-bright);border-radius:3px;font-family:var(--mono);font-size:11px;font-weight:500;color:var(--text-bright);box-shadow:0 1px 0 var(--border)}`,
+    `.shortcut-then{font-size:9px;color:var(--text-dim);padding:0 2px}`,
+    `.shortcut-desc{font-size:12px;color:var(--text-dim)}`,
 
     // --- Page: Dashboard ---
     `.dash-layout{display:flex;flex:1;min-height:0;overflow:hidden}`,
@@ -602,6 +615,157 @@ function shellCSS(): string {
     // --- Responsive ---
     `@media(max-width:900px){.stats-grid{grid-template-columns:repeat(2,1fr)}.tables-grid{grid-template-columns:1fr}.system-grid{grid-template-columns:1fr}}`,
     `@media(max-width:600px){.stats-grid{grid-template-columns:1fr}}`,
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard Shortcuts
+// ---------------------------------------------------------------------------
+
+/** Build the keyboard shortcut help modal HTML (appended after workspace). */
+function shortcutHelpModal(): string {
+  return (
+    `<div class="modal-overlay" id="shortcut-help-modal">` +
+    `<div class="modal shortcut-modal">` +
+    `<div class="shortcut-modal-header">` +
+    `<h3>keyboard shortcuts</h3>` +
+    `<button class="icon-btn" id="shortcut-close">\u2715</button>` +
+    `</div>` +
+    `<div class="shortcut-sections">` +
+    `<div class="shortcut-section">` +
+    `<div class="shortcut-section-title">navigation</div>` +
+    shortcutRow('g d', 'Dashboard') +
+    shortcutRow('g a', 'Agents') +
+    shortcutRow('g t', 'Tasks') +
+    shortcutRow('g l', 'Logs') +
+    shortcutRow('g c', 'Conversations') +
+    shortcutRow('g x', 'Context') +
+    shortcutRow('g i', 'IPC Inspector') +
+    shortcutRow('g n', 'Network') +
+    shortcutRow('g y', 'System') +
+    shortcutRow('g e', 'Settings') +
+    `</div>` +
+    `<div class="shortcut-section">` +
+    `<div class="shortcut-section-title">actions</div>` +
+    shortcutRow('/', 'Focus search') +
+    shortcutRow('Esc', 'Close modal / blur') +
+    shortcutRow('?', 'Show this help') +
+    `</div>` +
+    `</div>` +
+    `</div></div>`
+  );
+}
+
+function shortcutRow(keys: string, description: string): string {
+  const keyParts = keys.split(' ');
+  const kbdHtml = keyParts
+    .map((k) => `<kbd>${escapeHtml(k)}</kbd>`)
+    .join('<span class="shortcut-then">then</span>');
+  return (
+    `<div class="shortcut-row">` +
+    `<div class="shortcut-keys">${kbdHtml}</div>` +
+    `<div class="shortcut-desc">${escapeHtml(description)}</div>` +
+    `</div>`
+  );
+}
+
+export { shortcutHelpModal };
+
+/** Client-side keyboard shortcut handler script. */
+function keyboardShortcutScript(): string {
+  // Navigation map: second key -> page path and data-page name
+  const navMap: Record<string, [string, string]> = {
+    d: ['/', 'dashboard'],
+    a: ['/agents-list', 'agents'],
+    t: ['/tasks', 'tasks'],
+    l: ['/logs', 'logs'],
+    c: ['/conversations', 'conversations'],
+    x: ['/context', 'context'],
+    i: ['/ipc', 'ipc'],
+    n: ['/network', 'network'],
+    y: ['/system', 'system'],
+    e: ['/settings', 'settings'],
+  };
+
+  const navEntries = Object.entries(navMap)
+    .map(([key, [href, page]]) => `"${key}":["${href}","${page}"]`)
+    .join(',');
+
+  return [
+    '// ---- Keyboard Shortcuts ----',
+    'var __kbGPrefix=false;var __kbGTimer=null;',
+    `var __kbNav={${navEntries}};`,
+    '',
+    'function __kbIsInput(el){',
+    '  if(!el||!el.tagName)return false;',
+    '  var tag=el.tagName;',
+    '  return tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT"||el.isContentEditable;',
+    '}',
+    '',
+    'function __kbNavigate(href,page){',
+    '  history.pushState({page:page},"",href);',
+    '  var link=document.querySelector("nav a[data-page=\\""+page+"\\"]");',
+    '  if(link)link.click();',
+    '}',
+    '',
+    'function __kbToggleHelp(show){',
+    '  var modal=document.getElementById("shortcut-help-modal");',
+    '  if(!modal)return;',
+    '  if(show===undefined)show=!modal.classList.contains("open");',
+    '  if(show)modal.classList.add("open");else modal.classList.remove("open");',
+    '}',
+    '',
+    'document.addEventListener("keydown",function(e){',
+    '  // Skip when typing in inputs (unless Escape)',
+    '  if(e.key==="Escape"){',
+    '    __kbGPrefix=false;',
+    '    // Close any open modal',
+    '    var openModal=document.querySelector(".modal-overlay.open");',
+    '    if(openModal){openModal.classList.remove("open");e.preventDefault();return;}',
+    '    // Blur focused input',
+    '    if(document.activeElement&&__kbIsInput(document.activeElement)){document.activeElement.blur();e.preventDefault();return;}',
+    '    return;',
+    '  }',
+    '  if(__kbIsInput(e.target))return;',
+    '  if(e.ctrlKey||e.metaKey||e.altKey)return;',
+    '',
+    '  // ? -> help modal',
+    '  if(e.key==="?"||e.key==="/"){',
+    '    if(e.key==="?"){e.preventDefault();__kbToggleHelp();return;}',
+    '    // / -> focus search',
+    '    e.preventDefault();',
+    '    var search=document.querySelector(".ap-search")',
+    '      ||document.querySelector("#chat-search")',
+    '      ||document.querySelector(".logs-search input")',
+    '      ||document.querySelector("#msg-search");',
+    '    if(search){search.focus();search.select();}',
+    '    return;',
+    '  }',
+    '',
+    '  // g prefix for navigation',
+    '  if(e.key==="g"&&!__kbGPrefix){',
+    '    __kbGPrefix=true;',
+    '    if(__kbGTimer)clearTimeout(__kbGTimer);',
+    '    __kbGTimer=setTimeout(function(){__kbGPrefix=false;},800);',
+    '    return;',
+    '  }',
+    '',
+    '  if(__kbGPrefix){',
+    '    __kbGPrefix=false;',
+    '    if(__kbGTimer){clearTimeout(__kbGTimer);__kbGTimer=null;}',
+    '    var nav=__kbNav[e.key];',
+    '    if(nav){e.preventDefault();__kbNavigate(nav[0],nav[1]);}',
+    '    return;',
+    '  }',
+    '});',
+    '',
+    '// Close help modal via button',
+    'var scClose=document.getElementById("shortcut-close");',
+    'if(scClose)scClose.addEventListener("click",function(){__kbToggleHelp(false);});',
+    'var scOverlay=document.getElementById("shortcut-help-modal");',
+    'if(scOverlay)scOverlay.addEventListener("click",function(e){',
+    '  if(e.target===scOverlay)__kbToggleHelp(false);',
+    '});',
   ].join('\n');
 }
 
@@ -956,6 +1120,9 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push(
     'window.__esc=function(s){if(!s)return"";var d=document.createElement("div");d.textContent=String(s);return d.innerHTML;};',
   );
+
+  // ---- Keyboard shortcuts ----
+  parts.push(keyboardShortcutScript());
 
   // ---- Embed page scripts ----
   for (const [name, script] of Object.entries(pageScripts)) {
