@@ -1,24 +1,39 @@
+import { createHash } from 'crypto';
+import { Effect } from 'effect';
 import fs from 'fs';
 import path from 'path';
-import { createHash } from 'crypto';
-
 import { syncAvatars } from './avatar-sync.js';
-
 import {
-  ASSISTANT_NAME,
+  initializeBackends,
+  resolveBackend,
+  shutdownBackends,
+} from './backends/index.js';
+import type { ChannelInfo, ContainerOutput } from './backends/types.js';
+import {
+  buildAgentToChannelsMapFromSubscriptions,
+  buildSendToInstruction,
+} from './channel-routes.js';
+import { DiscordChannel } from './channels/discord.js';
+import { SlackChannel } from './channels/slack.js';
+import { TelegramChannel } from './channels/telegram.js';
+import { WhatsAppChannel } from './channels/whatsapp.js';
+import {
   buildTriggerPattern,
   CHANNEL_ROSTER_CACHE_TTL_MS,
   CHANNEL_ROSTER_ROLE_FILTERS,
   CHANNEL_ROSTER_SCOPE,
   DATA_DIR,
-  DISPATCH_RUNTIME_SEP,
   DISCORD_BOTS,
   DISCORD_DEFAULT_BOT_ID,
+  DISCOVERY_ENABLED,
+  DISCOVERY_TRUST_LAN_ADMIN,
+  DISPATCH_RUNTIME_SEP,
   GITHUB_WEBHOOK_PATH,
   GITHUB_WEBHOOK_PORT,
   GITHUB_WEBHOOK_SECRET,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  INSTANCE_NAME,
   MAIN_GROUP_FOLDER,
   PERSISTENT_TASK_STATE,
   POLL_INTERVAL,
@@ -27,133 +42,114 @@ import {
   SLACK_BOTS,
   SLACK_DEFAULT_BOT_ID,
   TELEGRAM_BOT_TOKENS,
-  TRIGGER_PATTERN,
+  WEB_UI_CORS_ORIGIN,
+  WEB_UI_HOST,
+  WEB_UI_PASS,
   WEB_UI_PORT,
   WEB_UI_USER,
-  WEB_UI_PASS,
-  WEB_UI_HOST,
-  WEB_UI_CORS_ORIGIN,
-  DISCOVERY_ENABLED,
-  DISCOVERY_TRUST_LAN_ADMIN,
-  INSTANCE_NAME,
 } from './config.js';
-import { DiscordChannel } from './channels/discord.js';
-import { SlackChannel } from './channels/slack.js';
-import { TelegramChannel } from './channels/telegram.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
+import { resolveContextLayers } from './context-layers.js';
 import {
-  initializeBackends,
-  resolveBackend,
-  shutdownBackends,
-} from './backends/index.js';
-import type { ChannelInfo, ContainerOutput } from './backends/types.js';
+  createTrustStore,
+  createTask as dbCreateTask,
+  deleteTask as dbDeleteTask,
+  searchMessages as dbSearchMessages,
+  updateTask as dbUpdateTask,
+  expireStaleSessions,
+  getAgent,
+  getAgentHealth,
+  getAllAgentHealth,
+  getAllAgents,
+  getAllChannelRoutes,
+  getAllChannelSubscriptions,
+  getAllChats,
+  getAllGuildRosters,
+  getAllRegisteredGroups,
+  getAllSessions,
+  getAllTasks,
+  getChatGuildId,
+  getGuildRoster,
+  getMessagesSince,
+  getNewMessages,
+  getOrCreateDiscoveryInstanceId,
+  getRouterState,
+  getSubscriptionsForAgent,
+  getTaskById,
+  getTaskRunLogs,
+  initDatabase,
+  setAgent,
+  setAgentHealth,
+  setChannelRoute,
+  setChannelSubscription,
+  setRegisteredGroup,
+  setRouterState,
+  setSession,
+  storeChatMetadata,
+  storeGuildRoster,
+  storeMessage,
+  updateAgentAvatar,
+} from './db.js';
+import {
+  type DiscoveryHandle,
+  DiscoveryRuntimeController,
+  detectCurrentNetwork,
+  startDiscovery,
+  type TrustStore,
+} from './discovery/index.js';
+import { getGitHubContextForAgent } from './github.js';
+import { fetchGitHubDelta } from './github-delta.js';
+import { fetchGitHubLinkedContext } from './github-linked.js';
+import type { GitHubWebhookNotification } from './github-webhooks.js';
+import { startGitHubWebhookServer } from './github-webhooks.js';
+import { GroupQueue } from './group-queue.js';
+import { startIpcWatcher } from './ipc.js';
 import {
   mapTasksForSnapshot,
   writeGroupsSnapshot,
   writeRostersSnapshot,
   writeTasksSnapshot,
 } from './ipc-snapshots.js';
-import {
-  expireStaleSessions,
-  getAllAgents,
-  getAllAgentHealth,
-  getAgentHealth,
-  getAllChannelSubscriptions,
-  getAllChannelRoutes,
-  getAllChats,
-  getAllRegisteredGroups,
-  getAllSessions,
-  getAllTasks,
-  getAllGuildRosters,
-  getChatGuildId,
-  getGuildRoster,
-  getMessagesSince,
-  searchMessages as dbSearchMessages,
-  storeGuildRoster,
-  getNewMessages,
-  getRouterState,
-  getAgent,
-  getTaskById,
-  createTask as dbCreateTask,
-  updateTask as dbUpdateTask,
-  deleteTask as dbDeleteTask,
-  initDatabase,
-  setAgent,
-  setAgentHealth,
-  setChannelSubscription,
-  setChannelRoute,
-  setRegisteredGroup,
-  setRouterState,
-  setSession,
-  storeChatMetadata,
-  storeMessage,
-  getSubscriptionsForAgent,
-  updateAgentAvatar,
-  createTrustStore,
-  getOrCreateDiscoveryInstanceId,
-  getTaskRunLogs,
-} from './db.js';
-import {
-  buildAgentToChannelsMapFromSubscriptions,
-  buildSendToInstruction,
-} from './channel-routes.js';
-import { resolveContextLayers } from './context-layers.js';
-import { parseScopedSlackJid } from './slack-jid.js';
-import { GroupQueue } from './group-queue.js';
-import { startIpcWatcher } from './ipc.js';
-import {
-  parseTelegramApiFileUrl,
-  parseTelegramFileDescriptor,
-  sanitizeTelegramAvatarUrl,
-} from './telegram-avatar.js';
+import { logger } from './logger.js';
+import { assertPathWithin } from './path-security.js';
+import { createResumePositionStore } from './resume-position-store.js';
 import {
   findChannel,
   formatMessages,
   formatOutbound,
   getAgentName,
 } from './router.js';
+import { calculateNextRun } from './schedule-utils.js';
+import { redactSensitiveData } from './security/redaction.js';
+import { parseScopedSlackJid } from './slack-jid.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import {
-  Agent,
-  AgentHealth,
-  AgentRuntime,
-  BackendType,
-  Channel,
-  ChannelRoute,
-  ChannelSubscription,
-  NewMessage,
-  RegisteredGroup,
+  parseTelegramApiFileUrl,
+  parseTelegramFileDescriptor,
+  sanitizeTelegramAvatarUrl,
+} from './telegram-avatar.js';
+import {
+  type Agent,
+  type AgentHealth,
+  type AgentRuntime,
+  type BackendType,
+  type Channel,
+  type ChannelRoute,
+  type ChannelSubscription,
+  type NewMessage,
+  type RegisteredGroup,
   registeredGroupToAgent,
   registeredGroupToRoute,
 } from './types.js';
-import { getGitHubContextForAgent } from './github.js';
-import { fetchGitHubDelta } from './github-delta.js';
-import { fetchGitHubLinkedContext } from './github-linked.js';
-import { startGitHubWebhookServer } from './github-webhooks.js';
-import type { GitHubWebhookNotification } from './github-webhooks.js';
-import { calculateNextRun } from './schedule-utils.js';
-import { logger } from './logger.js';
-import { createResumePositionStore } from './resume-position-store.js';
-import { assertPathWithin } from './path-security.js';
-import { redactSensitiveData } from './security/redaction.js';
 import { serveCachedRemoteImage } from './web/image-cache.js';
 import {
-  startWebServer,
-  startLogStream,
   IpcEventBuffer,
   type IpcEventKind,
+  startLogStream,
+  startWebServer,
   type WebServerHandle,
 } from './web/index.js';
-import type { WebStateProvider } from './web/types.js';
-import {
-  detectCurrentNetwork,
-  DiscoveryRuntimeController,
-  startDiscovery,
-  TrustStore,
-  type DiscoveryHandle,
-} from './discovery/index.js';
 import { setDiscoveryContext } from './web/routes.js';
-import { Effect } from 'effect';
+import type { WebStateProvider } from './web/types.js';
 
 // Global error handlers to prevent crashes from unhandled rejections/exceptions
 // See: https://github.com/omniaura/omniclaw/issues/221
@@ -222,7 +218,7 @@ const consecutiveErrors: Record<string, number> = {};
 const MAX_CONSECUTIVE_ERRORS = 3;
 
 let whatsapp: WhatsAppChannel | null = null;
-let channels: Channel[] = [];
+const channels: Channel[] = [];
 const queue = new GroupQueue();
 const ipcEvents = new IpcEventBuffer();
 let githubWebhookServer: { stop: () => void } | null = null;
@@ -653,7 +649,7 @@ function refreshRegisteredGroupsFromCanonicalState(): {
         preferredSub?.trigger ||
         route?.trigger ||
         legacy?.trigger ||
-        `@${ASSISTANT_NAME}`,
+        `@${agent?.name || legacy?.name || agentId || jid}`,
       added_at:
         preferredSub?.createdAt ||
         route?.createdAt ||
@@ -1206,9 +1202,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   if (missedMessages.length === 0) return true;
 
   // For non-main groups, check if trigger is required and present.
-  // Use buildTriggerPattern(group.trigger) so @PeytonOmni / @OmarOmni groups
-  // aren't silently dropped by the global @Omni TRIGGER_PATTERN (mirrors the
-  // same fix already applied in startMessageLoop by PR #138).
+  // Uses the per-agent trigger pattern from the subscription.
   // For dispatch-selected agent runs, trigger routing already happened in
   // selectSubscriptionsForMessage(). Don't re-apply trigger gating here.
   if (!agentId && !isMainGroup && group.requiresTrigger !== false) {
@@ -1332,24 +1326,18 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   // 1. mentions[] contains this bot's name — catches reply-to-bot messages where
   //    "[Replying to ...]" is prepended and ^-anchored regex won't match the start.
   // 2. content contains the trigger pattern anywhere — catches explicit @mentions
-  //    and DM/auto-respond messages where "@Omni" is prepended to content.
-  const agentName = (group.trigger ?? `@${ASSISTANT_NAME}`).replace(/^@/, '');
+  //    and DM/auto-respond messages where the trigger is prepended to content.
+  const agentName = group.trigger.replace(/^@/, '');
   const groupTriggerRe = new RegExp(
     `@${agentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
     'i',
   );
-  // Bot names to match in the mentions array: the per-group agent name AND the global
-  // assistant name. Replies-to-bot store the bot's display name (ASSISTANT_NAME) in mentions.
-  const botNames = new Set([
-    agentName.toLowerCase(),
-    ASSISTANT_NAME.toLowerCase(),
-  ]);
+  const botNames = new Set([agentName.toLowerCase()]);
   const isTriggerMessage = (m: {
     content: string;
     mentions?: Array<{ name: string }>;
   }): boolean =>
     groupTriggerRe.test(m.content) ||
-    TRIGGER_PATTERN.test(m.content) ||
     (m.mentions?.some((mention) => botNames.has(mention.name.toLowerCase())) ??
       false);
   const triggeringMessage = missedMessages.findLast(isTriggerMessage);
@@ -1952,7 +1940,7 @@ async function startMessageLoop(): Promise<void> {
   }
   messageLoopRunning = true;
 
-  logger.info(`OmniClaw running (trigger: @${ASSISTANT_NAME})`);
+  logger.info('OmniClaw running');
 
   while (true) {
     try {
@@ -2216,7 +2204,7 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
           )
         : undefined;
     const primaryJid = jids[0] || agent.id;
-    const trigger = firstSub?.trigger || `@${ASSISTANT_NAME}`;
+    const trigger = firstSub?.trigger || `@${agent.name}`;
     const requiresTrigger = firstSub?.requiresTrigger !== false;
     const sendTo = buildSendToInstruction(jids, trigger, requiresTrigger);
     return {
@@ -2342,7 +2330,7 @@ async function handleReactionNotification(
     `Reaction on bot message in ${channelName}`,
   );
 
-  const reactionContent = `@${ASSISTANT_NAME} [${userName} reacted with ${emoji}]`;
+  const reactionContent = `${group.trigger} [${userName} reacted with ${emoji}]`;
 
   const reactionMessage = {
     id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -2687,7 +2675,7 @@ async function main(): Promise<void> {
         if (delivered.has(sub.agentId)) continue;
         const group = buildRegisteredGroupFromSubscription(chatJid, sub);
         if (!group) continue;
-        const trigger = group.trigger || `@${ASSISTANT_NAME}`;
+        const trigger = group.trigger;
         const withLink = notification.url
           ? `${notification.summary}\n${notification.url}`
           : notification.summary;
@@ -3062,7 +3050,7 @@ async function main(): Promise<void> {
     notifyGroup: (jid, text, sourceFolder?) => {
       // Prefix with the group's trigger so it passes requiresTrigger filter
       const group = getRegisteredGroupForJid(jid);
-      const trigger = group?.trigger || `@${ASSISTANT_NAME}`;
+      const trigger = group?.trigger || '';
       storeMessage({
         id: `notify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         chat_jid: jid,

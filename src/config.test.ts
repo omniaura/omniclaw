@@ -1,14 +1,12 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
 import {
-  ASSISTANT_NAME,
   buildDiscordBotConfigFromEnv,
   buildSlackBotConfigFromEnv,
   buildTelegramBotTokensFromEnv,
-  escapeRegex,
   buildTriggerPattern,
+  escapeRegex,
   parseEnvList,
-  TRIGGER_PATTERN,
 } from './config.js';
 
 // --- escapeRegex ---
@@ -260,14 +258,15 @@ describe('buildTriggerPattern', () => {
     expect(pattern.test('@Omni hello')).toBe(false); // 'Omni' extends past 'Om' — no boundary
   });
 
-  it('falls back to TRIGGER_PATTERN when no trigger provided', () => {
+  it('returns never-match regex when no trigger provided', () => {
     const pattern = buildTriggerPattern();
-    expect(pattern).toBe(TRIGGER_PATTERN);
+    expect(pattern.test('@Omni hello')).toBe(false);
+    expect(pattern.test('@anything')).toBe(false);
   });
 
-  it('falls back to TRIGGER_PATTERN for empty string', () => {
+  it('returns never-match regex for empty string', () => {
     const pattern = buildTriggerPattern('');
-    expect(pattern).toBe(TRIGGER_PATTERN);
+    expect(pattern.test('@Omni hello')).toBe(false);
   });
 
   it('handles trigger with dots (special regex chars are escaped)', () => {
@@ -308,38 +307,5 @@ describe('buildTriggerPattern', () => {
   it('matches trigger followed by newline', () => {
     const pattern = buildTriggerPattern('@TestBot');
     expect(pattern.test('@TestBot\nhello')).toBe(true);
-  });
-});
-
-// --- TRIGGER_PATTERN (global, uses ASSISTANT_NAME from env/.env) ---
-
-describe('TRIGGER_PATTERN', () => {
-  // TRIGGER_PATTERN depends on ASSISTANT_NAME from the environment.
-  // We test against the actual configured name rather than hardcoding.
-
-  it('matches @ASSISTANT_NAME at the start of a message', () => {
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME} hello`)).toBe(true);
-  });
-
-  it('is case insensitive', () => {
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME.toLowerCase()} hello`)).toBe(
-      true,
-    );
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME.toUpperCase()} hello`)).toBe(
-      true,
-    );
-  });
-
-  it('does not match in the middle of a message', () => {
-    expect(TRIGGER_PATTERN.test(`hey @${ASSISTANT_NAME} hello`)).toBe(false);
-  });
-
-  it('respects word boundaries — does not match partial prefix', () => {
-    // Adding extra chars after the name should not match
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME}xyz hello`)).toBe(false);
-  });
-
-  it('matches at end of string', () => {
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME}`)).toBe(true);
   });
 });

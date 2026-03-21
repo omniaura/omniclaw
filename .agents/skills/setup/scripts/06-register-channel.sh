@@ -19,7 +19,6 @@ NAME=""
 TRIGGER=""
 FOLDER=""
 REQUIRES_TRIGGER="true"
-ASSISTANT_NAME="Andy"
 DISCORD_BOT_ID=""
 AGENT_RUNTIME=""
 
@@ -32,7 +31,6 @@ while [[ $# -gt 0 ]]; do
     --discord-bot-id)   DISCORD_BOT_ID="$2"; shift 2 ;;
     --agent-runtime)    AGENT_RUNTIME="$2"; shift 2 ;;
     --no-trigger-required) REQUIRES_TRIGGER="false"; shift ;;
-    --assistant-name)   ASSISTANT_NAME="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -116,33 +114,6 @@ fi
 mkdir -p "$PROJECT_ROOT/groups/$FOLDER/logs"
 log "Created groups/$FOLDER/logs/"
 
-# Update assistant name in CLAUDE.md files if different from default
-NAME_UPDATED="false"
-if [ "$ASSISTANT_NAME" != "Andy" ]; then
-  log "Updating assistant name from Andy to $ASSISTANT_NAME"
-
-  for md_file in groups/global/CLAUDE.md groups/main/CLAUDE.md; do
-    if [ -f "$PROJECT_ROOT/$md_file" ]; then
-      sed -i '' "s/^# Andy$/# $ASSISTANT_NAME/" "$PROJECT_ROOT/$md_file"
-      sed -i '' "s/You are Andy/You are $ASSISTANT_NAME/g" "$PROJECT_ROOT/$md_file"
-      log "Updated $md_file"
-    else
-      log "WARNING: $md_file not found, skipping name update"
-    fi
-  done
-
-  # Add ASSISTANT_NAME to .env so config.ts picks it up
-  ENV_FILE="$PROJECT_ROOT/.env"
-  if [ -f "$ENV_FILE" ] && grep -q '^ASSISTANT_NAME=' "$ENV_FILE"; then
-    sed "s|^ASSISTANT_NAME=.*|ASSISTANT_NAME=\"$ASSISTANT_NAME\"|" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
-  else
-    echo "ASSISTANT_NAME=\"$ASSISTANT_NAME\"" >> "$ENV_FILE"
-  fi
-  log "Set ASSISTANT_NAME=$ASSISTANT_NAME in .env"
-
-  NAME_UPDATED="true"
-fi
-
 cat <<EOF
 === OMNICLAW SETUP: REGISTER_CHANNEL ===
 JID: $JID
@@ -150,10 +121,8 @@ NAME: $NAME
 FOLDER: $FOLDER
 TRIGGER: $TRIGGER
 REQUIRES_TRIGGER: $REQUIRES_TRIGGER
-ASSISTANT_NAME: $ASSISTANT_NAME
 DISCORD_BOT_ID: $DISCORD_BOT_ID
 AGENT_RUNTIME: $AGENT_RUNTIME
-NAME_UPDATED: $NAME_UPDATED
 STATUS: success
 LOG: logs/setup.log
 === END ===

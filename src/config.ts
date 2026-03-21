@@ -123,7 +123,6 @@ export function buildSlackBotConfigFromEnv(env: NodeJS.ProcessEnv): {
   };
 }
 
-export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Omni';
 const discordEnv = buildDiscordBotConfigFromEnv(process.env);
 export const DISCORD_BOTS = discordEnv.bots;
 export const DISCORD_DEFAULT_BOT_ID = discordEnv.defaultBotId;
@@ -237,17 +236,13 @@ export function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export const TRIGGER_PATTERN = new RegExp(
-  `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
-  'i',
-);
-
 /**
- * Build a trigger regex for a specific group's trigger string (e.g. "@OmarOmni").
- * Falls back to the global TRIGGER_PATTERN if no trigger is provided.
+ * Build a trigger regex for a specific group's trigger string (e.g. "@Clayton").
+ * Returns a never-match regex when no trigger is provided — all agents should
+ * have explicit triggers in the channel_subscriptions table.
  */
 export function buildTriggerPattern(trigger?: string): RegExp {
-  if (!trigger) return TRIGGER_PATTERN;
+  if (!trigger) return /(?!)/;
   const name = trigger.replace(/^@/, '');
   return new RegExp(`^@${escapeRegex(name)}\\b`, 'i');
 }
