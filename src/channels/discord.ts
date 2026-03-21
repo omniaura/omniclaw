@@ -1,31 +1,25 @@
+import { RESTEvents } from '@discordjs/rest';
 import {
-  ChatInputCommandInteraction,
-  Client,
-  GatewayIntentBits,
-  Partials,
-  Events,
-  Message,
-  MessageReaction,
-  PartialMessageReaction,
-  User as DiscordUser,
-  PartialUser,
-  TextChannel,
-  DMChannel,
   ChannelType,
-  ThreadAutoArchiveDuration,
+  type ChatInputCommandInteraction,
+  Client,
+  type User as DiscordUser,
+  type DMChannel,
+  Events,
+  GatewayIntentBits,
+  type Message,
+  type MessageReaction,
+  type PartialMessageReaction,
+  Partials,
+  type PartialUser,
   PermissionFlagsBits,
+  type TextChannel,
+  ThreadAutoArchiveDuration,
   type ThreadChannel,
 } from 'discord.js';
-import { RESTEvents } from '@discordjs/rest';
 
 import fs from 'fs';
 import path from 'path';
-
-import {
-  buildDiscordSlashCommandPayloads,
-  getDiscordFlowDefinitionsForGroup,
-  renderDiscordFlowPrompt,
-} from '../discord-command-flows.js';
 import { buildTriggerPattern, DATA_DIR, GROUPS_DIR } from '../config.js';
 import {
   getAllAgents,
@@ -33,9 +27,14 @@ import {
   storeChatMetadata,
   storeMessage,
 } from '../db.js';
+import {
+  buildDiscordSlashCommandPayloads,
+  getDiscordFlowDefinitionsForGroup,
+  renderDiscordFlowPrompt,
+} from '../discord-command-flows.js';
 import { logger } from '../logger.js';
 import { assertPathWithin } from '../path-security.js';
-import { Channel, NewMessage, RegisteredGroup } from '../types.js';
+import type { Channel, NewMessage, RegisteredGroup } from '../types.js';
 import { splitMessage } from './utils.js';
 
 export function getAttachmentWorkspaceFolder(
@@ -1281,7 +1280,9 @@ export class DiscordChannel implements Channel {
       chat_jid: chatJid,
       sender: `discord:${interaction.user.id}`,
       sender_name: senderName,
-      content: `${group.trigger} ${renderedPrompt}`,
+      content: group.trigger
+        ? `${group.trigger} ${renderedPrompt}`
+        : renderedPrompt,
       timestamp,
       is_from_me: false,
       sender_platform: 'discord',

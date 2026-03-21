@@ -1,23 +1,39 @@
+import { createHash } from 'crypto';
+import { Effect } from 'effect';
 import fs from 'fs';
 import path from 'path';
-import { createHash } from 'crypto';
-
 import { syncAvatars } from './avatar-sync.js';
-
+import {
+  initializeBackends,
+  resolveBackend,
+  shutdownBackends,
+} from './backends/index.js';
+import type { ChannelInfo, ContainerOutput } from './backends/types.js';
+import {
+  buildAgentToChannelsMapFromSubscriptions,
+  buildSendToInstruction,
+} from './channel-routes.js';
+import { DiscordChannel } from './channels/discord.js';
+import { SlackChannel } from './channels/slack.js';
+import { TelegramChannel } from './channels/telegram.js';
+import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   buildTriggerPattern,
   CHANNEL_ROSTER_CACHE_TTL_MS,
   CHANNEL_ROSTER_ROLE_FILTERS,
   CHANNEL_ROSTER_SCOPE,
   DATA_DIR,
-  DISPATCH_RUNTIME_SEP,
   DISCORD_BOTS,
   DISCORD_DEFAULT_BOT_ID,
+  DISCOVERY_ENABLED,
+  DISCOVERY_TRUST_LAN_ADMIN,
+  DISPATCH_RUNTIME_SEP,
   GITHUB_WEBHOOK_PATH,
   GITHUB_WEBHOOK_PORT,
   GITHUB_WEBHOOK_SECRET,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  INSTANCE_NAME,
   MAIN_GROUP_FOLDER,
   PERSISTENT_TASK_STATE,
   POLL_INTERVAL,
@@ -26,132 +42,114 @@ import {
   SLACK_BOTS,
   SLACK_DEFAULT_BOT_ID,
   TELEGRAM_BOT_TOKENS,
+  WEB_UI_CORS_ORIGIN,
+  WEB_UI_HOST,
+  WEB_UI_PASS,
   WEB_UI_PORT,
   WEB_UI_USER,
-  WEB_UI_PASS,
-  WEB_UI_HOST,
-  WEB_UI_CORS_ORIGIN,
-  DISCOVERY_ENABLED,
-  DISCOVERY_TRUST_LAN_ADMIN,
-  INSTANCE_NAME,
 } from './config.js';
-import { DiscordChannel } from './channels/discord.js';
-import { SlackChannel } from './channels/slack.js';
-import { TelegramChannel } from './channels/telegram.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
+import { resolveContextLayers } from './context-layers.js';
 import {
-  initializeBackends,
-  resolveBackend,
-  shutdownBackends,
-} from './backends/index.js';
-import type { ChannelInfo, ContainerOutput } from './backends/types.js';
+  createTrustStore,
+  createTask as dbCreateTask,
+  deleteTask as dbDeleteTask,
+  searchMessages as dbSearchMessages,
+  updateTask as dbUpdateTask,
+  expireStaleSessions,
+  getAgent,
+  getAgentHealth,
+  getAllAgentHealth,
+  getAllAgents,
+  getAllChannelRoutes,
+  getAllChannelSubscriptions,
+  getAllChats,
+  getAllGuildRosters,
+  getAllRegisteredGroups,
+  getAllSessions,
+  getAllTasks,
+  getChatGuildId,
+  getGuildRoster,
+  getMessagesSince,
+  getNewMessages,
+  getOrCreateDiscoveryInstanceId,
+  getRouterState,
+  getSubscriptionsForAgent,
+  getTaskById,
+  getTaskRunLogs,
+  initDatabase,
+  setAgent,
+  setAgentHealth,
+  setChannelRoute,
+  setChannelSubscription,
+  setRegisteredGroup,
+  setRouterState,
+  setSession,
+  storeChatMetadata,
+  storeGuildRoster,
+  storeMessage,
+  updateAgentAvatar,
+} from './db.js';
+import {
+  type DiscoveryHandle,
+  DiscoveryRuntimeController,
+  detectCurrentNetwork,
+  startDiscovery,
+  type TrustStore,
+} from './discovery/index.js';
+import { getGitHubContextForAgent } from './github.js';
+import { fetchGitHubDelta } from './github-delta.js';
+import { fetchGitHubLinkedContext } from './github-linked.js';
+import type { GitHubWebhookNotification } from './github-webhooks.js';
+import { startGitHubWebhookServer } from './github-webhooks.js';
+import { GroupQueue } from './group-queue.js';
+import { startIpcWatcher } from './ipc.js';
 import {
   mapTasksForSnapshot,
   writeGroupsSnapshot,
   writeRostersSnapshot,
   writeTasksSnapshot,
 } from './ipc-snapshots.js';
-import {
-  expireStaleSessions,
-  getAllAgents,
-  getAllAgentHealth,
-  getAgentHealth,
-  getAllChannelSubscriptions,
-  getAllChannelRoutes,
-  getAllChats,
-  getAllRegisteredGroups,
-  getAllSessions,
-  getAllTasks,
-  getAllGuildRosters,
-  getChatGuildId,
-  getGuildRoster,
-  getMessagesSince,
-  searchMessages as dbSearchMessages,
-  storeGuildRoster,
-  getNewMessages,
-  getRouterState,
-  getAgent,
-  getTaskById,
-  createTask as dbCreateTask,
-  updateTask as dbUpdateTask,
-  deleteTask as dbDeleteTask,
-  initDatabase,
-  setAgent,
-  setAgentHealth,
-  setChannelSubscription,
-  setChannelRoute,
-  setRegisteredGroup,
-  setRouterState,
-  setSession,
-  storeChatMetadata,
-  storeMessage,
-  getSubscriptionsForAgent,
-  updateAgentAvatar,
-  createTrustStore,
-  getOrCreateDiscoveryInstanceId,
-  getTaskRunLogs,
-} from './db.js';
-import {
-  buildAgentToChannelsMapFromSubscriptions,
-  buildSendToInstruction,
-} from './channel-routes.js';
-import { resolveContextLayers } from './context-layers.js';
-import { parseScopedSlackJid } from './slack-jid.js';
-import { GroupQueue } from './group-queue.js';
-import { startIpcWatcher } from './ipc.js';
-import {
-  parseTelegramApiFileUrl,
-  parseTelegramFileDescriptor,
-  sanitizeTelegramAvatarUrl,
-} from './telegram-avatar.js';
+import { logger } from './logger.js';
+import { assertPathWithin } from './path-security.js';
+import { createResumePositionStore } from './resume-position-store.js';
 import {
   findChannel,
   formatMessages,
   formatOutbound,
   getAgentName,
 } from './router.js';
+import { calculateNextRun } from './schedule-utils.js';
+import { redactSensitiveData } from './security/redaction.js';
+import { parseScopedSlackJid } from './slack-jid.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import {
-  Agent,
-  AgentHealth,
-  AgentRuntime,
-  BackendType,
-  Channel,
-  ChannelRoute,
-  ChannelSubscription,
-  NewMessage,
-  RegisteredGroup,
+  parseTelegramApiFileUrl,
+  parseTelegramFileDescriptor,
+  sanitizeTelegramAvatarUrl,
+} from './telegram-avatar.js';
+import {
+  type Agent,
+  type AgentHealth,
+  type AgentRuntime,
+  type BackendType,
+  type Channel,
+  type ChannelRoute,
+  type ChannelSubscription,
+  type NewMessage,
+  type RegisteredGroup,
   registeredGroupToAgent,
   registeredGroupToRoute,
 } from './types.js';
-import { getGitHubContextForAgent } from './github.js';
-import { fetchGitHubDelta } from './github-delta.js';
-import { fetchGitHubLinkedContext } from './github-linked.js';
-import { startGitHubWebhookServer } from './github-webhooks.js';
-import type { GitHubWebhookNotification } from './github-webhooks.js';
-import { calculateNextRun } from './schedule-utils.js';
-import { logger } from './logger.js';
-import { createResumePositionStore } from './resume-position-store.js';
-import { assertPathWithin } from './path-security.js';
-import { redactSensitiveData } from './security/redaction.js';
 import { serveCachedRemoteImage } from './web/image-cache.js';
 import {
-  startWebServer,
-  startLogStream,
   IpcEventBuffer,
   type IpcEventKind,
+  startLogStream,
+  startWebServer,
   type WebServerHandle,
 } from './web/index.js';
-import type { WebStateProvider } from './web/types.js';
-import {
-  detectCurrentNetwork,
-  DiscoveryRuntimeController,
-  startDiscovery,
-  TrustStore,
-  type DiscoveryHandle,
-} from './discovery/index.js';
 import { setDiscoveryContext } from './web/routes.js';
-import { Effect } from 'effect';
+import type { WebStateProvider } from './web/types.js';
 
 // Global error handlers to prevent crashes from unhandled rejections/exceptions
 // See: https://github.com/omniaura/omniclaw/issues/221
@@ -220,7 +218,7 @@ const consecutiveErrors: Record<string, number> = {};
 const MAX_CONSECUTIVE_ERRORS = 3;
 
 let whatsapp: WhatsAppChannel | null = null;
-let channels: Channel[] = [];
+const channels: Channel[] = [];
 const queue = new GroupQueue();
 const ipcEvents = new IpcEventBuffer();
 let githubWebhookServer: { stop: () => void } | null = null;

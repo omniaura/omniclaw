@@ -1,11 +1,11 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
 import {
   buildDiscordBotConfigFromEnv,
   buildSlackBotConfigFromEnv,
   buildTelegramBotTokensFromEnv,
-  escapeRegex,
   buildTriggerPattern,
+  escapeRegex,
   parseEnvList,
 } from './config.js';
 
@@ -309,4 +309,3 @@ describe('buildTriggerPattern', () => {
     expect(pattern.test('@TestBot\nhello')).toBe(true);
   });
 });
-

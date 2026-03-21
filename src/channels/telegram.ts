@@ -8,10 +8,10 @@ import {
   parseTelegramApiFileUrl,
   parseTelegramFileDescriptor,
 } from '../telegram-avatar.js';
-import {
+import type {
   Channel,
-  OnInboundMessage,
   OnChatMetadata,
+  OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
 import { splitMessage } from './utils.js';

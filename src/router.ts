@@ -1,5 +1,5 @@
 import { logger } from './logger.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import type { Channel, NewMessage, RegisteredGroup } from './types.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -114,9 +114,7 @@ export function formatOutbound(
   const text = stripInternalTags(rawText);
   if (!text) return '';
   const prefix =
-    channel.prefixAssistantName !== false && agentName
-      ? `${agentName}: `
-      : '';
+    channel.prefixAssistantName !== false && agentName ? `${agentName}: ` : '';
   return `${prefix}${text}`;
 }
 

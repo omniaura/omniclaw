@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
 import { buildTriggerPattern } from './config.js';
 import { logger } from './logger.js';
@@ -8,7 +8,7 @@ import {
   formatOutbound,
   stripInternalTags,
 } from './router.js';
-import { Channel, NewMessage } from './types.js';
+import type { Channel, NewMessage } from './types.js';
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
   return {

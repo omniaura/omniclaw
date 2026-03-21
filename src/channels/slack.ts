@@ -2,14 +2,14 @@ import { App } from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
 
 import { logger } from '../logger.js';
-import {
+import { parseScopedSlackJid } from '../slack-jid.js';
+import type {
   Channel,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
 import { splitMessage as splitMessageShared } from './utils.js';
-import { parseScopedSlackJid } from '../slack-jid.js';
 
 export { parseScopedSlackJid };
 

@@ -5,10 +5,9 @@
  * (escapeXml, formatMessages, stripInternalTags, formatOutbound
  *  are already tested in formatting.test.ts)
  */
-import { describe, it, expect } from 'bun:test';
-
-import { Channel, RegisteredGroup } from './types.js';
-import { getAgentName, findChannel } from './router.js';
+import { describe, expect, it } from 'bun:test';
+import { findChannel, getAgentName } from './router.js';
+import type { Channel, RegisteredGroup } from './types.js';
 
 // --- Mock Channel factory ---
 
