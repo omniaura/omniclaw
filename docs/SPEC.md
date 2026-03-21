@@ -217,7 +217,6 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 
 | Variable                    | Default                         | Purpose                                        |
 | --------------------------- | ------------------------------- | ---------------------------------------------- |
-| `ASSISTANT_NAME`            | `Omni`                          | Bot name and trigger pattern                   |
 | `POLL_INTERVAL`             | `2000`                          | Message polling interval (ms)                  |
 | `SCHEDULER_POLL_INTERVAL`   | `60000`                         | Task scheduler check interval (ms)             |
 | `IPC_POLL_INTERVAL`         | `30000`                         | IPC watcher polling interval (ms)              |

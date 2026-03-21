@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
+import { buildTriggerPattern } from './config.js';
 import { logger } from './logger.js';
 import {
   escapeXml,
@@ -363,41 +363,17 @@ describe('formatMessages', () => {
   });
 });
 
-// --- TRIGGER_PATTERN ---
+// --- buildTriggerPattern ---
 
-describe('TRIGGER_PATTERN', () => {
-  it('matches @{ASSISTANT_NAME} at start of message', () => {
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME} hello`)).toBe(true);
+describe('buildTriggerPattern in formatting context', () => {
+  it('matches per-agent trigger at start of message', () => {
+    const pattern = buildTriggerPattern('@Clayton');
+    expect(pattern.test('@Clayton hello')).toBe(true);
   });
 
-  it('matches case-insensitively', () => {
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME.toLowerCase()} hello`)).toBe(
-      true,
-    );
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME.toUpperCase()} hello`)).toBe(
-      true,
-    );
-  });
-
-  it('does not match when not at start of message', () => {
-    expect(TRIGGER_PATTERN.test(`hello @${ASSISTANT_NAME}`)).toBe(false);
-  });
-
-  it('does not match partial name (word boundary)', () => {
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME}Extra hello`)).toBe(false);
-  });
-
-  it('matches with word boundary before apostrophe', () => {
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME}'s thing`)).toBe(true);
-  });
-
-  it('matches @{ASSISTANT_NAME} alone (end of string is a word boundary)', () => {
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME}`)).toBe(true);
-  });
-
-  it('matches with leading whitespace after trim', () => {
-    // The actual usage trims before testing: TRIGGER_PATTERN.test(m.content.trim())
-    expect(TRIGGER_PATTERN.test(`@${ASSISTANT_NAME} hey`.trim())).toBe(true);
+  it('returns never-match regex when no trigger provided', () => {
+    const pattern = buildTriggerPattern();
+    expect(pattern.test('@anything')).toBe(false);
   });
 });
 
@@ -432,24 +408,26 @@ describe('formatOutbound', () => {
   const noPrefixChannel = { prefixAssistantName: false } as Channel;
   const defaultChannel = {} as Channel;
 
-  it('prefixes with assistant name when channel wants it', () => {
-    expect(formatOutbound(waChannel, 'hello world')).toBe(
-      `${ASSISTANT_NAME}: hello world`,
+  it('prefixes with agent name when channel wants it', () => {
+    expect(formatOutbound(waChannel, 'hello world', 'Clayton')).toBe(
+      'Clayton: hello world',
     );
   });
 
   it('does not prefix when channel opts out', () => {
-    expect(formatOutbound(noPrefixChannel, 'hello world')).toBe('hello world');
-  });
-
-  it('defaults to prefixing when prefixAssistantName is undefined', () => {
-    expect(formatOutbound(defaultChannel, 'hello world')).toBe(
-      `${ASSISTANT_NAME}: hello world`,
+    expect(formatOutbound(noPrefixChannel, 'hello world', 'Clayton')).toBe(
+      'hello world',
     );
   });
 
+  it('does not prefix when agentName is not provided', () => {
+    expect(formatOutbound(defaultChannel, 'hello world')).toBe('hello world');
+  });
+
   it('returns empty string when all text is internal', () => {
-    expect(formatOutbound(waChannel, '<internal>hidden</internal>')).toBe('');
+    expect(
+      formatOutbound(waChannel, '<internal>hidden</internal>', 'Clayton'),
+    ).toBe('');
   });
 
   it('strips internal tags and prefixes remaining text', () => {
@@ -457,8 +435,9 @@ describe('formatOutbound', () => {
       formatOutbound(
         waChannel,
         '<internal>thinking</internal>The answer is 42',
+        'Clayton',
       ),
-    ).toBe(`${ASSISTANT_NAME}: The answer is 42`);
+    ).toBe('Clayton: The answer is 42');
   });
 });
 
@@ -480,7 +459,8 @@ describe('trigger gating (requiresTrigger interaction)', () => {
     messages: NewMessage[],
   ): boolean {
     if (!shouldRequireTrigger(isMainGroup, requiresTrigger)) return true;
-    return messages.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
+    const triggerPattern = buildTriggerPattern('@TestAgent');
+    return messages.some((m) => triggerPattern.test(m.content.trim()));
   }
 
   it('main group always processes (no trigger needed)', () => {
@@ -504,7 +484,7 @@ describe('trigger gating (requiresTrigger interaction)', () => {
   });
 
   it('non-main group with requiresTrigger=true processes when trigger present', () => {
-    const msgs = [makeMsg({ content: `@${ASSISTANT_NAME} do something` })];
+    const msgs = [makeMsg({ content: '@TestAgent do something' })];
     expect(shouldProcess(false, true, msgs)).toBe(true);
   });
 

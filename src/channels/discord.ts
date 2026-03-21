@@ -26,13 +26,7 @@ import {
   getDiscordFlowDefinitionsForGroup,
   renderDiscordFlowPrompt,
 } from '../discord-command-flows.js';
-import {
-  ASSISTANT_NAME,
-  buildTriggerPattern,
-  DATA_DIR,
-  GROUPS_DIR,
-  TRIGGER_PATTERN,
-} from '../config.js';
+import { buildTriggerPattern, DATA_DIR, GROUPS_DIR } from '../config.js';
 import {
   getAllAgents,
   getSubscriptionsForChannel,
@@ -723,7 +717,7 @@ export class DiscordChannel implements Channel {
     content: string,
     group: RegisteredGroup,
   ): boolean {
-    const name = (group?.trigger || `@${ASSISTANT_NAME}`).replace(/^@/, '');
+    const name = group?.trigger?.replace(/^@/, '');
     if (!name) return false;
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const pattern = new RegExp(`\\b${escaped}\\b`, 'i');
@@ -789,12 +783,10 @@ export class DiscordChannel implements Channel {
     const rawContent = message.content;
     let content = rawContent;
 
-    // Translate @bot mention into trigger format
-    // FIX: Determine agent name from the channel's registered group, not global ASSISTANT_NAME
+    // Replace raw Discord bot mention (<@123456>) with the readable trigger name
     const botId = this.client.user?.id;
     const botMentionPattern = botId ? new RegExp(`<@!?${botId}>`, 'g') : null;
     if (botMentionPattern && botMentionPattern.test(content)) {
-      content = content.replace(botMentionPattern, '').trim();
       const isDM = message.channel.type === ChannelType.DM;
       const chatJid = isDM
         ? `dc:dm:${message.author.id}`
@@ -810,11 +802,9 @@ export class DiscordChannel implements Channel {
         matchedSub?.trigger ||
         fallbackSub?.trigger ||
         group?.trigger ||
-        `@${ASSISTANT_NAME}`;
-      const triggerPattern = buildTriggerPattern(trigger);
-      if (!triggerPattern.test(content)) {
-        content = `${trigger} ${content}`;
-      }
+        `@${this.client.user?.displayName || this.client.user?.username || 'bot'}`;
+      // Replace <@botId> with @TriggerName inline (no strip+prepend)
+      content = content.replace(botMentionPattern, trigger).trim();
     }
 
     // Resolve all remaining <@USER_ID> mentions to display names so the agent
@@ -892,7 +882,7 @@ export class DiscordChannel implements Channel {
     }
 
     // In guild channels, only process messages that mention THIS bot OR reply to the bot.
-    // Prevents responding when another agent (e.g. @PeytonOmni) is mentioned instead.
+    // Prevents responding when another agent is mentioned instead.
     // Only block if message mentions other users but NOT this bot.
     // Messages with NO mentions pass through to auto-respond check below.
     // Guard botId != null so TypeScript is satisfied (Map.has requires a string).
@@ -950,11 +940,6 @@ export class DiscordChannel implements Channel {
         },
         'Discord message has empty sender_name',
       );
-    }
-
-    // DMs always trigger — prepend trigger if not present
-    if (isDM && !TRIGGER_PATTERN.test(content)) {
-      content = `@${ASSISTANT_NAME} ${content}`;
     }
 
     // Determine chat name
@@ -1108,57 +1093,50 @@ export class DiscordChannel implements Channel {
 
     if (!content) return;
 
-    const effectiveTrigger = group?.trigger || `@${ASSISTANT_NAME}`;
-    // Smart auto-respond: check if we should respond without explicit mention
-    const hasTrigger = TRIGGER_PATTERN.test(content);
-    if (!hasTrigger && !isDM) {
-      if (isReplyToBot) {
-        // Reply to bot = treat as triggered
-        logger.info(
-          { chatJid, sender: senderName },
-          'Reply to bot — treating as triggered',
-        );
-        content = `${effectiveTrigger} ${content}`;
-      } else if (isThread && message.channel.ownerId === botId) {
-        // Auto-trigger in threads created by this bot — no @mention needed.
-        // Use per-group trigger name for consistency with multi-agent setups.
-        const threadName = message.channel.name || 'thread';
-        const agentName = group?.trigger?.replace(/^@/, '') || ASSISTANT_NAME;
-        const groupTriggerPattern = buildTriggerPattern(group?.trigger);
-        logger.info(
-          {
-            chatJid,
-            threadId: message.channelId,
-            threadName,
-            sender: senderName,
-          },
-          'Auto-triggering in bot-created thread',
-        );
-        // Check original content before prepending thread context to avoid double trigger prefix
-        const hasGroupTrigger = groupTriggerPattern.test(content);
-        content = `[In thread: ${threadName}] ${content}`;
-        if (!hasGroupTrigger) {
+    // Smart auto-respond: for channels with requiresTrigger=true, prepend the
+    // agent's trigger so selectSubscriptionsForMessage() picks it up.
+    // Without this, reply-to-bot / thread / plaintext-name messages would be
+    // silently dropped because they lack an explicit @mention in the content.
+    if (group?.trigger && !isDM) {
+      const groupTriggerPattern = buildTriggerPattern(group.trigger);
+      const hasTrigger = groupTriggerPattern.test(content);
+      if (!hasTrigger) {
+        const agentName = group.trigger.replace(/^@/, '');
+        if (isReplyToBot) {
+          logger.info(
+            { chatJid, sender: senderName },
+            'Reply to bot — treating as triggered',
+          );
+          content = `${group.trigger} ${content}`;
+        } else if (isThread && message.channel.ownerId === botId) {
+          const threadName = message.channel.name || 'thread';
+          logger.info(
+            {
+              chatJid,
+              threadId: message.channelId,
+              threadName,
+              sender: senderName,
+            },
+            'Auto-triggering in bot-created thread',
+          );
+          content = `${group.trigger} [In thread: ${threadName}] ${content}`;
+        } else if (this.containsPlaintextName(rawContent, group)) {
+          logger.info(
+            { chatJid, sender: senderName },
+            'Plaintext name mention — treating as triggered',
+          );
           content = `@${agentName} ${content}`;
+        } else if (this.shouldAutoRespond(content, group)) {
+          logger.debug(
+            {
+              chatJid,
+              autoRespondToQuestions: group.autoRespondToQuestions,
+              autoRespondKeywords: group.autoRespondKeywords,
+            },
+            'Auto-responding based on group config',
+          );
+          content = `${group.trigger} ${content}`;
         }
-      } else if (this.containsPlaintextName(rawContent, group)) {
-        // Plaintext name mention — user referred to the bot by name without @
-        const agentName = group?.trigger?.replace(/^@/, '') || ASSISTANT_NAME;
-        logger.info(
-          { chatJid, sender: senderName },
-          'Plaintext name mention — treating as triggered',
-        );
-        content = `@${agentName} ${content}`;
-      } else if (this.shouldAutoRespond(content, group)) {
-        logger.debug(
-          {
-            chatJid,
-            autoRespondToQuestions: group.autoRespondToQuestions,
-            autoRespondKeywords: group.autoRespondKeywords,
-          },
-          'Auto-responding based on group config',
-        );
-        // Prepend trigger so message gets processed
-        content = `${effectiveTrigger} ${content}`;
       }
     }
 
@@ -1303,7 +1281,7 @@ export class DiscordChannel implements Channel {
       chat_jid: chatJid,
       sender: `discord:${interaction.user.id}`,
       sender_name: senderName,
-      content: `${group.trigger || `@${ASSISTANT_NAME}`} ${renderedPrompt}`,
+      content: `${group.trigger} ${renderedPrompt}`,
       timestamp,
       is_from_me: false,
       sender_platform: 'discord',

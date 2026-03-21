@@ -7,7 +7,6 @@
  */
 import { describe, it, expect } from 'bun:test';
 
-import { ASSISTANT_NAME } from './config.js';
 import { Channel, RegisteredGroup } from './types.js';
 import { getAgentName, findChannel } from './router.js';
 
@@ -52,14 +51,8 @@ describe('getAgentName', () => {
     expect(getAgentName(makeGroup({ trigger: 'Omni' }))).toBe('Omni');
   });
 
-  it('falls back to ASSISTANT_NAME when trigger is undefined', () => {
-    expect(getAgentName(makeGroup({ trigger: undefined }))).toBe(
-      ASSISTANT_NAME,
-    );
-  });
-
-  it('falls back to ASSISTANT_NAME when trigger is empty', () => {
-    expect(getAgentName(makeGroup({ trigger: '' }))).toBe(ASSISTANT_NAME);
+  it('returns empty string when trigger is empty', () => {
+    expect(getAgentName(makeGroup({ trigger: '' }))).toBe('');
   });
 
   it('handles multi-word triggers', () => {

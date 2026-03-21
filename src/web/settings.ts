@@ -1,5 +1,4 @@
 import {
-  ASSISTANT_NAME,
   CONTAINER_IMAGE,
   CONTAINER_MEMORY,
   CONTAINER_TIMEOUT,
@@ -44,7 +43,6 @@ import { allPageScripts } from './page-scripts.js';
 
 export interface SettingsData {
   general: {
-    assistantName: string;
     timezone: string;
     anthropicModel: string | null;
     localRuntime: string;
@@ -105,7 +103,6 @@ export interface SettingsData {
 export function buildSettingsData(): SettingsData {
   return {
     general: {
-      assistantName: ASSISTANT_NAME,
       timezone: TIMEZONE,
       anthropicModel: ANTHROPIC_MODEL || null,
       localRuntime: LOCAL_RUNTIME,
@@ -220,8 +217,7 @@ export function renderSettingsContent(data?: SettingsData): string {
     // General
     settingCard(
       'general',
-      settingRow('assistant name', settings.general.assistantName) +
-        settingRow('timezone', settings.general.timezone) +
+      settingRow('timezone', settings.general.timezone) +
         settingRow(
           'model override',
           settings.general.anthropicModel || 'default',

@@ -1,7 +1,6 @@
 import { App } from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN, escapeRegex } from '../config.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -162,7 +161,7 @@ export class SlackChannel implements Channel {
     try {
       const authResult = await this.client.auth.test();
       this.botUserId = authResult.user_id as string;
-      const botName = authResult.user || ASSISTANT_NAME;
+      const botName = authResult.user || 'unknown';
       logger.info(
         { botUserId: this.botUserId, botName },
         'Slack bot connected',
@@ -373,18 +372,6 @@ export class SlackChannel implements Channel {
       this.client,
     );
     let content = resolvedText;
-
-    // Translate @BotName mention into our internal trigger format
-    // Slack uses <@BOTID> which we already resolved above to @AssistantName.
-    // If the message contains @AssistantName but isn't already in trigger format,
-    // move it to the front so TRIGGER_PATTERN matches.
-    if (
-      content.toLowerCase().includes(`@${ASSISTANT_NAME.toLowerCase()}`) &&
-      !TRIGGER_PATTERN.test(content)
-    ) {
-      // Strip the existing @AssistantName occurrence and prepend it at the start
-      content = `@${ASSISTANT_NAME} ${content.replace(new RegExp(`@${escapeRegex(ASSISTANT_NAME)}`, 'i'), '').trim()}`;
-    }
 
     // Prepend thread context if this is a threaded reply
     if (

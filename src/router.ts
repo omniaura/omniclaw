@@ -1,4 +1,3 @@
-import { ASSISTANT_NAME } from './config.js';
 import { logger } from './logger.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 
@@ -103,8 +102,8 @@ export function stripInternalTags(text: string): string {
 }
 
 export function getAgentName(group: RegisteredGroup): string {
-  // Extract agent name from trigger (e.g., "@OmarOmni" → "OmarOmni")
-  return group.trigger?.replace(/^@/, '') || ASSISTANT_NAME;
+  // Extract agent name from trigger (e.g., "@Clayton" → "Clayton")
+  return group.trigger.replace(/^@/, '');
 }
 
 export function formatOutbound(
@@ -114,8 +113,10 @@ export function formatOutbound(
 ): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
-  const name = agentName || ASSISTANT_NAME;
-  const prefix = channel.prefixAssistantName !== false ? `${name}: ` : '';
+  const prefix =
+    channel.prefixAssistantName !== false && agentName
+      ? `${agentName}: `
+      : '';
   return `${prefix}${text}`;
 }
 

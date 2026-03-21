@@ -1,7 +1,6 @@
 import { Bot } from 'grammy';
 import telegramifyMarkdown from 'telegramify-markdown';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
 import {
   buildTelegramApiFileUrl,
@@ -164,7 +163,7 @@ export class TelegramChannel implements Channel {
 
     // Command to check bot status
     this.bot.command('ping', (ctx) => {
-      ctx.reply(`${ASSISTANT_NAME} is online.`);
+      ctx.reply(`${ctx.me.first_name || ctx.me.username} is online.`);
     });
 
     this.bot.on('message:text', async (ctx) => {
@@ -201,24 +200,6 @@ export class TelegramChannel implements Channel {
           : 'title' in ctx.chat
             ? ctx.chat.title
             : chatJid;
-
-      // Translate Telegram @bot_username mentions into TRIGGER_PATTERN format.
-      const botUsername = ctx.me?.username?.toLowerCase();
-      if (botUsername) {
-        const entities = ctx.message.entities || [];
-        const isBotMentioned = entities.some((entity) => {
-          if (entity.type === 'mention') {
-            const mentionText = content
-              .substring(entity.offset, entity.offset + entity.length)
-              .toLowerCase();
-            return mentionText === `@${botUsername}`;
-          }
-          return false;
-        });
-        if (isBotMentioned && !TRIGGER_PATTERN.test(content)) {
-          content = `@${ASSISTANT_NAME} ${content}`;
-        }
-      }
 
       // Prepend reply context so the agent knows what's being replied to
       const replyTo = ctx.message.reply_to_message;

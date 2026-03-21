@@ -39,7 +39,6 @@ function makeState(): WebStateProvider {
 function makeSettingsData(overrides: Partial<SettingsData> = {}): SettingsData {
   return {
     general: {
-      assistantName: 'TestBot',
       timezone: 'America/New_York',
       anthropicModel: null,
       localRuntime: 'container',
@@ -113,12 +112,6 @@ describe('buildSettingsData', () => {
     expect(data).toHaveProperty('paths');
   });
 
-  it('returns string assistant name', () => {
-    const data = buildSettingsData();
-    expect(typeof data.general.assistantName).toBe('string');
-    expect(data.general.assistantName.length).toBeGreaterThan(0);
-  });
-
   it('returns numeric container limits', () => {
     const data = buildSettingsData();
     expect(data.containers.maxActive).toBeGreaterThanOrEqual(1);
@@ -183,7 +176,6 @@ describe('renderSettingsContent', () => {
 
   it('renders general section values', () => {
     const html = renderSettingsContent(makeSettingsData());
-    expect(html).toContain('TestBot');
     expect(html).toContain('America/New_York');
     expect(html).toContain('container');
     expect(html).toContain('default'); // model override = null -> 'default'
@@ -192,7 +184,6 @@ describe('renderSettingsContent', () => {
   it('renders model override when present', () => {
     const data = makeSettingsData({
       general: {
-        assistantName: 'Bot',
         timezone: 'UTC',
         anthropicModel: 'claude-3-haiku-20240307',
         localRuntime: 'container',
@@ -339,15 +330,12 @@ describe('renderSettingsContent', () => {
   it('escapes HTML in settings values', () => {
     const data = makeSettingsData({
       general: {
-        assistantName: '<script>alert("xss")</script>',
         timezone: 'US/Eastern&<>',
         anthropicModel: 'model"<>&',
         localRuntime: 'container',
       },
     });
     const html = renderSettingsContent(data);
-    expect(html).not.toContain('<script>');
-    expect(html).toContain('&lt;script&gt;');
     expect(html).toContain('&amp;&lt;&gt;');
   });
 

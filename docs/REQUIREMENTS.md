@@ -91,7 +91,7 @@ A personal Claude assistant accessible via WhatsApp, Discord, Telegram, or Slack
 
 - A router listens to all configured channels (WhatsApp, Discord, Telegram, Slack) and routes messages based on configuration
 - Only messages from registered groups are processed
-- Trigger: `@Omni` prefix (case insensitive), configurable via `ASSISTANT_NAME` env var
+- Trigger: per-agent `@name` prefix (case insensitive), configured per channel subscription in SQLite
 - Unregistered groups are ignored completely
 
 ### Memory System
@@ -216,7 +216,7 @@ A personal Claude assistant accessible via WhatsApp, Discord, Telegram, or Slack
 
 These are the default settings, stored here for reference:
 
-- **Trigger**: `@Omni` (case insensitive), configurable via `ASSISTANT_NAME` env var
+- **Trigger**: per-agent `@name` prefix (case insensitive), configured per channel subscription in SQLite
 - **Persona**: Default Claude (no custom personality)
 - **Main channel**: Self-chat (messaging yourself in WhatsApp or Telegram)
 

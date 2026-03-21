@@ -5,7 +5,6 @@ import { createHash } from 'crypto';
 import { syncAvatars } from './avatar-sync.js';
 
 import {
-  ASSISTANT_NAME,
   buildTriggerPattern,
   CHANNEL_ROSTER_CACHE_TTL_MS,
   CHANNEL_ROSTER_ROLE_FILTERS,
@@ -27,7 +26,6 @@ import {
   SLACK_BOTS,
   SLACK_DEFAULT_BOT_ID,
   TELEGRAM_BOT_TOKENS,
-  TRIGGER_PATTERN,
   WEB_UI_PORT,
   WEB_UI_USER,
   WEB_UI_PASS,
@@ -653,7 +651,7 @@ function refreshRegisteredGroupsFromCanonicalState(): {
         preferredSub?.trigger ||
         route?.trigger ||
         legacy?.trigger ||
-        `@${ASSISTANT_NAME}`,
+        `@${agent?.name || legacy?.name || agentId || jid}`,
       added_at:
         preferredSub?.createdAt ||
         route?.createdAt ||
@@ -1206,9 +1204,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   if (missedMessages.length === 0) return true;
 
   // For non-main groups, check if trigger is required and present.
-  // Use buildTriggerPattern(group.trigger) so @PeytonOmni / @OmarOmni groups
-  // aren't silently dropped by the global @Omni TRIGGER_PATTERN (mirrors the
-  // same fix already applied in startMessageLoop by PR #138).
+  // Uses the per-agent trigger pattern from the subscription.
   // For dispatch-selected agent runs, trigger routing already happened in
   // selectSubscriptionsForMessage(). Don't re-apply trigger gating here.
   if (!agentId && !isMainGroup && group.requiresTrigger !== false) {
@@ -1332,24 +1328,18 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   // 1. mentions[] contains this bot's name — catches reply-to-bot messages where
   //    "[Replying to ...]" is prepended and ^-anchored regex won't match the start.
   // 2. content contains the trigger pattern anywhere — catches explicit @mentions
-  //    and DM/auto-respond messages where "@Omni" is prepended to content.
-  const agentName = (group.trigger ?? `@${ASSISTANT_NAME}`).replace(/^@/, '');
+  //    and DM/auto-respond messages where the trigger is prepended to content.
+  const agentName = group.trigger.replace(/^@/, '');
   const groupTriggerRe = new RegExp(
     `@${agentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
     'i',
   );
-  // Bot names to match in the mentions array: the per-group agent name AND the global
-  // assistant name. Replies-to-bot store the bot's display name (ASSISTANT_NAME) in mentions.
-  const botNames = new Set([
-    agentName.toLowerCase(),
-    ASSISTANT_NAME.toLowerCase(),
-  ]);
+  const botNames = new Set([agentName.toLowerCase()]);
   const isTriggerMessage = (m: {
     content: string;
     mentions?: Array<{ name: string }>;
   }): boolean =>
     groupTriggerRe.test(m.content) ||
-    TRIGGER_PATTERN.test(m.content) ||
     (m.mentions?.some((mention) => botNames.has(mention.name.toLowerCase())) ??
       false);
   const triggeringMessage = missedMessages.findLast(isTriggerMessage);
@@ -1952,7 +1942,7 @@ async function startMessageLoop(): Promise<void> {
   }
   messageLoopRunning = true;
 
-  logger.info(`OmniClaw running (trigger: @${ASSISTANT_NAME})`);
+  logger.info('OmniClaw running');
 
   while (true) {
     try {
@@ -2216,7 +2206,7 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
           )
         : undefined;
     const primaryJid = jids[0] || agent.id;
-    const trigger = firstSub?.trigger || `@${ASSISTANT_NAME}`;
+    const trigger = firstSub?.trigger || `@${agent.name}`;
     const requiresTrigger = firstSub?.requiresTrigger !== false;
     const sendTo = buildSendToInstruction(jids, trigger, requiresTrigger);
     return {
@@ -2342,7 +2332,7 @@ async function handleReactionNotification(
     `Reaction on bot message in ${channelName}`,
   );
 
-  const reactionContent = `@${ASSISTANT_NAME} [${userName} reacted with ${emoji}]`;
+  const reactionContent = `${group.trigger} [${userName} reacted with ${emoji}]`;
 
   const reactionMessage = {
     id: `react-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -2687,7 +2677,7 @@ async function main(): Promise<void> {
         if (delivered.has(sub.agentId)) continue;
         const group = buildRegisteredGroupFromSubscription(chatJid, sub);
         if (!group) continue;
-        const trigger = group.trigger || `@${ASSISTANT_NAME}`;
+        const trigger = group.trigger;
         const withLink = notification.url
           ? `${notification.summary}\n${notification.url}`
           : notification.summary;
@@ -3062,7 +3052,7 @@ async function main(): Promise<void> {
     notifyGroup: (jid, text, sourceFolder?) => {
       // Prefix with the group's trigger so it passes requiresTrigger filter
       const group = getRegisteredGroupForJid(jid);
-      const trigger = group?.trigger || `@${ASSISTANT_NAME}`;
+      const trigger = group?.trigger || '';
       storeMessage({
         id: `notify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         chat_jid: jid,
