@@ -575,8 +575,13 @@ export function buildContainerArgs({
   if (execContainerName) {
     args.push('-e', `EXEC_CONTAINER_NAME=${execContainerName}`);
     // Add docker group so the bun user can access the Docker socket
-    const dockerGidProc = Bun.spawnSync(['stat', '-c', '%g', '/var/run/docker.sock']);
-    const dockerGid = dockerGidProc.stdout?.toString().trim();
+    const dockerGid = (() => {
+      try {
+        return String(fs.statSync('/var/run/docker.sock').gid);
+      } catch {
+        return null;
+      }
+    })();
     if (dockerGid && /^\d+$/.test(dockerGid)) {
       args.push('--group-add', dockerGid);
     }
@@ -777,8 +782,13 @@ export class LocalBackend implements AgentBackend {
           readonly: false,
         });
       } catch (err) {
-        log.warn(
-          { err },
+        logger.warn(
+          {
+            err,
+            group: groupName,
+            container: containerName,
+            backend: this.name,
+          },
           'Failed to start execution sidecar, falling back to single container',
         );
       }

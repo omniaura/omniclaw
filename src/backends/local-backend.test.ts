@@ -559,10 +559,13 @@ describe('LocalBackend', () => {
   describe('buildContainerArgs', () => {
     const originalGetuid = process.getuid;
     const originalGetgid = process.getgid;
+    const mutableFs = fs as { statSync: typeof fs.statSync };
+    const originalStatSync = fs.statSync;
 
     afterEach(() => {
       process.getuid = originalGetuid;
       process.getgid = originalGetgid;
+      mutableFs.statSync = originalStatSync;
     });
 
     it('renders readonly and read-write mounts with the expected flags', () => {
@@ -607,6 +610,45 @@ describe('LocalBackend', () => {
       expect(args).toContain('501:20');
       expect(args).toContain('-e');
       expect(args).toContain('HOME=/home/bun');
+    });
+
+    it('adds split-execution env and docker socket group access', () => {
+      mutableFs.statSync = ((target: fs.PathLike) => {
+        if (target === '/var/run/docker.sock') {
+          return { gid: 123 } as fs.Stats;
+        }
+        return originalStatSync(target);
+      }) as typeof fs.statSync;
+
+      const args = buildContainerArgs({
+        mounts: [],
+        containerName: 'exec-args-test',
+        isMain: false,
+        runtime: 'docker',
+        execContainerName: 'exec-sidecar',
+      });
+
+      expect(args).toContain('EXEC_CONTAINER_NAME=exec-sidecar');
+      expect(args).toContain('--group-add');
+      const groupAddIdx = args.indexOf('--group-add');
+      expect(args[groupAddIdx + 1]).toBe('123');
+    });
+
+    it('skips docker socket group access when the socket metadata is unavailable', () => {
+      mutableFs.statSync = (() => {
+        throw new Error('missing docker socket');
+      }) as typeof fs.statSync;
+
+      const args = buildContainerArgs({
+        mounts: [],
+        containerName: 'exec-args-test',
+        isMain: false,
+        runtime: 'docker',
+        execContainerName: 'exec-sidecar',
+      });
+
+      expect(args).toContain('EXEC_CONTAINER_NAME=exec-sidecar');
+      expect(args).not.toContain('--group-add');
     });
   });
 });
