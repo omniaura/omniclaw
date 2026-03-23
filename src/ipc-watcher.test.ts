@@ -1,0 +1,148 @@
+import { afterEach, describe, expect, it } from 'bun:test';
+import fs from 'fs';
+import path from 'path';
+
+import { DATA_DIR, DISPATCH_RUNTIME_SEP, IPC_POLL_INTERVAL } from './config.js';
+import { startIpcWatcher, type IpcDeps } from './ipc.js';
+import type { RegisteredGroup } from './types.js';
+
+const IPC_BASE_DIR = path.join(DATA_DIR, 'ipc');
+
+const MAIN_GROUP: RegisteredGroup = {
+  name: 'Main',
+  folder: 'main',
+  trigger: 'always',
+  added_at: '2024-01-01T00:00:00.000Z',
+};
+
+const flushMicrotasks = async () => {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+};
+
+describe('startIpcWatcher', () => {
+  const originalSetTimeout = globalThis.setTimeout;
+
+  afterEach(() => {
+    globalThis.setTimeout = originalSetTimeout;
+  });
+
+  it('maps runtime folders to owners, cleans stale dispatch dirs, and quarantines rogue sources', async () => {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+    const ownerFolder = `runtime-owner-${id}`;
+    const staleRuntimeFolder = `${ownerFolder}${DISPATCH_RUNTIME_SEP}0123456789abcdef`;
+    const rogueFolder = `rogue-source-${id}`;
+    const rogueErrorDir = path.join(IPC_BASE_DIR, 'errors', rogueFolder);
+
+    fs.rmSync(path.join(IPC_BASE_DIR, staleRuntimeFolder), {
+      recursive: true,
+      force: true,
+    });
+    fs.rmSync(path.join(IPC_BASE_DIR, rogueFolder), {
+      recursive: true,
+      force: true,
+    });
+    fs.rmSync(rogueErrorDir, { recursive: true, force: true });
+
+    fs.mkdirSync(path.join(IPC_BASE_DIR, staleRuntimeFolder, 'messages'), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(IPC_BASE_DIR, rogueFolder, 'messages'), {
+      recursive: true,
+    });
+
+    fs.writeFileSync(
+      path.join(IPC_BASE_DIR, staleRuntimeFolder, 'messages', 'message.json'),
+      JSON.stringify({
+        type: 'message',
+        chatJid: 'main@g.us',
+        text: 'hello from runtime',
+      }),
+    );
+    fs.writeFileSync(
+      path.join(IPC_BASE_DIR, rogueFolder, 'messages', 'message.json'),
+      JSON.stringify({
+        type: 'message',
+        chatJid: 'main@g.us',
+        text: 'should never be processed',
+      }),
+    );
+
+    const otherGroup: RegisteredGroup = {
+      name: 'Other',
+      folder: ownerFolder,
+      trigger: '@Bot',
+      added_at: '2024-01-01T00:00:00.000Z',
+    };
+
+    const groups: Record<string, RegisteredGroup> = {
+      'main@g.us': MAIN_GROUP,
+      'other@g.us': otherGroup,
+    };
+
+    const sendCalls: Array<{
+      jid: string;
+      text: string;
+      discordBotId?: string;
+    }> = [];
+    const notifyCalls: Array<{
+      jid: string;
+      text: string;
+      sourceFolder?: string;
+    }> = [];
+    const events: Array<{ kind: string; sourceGroup: string }> = [];
+    const scheduledDelays: number[] = [];
+
+    globalThis.setTimeout = ((fn: TimerHandler, delay?: number) => {
+      scheduledDelays.push(delay ?? 0);
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+
+    const deps: IpcDeps = {
+      sendMessage: async (jid, text, discordBotId) => {
+        sendCalls.push({ jid, text, discordBotId });
+        return 'sent-1';
+      },
+      notifyGroup: (jid, text, sourceFolder) => {
+        notifyCalls.push({ jid, text, sourceFolder });
+      },
+      registeredGroups: () => groups,
+      registerGroup: () => {},
+      updateGroup: () => {},
+      syncGroupMetadata: async () => {},
+      getAvailableGroups: () => [],
+      writeGroupsSnapshot: () => {},
+      activeRuntimeFolders: () => new Set<string>(),
+      agentFolders: () => new Set<string>([ownerFolder]),
+      onIpcEvent: (kind, sourceGroup) => {
+        events.push({ kind, sourceGroup });
+      },
+    };
+
+    startIpcWatcher(deps);
+    await flushMicrotasks();
+
+    expect(sendCalls).toEqual([
+      { jid: 'main@g.us', text: 'hello from runtime', discordBotId: undefined },
+    ]);
+    expect(notifyCalls).toEqual([
+      {
+        jid: 'main@g.us',
+        text: 'hello from runtime',
+        sourceFolder: ownerFolder,
+      },
+    ]);
+    expect(events).toContainEqual({
+      kind: 'message_sent',
+      sourceGroup: ownerFolder,
+    });
+    expect(fs.existsSync(path.join(IPC_BASE_DIR, staleRuntimeFolder))).toBe(
+      false,
+    );
+    expect(fs.existsSync(rogueErrorDir)).toBe(true);
+    expect(scheduledDelays).toEqual([IPC_POLL_INTERVAL]);
+
+    fs.rmSync(rogueErrorDir, { recursive: true, force: true });
+  });
+});
