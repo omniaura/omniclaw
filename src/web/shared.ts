@@ -597,6 +597,12 @@ function shellCSS(): string {
     `.ap-avatar-ph{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--surface-2);color:var(--text-dim);font-size:11px;font-weight:600}`,
     `.ap-name{font-weight:500;white-space:nowrap}`,
     `.badge-remote{background:var(--surface-2);color:var(--blue)}`,
+    `.exec-executing{background:rgba(52,211,153,.15);color:var(--green);animation:exec-pulse 2s ease-in-out infinite}`,
+    `.exec-task{background:rgba(96,165,250,.15);color:var(--blue);animation:exec-pulse 2s ease-in-out infinite}`,
+    `.exec-idle{background:rgba(251,191,36,.1);color:var(--yellow)}`,
+    `.exec-queued{background:rgba(34,211,238,.1);color:var(--cyan)}`,
+    `.exec-offline{background:var(--surface-2);color:var(--text-dim)}`,
+    `@keyframes exec-pulse{0%,100%{opacity:1}50%{opacity:.6}}`,
     `.ap-empty{padding:2rem;text-align:center;color:var(--text-dim);font-size:12px}`,
 
     // --- Responsive ---

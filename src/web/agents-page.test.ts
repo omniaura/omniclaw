@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
+import type { GroupQueueDetail } from '../group-queue.js';
 import { handleRequest } from './routes.js';
 import {
+  getAgentExecStatus,
   renderAgentRow,
+  renderExecStatusBadge,
   renderAgentsContent,
   renderAgentsPage,
   renderAgentsPageWithRemote,
@@ -404,5 +407,273 @@ describe('navigation', () => {
     expect(html).toContain('href="/agents-list"');
     expect(html).toContain('data-page="agents"');
     expect(html).toContain('>Agents<');
+  });
+});
+
+// --- Execution status ---
+
+function makeQueueDetail(
+  overrides: Partial<GroupQueueDetail> = {},
+): GroupQueueDetail {
+  return {
+    folderKey: 'test-agent',
+    messageLane: {
+      active: false,
+      idle: false,
+      pendingCount: 0,
+      containerName: null,
+    },
+    taskLane: {
+      active: false,
+      pendingCount: 0,
+      containerName: null,
+      activeTask: null,
+    },
+    retryCount: 0,
+    ...overrides,
+  };
+}
+
+describe('getAgentExecStatus', () => {
+  it('returns "offline" when agent has no queue entry', () => {
+    expect(getAgentExecStatus('test-agent', [])).toBe('offline');
+  });
+
+  it('returns "executing" when message lane is active and not idle', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+      }),
+    ];
+    expect(getAgentExecStatus('test-agent', details)).toBe('executing');
+  });
+
+  it('returns "running-task" when task lane is active', () => {
+    const details = [
+      makeQueueDetail({
+        taskLane: {
+          active: true,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+          activeTask: {
+            taskId: 'task-1',
+            promptPreview: 'Run check',
+            startedAt: Date.now(),
+            runningMs: 1000,
+          },
+        },
+      }),
+    ];
+    expect(getAgentExecStatus('test-agent', details)).toBe('running-task');
+  });
+
+  it('returns "idle" when message lane is idle-waiting', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: true,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+      }),
+    ];
+    expect(getAgentExecStatus('test-agent', details)).toBe('idle');
+  });
+
+  it('returns "queued" when messages are pending', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 3,
+          containerName: null,
+        },
+      }),
+    ];
+    expect(getAgentExecStatus('test-agent', details)).toBe('queued');
+  });
+
+  it('returns "queued" when tasks are pending', () => {
+    const details = [
+      makeQueueDetail({
+        taskLane: {
+          active: false,
+          pendingCount: 2,
+          containerName: null,
+          activeTask: null,
+        },
+      }),
+    ];
+    expect(getAgentExecStatus('test-agent', details)).toBe('queued');
+  });
+
+  it('returns "offline" when queue entry exists but nothing active or pending', () => {
+    const details = [makeQueueDetail()];
+    expect(getAgentExecStatus('test-agent', details)).toBe('offline');
+  });
+
+  it('executing takes priority over running-task', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+        taskLane: {
+          active: true,
+          pendingCount: 0,
+          containerName: 'ctr-2',
+          activeTask: {
+            taskId: 'task-1',
+            promptPreview: 'Run check',
+            startedAt: Date.now(),
+            runningMs: 500,
+          },
+        },
+      }),
+    ];
+    expect(getAgentExecStatus('test-agent', details)).toBe('executing');
+  });
+
+  it('matches by folder key', () => {
+    const details = [
+      makeQueueDetail({
+        folderKey: 'other-agent',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+      }),
+    ];
+    expect(getAgentExecStatus('test-agent', details)).toBe('offline');
+    expect(getAgentExecStatus('other-agent', details)).toBe('executing');
+  });
+});
+
+describe('renderExecStatusBadge', () => {
+  it('renders executing badge with correct CSS class', () => {
+    const html = renderExecStatusBadge('executing');
+    expect(html).toContain('exec-executing');
+    expect(html).toContain('executing');
+  });
+
+  it('renders running-task badge', () => {
+    const html = renderExecStatusBadge('running-task');
+    expect(html).toContain('exec-task');
+    expect(html).toContain('task');
+  });
+
+  it('renders idle badge', () => {
+    const html = renderExecStatusBadge('idle');
+    expect(html).toContain('exec-idle');
+    expect(html).toContain('idle');
+  });
+
+  it('renders queued badge', () => {
+    const html = renderExecStatusBadge('queued');
+    expect(html).toContain('exec-queued');
+    expect(html).toContain('queued');
+  });
+
+  it('renders offline badge', () => {
+    const html = renderExecStatusBadge('offline');
+    expect(html).toContain('exec-offline');
+    expect(html).toContain('offline');
+  });
+});
+
+describe('renderAgentRow with status', () => {
+  it('renders execution status badge when status is provided', () => {
+    const agentData = {
+      id: 'agent-1',
+      name: 'Test Agent',
+      folder: 'test-agent',
+      backend: 'apple-container',
+      agentRuntime: 'claude-agent-sdk',
+      isAdmin: false,
+      channels: [],
+    };
+
+    const html = renderAgentRow(agentData, 0, 'executing');
+    expect(html).toContain('exec-executing');
+  });
+
+  it('defaults to offline status when no status provided', () => {
+    const agentData = {
+      id: 'agent-1',
+      name: 'Test Agent',
+      folder: 'test-agent',
+      backend: 'apple-container',
+      agentRuntime: 'claude-agent-sdk',
+      isAdmin: false,
+      channels: [],
+    };
+
+    const html = renderAgentRow(agentData, 0);
+    expect(html).toContain('exec-offline');
+  });
+});
+
+describe('renderAgentsContent with execution status', () => {
+  it('includes status column header', () => {
+    const html = renderAgentsContent(makeState());
+    expect(html).toContain('>status<');
+  });
+
+  it('renders executing status when queue shows active message lane', () => {
+    const state = makeState();
+    const origGetQueueDetails = state.getQueueDetails;
+    state.getQueueDetails = () => [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+      }),
+    ];
+
+    const html = renderAgentsContent(state);
+    expect(html).toContain('exec-executing');
+
+    state.getQueueDetails = origGetQueueDetails;
+  });
+
+  it('renders offline status for remote agents regardless of queue', () => {
+    const remotePeers = [
+      {
+        instanceId: 'peer-1',
+        instanceName: 'macbook',
+        online: true,
+        host: '192.168.1.10',
+        port: 4444,
+        agents: [
+          {
+            id: 'remote-agent',
+            name: 'Remote',
+            folder: 'remote',
+            backend: 'docker' as const,
+            agentRuntime: 'opencode' as const,
+            channels: [],
+          },
+        ],
+      },
+    ];
+
+    const html = renderAgentsContent(makeState(), remotePeers);
+    // Remote agents should show offline, not use queue details
+    expect(html).toContain('exec-offline');
   });
 });

@@ -1,11 +1,12 @@
 /**
  * Agents page — top-level agent directory with search, filters, and quick actions.
  * Shows all local and remote agents in a clean table with backend badges,
- * channel/task counts, and links to detail pages.
+ * channel/task counts, execution status, and links to detail pages.
  */
 
 import { createHash } from 'crypto';
 
+import type { GroupQueueDetail } from '../group-queue.js';
 import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
@@ -14,6 +15,53 @@ import {
   type AgentChannelData,
 } from './agent-channels.js';
 import type { RemotePeerAgents } from '../discovery/types.js';
+
+export type AgentExecStatus =
+  | 'executing'
+  | 'running-task'
+  | 'idle'
+  | 'queued'
+  | 'offline';
+
+/** Derive an agent's execution status from the group queue details. */
+export function getAgentExecStatus(
+  folder: string,
+  queueDetails: GroupQueueDetail[],
+): AgentExecStatus {
+  const detail = queueDetails.find((d) => d.folderKey === folder);
+  if (!detail) return 'offline';
+
+  // Active message processing takes precedence
+  if (detail.messageLane.active && !detail.messageLane.idle) return 'executing';
+
+  // Running a scheduled task
+  if (detail.taskLane.active) return 'running-task';
+
+  // Container alive but idle-waiting
+  if (detail.messageLane.idle) return 'idle';
+
+  // Messages waiting in queue but no container yet
+  if (detail.messageLane.pendingCount > 0 || detail.taskLane.pendingCount > 0)
+    return 'queued';
+
+  return 'offline';
+}
+
+const EXEC_STATUS_LABELS: Record<AgentExecStatus, string> = {
+  executing: 'executing',
+  'running-task': 'task',
+  idle: 'idle',
+  queued: 'queued',
+  offline: 'offline',
+};
+
+const EXEC_STATUS_CSS: Record<AgentExecStatus, string> = {
+  executing: 'exec-executing',
+  'running-task': 'exec-task',
+  idle: 'exec-idle',
+  queued: 'exec-queued',
+  offline: 'exec-offline',
+};
 
 function imageRev(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12);
@@ -33,10 +81,18 @@ function backendBadgeClass(backend: string): string {
   return '';
 }
 
+/** Render the execution status badge for an agent. */
+export function renderExecStatusBadge(status: AgentExecStatus): string {
+  const label = EXEC_STATUS_LABELS[status];
+  const css = EXEC_STATUS_CSS[status];
+  return `<span class="badge badge-sm ${css}">${escapeHtml(label)}</span>`;
+}
+
 /** Render a single agent row in the agents table. */
 export function renderAgentRow(
   agent: AgentChannelData,
   taskCount: number,
+  execStatus: AgentExecStatus = 'offline',
 ): string {
   const esc = escapeHtml;
   const avatar = avatarSrc(agent);
@@ -57,6 +113,7 @@ export function renderAgentRow(
     `<span class="ap-avatar-wrap">${avatarHtml}</span>` +
     `<span class="ap-name">${esc(agent.name)}</span>` +
     `</a></td>` +
+    `<td>${renderExecStatusBadge(execStatus)}</td>` +
     `<td><span class="badge ${backendBadgeClass(agent.backend)}">${esc(agent.backend)}</span></td>` +
     `<td><span class="badge badge-sm">${esc(agent.agentRuntime)}</span></td>` +
     `<td class="td-center">${agent.channels.length}</td>` +
@@ -86,6 +143,7 @@ export function renderAgentsContent(
 ): string {
   const agentData = buildAgentChannelData(state, remotePeers);
   const tasks = state.getTasks();
+  const queueDetails = state.getQueueDetails();
 
   // Count tasks per agent group folder
   const taskCounts: Record<string, number> = {};
@@ -109,7 +167,12 @@ export function renderAgentsContent(
     .join('');
 
   const rows = agentData
-    .map((a) => renderAgentRow(a, taskCounts[a.folder] || 0))
+    .map((a) => {
+      const status = a.remoteInstanceId
+        ? 'offline'
+        : getAgentExecStatus(a.folder, queueDetails);
+      return renderAgentRow(a, taskCounts[a.folder] || 0, status);
+    })
     .join('\n');
 
   return (
@@ -139,6 +202,7 @@ export function renderAgentsContent(
     `<table class="ap-table">` +
     `<thead><tr>` +
     `<th>agent</th>` +
+    `<th>status</th>` +
     `<th>backend</th>` +
     `<th>runtime</th>` +
     `<th class="th-center">channels</th>` +

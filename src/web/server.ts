@@ -32,7 +32,12 @@ import { renderSystemContent } from './system.js';
 import { renderSettingsContent } from './settings.js';
 import { renderTasksContent } from './tasks.js';
 import { renderLogsContent } from './logs.js';
-import { renderAgentsContent } from './agents-page.js';
+import {
+  renderAgentsContent,
+  renderAgentRow,
+  getAgentExecStatus,
+} from './agents-page.js';
+import { buildAgentChannelData } from './agent-channels.js';
 
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
@@ -540,6 +545,7 @@ export function startWebServer(
 
           if (event.type === 'agent_status') {
             patchStats(client, state);
+            patchAgentsPage(client, state);
             continue;
           }
 
@@ -721,6 +727,7 @@ function isLoopbackOrPrivateAddress(address?: string): boolean {
 function patchSnapshot(client: SseClient, state: WebStateProvider): void {
   patchStats(client, state);
   patchAgents(client, state);
+  patchAgentsPage(client, state);
   patchTasks(client, state);
   patchLogs(client);
 }
@@ -766,6 +773,29 @@ function patchAgents(client: SseClient, state: WebStateProvider): void {
   if (!client.subscriptions.has('agents')) return;
   client.stream.patchElements(renderAgentRows(state), {
     selector: '#agents-tbody',
+    mode: 'inner',
+  });
+}
+
+function patchAgentsPage(client: SseClient, state: WebStateProvider): void {
+  if (!client.subscriptions.has('agents')) return;
+  const agentData = buildAgentChannelData(state);
+  const tasks = state.getTasks();
+  const queueDetails = state.getQueueDetails();
+  const taskCounts: Record<string, number> = {};
+  for (const t of tasks) {
+    taskCounts[t.group_folder] = (taskCounts[t.group_folder] || 0) + 1;
+  }
+  const rows = agentData
+    .map((a) => {
+      const status = a.remoteInstanceId
+        ? ('offline' as const)
+        : getAgentExecStatus(a.folder, queueDetails);
+      return renderAgentRow(a, taskCounts[a.folder] || 0, status);
+    })
+    .join('\n');
+  client.stream.patchElements(rows, {
+    selector: '#ap-tbody',
     mode: 'inner',
   });
 }
