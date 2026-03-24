@@ -1,12 +1,36 @@
-import { describe, it, expect } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 
 import {
+  downloadDiscordBinaryAttachment,
+  downloadDiscordTextAttachment,
   jidToChannelId,
   DiscordChannel,
   getAttachmentWorkspaceFolder,
   isImageAttachment,
+  readStreamWithByteLimit,
 } from './discord.js';
 import type { RegisteredGroup } from '../types.js';
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
+
+function createStream(
+  chunks: Array<string | Uint8Array>,
+): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(
+          typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk,
+        );
+      }
+      controller.close();
+    },
+  });
+}
 
 // --- jidToChannelId ---
 
@@ -145,6 +169,55 @@ describe('isImageAttachment', () => {
   it('handles missing name when contentType is null', () => {
     expect(isImageAttachment({ contentType: null })).toBe(false);
     expect(isImageAttachment({ contentType: null, name: null })).toBe(false);
+  });
+});
+
+describe('Discord download guards', () => {
+  it('reads streamed responses within the byte limit', async () => {
+    const bytes = await readStreamWithByteLimit(
+      createStream(['hello', ' ', 'world']),
+      32,
+    );
+
+    expect(bytes.toString()).toBe('hello world');
+  });
+
+  it('rejects streamed responses that exceed the byte limit', async () => {
+    await expect(
+      readStreamWithByteLimit(createStream(['12345', '67890']), 8),
+    ).rejects.toThrow('Discord download exceeded 8 bytes');
+  });
+
+  it('applies capped streamed downloads for binary attachments', async () => {
+    let capturedSignal: AbortSignal | null = null;
+
+    globalThis.fetch = mock(
+      (_url: string | URL | Request, init?: RequestInit) => {
+        capturedSignal = init?.signal as AbortSignal | null;
+        return Promise.resolve(
+          new Response(createStream([new Uint8Array([1, 2, 3, 4])])),
+        );
+      },
+    ) as unknown as typeof globalThis.fetch;
+
+    const bytes = await downloadDiscordBinaryAttachment(
+      'https://cdn.discordapp.test/file.png',
+    );
+
+    expect(Array.from(bytes)).toEqual([1, 2, 3, 4]);
+    expect(capturedSignal).toBeTruthy();
+  });
+
+  it('rejects text attachments when the actual response body exceeds the cap', async () => {
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(createStream(['a'.repeat(70_000), 'b'.repeat(40_000)])),
+      ),
+    ) as unknown as typeof globalThis.fetch;
+
+    await expect(
+      downloadDiscordTextAttachment('https://cdn.discordapp.test/file.txt'),
+    ).rejects.toThrow('Discord download exceeded 102400 bytes');
   });
 });
 

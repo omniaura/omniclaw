@@ -63,6 +63,80 @@ const IMAGE_EXTENSIONS = new Set([
   '.svg',
 ]);
 
+const DISCORD_DOWNLOAD_TIMEOUT_MS = 15_000;
+const MAX_DISCORD_BINARY_DOWNLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_DISCORD_TEXT_DOWNLOAD_BYTES = 100 * 1024;
+
+export async function readStreamWithByteLimit(
+  stream: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+): Promise<Buffer> {
+  if (!stream) return Buffer.alloc(0);
+
+  const reader = stream.getReader();
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        try {
+          await reader.cancel('Discord download exceeded byte limit');
+        } catch {
+          // Ignore cancellation failures; the limit error below is the primary signal.
+        }
+        throw new Error(`Discord download exceeded ${maxBytes} bytes`);
+      }
+
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return Buffer.concat(chunks);
+}
+
+async function fetchDiscordDownload(url: string): Promise<Response> {
+  return fetch(url, {
+    signal: AbortSignal.timeout(DISCORD_DOWNLOAD_TIMEOUT_MS),
+  });
+}
+
+export async function downloadDiscordBinaryAttachment(
+  url: string,
+): Promise<Buffer> {
+  const response = await fetchDiscordDownload(url);
+  if (!response.ok) {
+    throw new Error(`Discord download failed with status ${response.status}`);
+  }
+
+  return readStreamWithByteLimit(
+    response.body,
+    MAX_DISCORD_BINARY_DOWNLOAD_BYTES,
+  );
+}
+
+export async function downloadDiscordTextAttachment(
+  url: string,
+): Promise<string> {
+  const response = await fetchDiscordDownload(url);
+  if (!response.ok) {
+    throw new Error(`Discord download failed with status ${response.status}`);
+  }
+
+  const bytes = await readStreamWithByteLimit(
+    response.body,
+    MAX_DISCORD_TEXT_DOWNLOAD_BYTES,
+  );
+  return new TextDecoder().decode(bytes);
+}
+
 /**
  * Determine if a Discord attachment is an image.
  * Discord sometimes sends contentType as null even for images,
@@ -979,16 +1053,8 @@ export class DiscordChannel implements Channel {
             const filePath = path.join(mediaDir, filename);
             // Layer 2: Defense-in-depth — verify resolved path stays within mediaDir
             assertPathWithin(filePath, mediaDir, 'Discord image attachment');
-            const resp = await fetch(a.url);
-            if (!resp.ok) {
-              logger.error(
-                { status: resp.status, url: a.url },
-                'Discord CDN returned non-OK status for image',
-              );
-              parts.push('[Image]');
-              continue;
-            }
-            fs.writeFileSync(filePath, Buffer.from(await resp.arrayBuffer()));
+            const bytes = await downloadDiscordBinaryAttachment(a.url);
+            fs.writeFileSync(filePath, bytes);
             parts.push(`[attachment:image file=${filename}]`);
           } catch (err) {
             logger.error(
@@ -1035,8 +1101,7 @@ export class DiscordChannel implements Channel {
             (a.size ?? Infinity) <= MAX_TEXT_SIZE
           ) {
             try {
-              const resp = await fetch(a.url);
-              const text = await resp.text();
+              const text = await downloadDiscordTextAttachment(a.url);
               parts.push(
                 `[attachment:file name=${fileName}]\n${text}\n[/attachment:file]`,
               );
@@ -1070,15 +1135,8 @@ export class DiscordChannel implements Channel {
           const filename = `${msgId}-embed-${safeName}`;
           const filePath = path.join(mediaDir, filename);
           assertPathWithin(filePath, mediaDir, 'Discord embed image');
-          const resp = await fetch(imageUrl);
-          if (!resp.ok) {
-            logger.warn(
-              { status: resp.status, url: imageUrl },
-              'Failed to fetch Discord embed image',
-            );
-            continue;
-          }
-          fs.writeFileSync(filePath, Buffer.from(await resp.arrayBuffer()));
+          const bytes = await downloadDiscordBinaryAttachment(imageUrl);
+          fs.writeFileSync(filePath, bytes);
           embedParts.push(`[attachment:image file=${filename}]`);
         } catch (err) {
           logger.warn({ err, url: imageUrl }, 'Failed to download embed image');
