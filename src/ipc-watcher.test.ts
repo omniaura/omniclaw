@@ -105,7 +105,6 @@ describe('startIpcWatcher', () => {
     const events: Array<{ kind: string; sourceGroup: string }> = [];
     const scheduledDelays: number[] = [];
 
-<<<<<<< HEAD
     globalThis.setTimeout = ((
       _fn: Parameters<typeof setTimeout>[0],
       delay?: number,
