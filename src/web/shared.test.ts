@@ -136,9 +136,7 @@ describe('shortcutHelpModal', () => {
     const html = shortcutHelpModal();
 
     // g then d, g then a, etc.
-    expect(html).toContain(
-      '<span class="shortcut-then">then</span>',
-    );
+    expect(html).toContain('<span class="shortcut-then">then</span>');
   });
 
   it('includes the close button', () => {
