@@ -156,7 +156,9 @@ export function validateExternalMcpCommand(
 ): string {
   const trimmed = command.trim();
   if (!trimmed) {
-    throw new Error(`External MCP server '${serverName}' must define a command`);
+    throw new Error(
+      `External MCP server '${serverName}' must define a command`,
+    );
   }
   if (trimmed.includes('\0')) {
     throw new Error(
@@ -184,7 +186,10 @@ export function validateExternalMcpCommand(
     : path.resolve('/workspace/group', trimmed);
   const isAllowed = ALLOWED_EXTERNAL_MCP_COMMAND_ROOTS.some((root) => {
     const resolvedRoot = path.resolve(root);
-    return resolved === resolvedRoot || resolved.startsWith(`${resolvedRoot}${path.sep}`);
+    return (
+      resolved === resolvedRoot ||
+      resolved.startsWith(`${resolvedRoot}${path.sep}`)
+    );
   });
   if (!isAllowed) {
     throw new Error(
@@ -210,7 +215,9 @@ export function normalizeExternalMcpServers(
       );
     }
     if (!isPlainObject(rawConfig)) {
-      throw new Error(`External MCP server '${serverName}' config must be an object`);
+      throw new Error(
+        `External MCP server '${serverName}' config must be an object`,
+      );
     }
 
     const type = rawConfig.type;
@@ -1150,7 +1157,9 @@ async function runQuery(
   }
 
   startHeartbeat();
-  const externalMcpServers = normalizeExternalMcpServers(containerInput.mcpServers);
+  const externalMcpServers = normalizeExternalMcpServers(
+    containerInput.mcpServers,
+  );
 
   for await (const message of query({
     prompt: stream,

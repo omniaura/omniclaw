@@ -14,7 +14,11 @@ describe('external MCP config security', () => {
     });
 
     expect(buildAllowedTools(normalized)).toEqual(
-      expect.arrayContaining(['mcp__omniclaw__*', 'mcp__gmail__*', 'mcp__calendar__*']),
+      expect.arrayContaining([
+        'mcp__omniclaw__*',
+        'mcp__gmail__*',
+        'mcp__calendar__*',
+      ]),
     );
   });
 
