@@ -120,8 +120,6 @@ async function runTask(
     return;
   }
 
-  // Set execution lease so crash recovery can detect stale runs
-  runtime.markTaskExecuting(task.id);
   try {
     const startTime = Date.now();
     const groupDir = path.join(GROUPS_DIR, task.group_folder);
@@ -148,6 +146,10 @@ async function runTask(
       });
       return;
     }
+
+    // Set execution lease only after preflight validation succeeds so
+    // missing-group failures do not leave the task stuck in a running state.
+    runtime.markTaskExecuting(task.id);
 
     const prompt = task.prompt;
 
