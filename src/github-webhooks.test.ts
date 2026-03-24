@@ -1,12 +1,17 @@
-import { beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, it } from 'bun:test';
 import { createHmac } from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import {
   _resetGitHubWebhookReplayCacheForTest,
   buildGitHubWebhookNotification,
+  isGitHubWebhookDeliveryProcessed,
   markGitHubWebhookDeliveryProcessed,
+  startGitHubWebhookServer,
   verifyGitHubWebhookSignature,
 } from './github-webhooks.js';
-import { _initTestDatabase } from './db.js';
+import { _initTestDatabase, isGitHubWebhookDeliveryRecorded } from './db.js';
+import { DATA_DIR } from './config.js';
 import type { GitHubWatchesConfig } from './types.js';
 
 describe('github webhooks', () => {
@@ -244,5 +249,196 @@ describe('github webhooks', () => {
 
     expect(unsupported).toBeNull();
     expect(missingConfig).toBeNull();
+  });
+});
+
+describe('isGitHubWebhookDeliveryProcessed', () => {
+  beforeEach(() => {
+    _initTestDatabase();
+    _resetGitHubWebhookReplayCacheForTest();
+  });
+
+  it('returns false for unknown delivery', () => {
+    expect(isGitHubWebhookDeliveryProcessed('never-seen')).toBe(false);
+  });
+
+  it('returns true after delivery is marked via in-memory cache', () => {
+    markGitHubWebhookDeliveryProcessed('delivery-check-1');
+    expect(isGitHubWebhookDeliveryProcessed('delivery-check-1')).toBe(true);
+  });
+
+  it('returns true from DB after in-memory cache is cleared', () => {
+    const now = Date.parse('2026-03-20T00:00:00.000Z');
+    markGitHubWebhookDeliveryProcessed('delivery-check-2', now);
+    _resetGitHubWebhookReplayCacheForTest();
+    expect(
+      isGitHubWebhookDeliveryProcessed('delivery-check-2', now + 1000),
+    ).toBe(true);
+  });
+});
+
+describe('isGitHubWebhookDeliveryRecorded (DB)', () => {
+  beforeEach(() => {
+    _initTestDatabase();
+  });
+
+  it('returns false when delivery is not in DB', () => {
+    expect(isGitHubWebhookDeliveryRecorded('not-in-db')).toBe(false);
+  });
+
+  it('returns true after delivery is recorded', () => {
+    const now = Date.parse('2026-03-20T00:00:00.000Z');
+    markGitHubWebhookDeliveryProcessed('recorded-1', now);
+    expect(isGitHubWebhookDeliveryRecorded('recorded-1', now + 1000)).toBe(
+      true,
+    );
+  });
+});
+
+describe('webhook server retry behavior (#365)', () => {
+  const secret = 'test-secret';
+  let port: number;
+  let server: { stop: () => void };
+  let handlerCalls: number;
+  let handlerShouldThrow: boolean;
+
+  function sign(body: string): string {
+    return `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
+  }
+
+  function makeIssuePayload() {
+    return JSON.stringify({
+      action: 'opened',
+      repository: {
+        owner: { login: 'omniaura' },
+        name: 'omniclaw',
+        full_name: 'omniaura/omniclaw',
+      },
+      sender: { login: 'user' },
+      issue: {
+        number: 999,
+        title: 'Test issue',
+        html_url: 'https://github.com/omniaura/omniclaw/issues/999',
+      },
+    });
+  }
+
+  async function sendWebhook(
+    deliveryId: string,
+    body: string,
+    event = 'issues',
+  ) {
+    return fetch(`http://localhost:${port}/webhooks/github`, {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': deliveryId,
+        'x-github-event': event,
+        'x-hub-signature-256': sign(body),
+        'content-type': 'application/json',
+      },
+      body,
+    });
+  }
+
+  beforeEach(() => {
+    _initTestDatabase();
+    _resetGitHubWebhookReplayCacheForTest();
+    handlerCalls = 0;
+    handlerShouldThrow = false;
+
+    // Write a github-watches config so buildGitHubWebhookNotification returns
+    // a notification for omniaura/omniclaw events.
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(DATA_DIR, 'github-watches.json'),
+      JSON.stringify({
+        watches: [
+          {
+            agentId: 'test-agent',
+            repos: [{ owner: 'omniaura', repo: 'omniclaw' }],
+          },
+        ],
+      }),
+    );
+
+    // Pick a random high port to avoid conflicts with parallel tests.
+    port = 30_000 + Math.floor(Math.random() * 20_000);
+    server = startGitHubWebhookServer({
+      secret,
+      port,
+      async onNotification() {
+        handlerCalls++;
+        if (handlerShouldThrow) throw new Error('transient failure');
+      },
+    });
+  });
+
+  afterAll(() => {
+    server?.stop();
+    // Clean up config file
+    const configPath = path.join(DATA_DIR, 'github-watches.json');
+    if (fs.existsSync(configPath)) fs.unlinkSync(configPath);
+  });
+
+  it('allows retry after handler failure (500)', async () => {
+    const body = makeIssuePayload();
+    handlerShouldThrow = true;
+
+    // First attempt — handler throws, should return 500
+    const res1 = await sendWebhook('retry-handler-500', body);
+    expect(res1.status).toBe(500);
+    expect(handlerCalls).toBe(1);
+
+    // Delivery should NOT be marked as processed
+    expect(isGitHubWebhookDeliveryProcessed('retry-handler-500')).toBe(false);
+
+    // Retry with same delivery ID — should be processed this time
+    handlerShouldThrow = false;
+    const res2 = await sendWebhook('retry-handler-500', body);
+    expect(res2.status).toBe(200);
+    expect(handlerCalls).toBe(2);
+
+    // Now the delivery IS marked as processed
+    expect(isGitHubWebhookDeliveryProcessed('retry-handler-500')).toBe(true);
+  });
+
+  it('allows retry after malformed JSON (400)', async () => {
+    const badBody = 'not valid json{{{';
+    const deliveryId = 'retry-bad-json';
+
+    const res1 = await sendWebhook(deliveryId, badBody);
+    expect(res1.status).toBe(400);
+
+    // Delivery should NOT be marked as processed
+    expect(isGitHubWebhookDeliveryProcessed(deliveryId)).toBe(false);
+
+    // Retry with valid payload
+    const goodBody = makeIssuePayload();
+    const res2 = await fetch(`http://localhost:${port}/webhooks/github`, {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': deliveryId,
+        'x-github-event': 'issues',
+        'x-hub-signature-256': sign(goodBody),
+        'content-type': 'application/json',
+      },
+      body: goodBody,
+    });
+    expect(res2.status).toBe(200);
+    expect(handlerCalls).toBe(1);
+  });
+
+  it('rejects duplicate after successful processing', async () => {
+    const body = makeIssuePayload();
+    const deliveryId = 'no-double-process';
+
+    const res1 = await sendWebhook(deliveryId, body);
+    expect(res1.status).toBe(200);
+    expect(handlerCalls).toBe(1);
+
+    // Same delivery ID again — should be rejected as duplicate
+    const res2 = await sendWebhook(deliveryId, body);
+    expect(res2.status).toBe(202);
+    expect(handlerCalls).toBe(1); // handler NOT called again
   });
 });

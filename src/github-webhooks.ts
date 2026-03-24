@@ -5,7 +5,10 @@ import {
   invalidateGitHubContextCacheForAgents,
   loadGitHubWatchesConfig,
 } from './github.js';
-import { recordGitHubWebhookDelivery } from './db.js';
+import {
+  isGitHubWebhookDeliveryRecorded,
+  recordGitHubWebhookDelivery,
+} from './db.js';
 import { logger } from './logger.js';
 import type { GitHubWatchesConfig } from './types.js';
 
@@ -211,6 +214,19 @@ export function markGitHubWebhookDeliveryProcessed(
   return true;
 }
 
+/**
+ * Read-only check: returns true if the delivery was already successfully
+ * processed (in-memory cache or persisted DB).  Does NOT insert anything.
+ */
+export function isGitHubWebhookDeliveryProcessed(
+  deliveryId: string,
+  now = Date.now(),
+): boolean {
+  cleanupDeliveryCache(now);
+  if (recentlyProcessedDeliveries.has(deliveryId)) return true;
+  return isGitHubWebhookDeliveryRecorded(deliveryId, now);
+}
+
 export function _resetGitHubWebhookReplayCacheForTest(): void {
   recentlyProcessedDeliveries.clear();
 }
@@ -277,7 +293,10 @@ export function startGitHubWebhookServer(options: GitHubWebhookServerOptions): {
         return new Response('Invalid signature', { status: 401 });
       }
 
-      if (!markGitHubWebhookDeliveryProcessed(deliveryId)) {
+      // Read-only duplicate check — does NOT mark the delivery as processed.
+      // We only persist the delivery after the handler succeeds so that
+      // GitHub retries are not suppressed by parse or handler failures (#365).
+      if (isGitHubWebhookDeliveryProcessed(deliveryId)) {
         return new Response('Duplicate delivery ignored', { status: 202 });
       }
 
@@ -298,6 +317,9 @@ export function startGitHubWebhookServer(options: GitHubWebhookServerOptions): {
         payload,
       );
       if (!notification) {
+        // Event parsed but not watched — safe to mark as processed so
+        // retries of unwatched events are still short-circuited.
+        markGitHubWebhookDeliveryProcessed(deliveryId);
         return new Response('Ignored', { status: 202 });
       }
 
@@ -310,6 +332,9 @@ export function startGitHubWebhookServer(options: GitHubWebhookServerOptions): {
         );
         return new Response('Handler error', { status: 500 });
       }
+
+      // Mark as processed only after the handler succeeds.
+      markGitHubWebhookDeliveryProcessed(deliveryId);
 
       logger.info(
         {

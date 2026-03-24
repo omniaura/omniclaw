@@ -1374,6 +1374,19 @@ export function recordGitHubWebhookDelivery(
   return transaction().changes === 1;
 }
 
+export function isGitHubWebhookDeliveryRecorded(
+  deliveryId: string,
+  nowMs = Date.now(),
+): boolean {
+  cleanupExpiredGitHubWebhookDeliveries(nowMs);
+  const row = db
+    .query(
+      'SELECT 1 FROM github_webhook_deliveries WHERE delivery_id = ? AND expires_at > ?',
+    )
+    .get(deliveryId, new Date(nowMs).toISOString());
+  return row != null;
+}
+
 // --- Session accessors ---
 
 export function getSession(groupFolder: string): string | undefined {
