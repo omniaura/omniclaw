@@ -211,9 +211,7 @@ describe('Discord download guards', () => {
   it('rejects text attachments when the actual response body exceeds the cap', async () => {
     globalThis.fetch = mock(() =>
       Promise.resolve(
-        new Response(
-          createStream(['a'.repeat(70_000), 'b'.repeat(40_000)]),
-        ),
+        new Response(createStream(['a'.repeat(70_000), 'b'.repeat(40_000)])),
       ),
     ) as unknown as typeof globalThis.fetch;
 
