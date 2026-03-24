@@ -228,7 +228,8 @@ describe('startSchedulerLoop harness', () => {
 
       expect(logTaskRunMock).toHaveBeenCalledTimes(2);
       expect(updateTaskAfterRunMock).toHaveBeenCalledTimes(1);
-      expect(markTaskExecutingMock).toHaveBeenCalledTimes(2);
+      expect(markTaskExecutingMock).toHaveBeenCalledTimes(1);
+      expect(markTaskExecutingMock).toHaveBeenCalledWith('task-success');
       expect(clearTaskExecutingMock).toHaveBeenCalledTimes(2);
       expect(clearTaskExecutingMock).toHaveBeenCalledWith('task-success');
       expect(clearTaskExecutingMock).toHaveBeenCalledWith('task-missing-group');

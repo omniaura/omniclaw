@@ -19,7 +19,7 @@ import {
   updateTaskAfterRun,
 } from './db.js';
 import { calculateNextRun, validateSchedule } from './schedule-utils.js';
-import { recoverStaleTasks } from './task-scheduler.js';
+import { recoverStaleTasks, triggerTaskNow } from './task-scheduler.js';
 import {
   findGroupByFolder,
   findJidByFolder,
@@ -812,6 +812,55 @@ describe('execution lease tracking', () => {
     // Cutoff: 1 minute in the future — both should be stale
     const futureCutoff = new Date(Date.now() + 60 * 1000).toISOString();
     expect(getStaleExecutingTasks(futureCutoff)).toHaveLength(2);
+  });
+
+  it('does not leave an execution lease when target group lookup fails', async () => {
+    createTask({
+      id: 'missing-group-task',
+      group_folder: 'missing-group',
+      chat_jid: 'missing@g.us',
+      prompt: 'run me',
+      schedule_type: 'interval',
+      schedule_value: '60000',
+      next_run: new Date().toISOString(),
+      status: 'active',
+      context_mode: 'isolated',
+      created_at: new Date().toISOString(),
+    });
+
+    let runPromise: Promise<void> | null = null;
+
+    const result = triggerTaskNow('missing-group-task', {
+      registeredGroups: () => ({}),
+      getGroupForTask: () => undefined,
+      getSessions: () => ({}),
+      resumePositionStore: { get: () => undefined, set: () => {} } as any,
+      queue: {
+        enqueueTask: (
+          _jid: string,
+          _taskId: string,
+          fn: () => Promise<void>,
+        ) => {
+          runPromise = fn();
+        },
+      } as any,
+      onProcess: () => {},
+      sendMessage: async () => undefined,
+      findChannel: () => undefined,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(runPromise).toBeTruthy();
+
+    await runPromise;
+
+    const task = getTaskById('missing-group-task');
+    expect(task?.executing_since).toBeNull();
+
+    const runLogs = getTaskRunLogs('missing-group-task');
+    expect(runLogs).toHaveLength(1);
+    expect(runLogs[0]?.status).toBe('error');
+    expect(runLogs[0]?.error).toContain('Group not found');
   });
 });
 
