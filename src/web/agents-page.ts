@@ -32,8 +32,7 @@ export function getAgentExecStatus(
   if (!detail) return 'offline';
 
   // Active message processing takes precedence
-  if (detail.messageLane.active && !detail.messageLane.idle)
-    return 'executing';
+  if (detail.messageLane.active && !detail.messageLane.idle) return 'executing';
 
   // Running a scheduled task
   if (detail.taskLane.active) return 'running-task';
