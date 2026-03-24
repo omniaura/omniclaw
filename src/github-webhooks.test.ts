@@ -271,9 +271,9 @@ describe('isGitHubWebhookDeliveryProcessed', () => {
     const now = Date.parse('2026-03-20T00:00:00.000Z');
     markGitHubWebhookDeliveryProcessed('delivery-check-2', now);
     _resetGitHubWebhookReplayCacheForTest();
-    expect(isGitHubWebhookDeliveryProcessed('delivery-check-2', now + 1000)).toBe(
-      true,
-    );
+    expect(
+      isGitHubWebhookDeliveryProcessed('delivery-check-2', now + 1000),
+    ).toBe(true);
   });
 });
 
@@ -289,7 +289,9 @@ describe('isGitHubWebhookDeliveryRecorded (DB)', () => {
   it('returns true after delivery is recorded', () => {
     const now = Date.parse('2026-03-20T00:00:00.000Z');
     markGitHubWebhookDeliveryProcessed('recorded-1', now);
-    expect(isGitHubWebhookDeliveryRecorded('recorded-1', now + 1000)).toBe(true);
+    expect(isGitHubWebhookDeliveryRecorded('recorded-1', now + 1000)).toBe(
+      true,
+    );
   });
 });
 
@@ -351,7 +353,10 @@ describe('webhook server retry behavior (#365)', () => {
       path.join(DATA_DIR, 'github-watches.json'),
       JSON.stringify({
         watches: [
-          { agentId: 'test-agent', repos: [{ owner: 'omniaura', repo: 'omniclaw' }] },
+          {
+            agentId: 'test-agent',
+            repos: [{ owner: 'omniaura', repo: 'omniclaw' }],
+          },
         ],
       }),
     );
