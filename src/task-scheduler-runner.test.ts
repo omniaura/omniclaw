@@ -84,15 +84,17 @@ describe('startSchedulerLoop task execution', () => {
       ['task-deleted', null],
     ]);
     const getDueTasksMock = mock(() => dueTasks);
-    const getTaskByIdMock = mock((taskId: string) => taskById.get(taskId) ?? null);
+    const getTaskByIdMock = mock(
+      (taskId: string) => taskById.get(taskId) ?? null,
+    );
     const advanceTaskNextRunMock = mock(() => {});
     const enqueueTaskMock = mock(() => {});
     const loggerMock = createLoggerMock();
     const originalSetTimeout = globalThis.setTimeout;
 
-    (globalThis as { setTimeout: typeof setTimeout }).setTimeout = (((
+    (globalThis as { setTimeout: typeof setTimeout }).setTimeout = ((
       _fn: Parameters<typeof setTimeout>[0],
-    ) => ({ id: 'poll' })) as unknown) as typeof setTimeout;
+    ) => ({ id: 'poll' })) as unknown as typeof setTimeout;
 
     try {
       const deps: SchedulerDependencies = {
@@ -205,13 +207,15 @@ describe('startSchedulerLoop task execution', () => {
     const timeoutCalls: number[] = [];
     const originalSetTimeout = globalThis.setTimeout;
 
-    (globalThis as { setTimeout: typeof setTimeout }).setTimeout = (((
+    (globalThis as { setTimeout: typeof setTimeout }).setTimeout = ((
       _fn: Parameters<typeof setTimeout>[0],
       ms?: number,
     ) => {
       timeoutCalls.push(ms ?? 0);
-      return { id: timeoutCalls.length } as unknown as ReturnType<typeof setTimeout>;
-    }) as unknown) as typeof setTimeout;
+      return { id: timeoutCalls.length } as unknown as ReturnType<
+        typeof setTimeout
+      >;
+    }) as unknown as typeof setTimeout;
 
     try {
       const deps: SchedulerDependencies = {
