@@ -10,7 +10,10 @@ describe('FakeState', () => {
   });
 
   it('filters chat messages by timestamp and limit', () => {
-    const allGeneral = state.getMessages('sim:general', '1970-01-01T00:00:00.000Z');
+    const allGeneral = state.getMessages(
+      'sim:general',
+      '1970-01-01T00:00:00.000Z',
+    );
 
     expect(allGeneral.map((message) => message.id)).toEqual([
       'msg-1',
@@ -49,9 +52,9 @@ describe('FakeState', () => {
     expect(matches).toHaveLength(4);
     expect(matches[0]?.chat_jid).toBe('sim:general');
     expect(matches[1]?.chat_jid).toBe('sim:code-review');
-    expect(matches.slice(2).every((message) => message.chat_jid === 'sim:general')).toBe(
-      true,
-    );
+    expect(
+      matches.slice(2).every((message) => message.chat_jid === 'sim:general'),
+    ).toBe(true);
 
     const filtered = state.searchMessages('pr #315', 'sim:general', 1);
     expect(filtered).toHaveLength(1);
@@ -109,9 +112,9 @@ describe('FakeState', () => {
       next_run: null,
     });
 
-    expect(() => state.updateTask('missing-task', { status: 'paused' })).toThrow(
-      'Task not found: missing-task',
-    );
+    expect(() =>
+      state.updateTask('missing-task', { status: 'paused' }),
+    ).toThrow('Task not found: missing-task');
 
     state.deleteTask('task-new');
     expect(state.getTaskById('task-new')).toBeUndefined();
@@ -128,8 +131,10 @@ describe('FakeState', () => {
     expect(state.getChannelSubscriptions()['sim:temp']).toBeUndefined();
     expect(
       state
-        .getChannelSubscriptions()['sim:general']
-        ?.some((subscription) => subscription.agentId === 'research-bot'),
+        .getChannelSubscriptions()
+        [
+          'sim:general'
+        ]?.some((subscription) => subscription.agentId === 'research-bot'),
     ).toBe(false);
     expect(state.removeAgent('research-bot')).toBe(false);
   });
@@ -160,11 +165,18 @@ describe('FakeState', () => {
     expect(state.ipcEvents.at(-1)?.summary).toBe('event-204');
 
     const latest = state.getIpcEvents(2);
-    expect(latest.map((event) => event.summary)).toEqual(['event-204', 'event-203']);
+    expect(latest.map((event) => event.summary)).toEqual([
+      'event-204',
+      'event-203',
+    ]);
   });
 
   it('updates avatars, task logs, and reset restores seeded state', () => {
-    state.updateAgentAvatar('main', 'https://example.com/avatar.png', 'discord');
+    state.updateAgentAvatar(
+      'main',
+      'https://example.com/avatar.png',
+      'discord',
+    );
     expect(state.getAgents().main).toMatchObject({
       avatarUrl: 'https://example.com/avatar.png',
       avatarSource: 'discord',

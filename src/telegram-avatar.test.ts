@@ -25,7 +25,9 @@ describe('telegram avatar helpers', () => {
   it('rejects malformed file descriptors', () => {
     expect(parseTelegramFileDescriptor('not-telegram')).toBeNull();
     expect(parseTelegramFileDescriptor('tg-file:no-separator')).toBeNull();
-    expect(parseTelegramFileDescriptor('tg-file:%E0%A4%A:avatar.png')).toBeNull();
+    expect(
+      parseTelegramFileDescriptor('tg-file:%E0%A4%A:avatar.png'),
+    ).toBeNull();
     expect(parseTelegramFileDescriptor('tg-file:bot-id:')).toBeNull();
   });
 
@@ -42,9 +44,19 @@ describe('telegram avatar helpers', () => {
   });
 
   it('rejects malformed Telegram API file urls', () => {
-    expect(parseTelegramApiFileUrl('https://example.com/avatar.png')).toBeNull();
-    expect(parseTelegramApiFileUrl('https://api.telegram.org/file/bot/photos/avatar.png')).toBeNull();
-    expect(parseTelegramApiFileUrl('https://api.telegram.org/file/bot:token/photos/avatar.png')).toBeNull();
+    expect(
+      parseTelegramApiFileUrl('https://example.com/avatar.png'),
+    ).toBeNull();
+    expect(
+      parseTelegramApiFileUrl(
+        'https://api.telegram.org/file/bot/photos/avatar.png',
+      ),
+    ).toBeNull();
+    expect(
+      parseTelegramApiFileUrl(
+        'https://api.telegram.org/file/bot:token/photos/avatar.png',
+      ),
+    ).toBeNull();
   });
 
   it('sanitizes Telegram avatar urls only for Telegram sources', () => {
@@ -54,18 +66,22 @@ describe('telegram avatar helpers', () => {
       buildTelegramFileDescriptor('123456', 'photos/avatar.png'),
     );
     expect(sanitizeTelegramAvatarUrl(url, 'discord')).toBe(url);
+    expect(sanitizeTelegramAvatarUrl(url, 'slack')).toBe(url);
     expect(sanitizeTelegramAvatarUrl(undefined, 'telegram')).toBeUndefined();
   });
 
   it('redacts Telegram bot tokens from matching urls', () => {
-    const url = buildTelegramApiFileUrl('123456:super-secret', 'photos/avatar.png');
+    const url = buildTelegramApiFileUrl(
+      '123456:super-secret',
+      'photos/avatar.png',
+    );
 
     expect(redactTelegramBotTokenFromUrl(url)).toBe(
       buildTelegramFileDescriptor('123456', 'photos/avatar.png'),
     );
-    expect(redactTelegramBotTokenFromUrl('https://example.com/avatar.png')).toBe(
-      'https://example.com/avatar.png',
-    );
+    expect(
+      redactTelegramBotTokenFromUrl('https://example.com/avatar.png'),
+    ).toBe('https://example.com/avatar.png');
     expect(redactTelegramBotTokenFromUrl(undefined)).toBeUndefined();
   });
 });

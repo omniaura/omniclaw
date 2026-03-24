@@ -42,7 +42,10 @@ describe('startAdminApi', () => {
     return `http://127.0.0.1:${handle!.port}${path}`;
   }
 
-  async function requestJson(path: string, init?: RequestInit): Promise<Response> {
+  async function requestJson(
+    path: string,
+    init?: RequestInit,
+  ): Promise<Response> {
     return fetch(baseUrl(path), init);
   }
 
@@ -206,6 +209,14 @@ describe('startAdminApi', () => {
     const discovery = createSimDiscoveryEnvironment(state);
     handle = startAdminApi({ port: 0 }, state, webServer, discovery);
 
+    const peersBeforeLog = await requestJson('/remote-peers');
+    const peerBefore = (
+      (await peersBeforeLog.json()) as Array<{
+        instanceId: string;
+        logs: number;
+      }>
+    ).find((peer) => peer.instanceId === 'peer-remote-1');
+
     const logResponse = await requestJson('/remote-peers/peer-remote-1/logs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -218,10 +229,10 @@ describe('startAdminApi', () => {
       instanceId: string;
       logs: number;
     }>;
-    expect(peerSummaries[0]).toMatchObject({
-      instanceId: 'peer-remote-1',
-      logs: 3,
-    });
+    const updatedPeer = peerSummaries.find(
+      (peer) => peer.instanceId === 'peer-remote-1',
+    );
+    expect(updatedPeer?.logs).toBe((peerBefore?.logs ?? 0) + 1);
 
     const scenarioResponse = await requestJson('/scenario/task-storm', {
       method: 'POST',

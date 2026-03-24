@@ -23,17 +23,30 @@ const flushMicrotasks = async () => {
 
 describe('startIpcWatcher', () => {
   const originalSetTimeout = globalThis.setTimeout;
+  let staleRuntimeFolder: string | undefined;
+  let rogueErrorDir: string | undefined;
 
   afterEach(() => {
     globalThis.setTimeout = originalSetTimeout;
+    if (staleRuntimeFolder) {
+      fs.rmSync(path.join(IPC_BASE_DIR, staleRuntimeFolder), {
+        recursive: true,
+        force: true,
+      });
+      staleRuntimeFolder = undefined;
+    }
+    if (rogueErrorDir) {
+      fs.rmSync(rogueErrorDir, { recursive: true, force: true });
+      rogueErrorDir = undefined;
+    }
   });
 
   it('maps runtime folders to owners, cleans stale dispatch dirs, and quarantines rogue sources', async () => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
     const ownerFolder = `runtime-owner-${id}`;
-    const staleRuntimeFolder = `${ownerFolder}${DISPATCH_RUNTIME_SEP}0123456789abcdef`;
+    staleRuntimeFolder = `${ownerFolder}${DISPATCH_RUNTIME_SEP}0123456789abcdef`;
     const rogueFolder = `rogue-source-${id}`;
-    const rogueErrorDir = path.join(IPC_BASE_DIR, 'errors', rogueFolder);
+    rogueErrorDir = path.join(IPC_BASE_DIR, 'errors', rogueFolder);
 
     fs.rmSync(path.join(IPC_BASE_DIR, staleRuntimeFolder), {
       recursive: true,
@@ -94,7 +107,11 @@ describe('startIpcWatcher', () => {
     const events: Array<{ kind: string; sourceGroup: string }> = [];
     const scheduledDelays: number[] = [];
 
-    globalThis.setTimeout = ((fn: TimerHandler, delay?: number) => {
+    globalThis.setTimeout = ((
+      _fn: Parameters<typeof setTimeout>[0],
+      delay?: number,
+      ..._args: unknown[]
+    ) => {
       scheduledDelays.push(delay ?? 0);
       return 1 as unknown as ReturnType<typeof setTimeout>;
     }) as typeof setTimeout;
@@ -142,7 +159,5 @@ describe('startIpcWatcher', () => {
     );
     expect(fs.existsSync(rogueErrorDir)).toBe(true);
     expect(scheduledDelays).toEqual([IPC_POLL_INTERVAL]);
-
-    fs.rmSync(rogueErrorDir, { recursive: true, force: true });
   });
 });
