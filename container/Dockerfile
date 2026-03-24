@@ -19,6 +19,16 @@ COPY agent-runner/ ./
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
+# Install bash shim for split-execution mode.
+# Renames real bash to bash.real, installs shim at /usr/local/bin/bash.
+# PATH has /usr/local/bin before /bin, so agent runtimes get the shim.
+# The shim is a no-op unless EXEC_CONTAINER_NAME env var is set.
+# Entrypoint uses #!/bin/bash.real to bypass the shim.
+COPY exec-shim.sh /usr/local/bin/exec-shim.sh
+RUN chmod +x /usr/local/bin/exec-shim.sh \
+    && cp /bin/bash /bin/bash.real \
+    && ln -sf /usr/local/bin/exec-shim.sh /usr/local/bin/bash
+
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER bun
 

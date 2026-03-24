@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash.real
 set -e
 
 # When running as host uid (--user 501:20), there's no /etc/passwd entry.
