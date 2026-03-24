@@ -80,6 +80,221 @@ interface ContainerOutput {
   chatJid?: string;
 }
 
+type ExternalMcpServerConfig =
+  | {
+      type?: 'stdio';
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+    }
+  | {
+      type: 'sse' | 'http';
+      url: string;
+      headers?: Record<string, string>;
+    };
+
+const BUILTIN_ALLOWED_TOOLS = [
+  'Bash',
+  'Read',
+  'Write',
+  'Edit',
+  'Glob',
+  'Grep',
+  'WebSearch',
+  'WebFetch',
+  'Task',
+  'TaskOutput',
+  'TaskStop',
+  'TeamCreate',
+  'TeamDelete',
+  'SendMessage',
+  'TodoWrite',
+  'ToolSearch',
+  'Skill',
+  'NotebookEdit',
+  'EnterPlanMode',
+  'ExitPlanMode',
+  'TaskCreate',
+  'TaskGet',
+  'TaskUpdate',
+  'TaskList',
+  'mcp__omniclaw__*',
+] as const;
+
+const RESERVED_MCP_SERVER_NAME = 'omniclaw';
+const MCP_SERVER_NAME_RE = /^[A-Za-z0-9_-]+$/;
+const SAFE_BINARY_NAME_RE = /^[A-Za-z0-9._-]+$/;
+const ALLOWED_EXTERNAL_MCP_COMMAND_ROOTS = [
+  '/workspace/group',
+  '/workspace/project',
+  '/workspace/global',
+  '/workspace/agent',
+  '/workspace/category',
+  '/workspace/server',
+  '/workspace/extra',
+] as const;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function assertStringRecord(
+  value: unknown,
+  errorMessage: string,
+): Record<string, string> | undefined {
+  if (value === undefined) return undefined;
+  if (!isPlainObject(value)) throw new Error(errorMessage);
+  for (const entryValue of Object.values(value)) {
+    if (typeof entryValue !== 'string') throw new Error(errorMessage);
+  }
+  return value as Record<string, string>;
+}
+
+export function validateExternalMcpCommand(
+  serverName: string,
+  command: string,
+): string {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    throw new Error(
+      `External MCP server '${serverName}' must define a command`,
+    );
+  }
+  if (trimmed.includes('\0')) {
+    throw new Error(
+      `External MCP server '${serverName}' command contains invalid null bytes`,
+    );
+  }
+  if (!trimmed.includes('/')) {
+    if (!SAFE_BINARY_NAME_RE.test(trimmed)) {
+      throw new Error(
+        `External MCP server '${serverName}' command must be a bare executable name or a workspace path`,
+      );
+    }
+    return trimmed;
+  }
+
+  const segments = trimmed.split('/').filter(Boolean);
+  if (segments.includes('..')) {
+    throw new Error(
+      `External MCP server '${serverName}' command cannot contain path traversal segments`,
+    );
+  }
+
+  const resolved = trimmed.startsWith('/')
+    ? path.resolve(trimmed)
+    : path.resolve('/workspace/group', trimmed);
+  const isAllowed = ALLOWED_EXTERNAL_MCP_COMMAND_ROOTS.some((root) => {
+    const resolvedRoot = path.resolve(root);
+    return (
+      resolved === resolvedRoot ||
+      resolved.startsWith(`${resolvedRoot}${path.sep}`)
+    );
+  });
+  if (!isAllowed) {
+    throw new Error(
+      `External MCP server '${serverName}' command must stay within mounted workspace paths`,
+    );
+  }
+  return resolved;
+}
+
+export function normalizeExternalMcpServers(
+  mcpServers?: Record<string, Record<string, unknown>>,
+): Record<string, ExternalMcpServerConfig> {
+  const normalized: Record<string, ExternalMcpServerConfig> = {};
+  for (const [serverName, rawConfig] of Object.entries(mcpServers || {})) {
+    if (!MCP_SERVER_NAME_RE.test(serverName)) {
+      throw new Error(
+        `External MCP server '${serverName}' has an invalid name; use only letters, numbers, '_' or '-'`,
+      );
+    }
+    if (serverName === RESERVED_MCP_SERVER_NAME) {
+      throw new Error(
+        `External MCP server '${serverName}' is reserved for the built-in OmniClaw transport`,
+      );
+    }
+    if (!isPlainObject(rawConfig)) {
+      throw new Error(
+        `External MCP server '${serverName}' config must be an object`,
+      );
+    }
+
+    const type = rawConfig.type;
+    if (type === undefined || type === 'stdio') {
+      if (typeof rawConfig.command !== 'string') {
+        throw new Error(
+          `External MCP server '${serverName}' must define a string command`,
+        );
+      }
+      if (
+        rawConfig.args !== undefined &&
+        (!Array.isArray(rawConfig.args) ||
+          rawConfig.args.some((arg) => typeof arg !== 'string'))
+      ) {
+        throw new Error(
+          `External MCP server '${serverName}' args must be an array of strings`,
+        );
+      }
+      normalized[serverName] = {
+        type: 'stdio',
+        command: validateExternalMcpCommand(serverName, rawConfig.command),
+        ...(rawConfig.args ? { args: rawConfig.args as string[] } : {}),
+        ...(rawConfig.env
+          ? {
+              env: assertStringRecord(
+                rawConfig.env,
+                `External MCP server '${serverName}' env must be a string map`,
+              ),
+            }
+          : {}),
+      };
+      continue;
+    }
+
+    if (type === 'sse' || type === 'http') {
+      if (typeof rawConfig.url !== 'string') {
+        throw new Error(
+          `External MCP server '${serverName}' must define a string url`,
+        );
+      }
+      const url = new URL(rawConfig.url);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        throw new Error(
+          `External MCP server '${serverName}' url must use http or https`,
+        );
+      }
+      normalized[serverName] = {
+        type,
+        url: url.toString(),
+        ...(rawConfig.headers
+          ? {
+              headers: assertStringRecord(
+                rawConfig.headers,
+                `External MCP server '${serverName}' headers must be a string map`,
+              ),
+            }
+          : {}),
+      };
+      continue;
+    }
+
+    throw new Error(
+      `External MCP server '${serverName}' has unsupported type '${String(type)}'`,
+    );
+  }
+  return normalized;
+}
+
+export function buildAllowedTools(
+  externalMcpServers?: Record<string, ExternalMcpServerConfig>,
+): string[] {
+  const extraTools = Object.keys(externalMcpServers || {}).map(
+    (serverName) => `mcp__${serverName}__*`,
+  );
+  return [...BUILTIN_ALLOWED_TOOLS, ...extraTools];
+}
+
 interface SessionEntry {
   sessionId: string;
   fullPath: string;
@@ -942,6 +1157,9 @@ async function runQuery(
   }
 
   startHeartbeat();
+  const externalMcpServers = normalizeExternalMcpServers(
+    containerInput.mcpServers,
+  );
 
   for await (const message of query({
     prompt: stream,
@@ -958,39 +1176,13 @@ async function runQuery(
             append: globalClaudeMd,
           }
         : undefined,
-      allowedTools: [
-        'Bash',
-        'Read',
-        'Write',
-        'Edit',
-        'Glob',
-        'Grep',
-        'WebSearch',
-        'WebFetch',
-        'Task',
-        'TaskOutput',
-        'TaskStop',
-        'TeamCreate',
-        'TeamDelete',
-        'SendMessage',
-        'TodoWrite',
-        'ToolSearch',
-        'Skill',
-        'NotebookEdit',
-        'EnterPlanMode',
-        'ExitPlanMode',
-        'TaskCreate',
-        'TaskGet',
-        'TaskUpdate',
-        'TaskList',
-        'mcp__omniclaw__*',
-      ],
+      allowedTools: buildAllowedTools(externalMcpServers),
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
       mcpServers: {
-        ...(containerInput.mcpServers || {}),
+        ...externalMcpServers,
         omniclaw: {
           command: 'bun',
           args: [mcpServerPath],
