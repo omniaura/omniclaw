@@ -8,6 +8,7 @@ import { DATA_DIR } from '../config.js';
 import { logger } from '../logger.js';
 import {
   describeImageUrl,
+  readStreamWithCap,
   type RemoteImageFetch,
   serveCachedRemoteImage,
   validateRemoteImageUrl,
@@ -96,6 +97,237 @@ describe('serveCachedRemoteImage', () => {
       expect(records[0].errorMessage).toBe(
         'request to https://93.184.216.34/avatar.png failed',
       );
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+      logger.warn = originalWarn;
+    }
+  });
+});
+
+/** Build a fake fetch that returns a streamed body of the given size. */
+function makeFakeStreamFetch(
+  bodySize: number,
+  chunkSize = 1024,
+): RemoteImageFetch {
+  return async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        let sent = 0;
+        while (sent < bodySize) {
+          const size = Math.min(chunkSize, bodySize - sent);
+          controller.enqueue(new Uint8Array(size));
+          sent += size;
+        }
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
+      status: 200,
+      headers: { 'content-type': 'image/png' },
+    });
+  };
+}
+
+describe('readStreamWithCap', () => {
+  it('reads a stream within the byte limit', async () => {
+    const data = new Uint8Array([1, 2, 3, 4, 5]);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(data);
+        controller.close();
+      },
+    });
+
+    const result = await readStreamWithCap(stream, 100);
+    expect(result).not.toBeNull();
+    expect(result!.length).toBe(5);
+  });
+
+  it('returns null when stream exceeds the byte limit', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(600));
+        controller.enqueue(new Uint8Array(600));
+        controller.close();
+      },
+    });
+
+    const result = await readStreamWithCap(stream, 1000);
+    expect(result).toBeNull();
+  });
+
+  it('handles exact boundary (equal to limit is allowed)', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(100));
+        controller.close();
+      },
+    });
+
+    const result = await readStreamWithCap(stream, 100);
+    expect(result).not.toBeNull();
+    expect(result!.length).toBe(100);
+  });
+
+  it('rejects stream that exceeds limit by one byte', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(101));
+        controller.close();
+      },
+    });
+
+    const result = await readStreamWithCap(stream, 100);
+    expect(result).toBeNull();
+  });
+
+  it('handles multi-chunk streams within limit', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(30));
+        controller.enqueue(new Uint8Array(30));
+        controller.enqueue(new Uint8Array(30));
+        controller.close();
+      },
+    });
+
+    const result = await readStreamWithCap(stream, 100);
+    expect(result).not.toBeNull();
+    expect(result!.length).toBe(90);
+  });
+});
+
+describe('serveCachedRemoteImage byte cap', () => {
+  it('rejects images that exceed the byte limit', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    const originalWarn = logger.warn;
+    const records: Array<Record<string, unknown>> = [];
+    logger.warn = ((fieldsOrMsg: Record<string, unknown> | string) => {
+      if (typeof fieldsOrMsg !== 'string') {
+        records.push(fieldsOrMsg);
+      }
+    }) as unknown as typeof logger.warn;
+
+    try {
+      const response = await serveCachedRemoteImage(
+        'oversized-key',
+        async () => 'https://93.184.216.34/huge-avatar.png',
+        {
+          cacheDir: testImageCacheDir,
+          fetchImpl: makeFakeStreamFetch(2000),
+          maxBytes: 1000,
+        },
+      );
+
+      expect(response).toBeNull();
+      expect(records.some((r) => r.maxBytes === 1000)).toBe(true);
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+      logger.warn = originalWarn;
+    }
+  });
+
+  it('accepts images within the byte limit', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    try {
+      const response = await serveCachedRemoteImage(
+        'small-key',
+        async () => 'https://93.184.216.34/small-avatar.png',
+        {
+          cacheDir: testImageCacheDir,
+          fetchImpl: makeFakeStreamFetch(500),
+          maxBytes: 1000,
+        },
+      );
+
+      expect(response).not.toBeNull();
+      expect(response!.headers.get('content-type')).toBe('image/png');
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+    }
+  });
+
+  it('does not write to disk when byte limit is exceeded', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    const originalWarn = logger.warn;
+    logger.warn = (() => {}) as unknown as typeof logger.warn;
+
+    try {
+      await serveCachedRemoteImage(
+        'no-disk-key',
+        async () => 'https://93.184.216.34/huge.png',
+        {
+          cacheDir: testImageCacheDir,
+          fetchImpl: makeFakeStreamFetch(5000),
+          maxBytes: 1000,
+        },
+      );
+
+      // Only the directory should exist, no .bin or .json files
+      const files = fs.existsSync(testImageCacheDir)
+        ? fs.readdirSync(testImageCacheDir)
+        : [];
+      expect(files.length).toBe(0);
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+      logger.warn = originalWarn;
+    }
+  });
+
+  it('uses default 5 MiB limit when maxBytes is not specified', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    const originalWarn = logger.warn;
+    const records: Array<Record<string, unknown>> = [];
+    logger.warn = ((fieldsOrMsg: Record<string, unknown> | string) => {
+      if (typeof fieldsOrMsg !== 'string') {
+        records.push(fieldsOrMsg);
+      }
+    }) as unknown as typeof logger.warn;
+
+    try {
+      // 6 MiB body — exceeds the default 5 MiB limit
+      const response = await serveCachedRemoteImage(
+        'default-limit-key',
+        async () => 'https://93.184.216.34/massive.png',
+        {
+          cacheDir: testImageCacheDir,
+          fetchImpl: makeFakeStreamFetch(6 * 1024 * 1024, 64 * 1024),
+        },
+      );
+
+      expect(response).toBeNull();
+      expect(
+        records.some((r) => r.maxBytes === 5 * 1024 * 1024),
+      ).toBe(true);
     } finally {
       clearTestImageCache(testImageCacheDir);
       logger.warn = originalWarn;
