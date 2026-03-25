@@ -5,6 +5,7 @@ import path from 'node:path';
 import { DATA_DIR, GROUPS_DIR } from '../config.js';
 import {
   buildContainerArgs,
+  buildExecInvocationArgs,
   buildVolumeMounts,
   LocalBackend,
 } from './local-backend.js';
@@ -205,6 +206,30 @@ describe('LocalBackend', () => {
         expect(fs.existsSync(fixture.agentDir)).toBe(true);
         expect(fs.existsSync(fixture.categoryDir)).toBe(true);
         expect(fs.existsSync(fixture.serverDir)).toBe(true);
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
+    it('creates exec broker directories inside the runtime IPC mount', () => {
+      const fixture = createFixture();
+      try {
+        buildVolumeMounts(
+          { folder: fixture.groupFolder, name: 'Exec Broker Test' } as any,
+          false,
+          false,
+          fixture.runtimeFolder,
+          'claude-agent-sdk',
+          undefined,
+          fixture.pathOverrides,
+        );
+
+        expect(fs.existsSync(path.join(fixture.ipcDir, 'exec-requests'))).toBe(
+          true,
+        );
+        expect(fs.existsSync(path.join(fixture.ipcDir, 'exec-responses'))).toBe(
+          true,
+        );
       } finally {
         fixture.cleanup();
       }
@@ -629,6 +654,13 @@ describe('LocalBackend', () => {
       });
 
       expect(args).toContain('EXEC_CONTAINER_NAME=exec-sidecar');
+      expect(args).toContain('EXEC_RUNTIME=docker');
+      expect(args).toContain(
+        'EXEC_BROKER_REQUEST_DIR=/workspace/ipc/exec-requests',
+      );
+      expect(args).toContain(
+        'EXEC_BROKER_RESPONSE_DIR=/workspace/ipc/exec-responses',
+      );
       expect(args).toContain('--group-add');
       const groupAddIdx = args.indexOf('--group-add');
       expect(args[groupAddIdx + 1]).toBe('123');
@@ -648,7 +680,82 @@ describe('LocalBackend', () => {
       });
 
       expect(args).toContain('EXEC_CONTAINER_NAME=exec-sidecar');
+      expect(args).toContain('EXEC_RUNTIME=docker');
       expect(args).not.toContain('--group-add');
+    });
+
+    it('adds Apple split-execution env without docker socket group access', () => {
+      const args = buildContainerArgs({
+        mounts: [],
+        containerName: 'exec-args-test',
+        isMain: false,
+        runtime: 'container',
+        execContainerName: 'exec-sidecar',
+      });
+
+      expect(args).toContain('EXEC_CONTAINER_NAME=exec-sidecar');
+      expect(args).toContain('EXEC_RUNTIME=apple-container');
+      expect(args).toContain(
+        'EXEC_BROKER_REQUEST_DIR=/workspace/ipc/exec-requests',
+      );
+      expect(args).toContain(
+        'EXEC_BROKER_RESPONSE_DIR=/workspace/ipc/exec-responses',
+      );
+      expect(args).not.toContain('--group-add');
+    });
+  });
+
+  describe('buildExecInvocationArgs', () => {
+    const request = {
+      id: 'exec-req-1',
+      cwd: '/workspace/group',
+      args: ['-lc', 'pwd'],
+      env: {
+        HOME: '/home/bun',
+        TZ: 'America/New_York',
+      },
+    };
+
+    it('builds Apple Container exec args', () => {
+      const args = buildExecInvocationArgs(
+        request,
+        'exec-sidecar',
+        'container',
+      );
+
+      expect(args).toEqual([
+        'exec',
+        '-i',
+        '-w',
+        '/workspace/group',
+        '-e',
+        'HOME=/home/bun',
+        '-e',
+        'TZ=America/New_York',
+        'exec-sidecar',
+        '/bin/bash.real',
+        '-lc',
+        'pwd',
+      ]);
+    });
+
+    it('builds Docker exec args', () => {
+      const args = buildExecInvocationArgs(request, 'exec-sidecar', 'docker');
+
+      expect(args).toEqual([
+        'exec',
+        '-i',
+        '-w',
+        '/workspace/group',
+        '-e',
+        'HOME=/home/bun',
+        '-e',
+        'TZ=America/New_York',
+        'exec-sidecar',
+        '/bin/bash.real',
+        '-lc',
+        'pwd',
+      ]);
     });
   });
 });
