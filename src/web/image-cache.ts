@@ -12,6 +12,9 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const BROWSER_CACHE_CONTROL = 'private, max-age=86400';
 const REMOTE_IMAGE_FETCH_TIMEOUT_MS = 10_000;
 
+/** Default maximum bytes to buffer from a remote image fetch (5 MiB). */
+const DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
 interface CacheMetadata {
   contentType: string;
   fetchedAt: number;
@@ -25,6 +28,8 @@ export type RemoteImageFetch = (
 export interface RemoteImageCacheOptions {
   cacheDir?: string;
   fetchImpl?: RemoteImageFetch;
+  /** Maximum bytes to read from the upstream response. Defaults to 5 MiB. */
+  maxBytes?: number;
 }
 
 export interface RemoteImageUrlValidationOptions {
@@ -197,6 +202,37 @@ function describeFetchError(err: unknown): Record<string, string> {
   };
 }
 
+/**
+ * Read from a ReadableStream into a Buffer, aborting once `maxBytes` is
+ * exceeded. Returns null when the stream exceeds the budget.
+ */
+export async function readStreamWithCap(
+  body: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): Promise<Buffer | null> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return Buffer.concat(chunks, totalBytes);
+}
+
 export async function serveCachedRemoteImage(
   cacheKey: string,
   resolveUrl: () => Promise<string | null>,
@@ -205,6 +241,7 @@ export async function serveCachedRemoteImage(
   const cacheDir = options.cacheDir ?? IMAGE_CACHE_DIR;
   const fetchImpl: RemoteImageFetch =
     options.fetchImpl ?? ((input, init) => fetch(input, init));
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_IMAGE_BYTES;
   fs.mkdirSync(cacheDir, { recursive: true });
   const { dataPath, metaPath } = getCachePaths(cacheDir, cacheKey);
   const meta = readMeta(metaPath);
@@ -255,7 +292,28 @@ export async function serveCachedRemoteImage(
 
     const contentType =
       upstream.headers.get('content-type') || 'application/octet-stream';
-    const bytes = Buffer.from(await upstream.arrayBuffer());
+
+    if (!upstream.body) {
+      logger.warn(
+        { cacheKey, imageUrl: describeImageUrl(url) },
+        'Remote image response has no body',
+      );
+      return null;
+    }
+
+    const bytes = await readStreamWithCap(upstream.body, maxBytes);
+    if (!bytes) {
+      logger.warn(
+        {
+          cacheKey,
+          imageUrl: describeImageUrl(url),
+          maxBytes,
+        },
+        'Remote image exceeded byte limit',
+      );
+      return null;
+    }
+
     fs.writeFileSync(dataPath, bytes);
     fs.writeFileSync(
       metaPath,
