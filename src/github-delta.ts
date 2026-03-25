@@ -11,7 +11,9 @@
 import { logger } from './logger.js';
 import type { GitHubChannelWatch, GitHubWatchesConfig } from './types.js';
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
+function getGitHubToken(): string {
+  return process.env.GITHUB_TOKEN || '';
+}
 
 // --- GitHub API types ---
 
@@ -105,12 +107,13 @@ export interface DeltaEvent {
 // --- GitHub API helpers ---
 
 async function githubFetch<T>(urlPath: string): Promise<T | null> {
-  if (!GITHUB_TOKEN) return null;
+  const token = getGitHubToken();
+  if (!token) return null;
   const url = `https://api.github.com${urlPath}`;
   try {
     const res = await fetch(url, {
       headers: {
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        Authorization: `Bearer ${token}`,
         Accept: 'application/vnd.github.v3+json',
         'User-Agent': 'OmniClaw/1.0',
       },
@@ -477,7 +480,7 @@ export async function fetchGitHubDelta(
   channelJid: string,
   currentMessageTimestamp: string,
 ): Promise<string | null> {
-  if (!GITHUB_TOKEN) return null;
+  if (!getGitHubToken()) return null;
 
   // Load config
   let config: GitHubWatchesConfig;
