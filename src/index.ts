@@ -121,6 +121,11 @@ import {
 import { calculateNextRun } from './schedule-utils.js';
 import { redactSensitiveData } from './security/redaction.js';
 import { parseScopedSlackJid } from './slack-jid.js';
+import {
+  buildStartupConfirmationTargets,
+  hasPriorRuntimeState,
+  STARTUP_CONFIRMATION_PROMPT,
+} from './startup-notifications.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import {
   parseTelegramApiFileUrl,
@@ -2185,6 +2190,51 @@ function recoverPendingMessages(): void {
   }
 }
 
+function queueStartupConfirmationMessages(): void {
+  if (
+    !hasPriorRuntimeState({
+      lastTimestamp,
+      lastAgentTimestamp,
+      sessions,
+    })
+  ) {
+    return;
+  }
+
+  const targets = buildStartupConfirmationTargets(
+    registeredGroups,
+    channelSubscriptions,
+  );
+
+  for (const target of targets) {
+    const content = target.trigger
+      ? `${target.trigger} ${STARTUP_CONFIRMATION_PROMPT}`
+      : STARTUP_CONFIRMATION_PROMPT;
+    storeMessage({
+      id: `startup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      chat_jid: target.chatJid,
+      sender: 'system',
+      sender_name: 'System',
+      content,
+      timestamp: new Date().toISOString(),
+      is_from_me: false,
+      sender_platform: 'system',
+    });
+    queue.enqueueMessageCheck(
+      target.agentId
+        ? makeDispatchKey(target.chatJid, target.agentId)
+        : target.chatJid,
+    );
+  }
+
+  if (targets.length > 0) {
+    logger.info(
+      { targetCount: targets.length },
+      'Queued startup confirmation prompts',
+    );
+  }
+}
+
 /**
  * Build agent registry and write it to all groups' IPC dirs.
  * Every agent can discover every other agent's name, purpose, backend, and dev URL.
@@ -2973,6 +3023,7 @@ async function main(): Promise<void> {
     // findChannel() can route recovered output to the correct channel.
     // (startMessageLoop already runs above for IPC/scheduled task responsiveness.)
     recoverPendingMessages();
+    queueStartupConfirmationMessages();
 
     // Sync agent avatars from platform APIs (non-blocking)
     syncAvatars(agents, channels, (agentId) =>
