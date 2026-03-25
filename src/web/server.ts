@@ -38,6 +38,11 @@ import {
   getAgentExecStatus,
 } from './agents-page.js';
 import { buildAgentChannelData } from './agent-channels.js';
+import {
+  initSolidHandler,
+  getSolidHandler,
+  isMainProcessRoute,
+} from './solid-handler.js';
 
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
@@ -51,6 +56,14 @@ interface SseClient {
   stream: ServerSentEventGenerator;
   logs: string[];
   logsDirty: boolean;
+  close(): void;
+}
+
+/** JSON SSE client for SolidStart mode — sends raw JSON events. */
+interface JsonSseClient {
+  controller: ReadableStreamDefaultController<Uint8Array>;
+  encoder: TextEncoder;
+  closed: boolean;
   close(): void;
 }
 
@@ -84,11 +97,19 @@ export function startWebServer(
   const bindHostname = hostname || '127.0.0.1';
   const sseClients = new Set<SseClient>();
   const recentLogs: string[] = [];
+  const solidMode = process.env.WEB_UI_SOLID === 'true';
+  /** JSON-only SSE clients used in SolidStart mode. */
+  const jsonSseClients = new Set<JsonSseClient>();
   let rawLogStreamClients = 0;
   const subscribeToRawLogs =
     typeof logger.subscribe === 'function'
       ? logger.subscribe.bind(logger)
       : null;
+
+  // Initialize SolidStart handler if enabled.
+  // Store the promise so the first proxied request can await it.
+  const solidReady = solidMode ? initSolidHandler(state) : null;
+
   const fetchHandler = async (req: Request) => {
     const url = new URL(req.url);
     const resolveRemotePeers = createRemotePeerResolver(getRemotePeers);
@@ -151,6 +172,106 @@ export function startWebServer(
           headers: { 'Content-Type': 'application/json' },
         },
       );
+    }
+
+    // --- SolidStart mode: JSON SSE + delegate to SolidStart handler ---
+    if (solidMode && url.pathname === '/api/events') {
+      if (req.method !== 'GET') {
+        return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+          status: 405,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+          },
+        });
+      }
+      if (jsonSseClients.size >= MAX_SSE_CLIENTS) {
+        return new Response('Too many SSE connections', {
+          status: 429,
+          headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
+        });
+      }
+
+      let jsonClient: JsonSseClient | undefined;
+      const encoder = new TextEncoder();
+
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(': connected\n\n'));
+          // Send initial connected event
+          controller.enqueue(
+            encoder.encode(
+              `event: connected\ndata: ${JSON.stringify({ status: 'connected' })}\n\n`,
+            ),
+          );
+
+          jsonClient = {
+            controller,
+            encoder,
+            closed: false,
+            close() {
+              if (this.closed) return;
+              this.closed = true;
+              try {
+                controller.close();
+              } catch {
+                // already closed
+              }
+            },
+          };
+          jsonSseClients.add(jsonClient);
+          logger.debug(
+            { jsonSseClients: jsonSseClients.size },
+            'JSON SSE client connected',
+          );
+        },
+        cancel() {
+          if (jsonClient) {
+            jsonClient.closed = true;
+            jsonSseClients.delete(jsonClient);
+            logger.debug(
+              { jsonSseClients: jsonSseClients.size },
+              'JSON SSE client disconnected',
+            );
+          }
+        },
+      });
+
+      req.signal.addEventListener(
+        'abort',
+        () => {
+          if (jsonClient) {
+            jsonClient.close();
+            jsonSseClients.delete(jsonClient);
+          }
+        },
+        { once: true },
+      );
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          'X-Accel-Buffering': 'no',
+          ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+        },
+      });
+    }
+
+    // In SolidStart mode, delegate non-SSE routes to the SolidStart handler
+    if (solidMode && !isMainProcessRoute(url.pathname)) {
+      if (solidReady) await solidReady;
+      const handler = getSolidHandler();
+      if (handler) {
+        const response = await handler(req);
+        if (corsOrigin && url.pathname.startsWith('/api/')) {
+          for (const [k, v] of Object.entries(makeCorsHeaders(corsOrigin))) {
+            response.headers.set(k, v);
+          }
+        }
+        return response;
+      }
+      // Fall through to Datastar UI if SolidStart handler not ready
     }
 
     if (url.pathname === '/api/logs/stream') {
@@ -564,6 +685,27 @@ export function startWebServer(
           sseClients.delete(client);
         }
       }
+
+      // JSON SSE broadcast for SolidStart mode
+      if (solidMode) {
+        const jsonPayload = JSON.stringify(event.data);
+        for (const client of jsonSseClients) {
+          if (client.closed) {
+            jsonSseClients.delete(client);
+            continue;
+          }
+          try {
+            client.controller.enqueue(
+              client.encoder.encode(
+                `event: ${event.type}\ndata: ${jsonPayload}\n\n`,
+              ),
+            );
+          } catch {
+            client.close();
+            jsonSseClients.delete(client);
+          }
+        }
+      }
     },
     async stop() {
       clearInterval(snapshotTicker);
@@ -571,11 +713,15 @@ export function startWebServer(
         client.close();
       }
       sseClients.clear();
+      for (const client of jsonSseClients) {
+        client.close();
+      }
+      jsonSseClients.clear();
       server.stop(true);
       logger.info('Web UI server stopped');
     },
     get clientCount() {
-      return sseClients.size;
+      return sseClients.size + jsonSseClients.size;
     },
     setNetworkPageState(getter: () => NetworkPageState) {
       networkPageStateGetter = getter;
