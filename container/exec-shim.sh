@@ -62,7 +62,7 @@ fi
 
 mkdir -p "$REQUEST_DIR" "$RESPONSE_DIR"
 
-REQUEST_ID="exec-$(date +%s%N)-$$-$RANDOM"
+REQUEST_ID="exec-$(date +%s)-$$-$(head -c4 /dev/urandom | od -An -tu4 | tr -d ' ')"
 REQUEST_FILE="$REQUEST_DIR/$REQUEST_ID.json"
 REQUEST_TMP="$REQUEST_FILE.tmp"
 STDOUT_FILE="$RESPONSE_DIR/$REQUEST_ID.stdout"

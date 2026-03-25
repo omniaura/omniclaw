@@ -962,7 +962,17 @@ function startExecBroker(
         processed = true;
         try {
           const request = parseExecRequest(processingPath, log);
-          if (!request) continue;
+          if (!request) {
+            const fallbackId = path.basename(file, '.json');
+            if (SAFE_EXEC_REQUEST_ID.test(fallbackId)) {
+              writeExecBrokerResponse(responseDir, fallbackId, {
+                stdout: '',
+                stderr: 'Malformed execution request',
+                exitCode: 125,
+              });
+            }
+            continue;
+          }
           await runExecBrokerRequest(
             request,
             execContainerName,
