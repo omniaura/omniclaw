@@ -1,49 +1,50 @@
 # OmniClaw Roadmap
 
-Last updated: 2026-03-06
+Last updated: 2026-03-25
 
 ## Guiding Principles
 
-1. **Small enough to understand** — one process, a handful of source files, no microservices
-2. **Security through true isolation** — OS-level containers, not application-level permissions
-3. **Customization = code changes** — minimal config, fork-and-modify model
-4. **AI-native development** — Claude Code guides setup, debugging, and maintenance
-5. **Skills over features** — contributors build `/add-X` skills, not monolithic integrations
+1. **Small enough to understand** — one orchestrator process, a compact codebase, no mandatory distributed control plane
+2. **Security through isolation** — real container boundaries, explicit trust, and aggressive path/input validation
+3. **Customization through code and context** — CLAUDE.md layers, workspace files, and pragmatic repo changes over endless configuration surfaces
+4. **AI-native operations** — the system should help build, debug, review, and maintain itself
+5. **Ship the software factory** — improve the tooling that lets multiple agents collaborate safely and visibly
 
 ---
 
 ## Current Capabilities
 
-### Channels (4)
+### Channels
 
-| Channel  | Adapter     | Maturity | Notes                                |
-| -------- | ----------- | -------- | ------------------------------------ |
-| WhatsApp | baileys     | Stable   | Original channel, QR auth            |
-| Discord  | discord.js  | Stable   | Threads, reactions, mentions, typing |
-| Telegram | grammY      | Stable   | Bot API, no trigger prefix needed    |
-| Slack    | @slack/bolt | Early    | Socket Mode, basic messaging         |
+| Channel  | Adapter     | Maturity | Notes                                       |
+| -------- | ----------- | -------- | ------------------------------------------- |
+| WhatsApp | baileys     | Stable   | Original channel, reconnect handling, auth  |
+| Discord  | discord.js  | Stable   | Mentions, threads, reactions, slash flows   |
+| Telegram | grammY      | Stable   | Multi-bot support, no trigger prefix needed |
+| Slack    | @slack/bolt | Early    | Multi-bot routing, Socket Mode              |
 
 ### Backends
 
-| Backend                 | Maturity | Notes                                      |
-| ----------------------- | -------- | ------------------------------------------ |
-| Apple Container (local) | Stable   | Default, macOS only                        |
-| Docker (local)          | Partial  | Uses same LocalBackend, needs testing (#3) |
+| Backend                 | Maturity | Notes                                                              |
+| ----------------------- | -------- | ------------------------------------------------------------------ |
+| Apple Container (local) | Stable   | Default path, startup probing, split execution support             |
+| Docker (local)          | Partial  | Supported through the same backend abstraction, less battle-tested |
 
-### Core Features
+### Product Features
 
-| Feature                   | Maturity | Notes                                                        |
-| ------------------------- | -------- | ------------------------------------------------------------ |
-| Multi-channel routing     | Stable   | Agent/ChannelRoute decoupling                                |
-| Scheduled tasks           | Stable   | Cron, interval, one-time; heartbeat support                  |
-| Persistent memory         | Stable   | CLAUDE.md hierarchy, per-group files                         |
-| Session management        | Stable   | Auto-rotation after 4 hours                                  |
-| Inter-agent communication | Stable   | send_message + list_agents                                   |
-| Browser automation        | Stable   | agent-browser + Chromium in container                        |
-| Mount security            | Stable   | Allowlist, path traversal protection, read-only project root |
-| Structured logging        | Stable   | Pino JSON output, migrated from console.log                  |
-| CI type checking          | Stable   | tsc --noEmit in CI pipeline                                  |
-| Thread streaming          | Early    | Stream intermediate output to Discord threads                |
+| Feature                         | Maturity | Notes                                                                                                        |
+| ------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------ |
+| Agent/channel decoupling        | Stable   | One agent can own multiple channels                                                                          |
+| Scheduled tasks                 | Stable   | Cron, interval, one-shot, pause/resume, recovery logic                                                       |
+| Persistent session + memory     | Stable   | CLAUDE.md hierarchy, SQLite state, task/run persistence                                                      |
+| Web UI                          | Active   | Agents page, logs, execution status, keyboard shortcuts, settings                                            |
+| LAN discovery + pairing         | Active   | mDNS discovery, trust workflow, `/network` page, remote peer browsing                                        |
+| GitHub context injection        | Stable   | Snapshot context, delta digest, linked PR/issue context                                                      |
+| Inter-agent messaging           | Stable   | `send_message`, agent registry, IPC snapshots                                                                |
+| Browser automation              | Stable   | Agent browser available inside containers                                                                    |
+| Container split execution       | Stable   | Separate execution path for local runtime workloads                                                          |
+| Startup confirmation on restart | Stable   | Agents wake and announce they are back after orchestrator restart                                            |
+| Security hardening              | Stable   | Path traversal guards, mount allowlist, webhook replay defense, external MCP validation, remote image limits |
 
 ---
 
@@ -51,98 +52,96 @@ Last updated: 2026-03-06
 
 ### Near-term (Active / Next Up)
 
-#### Web UI for OmniClaw (#157 — High Priority)
+#### LAN Discovery -> Multi-Instance Sync (#278, #50)
 
-Web UI is now an active product direction (not a non-goal). Build and harden the dashboard/API for day-to-day operations (agent management, logs, task control).
+The active multi-machine direction is now LAN discovery plus trust-based pairing, not ad hoc SSH/Tailscale proxying alone.
 
-- Base skeleton shipped in #169
-- Continue UX, auth, and operational controls as follow-on work
+- mDNS peer discovery and approval-based trust shipped in #277
+- next step is useful multi-instance sync: context exchange, remote coordination, and safe cross-instance workflows (#278)
+- keep one orchestrator simple; add networking only where it improves real operator workflows
 
-#### Scheduler Reliability & Cohesion (#162, #186 — High Priority)
+#### Web UI for OmniClaw (#157)
 
-Improve crash recovery and unify scheduled task behavior with chat context.
+The web UI is no longer speculative. It is now core product surface area.
 
-- #162: recover stale in-progress/orphaned tasks safely
-- #186: shared progress with isolated execution
+- shipped foundations: Bun-served UI, live logs, execution status, network page, keyboard shortcuts, settings surface
+- next work: richer agent/task control, better operational visibility, and tighter debugging workflows
 
-#### Test Reliability (#200 — High Priority)
+#### Scheduler Reliability and Chat Cohesion (#162, #186)
 
-Stabilize flaky full-suite behavior in GitHub webhook tests and document root cause once fixed.
+Recovery work has landed, but the full scheduler/chat cohesion vision is still open.
+
+- stale task recovery and deterministic scheduler coverage have improved the base
+- #186 remains open for shared progress, isolated execution workspaces, lease/lock semantics, and structured handoffs between scheduled and chat work
 
 #### Share Request Security Follow-through (#237, #240)
 
-Recent hardening landed in #236. Remaining work is to complete approval-path cleanup and remove obsolete admin-approval flow paths.
+Recent hardening reduced risk in approval and transfer paths, but cleanup is still in progress.
 
-#### Effect.ts Adoption Strategy (#136 — Ongoing)
+- finish removing obsolete approval flow paths
+- keep approval, provenance, and auditability crisp for cross-agent context sharing
 
-Effect.ts is used selectively where it clearly improves reliability/composability. There is no 100% migration target.
+#### Test Reliability and Coverage Expansion (#200 and follow-ons)
 
-- Prefer focused adoption in modules that benefit from Effect primitives
-- Do not migrate files for coverage percentage alone
+Coverage has improved materially, but there are still gaps in end-to-end confidence and a few brittle areas.
+
+- stabilize remaining flaky suites and document root causes
+- keep filling high-value gaps in orchestrator, backend, and security-sensitive paths
+
+#### Effect.ts Selective Adoption (#136)
+
+Effect remains a targeted tool, not a migration goal.
+
+- use it where concurrency/retry/streaming genuinely benefits
+- keep leaf modules simple async/await when Effect adds more weight than value
 
 ### Medium-term
 
 #### Agent Runtime Agnosticism (#49)
 
-OmniClaw is tightly coupled to Claude (Agent SDK, CLAUDE.md conventions, session resume). Define an `AgentRuntime` interface to support alternative backends like Codex, OpenCode, or local models.
+OmniClaw still carries Claude-first assumptions in prompt assembly, context conventions, and session handling.
 
-- Define `AgentRuntime` interface: prompt-in/response-out with tool definitions
-- Extract Claude-specific logic into `ClaudeRuntime`
-- Make runtime configurable per-agent
+- keep pushing runtime abstraction so Claude Agent SDK, OpenCode, Codex, and future local runtimes fit the same orchestration model
+- preserve per-agent runtime selection without forking the orchestrator
 
-#### Multi-Machine Orchestration (#50)
+#### Multi-bot / Multi-token Maturity (#100, #101, #102)
 
-Run OmniClaw across multiple machines (e.g., Mac Mini as main orchestrator + MacBook as delegate) without building a complex distributed system.
+Telegram and Slack multi-bot support have moved forward; the remaining work is consistency and polish across all channels.
 
-- "Remote local" backend that proxies `AgentBackend` over SSH/Tailscale
-- Route agents to specific machines by hardware capability
-- Keep the main orchestrator as single source of truth
-- Cross-machine context should use direct git access and normal chat coordination
+- make multi-bot routing predictable across Discord, Telegram, and Slack
+- keep channel ownership, slash flow targeting, and avatar identity aligned
 
-#### Multi-Token Channel Support (#100, #101, #102)
+#### Codebase Simplification
 
-Support multiple bot/app token pairs per channel type within a single OmniClaw process:
+Continue removing weight while the architecture settles.
 
-- **#100**: Multiple Slack bot/app tokens
-- **#101**: Multiple Telegram bot tokens
-- **#102**: Multiple Discord bot tokens
+- trim dead code, stale compatibility layers, and duplicate control paths
+- prefer shared helpers and narrow modules over sprawling orchestration logic
 
-Currently each channel type is limited to one set of credentials. Multi-token support enables running several bots (e.g., separate personalities or teams) from a single instance.
+#### Observability and Operator UX
 
-#### Codebase Simplification (Ongoing)
+Logs and web pages exist, but the operator story is still incomplete.
 
-Significant progress made (475+ lines of dead code removed, duplicated handlers extracted). Continue:
-
-- Unused exports and dead code paths
-- Backend code that could be lazily loaded
-- Legacy compatibility shims
-
-#### Test Coverage Expansion (Ongoing)
-
-Good coverage for IPC, scheduling, routing, security, config, file transfer, stream parsing (125+ unit tests added in Feb 2026). Gaps remain in:
-
-- Channel adapters (integration tests)
-- Backend implementations (mock-based unit tests)
-- End-to-end message flow
+- better surfacing of active runs, queue state, peer health, and task outcomes
+- lightweight diagnostics for why an agent is idle, blocked, retrying, or offline
 
 ### Long-term
 
-#### Declarative Agent Configuration (#57)
+#### Declarative Agent Topology (#57)
 
-Move from SQLite-registered groups to a declarative config file (YAML/TOML) that describes the full agent topology — channels, backends, mounts, triggers, heartbeats. Keep SQLite for runtime state only.
+Move toward a declarative source of truth for agent/channel topology while keeping SQLite for runtime state.
 
-#### Plugin Architecture for MCP Tools
+#### Extensible MCP / Tool Plugin Model
 
-Allow agents to bring custom MCP tools without modifying `ipc-mcp-stdio.ts`. A plugin directory where each file exports tool definitions.
+Make it easier to add tool bundles without modifying core runtime glue.
 
-#### Monitoring and Observability
+#### Software Factory Workflow Layer
 
-Structured logs exist but there's no dashboard or alerting. Consider:
+Push from "personal assistant with tasks" toward a genuine multi-agent factory.
 
-- Health check endpoint (see #83 for near-term work)
-- Agent uptime/latency metrics
-- Task success/failure rates
-- Channel connectivity status
+- backlog -> spec -> implementation -> review -> verification loops
+- stronger handoff contracts between agents
+- better visibility into who is working on what and why
 
 ---
 
@@ -150,72 +149,36 @@ Structured logs exist but there's no dashboard or alerting. Consider:
 
 ### Mar 2026
 
-- Web UI skeleton landed (#169)
-- Scheduler cohesion delivered (#186)
-- Discord roster context shipped in phases (#230, #234, #239, #242)
-- Multi-token Telegram support shipped (#233)
-- Share-request transfer gating hardened (#236)
+- LAN discovery with mDNS, trust-based pairing, remote peer browsing, and `/network` UI shipped (#277)
+- Apple Container split execution landed (#399)
+- auto-update PR CI backstop landed (#394)
+- external MCP config validation landed (#386)
+- webhook replay handling tightened so deliveries are marked processed only after success (#391)
+- live agent execution status and keyboard shortcuts improved the web UI (#387, #381)
+- remote image cache byte cap shipped to close a security issue (#396, closes #395)
+- restart startup confirmation shipped (#402, closes #251)
+- scheduler reliability and coverage improved, but #186 is still open and only partially delivered
 
-### Feb 25, 2026
+### Feb 2026 hardening sprint
 
-- Graceful shutdown: SIGTERM/SIGINT handlers (#82 — closed)
-- Documentation fixes: removed stale `SIMPLIFICATION_SUMMARY.md` (#81), fixed SPEC.md `src/shared/` references (#80), fixed SECURITY.md 'node' vs 'bun' user (#79) — all closed
-- Security: Discord attachment path traversal (#104 — closed)
-- Security: S3 issues #76, #78 resolved by removing S3 code entirely (PR #89)
+- major path traversal, mount, IPC, and attachment hardening landed across many PRs
+- broad unit test expansion landed across IPC, DB, routing, config, security, and scheduler paths
+- structured logging and code simplification work removed dead code and improved operator visibility
 
-### Feb 23-24, 2026
+### Earlier milestones
 
-Major hardening push — 30+ PRs merged in 48 hours:
-
-**Security**
-
-- Path traversal protection in `buildContent` (#41)
-- Block `.env` access from project root (#43)
-- Container hardening: `--pids-limit` and `--no-new-privileges` (#53)
-- Gate `--pids-limit` on Docker + `LOCAL_RUNTIME` config
-
-**Testing**
-
-- 125+ unit tests added across IPC, DB CRUD, splitMessage, config, security (#75, #46, #38, #37)
-- Fix fs mock leak between test files (#71)
-
-**Refactoring & Code Quality**
-
-- Remove ~475 lines dead code (#64)
-- Replace `any` types across 8 files (#62)
-- Typed IPC payloads — removed `any` from processing pipeline (#48)
-- Extract task lifecycle handler (#54)
-- Extract duplicated reaction handlers (-90 lines) (#45)
-- Extract shared helpers (#39)
-- Remove duplicate `storeMessageDirect` (#36)
-
-**Bug Fixes**
-
-- Fix SQLite FK crash on task deletion (#61)
-- Fix agent response delivery on tool call (#63)
-- Fix WhatsApp reconnect logic (#72)
-
-**Infrastructure & CI**
-
-- Add `tsc --noEmit` to CI (#52)
-- SPEC.md rewrite (#59, #60)
-- Docs cleanup: REQUIREMENTS.md, stale references (#65, #66, #67)
-- Task ownership visibility in `list_tasks` (#69)
-
-### Earlier Feb 2026
-
-- Multi-channel support (Discord, Telegram, Slack) — all four channels operational
-- 2 compute backends (Apple Container + Docker)
-- Agent/ChannelRoute decoupling
-- Structured logging migration (console.log → Pino)
+- four channel families operational: WhatsApp, Discord, Telegram, Slack
+- backend abstraction established for Apple Container and Docker
+- agent/channel decoupling shipped
+- scheduled task system and persistent runtime state established
 
 ---
 
 ## Non-Goals
 
-Things we deliberately avoid:
+Things OmniClaw still deliberately avoids:
 
-- **Multi-user SaaS** — this is personal software, not a platform
-- **Complex deployment** — single process, launchd/systemd, done
-- **Every possible integration** — add what you need via skills
-- **Backwards compatibility guarantees** — fork and modify
+- **Multi-user SaaS platforming** — this is operator-owned software, not a hosted product
+- **Distributed systems for their own sake** — keep one clear source of truth and add networking pragmatically
+- **Infinite compatibility layers** — simplify aggressively when old paths stop earning their keep
+- **Every possible integration** — prioritize capabilities that improve the agent factory itself
