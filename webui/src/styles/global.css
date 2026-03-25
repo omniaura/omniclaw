@@ -44,3 +44,67 @@
     @apply text-accent-hover;
   }
 }
+
+/* Topology canvas tooltip */
+canvas.dragging {
+  cursor: grabbing;
+}
+
+.topo-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 20;
+  background: theme('colors.surface-2');
+  border: 1px solid theme('colors.border-bright');
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 11px;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.topo-tooltip.visible {
+  display: block;
+}
+
+.topo-tooltip .tt-name {
+  font-weight: 600;
+  color: theme('colors.text-bright');
+}
+
+.topo-tooltip .tt-type {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-left: 6px;
+}
+
+.topo-tooltip .tt-type.agent {
+  color: theme('colors.accent');
+}
+
+.topo-tooltip .tt-type.channel {
+  color: theme('colors.green');
+}
+
+.topo-tooltip .tt-type.server {
+  color: theme('colors.yellow');
+}
+
+.topo-tooltip .tt-type.category {
+  color: theme('colors.cyan');
+}
+
+.topo-tooltip .tt-detail {
+  color: theme('colors.text-dim');
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.topo-tooltip .tt-copy {
+  color: theme('colors.accent');
+  font-size: 9px;
+  margin-top: 2px;
+  opacity: 0.6;
+}
