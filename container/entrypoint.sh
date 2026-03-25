@@ -27,6 +27,13 @@ export NODE_OPTIONS="--max-old-space-size=2048"
 TOTAL_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
 export GOMEMLIMIT=$(( TOTAL_KB * 3 / 4 / 1024 ))MiB
 
+# Normalize GitHub auth env so both gh CLI aliases work inside the container.
+if [ -n "$GH_TOKEN" ] && [ -z "$GITHUB_TOKEN" ]; then
+  export GITHUB_TOKEN="$GH_TOKEN"
+elif [ -n "$GITHUB_TOKEN" ] && [ -z "$GH_TOKEN" ]; then
+  export GH_TOKEN="$GITHUB_TOKEN"
+fi
+
 # Configure git with GitHub token
 if [ -n "$GITHUB_TOKEN" ]; then
   gh auth setup-git 2>/dev/null || true
