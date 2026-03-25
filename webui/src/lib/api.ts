@@ -167,18 +167,34 @@ export interface SettingsData {
 }
 
 export interface IpcEvent {
-  id: string;
-  type: string;
-  groupFolder: string;
+  id: number;
+  kind: string;
   timestamp: string;
-  data: unknown;
+  sourceGroup: string;
+  summary: string;
+  details?: Record<string, unknown>;
 }
 
 export interface QueueDetail {
-  groupFolder: string;
-  status: string;
-  queuedAt?: string;
-  startedAt?: string;
+  folderKey: string;
+  messageLane: {
+    active: boolean;
+    idle: boolean;
+    pendingCount: number;
+    containerName: string | null;
+  };
+  taskLane: {
+    active: boolean;
+    pendingCount: number;
+    containerName: string | null;
+    activeTask: {
+      taskId: string;
+      promptPreview: string;
+      startedAt: number;
+      runningMs: number;
+    } | null;
+  };
+  retryCount: number;
 }
 
 // --- Fetch helpers ---
