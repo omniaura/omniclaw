@@ -31,6 +31,7 @@ const { values } = parseArgs({
     'web-port': { type: 'string', default: '3000' },
     'admin-port': { type: 'string', default: '3001' },
     hostname: { type: 'string', default: '127.0.0.1' },
+    solid: { type: 'boolean', default: false },
   },
   strict: false,
 });
@@ -38,6 +39,11 @@ const { values } = parseArgs({
 const webPort = parseInt(values['web-port'] as string, 10);
 const adminPort = parseInt(values['admin-port'] as string, 10);
 const hostname = values.hostname as string;
+
+// Enable SolidStart mode if --solid flag or WEB_UI_SOLID env var
+if (values.solid || process.env.WEB_UI_SOLID === 'true') {
+  process.env.WEB_UI_SOLID = 'true';
+}
 
 // Create fake state with seed data
 const state = new FakeState();
