@@ -6,6 +6,7 @@ import {
   buildTelegramBotTokensFromEnv,
   buildTriggerPattern,
   escapeRegex,
+  parseConfigEnv,
   parseEnvList,
 } from './config.js';
 
@@ -144,6 +145,28 @@ describe('buildDiscordBotConfigFromEnv', () => {
     ]);
     expect(parsed.defaultBotId).toBe('PRIMARY');
   });
+
+  it('fails fast when a listed Discord bot is missing its token', () => {
+    expect(() =>
+      buildDiscordBotConfigFromEnv({
+        DISCORD_BOT_IDS: 'CLAUDE',
+      }),
+    ).toThrow(
+      'DISCORD_BOT_CLAUDE_TOKEN: required when DISCORD_BOT_IDS includes CLAUDE',
+    );
+  });
+
+  it('fails fast when a Discord bot runtime is invalid', () => {
+    expect(() =>
+      buildDiscordBotConfigFromEnv({
+        DISCORD_BOT_IDS: 'CLAUDE',
+        DISCORD_BOT_CLAUDE_TOKEN: 'token-a',
+        DISCORD_BOT_CLAUDE_RUNTIME: 'bad-runtime',
+      }),
+    ).toThrow(
+      'DISCORD_BOT_CLAUDE_RUNTIME: expected one of claude-agent-sdk, opencode, codex',
+    );
+  });
 });
 
 describe('buildTelegramBotTokensFromEnv', () => {
@@ -233,6 +256,58 @@ describe('buildSlackBotConfigFromEnv', () => {
       { id: 'PRIMARY', token: 'xoxb-legacy', appToken: 'xapp-legacy' },
     ]);
     expect(parsed.defaultBotId).toBe('PRIMARY');
+  });
+
+  it('fails fast when a listed Slack bot is missing its app token', () => {
+    expect(() =>
+      buildSlackBotConfigFromEnv({
+        SLACK_BOT_IDS: 'OPS',
+        SLACK_BOT_OPS_TOKEN: 'xoxb-ops',
+      }),
+    ).toThrow(
+      'SLACK_BOT_OPS_APP_TOKEN: required when SLACK_BOT_IDS includes OPS',
+    );
+  });
+});
+
+describe('parseConfigEnv', () => {
+  it('applies defaults for omitted values', () => {
+    const parsed = parseConfigEnv({});
+
+    expect(parsed.CONTAINER_TIMEOUT).toBe(7200000);
+    expect(parsed.MAX_IDLE_CONTAINERS).toBe(4);
+    expect(parsed.DISCOVERY_ENABLED).toBe(false);
+    expect(parsed.WEB_UI_PORT).toBeUndefined();
+  });
+
+  it('coerces valid integers and booleans', () => {
+    const parsed = parseConfigEnv({
+      CONTAINER_TIMEOUT: '1234',
+      PERSISTENT_TASK_STATE: 'true',
+      WEB_UI_PORT: '3000',
+      CHANNEL_ROSTER_SCOPE: 'Guild',
+    });
+
+    expect(parsed.CONTAINER_TIMEOUT).toBe(1234);
+    expect(parsed.PERSISTENT_TASK_STATE).toBe(true);
+    expect(parsed.WEB_UI_PORT).toBe(3000);
+    expect(parsed.CHANNEL_ROSTER_SCOPE).toBe('guild');
+  });
+
+  it('throws a clear error for invalid numeric config', () => {
+    expect(() =>
+      parseConfigEnv({
+        CONTAINER_TIMEOUT: 'abc',
+      }),
+    ).toThrow('CONTAINER_TIMEOUT: Invalid input: expected number');
+  });
+
+  it('throws a clear error for invalid boolean config', () => {
+    expect(() =>
+      parseConfigEnv({
+        DISCOVERY_ENABLED: 'yes',
+      }),
+    ).toThrow('DISCOVERY_ENABLED: Invalid input: expected boolean');
   });
 });
 

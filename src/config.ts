@@ -1,5 +1,6 @@
 import os from 'os';
 import path from 'path';
+import { z } from 'zod';
 
 export type AgentRuntime = 'claude-agent-sdk' | 'opencode' | 'codex';
 
@@ -15,6 +16,152 @@ export interface SlackBotConfig {
   appToken: string;
 }
 
+const AGENT_RUNTIME_VALUES = ['claude-agent-sdk', 'opencode', 'codex'] as const;
+
+function parseBooleanString(value: unknown): unknown {
+  if (value === undefined || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return value;
+}
+
+function parseIntegerString(value: unknown): unknown {
+  if (value === undefined || value === '') return undefined;
+  if (typeof value === 'number' && Number.isInteger(value)) return value;
+  if (typeof value !== 'string' || !/^-?\d+$/.test(value.trim())) {
+    return value;
+  }
+  return Number.parseInt(value, 10);
+}
+
+function optionalTrimmedString(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+const configSchema = z
+  .object({
+    DISCORD_BOT_IDS: z.string().optional(),
+    DISCORD_BOT_DEFAULT: z.string().optional(),
+    DISCORD_BOT_TOKEN: z.string().optional(),
+    TELEGRAM_BOT_TOKENS: z.string().optional(),
+    TELEGRAM_BOT_TOKEN: z.string().optional(),
+    SLACK_BOT_IDS: z.string().optional(),
+    SLACK_BOT_DEFAULT: z.string().optional(),
+    SLACK_BOT_TOKEN: z.string().optional(),
+    SLACK_APP_TOKEN: z.string().optional(),
+    PERSISTENT_TASK_STATE: z.preprocess(
+      parseBooleanString,
+      z.boolean().default(false),
+    ),
+    LOCAL_RUNTIME: z.string().default('container'),
+    CONTAINER_IMAGE: z.string().default('omniclaw-agent:latest'),
+    CONTAINER_MEMORY: z.string().default('4G'),
+    SPLIT_EXECUTION: z.preprocess(
+      parseBooleanString,
+      z.boolean().default(false),
+    ),
+    EXEC_CONTAINER_MEMORY: z.string().optional(),
+    CONTAINER_TIMEOUT: z.preprocess(
+      parseIntegerString,
+      z.number().int().positive().default(7200000),
+    ),
+    CONTAINER_MAX_OUTPUT_SIZE: z.preprocess(
+      parseIntegerString,
+      z.number().int().positive().default(10485760),
+    ),
+    IDLE_TIMEOUT: z.preprocess(
+      parseIntegerString,
+      z.number().int().positive().default(7200000),
+    ),
+    CONTAINER_STARTUP_TIMEOUT: z.preprocess(
+      parseIntegerString,
+      z.number().int().positive().default(120000),
+    ),
+    SESSION_MAX_AGE: z.preprocess(
+      parseIntegerString,
+      z.number().int().positive().default(14400000),
+    ),
+    ROSTER_REFRESH_INTERVAL: z.preprocess(
+      parseIntegerString,
+      z.number().int().positive().default(900000),
+    ),
+    CHANNEL_ROSTER_SCOPE: z.preprocess(
+      (value) =>
+        typeof value === 'string' ? value.trim().toLowerCase() : value,
+      z.enum(['channel', 'guild']).default('channel'),
+    ),
+    CHANNEL_ROSTER_ROLE_FILTERS: z.string().optional(),
+    CHANNEL_ROSTER_CACHE_TTL_MS: z.preprocess(
+      parseIntegerString,
+      z.number().int().nonnegative().default(300000),
+    ),
+    MAX_ACTIVE_CONTAINERS: z.preprocess(
+      parseIntegerString,
+      z.number().int().positive().optional(),
+    ),
+    MAX_CONCURRENT_CONTAINERS: z.preprocess(
+      parseIntegerString,
+      z.number().int().positive().optional(),
+    ),
+    MAX_IDLE_CONTAINERS: z.preprocess(
+      parseIntegerString,
+      z.number().int().nonnegative().default(4),
+    ),
+    MAX_TASK_CONTAINERS: z.preprocess(
+      parseIntegerString,
+      z.number().int().positive().optional(),
+    ),
+    ANTHROPIC_MODEL: z.preprocess(optionalTrimmedString, z.string().optional()),
+    TZ: z.preprocess(optionalTrimmedString, z.string().optional()),
+    GITHUB_WEBHOOK_SECRET: z.string().default(''),
+    GITHUB_WEBHOOK_PORT: z.preprocess(
+      parseIntegerString,
+      z.number().int().nonnegative().default(0),
+    ),
+    GITHUB_WEBHOOK_PATH: z.string().default('/webhooks/github'),
+    DISCOVERY_ENABLED: z.preprocess(
+      parseBooleanString,
+      z.boolean().default(false),
+    ),
+    INSTANCE_NAME: z.string().default(os.hostname()),
+    DISCOVERY_TRUST_LAN_ADMIN: z.preprocess(
+      parseBooleanString,
+      z.boolean().default(false),
+    ),
+    WEB_UI_PORT: z.preprocess(
+      parseIntegerString,
+      z.number().int().min(1).max(65535).optional(),
+    ),
+    WEB_UI_USER: z.preprocess(optionalTrimmedString, z.string().optional()),
+    WEB_UI_PASS: z.preprocess(optionalTrimmedString, z.string().optional()),
+    WEB_UI_HOST: z.string().default('127.0.0.1'),
+    WEB_UI_CORS_ORIGIN: z.preprocess(
+      optionalTrimmedString,
+      z.string().optional(),
+    ),
+  })
+  .passthrough();
+
+export function parseConfigEnv(
+  env: NodeJS.ProcessEnv,
+): z.infer<typeof configSchema> {
+  const parsed = configSchema.safeParse(env);
+  if (parsed.success) return parsed.data;
+
+  const details = parsed.error.issues
+    .map((issue) => {
+      const key = issue.path.join('.') || 'config';
+      return `${key}: ${issue.message}`;
+    })
+    .join('\n');
+  throw new Error(`Invalid OmniClaw configuration:\n${details}`);
+}
+
 export function parseEnvList(value: string | undefined): string[] {
   if (!value) return [];
   return value
@@ -27,8 +174,9 @@ function parseAgentRuntime(
   value: string | undefined,
 ): AgentRuntime | undefined {
   if (!value) return undefined;
-  if (value === 'claude-agent-sdk' || value === 'opencode' || value === 'codex')
-    return value;
+  if ((AGENT_RUNTIME_VALUES as readonly string[]).includes(value)) {
+    return value as AgentRuntime;
+  }
   return undefined;
 }
 
@@ -52,11 +200,20 @@ export function buildDiscordBotConfigFromEnv(env: NodeJS.ProcessEnv): {
     const bots: DiscordBotConfig[] = [];
     for (const id of ids) {
       const token = env[`DISCORD_BOT_${id}_TOKEN`]?.trim();
-      if (!token) continue;
-      const runtime = parseAgentRuntime(env[`DISCORD_BOT_${id}_RUNTIME`]);
+      if (!token) {
+        throw new Error(
+          `Invalid OmniClaw configuration:\nDISCORD_BOT_${id}_TOKEN: required when DISCORD_BOT_IDS includes ${id}`,
+        );
+      }
+      const runtimeValue = env[`DISCORD_BOT_${id}_RUNTIME`]?.trim();
+      const runtime = parseAgentRuntime(runtimeValue);
+      if (runtimeValue && !runtime) {
+        throw new Error(
+          `Invalid OmniClaw configuration:\nDISCORD_BOT_${id}_RUNTIME: expected one of ${AGENT_RUNTIME_VALUES.join(', ')}`,
+        );
+      }
       bots.push({ id, token, runtime });
     }
-    if (bots.length === 0) return { bots: [] };
     const preferredDefault = sanitizeBotId(env.DISCORD_BOT_DEFAULT || '');
     const defaultBotId = bots.some((b) => b.id === preferredDefault)
       ? preferredDefault
@@ -103,10 +260,18 @@ export function buildSlackBotConfigFromEnv(env: NodeJS.ProcessEnv): {
     for (const id of ids) {
       const token = env[`SLACK_BOT_${id}_TOKEN`]?.trim();
       const appToken = env[`SLACK_BOT_${id}_APP_TOKEN`]?.trim();
-      if (!token || !appToken) continue;
+      if (!token) {
+        throw new Error(
+          `Invalid OmniClaw configuration:\nSLACK_BOT_${id}_TOKEN: required when SLACK_BOT_IDS includes ${id}`,
+        );
+      }
+      if (!appToken) {
+        throw new Error(
+          `Invalid OmniClaw configuration:\nSLACK_BOT_${id}_APP_TOKEN: required when SLACK_BOT_IDS includes ${id}`,
+        );
+      }
       bots.push({ id, token, appToken });
     }
-    if (bots.length === 0) return { bots: [] };
     const preferredDefault = sanitizeBotId(env.SLACK_BOT_DEFAULT || '');
     const defaultBotId = bots.some((b) => b.id === preferredDefault)
       ? preferredDefault
@@ -122,6 +287,8 @@ export function buildSlackBotConfigFromEnv(env: NodeJS.ProcessEnv): {
     defaultBotId: bots[0]?.id,
   };
 }
+
+const CONFIG = parseConfigEnv(process.env);
 
 const discordEnv = buildDiscordBotConfigFromEnv(process.env);
 export const DISCORD_BOTS = discordEnv.bots;
@@ -142,8 +309,7 @@ export const DISCOVERY_POLL_INTERVAL = 10000;
 /** Separator used in runtime group folders to isolate multi-agent dispatch state. */
 export const DISPATCH_RUNTIME_SEP = '__dispatch__';
 export const SCHEDULER_POLL_INTERVAL = 60000;
-export const PERSISTENT_TASK_STATE =
-  process.env.PERSISTENT_TASK_STATE === 'true';
+export const PERSISTENT_TASK_STATE = CONFIG.PERSISTENT_TASK_STATE;
 
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
@@ -161,78 +327,40 @@ export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 export const MAIN_GROUP_FOLDER = 'main';
 
-export const LOCAL_RUNTIME = process.env.LOCAL_RUNTIME || 'container';
-export const CONTAINER_IMAGE =
-  process.env.CONTAINER_IMAGE || 'omniclaw-agent:latest';
-export const CONTAINER_MEMORY = process.env.CONTAINER_MEMORY || '4G';
-export const SPLIT_EXECUTION = process.env.SPLIT_EXECUTION === 'true';
+export const LOCAL_RUNTIME = CONFIG.LOCAL_RUNTIME;
+export const CONTAINER_IMAGE = CONFIG.CONTAINER_IMAGE;
+export const CONTAINER_MEMORY = CONFIG.CONTAINER_MEMORY;
+export const SPLIT_EXECUTION = CONFIG.SPLIT_EXECUTION;
 export const EXEC_CONTAINER_MEMORY =
-  process.env.EXEC_CONTAINER_MEMORY || CONTAINER_MEMORY;
-export const CONTAINER_TIMEOUT = parseInt(
-  process.env.CONTAINER_TIMEOUT || '7200000',
-  10,
-); // 2h default — inactivity timeout for agent output (tool calls, results, text)
-export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
-  process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
-  10,
-); // 10MB default
+  CONFIG.EXEC_CONTAINER_MEMORY || CONTAINER_MEMORY;
+export const CONTAINER_TIMEOUT = CONFIG.CONTAINER_TIMEOUT; // 2h default — inactivity timeout for agent output (tool calls, results, text)
+export const CONTAINER_MAX_OUTPUT_SIZE = CONFIG.CONTAINER_MAX_OUTPUT_SIZE; // 10MB default
 export const IPC_POLL_INTERVAL = 1000;
-export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '7200000', 10); // 2h default — how long to keep container alive after last result
-export const CONTAINER_STARTUP_TIMEOUT = parseInt(
-  process.env.CONTAINER_STARTUP_TIMEOUT || '120000',
-  10,
-); // 2min — kill container if zero stderr output (stuck initialization)
-export const SESSION_MAX_AGE = parseInt(
-  process.env.SESSION_MAX_AGE || '14400000',
-  10,
-); // 4 hours — rotate sessions to prevent unbounded context growth
-export const ROSTER_REFRESH_INTERVAL = parseInt(
-  process.env.ROSTER_REFRESH_INTERVAL || '900000',
-  10,
-); // 15min default — how often to refresh Discord guild rosters
+export const IDLE_TIMEOUT = CONFIG.IDLE_TIMEOUT; // 2h default — how long to keep container alive after last result
+export const CONTAINER_STARTUP_TIMEOUT = CONFIG.CONTAINER_STARTUP_TIMEOUT; // 2min — kill container if zero stderr output (stuck initialization)
+export const SESSION_MAX_AGE = CONFIG.SESSION_MAX_AGE; // 4 hours — rotate sessions to prevent unbounded context growth
+export const ROSTER_REFRESH_INTERVAL = CONFIG.ROSTER_REFRESH_INTERVAL; // 15min default — how often to refresh Discord guild rosters
 
 export type ChannelRosterScope = 'channel' | 'guild';
 
-function parseChannelRosterScope(
-  value: string | undefined,
-): ChannelRosterScope {
-  return value?.toLowerCase() === 'guild' ? 'guild' : 'channel';
-}
-
-export const CHANNEL_ROSTER_SCOPE = parseChannelRosterScope(
-  process.env.CHANNEL_ROSTER_SCOPE,
-);
+export const CHANNEL_ROSTER_SCOPE = CONFIG.CHANNEL_ROSTER_SCOPE;
 
 export const CHANNEL_ROSTER_ROLE_FILTERS = parseEnvList(
-  process.env.CHANNEL_ROSTER_ROLE_FILTERS,
+  CONFIG.CHANNEL_ROSTER_ROLE_FILTERS,
 ).map((role) => role.toLowerCase());
-export const CHANNEL_ROSTER_CACHE_TTL_MS = parseInt(
-  process.env.CHANNEL_ROSTER_CACHE_TTL_MS || '300000',
-  10,
-);
+export const CHANNEL_ROSTER_CACHE_TTL_MS = CONFIG.CHANNEL_ROSTER_CACHE_TTL_MS;
 /** Max containers actively processing messages or tasks. */
 export const MAX_ACTIVE_CONTAINERS = Math.max(
   1,
-  parseInt(
-    process.env.MAX_ACTIVE_CONTAINERS ||
-      process.env.MAX_CONCURRENT_CONTAINERS ||
-      '8',
-    10,
-  ) || 8,
+  CONFIG.MAX_ACTIVE_CONTAINERS ?? CONFIG.MAX_CONCURRENT_CONTAINERS ?? 8,
 );
 /** Max warm containers sitting idle, waiting for the next message. */
-export const MAX_IDLE_CONTAINERS = Math.max(
-  0,
-  parseInt(process.env.MAX_IDLE_CONTAINERS || '4', 10) || 4,
-);
+export const MAX_IDLE_CONTAINERS = Math.max(0, CONFIG.MAX_IDLE_CONTAINERS);
 /** Backward-compat alias. */
 export const MAX_CONCURRENT_CONTAINERS = MAX_ACTIVE_CONTAINERS;
 export const MAX_TASK_CONTAINERS = Math.max(
   1,
-  parseInt(
-    process.env.MAX_TASK_CONTAINERS || String(MAX_ACTIVE_CONTAINERS - 1),
-    10,
-  ),
+  CONFIG.MAX_TASK_CONTAINERS ?? MAX_ACTIVE_CONTAINERS - 1,
 );
 
 export function escapeRegex(str: string): string {
@@ -251,39 +379,32 @@ export function buildTriggerPattern(trigger?: string): RegExp {
 }
 
 // Allow overriding the Anthropic model (e.g. switch to cheaper model)
-export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || undefined;
+export const ANTHROPIC_MODEL = CONFIG.ANTHROPIC_MODEL;
 
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =
-  process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  CONFIG.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-export const GITHUB_WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || '';
-export const GITHUB_WEBHOOK_PORT = parseInt(
-  process.env.GITHUB_WEBHOOK_PORT || '0',
-  10,
-);
-export const GITHUB_WEBHOOK_PATH =
-  process.env.GITHUB_WEBHOOK_PATH || '/webhooks/github';
+export const GITHUB_WEBHOOK_SECRET = CONFIG.GITHUB_WEBHOOK_SECRET;
+export const GITHUB_WEBHOOK_PORT = CONFIG.GITHUB_WEBHOOK_PORT;
+export const GITHUB_WEBHOOK_PATH = CONFIG.GITHUB_WEBHOOK_PATH;
 
 // --- Network Discovery ---
 // Set DISCOVERY_ENABLED=true to advertise this instance on the LAN via mDNS.
-export const DISCOVERY_ENABLED = process.env.DISCOVERY_ENABLED === 'true';
-export const INSTANCE_NAME = process.env.INSTANCE_NAME || os.hostname();
+export const DISCOVERY_ENABLED = CONFIG.DISCOVERY_ENABLED;
+export const INSTANCE_NAME = CONFIG.INSTANCE_NAME;
 // Opt-in: allow discovery admin actions from loopback/private LAN without Web UI Basic Auth.
-export const DISCOVERY_TRUST_LAN_ADMIN =
-  process.env.DISCOVERY_TRUST_LAN_ADMIN === 'true';
+export const DISCOVERY_TRUST_LAN_ADMIN = CONFIG.DISCOVERY_TRUST_LAN_ADMIN;
 
 // --- Web UI ---
 // Set WEB_UI_PORT to enable the web dashboard. Unset = disabled.
-export const WEB_UI_PORT = process.env.WEB_UI_PORT
-  ? parseInt(process.env.WEB_UI_PORT, 10)
-  : undefined;
-export const WEB_UI_USER = process.env.WEB_UI_USER || undefined;
-export const WEB_UI_PASS = process.env.WEB_UI_PASS || undefined;
+export const WEB_UI_PORT = CONFIG.WEB_UI_PORT;
+export const WEB_UI_USER = CONFIG.WEB_UI_USER;
+export const WEB_UI_PASS = CONFIG.WEB_UI_PASS;
 // Bind hostname: defaults to loopback (127.0.0.1) for security.
 // Set WEB_UI_HOST=0.0.0.0 to expose on all interfaces (e.g. behind a reverse proxy).
-export const WEB_UI_HOST = process.env.WEB_UI_HOST || '127.0.0.1';
+export const WEB_UI_HOST = CONFIG.WEB_UI_HOST;
 // CORS: explicit allowed origin. Defaults to empty (CORS disabled).
 // Set WEB_UI_CORS_ORIGIN to allow cross-origin requests from a specific origin.
-export const WEB_UI_CORS_ORIGIN = process.env.WEB_UI_CORS_ORIGIN || undefined;
+export const WEB_UI_CORS_ORIGIN = CONFIG.WEB_UI_CORS_ORIGIN;
