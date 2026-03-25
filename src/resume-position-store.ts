@@ -22,7 +22,7 @@ export class MemoryResumePositionStore implements ResumePositionStore {
   }
 
   getAll(): Record<string, string> {
-    return this.state;
+    return { ...this.state };
   }
 
   clear(): void {
@@ -39,6 +39,7 @@ export interface PersistentStateAdapter {
 
 interface PersistentStoreOptions {
   stateAdapter?: PersistentStateAdapter;
+  schedulePersist?: (flush: () => void) => void;
 }
 
 const defaultStateAdapter: PersistentStateAdapter = {
@@ -49,9 +50,12 @@ const defaultStateAdapter: PersistentStateAdapter = {
 export class PersistentResumePositionStore implements ResumePositionStore {
   private readonly memoryStore: MemoryResumePositionStore;
   private readonly stateAdapter: PersistentStateAdapter;
+  private readonly schedulePersistFn: (flush: () => void) => void;
+  private persistScheduled = false;
 
   constructor(options?: PersistentStoreOptions) {
     this.stateAdapter = options?.stateAdapter ?? defaultStateAdapter;
+    this.schedulePersistFn = options?.schedulePersist ?? queueMicrotask;
     this.memoryStore = new MemoryResumePositionStore(this.loadInitialState());
   }
 
@@ -60,8 +64,9 @@ export class PersistentResumePositionStore implements ResumePositionStore {
   }
 
   set(groupFolder: string, resumeAt: string): void {
+    if (this.memoryStore.get(groupFolder) === resumeAt) return;
     this.memoryStore.set(groupFolder, resumeAt);
-    this.persist();
+    this.schedulePersist();
   }
 
   getAll(): Record<string, string> {
@@ -69,8 +74,9 @@ export class PersistentResumePositionStore implements ResumePositionStore {
   }
 
   clear(): void {
+    if (Object.keys(this.memoryStore.getAll()).length === 0) return;
     this.memoryStore.clear();
-    this.persist();
+    this.schedulePersist();
   }
 
   private loadInitialState(): Record<string, string> {
@@ -83,6 +89,15 @@ export class PersistentResumePositionStore implements ResumePositionStore {
       logger.warn({ err }, 'Failed to load persisted resume positions');
       return {};
     }
+  }
+
+  private schedulePersist(): void {
+    if (this.persistScheduled) return;
+    this.persistScheduled = true;
+    this.schedulePersistFn(() => {
+      this.persistScheduled = false;
+      this.persist();
+    });
   }
 
   private persist(): void {

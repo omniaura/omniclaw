@@ -38,6 +38,13 @@ describe('MemoryResumePositionStore', () => {
     });
   });
 
+  it('returns a defensive copy from getAll', () => {
+    const snapshot = store.getAll();
+    snapshot.alpha = 'mutated';
+
+    expect(store.get('alpha')).toBe('2026-03-01T00:00:00.000Z');
+  });
+
   it('clears all tracked positions', () => {
     store.set('beta', '2026-03-02T00:00:00.000Z');
 
@@ -86,16 +93,26 @@ describe('PersistentResumePositionStore', () => {
 
   it('persists updates and clears through the adapter', () => {
     const writes: Array<{ key: string; value: unknown }> = [];
+    const scheduled: Array<() => void> = [];
     const adapter: PersistentStateAdapter = {
       read: <T>() => ({ alpha: '2026-03-01T00:00:00.000Z' }) as T,
       write: (key, value) => {
         writes.push({ key, value: structuredClone(value) });
       },
     };
-    const store = new PersistentResumePositionStore({ stateAdapter: adapter });
+    const store = new PersistentResumePositionStore({
+      stateAdapter: adapter,
+      schedulePersist: (flush) => {
+        scheduled.push(flush);
+      },
+    });
 
     store.set('beta', '2026-03-02T00:00:00.000Z');
+    expect(scheduled).toHaveLength(1);
+    scheduled.shift()?.();
     store.clear();
+    expect(scheduled).toHaveLength(1);
+    scheduled.shift()?.();
 
     expect(writes).toEqual([
       {
@@ -110,6 +127,74 @@ describe('PersistentResumePositionStore', () => {
         value: {},
       },
     ]);
+  });
+
+  it('coalesces multiple writes scheduled in the same tick', () => {
+    const writes: Array<{ key: string; value: unknown }> = [];
+    const scheduled: Array<() => void> = [];
+    const store = new PersistentResumePositionStore({
+      stateAdapter: {
+        read: <T>() => ({}) as T,
+        write: (key, value) => {
+          writes.push({ key, value: structuredClone(value) });
+        },
+      },
+      schedulePersist: (flush) => {
+        scheduled.push(flush);
+      },
+    });
+
+    store.set('alpha', 'one');
+    store.set('beta', 'two');
+    store.set('beta', 'three');
+
+    expect(scheduled).toHaveLength(1);
+    scheduled[0]?.();
+
+    expect(writes).toEqual([
+      {
+        key: 'resume_positions',
+        value: {
+          alpha: 'one',
+          beta: 'three',
+        },
+      },
+    ]);
+  });
+
+  it('does not persist when setting an unchanged value', () => {
+    const writes: Array<{ key: string; value: unknown }> = [];
+    const scheduled: Array<() => void> = [];
+    const store = new PersistentResumePositionStore({
+      stateAdapter: {
+        read: <T>() => ({ alpha: '2026-03-01T00:00:00.000Z' }) as T,
+        write: (key, value) => {
+          writes.push({ key, value: structuredClone(value) });
+        },
+      },
+      schedulePersist: (flush) => {
+        scheduled.push(flush);
+      },
+    });
+
+    store.set('alpha', '2026-03-01T00:00:00.000Z');
+
+    expect(scheduled).toHaveLength(0);
+    expect(writes).toEqual([]);
+  });
+
+  it('returns a defensive copy from persistent getAll', () => {
+    const store = new PersistentResumePositionStore({
+      stateAdapter: {
+        read: <T>() => ({ alpha: '2026-03-01T00:00:00.000Z' }) as T,
+        write: () => {},
+      },
+    });
+
+    const snapshot = store.getAll();
+    snapshot.alpha = 'mutated';
+
+    expect(store.get('alpha')).toBe('2026-03-01T00:00:00.000Z');
   });
 
   it('warns and continues when initial load fails', () => {
@@ -144,6 +229,9 @@ describe('PersistentResumePositionStore', () => {
             throw new Error('disk full');
           },
         },
+        schedulePersist: (flush) => {
+          flush();
+        },
       });
 
       expect(() => {
@@ -163,6 +251,34 @@ describe('PersistentResumePositionStore', () => {
     } finally {
       stop();
     }
+  });
+
+  it('clears persisted state fully after flush', () => {
+    const writes: Array<{ key: string; value: unknown }> = [];
+    const scheduled: Array<() => void> = [];
+    const store = new PersistentResumePositionStore({
+      stateAdapter: {
+        read: <T>() => ({ alpha: '2026-03-01T00:00:00.000Z' }) as T,
+        write: (key, value) => {
+          writes.push({ key, value: structuredClone(value) });
+        },
+      },
+      schedulePersist: (flush) => {
+        scheduled.push(flush);
+      },
+    });
+
+    store.clear();
+    expect(scheduled).toHaveLength(1);
+    scheduled[0]?.();
+
+    expect(store.getAll()).toEqual({});
+    expect(writes).toEqual([
+      {
+        key: 'resume_positions',
+        value: {},
+      },
+    ]);
   });
 });
 
