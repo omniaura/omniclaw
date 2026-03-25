@@ -6,6 +6,7 @@ import { DATA_DIR, GROUPS_DIR } from '../config.js';
 import {
   buildContainerArgs,
   buildExecInvocationArgs,
+  buildExecutionContainerArgs,
   buildVolumeMounts,
   LocalBackend,
 } from './local-backend.js';
@@ -756,6 +757,24 @@ describe('LocalBackend', () => {
         '-lc',
         'pwd',
       ]);
+    });
+  });
+
+  describe('buildExecutionContainerArgs', () => {
+    it('uses a portable long-lived process for Apple sidecars', () => {
+      const args = buildExecutionContainerArgs({
+        mounts: [],
+        execContainerName: 'exec-sidecar',
+        networkMode: 'none',
+        runtime: 'container',
+      });
+
+      expect(args).not.toContain('--rm');
+      expect(args).toContain('--entrypoint');
+      expect(args).toContain('/bin/bash.real');
+      expect(args).toContain('exec-sidecar');
+      expect(args.at(-1)).toContain('while true; do sleep 3600; done');
+      expect(args.at(-1)).not.toContain('exec sleep infinity');
     });
   });
 });

@@ -658,7 +658,7 @@ interface ExecutionContainerOpts {
   runtime?: string;
 }
 
-function buildExecutionContainerArgs({
+export function buildExecutionContainerArgs({
   mounts,
   execContainerName,
   networkMode,
@@ -669,7 +669,6 @@ function buildExecutionContainerArgs({
   const args: string[] = [
     'run',
     '-d',
-    '--rm',
     '--memory',
     EXEC_CONTAINER_MEMORY,
     '--name',
@@ -677,6 +676,7 @@ function buildExecutionContainerArgs({
   ];
 
   if (isDocker) {
+    args.push('--rm');
     args.push('--pids-limit', '512');
     args.push('--security-opt', 'no-new-privileges:true');
     if (networkMode === 'none') {
@@ -723,9 +723,11 @@ function buildExecutionContainerArgs({
       '    export "$line"',
       '  done < /workspace/env-dir/env',
       'fi',
-      'if [ -n "$GITHUB_TOKEN" ]; then gh auth setup-git 2>/dev/null || true; fi',
-      'exec sleep infinity',
-    ].join('; '),
+      'if [ -n "$GITHUB_TOKEN" ]; then',
+      '  gh auth setup-git 2>/dev/null || true',
+      'fi',
+      'while true; do sleep 3600; done',
+    ].join('\n'),
   );
 
   return args;
@@ -737,6 +739,10 @@ function buildExecutionContainerArgs({
 
 function makeExecContainerName(agentContainerName: string): string {
   return `${agentContainerName}-exec`;
+}
+
+function isSplitExecutionEnabled(): boolean {
+  return SPLIT_EXECUTION || process.env.SPLIT_EXECUTION === 'true';
 }
 
 /** Filter mounts to only include workspace/ipc paths needed by the exec container. */
@@ -780,15 +786,26 @@ async function spawnExecutionContainer(
     name: execName,
     cleanup: async () => {
       log.debug('Stopping execution sidecar');
-      const stopArgs =
-        LOCAL_RUNTIME === 'docker'
-          ? ['docker', 'stop', '-t', '5', execName]
-          : [LOCAL_RUNTIME, 'stop', execName];
-      const stop = Bun.spawn(stopArgs, {
+      if (LOCAL_RUNTIME === 'docker') {
+        const stop = Bun.spawn(['docker', 'stop', '-t', '5', execName], {
+          stdout: 'ignore',
+          stderr: 'ignore',
+        });
+        await stop.exited;
+        return;
+      }
+
+      const stop = Bun.spawn([LOCAL_RUNTIME, 'stop', execName], {
         stdout: 'ignore',
         stderr: 'ignore',
       });
       await stop.exited;
+
+      const remove = Bun.spawn([LOCAL_RUNTIME, 'rm', execName], {
+        stdout: 'ignore',
+        stderr: 'ignore',
+      });
+      await remove.exited;
     },
   };
 }
@@ -1020,10 +1037,11 @@ export class LocalBackend implements AgentBackend {
     const containerName = makeContainerName(folder, runtimeFolder);
     const effectiveNetwork =
       containerCfg?.networkMode ?? (input.isMain ? 'full' : 'none');
+    const splitExecutionEnabled = isSplitExecutionEnabled();
     // Split-execution: spawn sidecar and wire it into the agent container
     let execContainer: { name: string; cleanup: () => Promise<void> } | null =
       null;
-    if (SPLIT_EXECUTION) {
+    if (splitExecutionEnabled) {
       try {
         execContainer = await spawnExecutionContainer(
           mounts,
@@ -1068,6 +1086,7 @@ export class LocalBackend implements AgentBackend {
       container: containerName,
       backend: this.name,
       mountCount: mounts.length,
+      splitExecutionEnabled,
     });
 
     log.debug(
