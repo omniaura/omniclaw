@@ -9,6 +9,7 @@ import {
   buildExecutionContainerArgs,
   buildVolumeMounts,
   LocalBackend,
+  resolveGitHubTokenForContainer,
 } from './local-backend.js';
 
 function uniqueId(): string {
@@ -154,6 +155,27 @@ describe('LocalBackend', () => {
   });
 
   describe('buildVolumeMounts', () => {
+    it('prefers GITHUB_TOKEN, then GH_TOKEN, then gh auth fallback for env mounts', () => {
+      expect(
+        resolveGitHubTokenForContainer(
+          { GITHUB_TOKEN: 'github-token', GH_TOKEN: 'gh-token' },
+          () => 'fallback-token',
+        ),
+      ).toBe('github-token');
+      expect(
+        resolveGitHubTokenForContainer(
+          { GH_TOKEN: 'gh-token' },
+          () => 'fallback-token',
+        ),
+      ).toBe('gh-token');
+      expect(resolveGitHubTokenForContainer({}, () => 'fallback-token')).toBe(
+        'fallback-token',
+      );
+      expect(
+        resolveGitHubTokenForContainer({}, () => undefined),
+      ).toBeUndefined();
+    });
+
     it('mounts channel, global, agent, category, and server workspaces for non-main agents', () => {
       const fixture = createFixture();
       try {
@@ -331,7 +353,11 @@ describe('LocalBackend', () => {
 
     it('copies only allowed env vars into runtime-scoped env mounts', () => {
       const fixture = createFixture();
+      const originalGithubToken = process.env.GITHUB_TOKEN;
+      const originalGhToken = process.env.GH_TOKEN;
       try {
+        delete process.env.GITHUB_TOKEN;
+        process.env.GH_TOKEN = 'gh-alias-token';
         fs.writeFileSync(
           path.join(fixture.tempProjectRoot, '.env'),
           [
@@ -366,6 +392,8 @@ describe('LocalBackend', () => {
         expect(codexEnv).toContain('OPENAI_API_KEY=openai-key');
         expect(codexEnv).toContain('CODEX_API_KEY=codex-key');
         expect(codexEnv).toContain('CODEX_MODEL=gpt-5');
+        expect(codexEnv).toContain('GITHUB_TOKEN=gh-alias-token');
+        expect(codexEnv).toContain('GH_TOKEN=gh-alias-token');
         expect(codexEnv).not.toContain('UNRELATED_SECRET=blocked');
 
         const claudeMounts = buildVolumeMounts(
@@ -389,10 +417,22 @@ describe('LocalBackend', () => {
         );
         expect(claudeEnv).toContain('CLAUDE_CODE_OAUTH_TOKEN=claude-token');
         expect(claudeEnv).toContain('ANTHROPIC_API_KEY=anthropic-key');
+        expect(claudeEnv).toContain('GITHUB_TOKEN=gh-alias-token');
+        expect(claudeEnv).toContain('GH_TOKEN=gh-alias-token');
         expect(claudeEnv).not.toContain('OPENAI_API_KEY=openai-key');
         expect(claudeEnv).not.toContain('CODEX_API_KEY=codex-key');
         expect(claudeEnv).not.toContain('UNRELATED_SECRET=blocked');
       } finally {
+        if (originalGithubToken === undefined) {
+          delete process.env.GITHUB_TOKEN;
+        } else {
+          process.env.GITHUB_TOKEN = originalGithubToken;
+        }
+        if (originalGhToken === undefined) {
+          delete process.env.GH_TOKEN;
+        } else {
+          process.env.GH_TOKEN = originalGhToken;
+        }
         fixture.cleanup();
       }
     });
@@ -775,6 +815,8 @@ describe('LocalBackend', () => {
       expect(args).toContain('exec-sidecar');
       expect(args.at(-1)).toContain('while true; do sleep 3600; done');
       expect(args.at(-1)).not.toContain('exec sleep infinity');
+      expect(args.at(-1)).toContain('export GITHUB_TOKEN="$GH_TOKEN"');
+      expect(args.at(-1)).toContain('export GH_TOKEN="$GITHUB_TOKEN"');
     });
   });
 });

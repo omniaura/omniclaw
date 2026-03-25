@@ -993,6 +993,12 @@ export function buildCodexEnv(
     if (!env.CODEX_API_KEY) env.CODEX_API_KEY = apiKey;
   }
 
+  const githubToken = env.GITHUB_TOKEN || env.GH_TOKEN;
+  if (githubToken) {
+    if (!env.GITHUB_TOKEN) env.GITHUB_TOKEN = githubToken;
+    if (!env.GH_TOKEN) env.GH_TOKEN = githubToken;
+  }
+
   if (!env.CODEX_HOME) {
     env.CODEX_HOME = '/home/bun/.codex';
   }

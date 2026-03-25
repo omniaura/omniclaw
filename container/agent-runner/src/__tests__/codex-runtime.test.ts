@@ -48,6 +48,17 @@ describe('buildCodexEnv', () => {
     const env = buildCodexEnv({} as any);
 
     expect(env.GITHUB_TOKEN).toBe('gh-token');
+    expect(env.GH_TOKEN).toBe('gh-token');
+  });
+
+  it('normalizes GH_TOKEN into both GitHub auth env names', () => {
+    delete process.env.GITHUB_TOKEN;
+    process.env.GH_TOKEN = 'gh-alias-token';
+
+    const env = buildCodexEnv({} as any);
+
+    expect(env.GH_TOKEN).toBe('gh-alias-token');
+    expect(env.GITHUB_TOKEN).toBe('gh-alias-token');
   });
 
   it('strips unrelated secrets but preserves Codex auth', () => {

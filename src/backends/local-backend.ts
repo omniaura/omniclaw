@@ -54,6 +54,30 @@ function getHomeDir(): string {
   return home;
 }
 
+function readGhAuthToken(): string | undefined {
+  const result = Bun.spawnSync(['gh', 'auth', 'token'], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (result.exitCode !== 0) return undefined;
+  const token = result.stdout.toString().trim();
+  return token || undefined;
+}
+
+export function resolveGitHubTokenForContainer(
+  env: NodeJS.ProcessEnv = process.env,
+  fallback: () => string | undefined = readGhAuthToken,
+): string | undefined {
+  const directToken = env.GITHUB_TOKEN?.trim() || env.GH_TOKEN?.trim();
+  if (directToken) return directToken;
+
+  try {
+    return fallback()?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function getLatestMtimeMs(dir: string): number {
   if (!fs.existsSync(dir)) return 0;
   let latest = 0;
@@ -386,51 +410,61 @@ export function buildVolumeMounts(
   assertPathWithin(envDir, envBase, 'env directory');
   fs.mkdirSync(envDir, { recursive: true });
   const envFile = path.join(projectRoot, '.env');
+  const allowedVars = [
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_MODEL',
+    'GITHUB_TOKEN',
+    'GH_TOKEN',
+    'GIT_AUTHOR_NAME',
+    'GIT_AUTHOR_EMAIL',
+    'CLAUDE_MODEL',
+    'OPENCODE_MODEL',
+    'OPENCODE_PROVIDER',
+    'OPENCODE_MODEL_ID',
+    ...(agentRuntime === 'codex'
+      ? ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_MODEL']
+      : []),
+    ...(options?.allowGcpCredentials
+      ? [
+          'GOOGLE_APPLICATION_CREDENTIALS',
+          'FIREBASE_PROJECT_ID',
+          'FIREBASE_CLIENT_EMAIL',
+          'FIREBASE_PRIVATE_KEY',
+          'GCLOUD_PROJECT',
+        ]
+      : []),
+  ];
+  let filteredLines: string[] = [];
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    const allowedVars = [
-      'CLAUDE_CODE_OAUTH_TOKEN',
-      'ANTHROPIC_API_KEY',
-      'ANTHROPIC_BASE_URL',
-      'ANTHROPIC_MODEL',
-      'GITHUB_TOKEN',
-      'GIT_AUTHOR_NAME',
-      'GIT_AUTHOR_EMAIL',
-      'CLAUDE_MODEL',
-      'OPENCODE_MODEL',
-      'OPENCODE_PROVIDER',
-      'OPENCODE_MODEL_ID',
-      ...(agentRuntime === 'codex'
-        ? ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_MODEL']
-        : []),
-      ...(options?.allowGcpCredentials
-        ? [
-            'GOOGLE_APPLICATION_CREDENTIALS',
-            'FIREBASE_PROJECT_ID',
-            'FIREBASE_CLIENT_EMAIL',
-            'FIREBASE_PRIVATE_KEY',
-            'GCLOUD_PROJECT',
-          ]
-        : []),
-    ];
-    const filteredLines = extractAllowedEnvBlocks(envContent, allowedVars);
+    filteredLines = extractAllowedEnvBlocks(envContent, allowedVars);
+  }
+  const githubToken = resolveGitHubTokenForContainer();
+  if (githubToken) {
+    filteredLines = filteredLines.filter(
+      (line) =>
+        !line.startsWith('GITHUB_TOKEN=') && !line.startsWith('GH_TOKEN='),
+    );
+    filteredLines.push(
+      `GITHUB_TOKEN=${githubToken}`,
+      `GH_TOKEN=${githubToken}`,
+    );
+  }
 
-    if (filteredLines.length > 0) {
-      fs.writeFileSync(
-        path.join(envDir, 'env'),
-        filteredLines.join('\n') + '\n',
-      );
-      mounts.push({
-        hostPath: envDir,
-        containerPath: '/workspace/env-dir',
-        readonly: true,
-      });
-    } else {
-      try {
-        fs.unlinkSync(path.join(envDir, 'env'));
-      } catch {
-        /* ignore */
-      }
+  if (filteredLines.length > 0) {
+    fs.writeFileSync(path.join(envDir, 'env'), filteredLines.join('\n') + '\n');
+    mounts.push({
+      hostPath: envDir,
+      containerPath: '/workspace/env-dir',
+      readonly: true,
+    });
+  } else {
+    try {
+      fs.unlinkSync(path.join(envDir, 'env'));
+    } catch {
+      /* ignore */
     }
   }
 
@@ -722,6 +756,11 @@ export function buildExecutionContainerArgs({
       '    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue',
       '    export "$line"',
       '  done < /workspace/env-dir/env',
+      'fi',
+      'if [ -n "$GH_TOKEN" ] && [ -z "$GITHUB_TOKEN" ]; then',
+      '  export GITHUB_TOKEN="$GH_TOKEN"',
+      'elif [ -n "$GITHUB_TOKEN" ] && [ -z "$GH_TOKEN" ]; then',
+      '  export GH_TOKEN="$GITHUB_TOKEN"',
       'fi',
       'if [ -n "$GITHUB_TOKEN" ]; then',
       '  gh auth setup-git 2>/dev/null || true',
