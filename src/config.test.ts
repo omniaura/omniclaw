@@ -285,7 +285,7 @@ describe('parseConfigEnv', () => {
       CONTAINER_TIMEOUT: '1234',
       PERSISTENT_TASK_STATE: 'true',
       WEB_UI_PORT: '3000',
-      CHANNEL_ROSTER_SCOPE: 'guild',
+      CHANNEL_ROSTER_SCOPE: 'Guild',
     });
 
     expect(parsed.CONTAINER_TIMEOUT).toBe(1234);

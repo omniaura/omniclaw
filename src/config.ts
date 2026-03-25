@@ -90,7 +90,11 @@ const configSchema = z
       parseIntegerString,
       z.number().int().positive().default(900000),
     ),
-    CHANNEL_ROSTER_SCOPE: z.enum(['channel', 'guild']).default('channel'),
+    CHANNEL_ROSTER_SCOPE: z.preprocess(
+      (value) =>
+        typeof value === 'string' ? value.trim().toLowerCase() : value,
+      z.enum(['channel', 'guild']).default('channel'),
+    ),
     CHANNEL_ROSTER_ROLE_FILTERS: z.string().optional(),
     CHANNEL_ROSTER_CACHE_TTL_MS: z.preprocess(
       parseIntegerString,
