@@ -26,7 +26,7 @@ export function parseTelegramFileDescriptor(
   try {
     const botId = decodeURIComponent(rest.slice(0, separator));
     const filePath = decodeURIComponent(rest.slice(separator + 1));
-    if (!botId || !filePath) return null;
+    if (!botId.trim() || !filePath.trim()) return null;
     return { botId, filePath };
   } catch {
     return null;

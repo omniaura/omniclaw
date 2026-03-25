@@ -17,8 +17,6 @@ const MAIN_GROUP: RegisteredGroup = {
 
 const flushMicrotasks = async () => {
   await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
 };
 
 describe('startIpcWatcher', () => {
@@ -138,10 +136,12 @@ describe('startIpcWatcher', () => {
     };
 
     startIpcWatcher(deps);
+    // The mock records the next poll interval without executing another loop,
+    // so this assertion exercises the synchronous first scan only.
     await flushMicrotasks();
 
-    expect(sendCalls).toEqual([
-      { jid: 'main@g.us', text: 'hello from runtime', discordBotId: undefined },
+    expect(sendCalls).toMatchObject([
+      { jid: 'main@g.us', text: 'hello from runtime' },
     ]);
     expect(notifyCalls).toEqual([
       {

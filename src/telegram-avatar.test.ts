@@ -29,6 +29,8 @@ describe('telegram avatar helpers', () => {
       parseTelegramFileDescriptor('tg-file:%E0%A4%A:avatar.png'),
     ).toBeNull();
     expect(parseTelegramFileDescriptor('tg-file:bot-id:')).toBeNull();
+    expect(parseTelegramFileDescriptor('tg-file:%20:avatar.png')).toBeNull();
+    expect(parseTelegramFileDescriptor('tg-file:bot-id:%20')).toBeNull();
   });
 
   it('extracts bot token, bot id, and file path from Telegram API file urls', () => {
