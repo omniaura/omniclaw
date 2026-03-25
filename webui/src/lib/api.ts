@@ -117,12 +117,34 @@ export interface AgentDetailData {
   backend: string;
   agentRuntime: string;
   isAdmin: boolean;
+  description?: string;
+  createdAt: string;
+  remoteInstanceId?: string;
+  remoteInstanceName?: string;
+  remoteHost?: string;
+  remotePort?: number;
   serverFolder?: string;
   agentContextFolder?: string;
   avatarUrl?: string;
   channels: Array<{
     jid: string;
     displayName: string;
+    channelFolder?: string;
+    categoryFolder?: string;
+  }>;
+  tasks: Array<{
+    id: string;
+    prompt: string;
+    schedule_type: string;
+    schedule_value: string;
+    status: string;
+    next_run: string | null;
+    last_run: string | null;
+  }>;
+  recentChats: Array<{
+    jid: string;
+    name: string;
+    last_message_time: string;
   }>;
 }
 
