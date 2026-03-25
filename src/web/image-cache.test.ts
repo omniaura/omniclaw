@@ -325,9 +325,7 @@ describe('serveCachedRemoteImage byte cap', () => {
       );
 
       expect(response).toBeNull();
-      expect(
-        records.some((r) => r.maxBytes === 5 * 1024 * 1024),
-      ).toBe(true);
+      expect(records.some((r) => r.maxBytes === 5 * 1024 * 1024)).toBe(true);
     } finally {
       clearTestImageCache(testImageCacheDir);
       logger.warn = originalWarn;
