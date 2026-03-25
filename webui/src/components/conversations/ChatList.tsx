@@ -1,4 +1,4 @@
-import { createSignal, createMemo, For, Show } from 'solid-js';
+import { createSignal, createMemo, onMount, For, Show } from 'solid-js';
 import type { ChatInfo, MessageInfo } from '~/lib/api';
 
 type TabMode = 'filter' | 'search';
@@ -6,12 +6,15 @@ type TabMode = 'filter' | 'search';
 export default function ChatList(props: {
   chats: ChatInfo[];
   selectedJid: string | null;
+  initialSearchQuery?: string | null;
   onSelect: (jid: string) => void;
   onSearch: (query: string) => Promise<MessageInfo[]>;
+  onSearchQueryChange?: (query: string | null) => void;
 }) {
-  const [mode, setMode] = createSignal<TabMode>('filter');
+  const hasInitQuery = !!props.initialSearchQuery;
+  const [mode, setMode] = createSignal<TabMode>(hasInitQuery ? 'search' : 'filter');
   const [filterText, setFilterText] = createSignal('');
-  const [searchText, setSearchText] = createSignal('');
+  const [searchText, setSearchText] = createSignal(props.initialSearchQuery ?? '');
   const [searchResults, setSearchResults] = createSignal<MessageInfo[]>([]);
   const [searching, setSearching] = createSignal(false);
   const [searchDone, setSearchDone] = createSignal(false);
@@ -57,8 +60,13 @@ export default function ChatList(props: {
       });
   }
 
+  onMount(() => {
+    if (hasInitQuery) doSearch(props.initialSearchQuery!);
+  });
+
   function handleSearchInput(value: string) {
     setSearchText(value);
+    props.onSearchQueryChange?.(value.trim() || null);
     if (searchTimer) clearTimeout(searchTimer);
     if (!value.trim()) {
       setSearchResults([]);
@@ -78,6 +86,7 @@ export default function ChatList(props: {
 
   function handleResultClick(jid: string) {
     setMode('filter');
+    props.onSearchQueryChange?.(null);
     props.onSelect(jid);
   }
 
