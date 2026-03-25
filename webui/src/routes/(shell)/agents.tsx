@@ -1,10 +1,6 @@
+import type { RouteSectionProps } from '@solidjs/router';
 import { Title } from '@solidjs/meta';
 
-export default function Agents() {
-  return (
-    <>
-      <Title>OmniClaw — Agents</Title>
-      <div class="p-4 text-text-dim">Agents</div>
-    </>
-  );
+export default function AgentsLayout(props: RouteSectionProps) {
+  return props.children;
 }
