@@ -238,6 +238,8 @@ Scheduled tasks are first-class:
 
 Tasks run as full agents with the same tool access and isolation model as interactive sessions.
 
+Dependency update workflows can also open PRs for runtime and SDK bumps. If you want those auto-generated PRs to trigger follow-up CI reliably, configure the repository GitHub App secrets described in `docs/GITHUB-AUTO-UPDATE-SETUP.md`.
+
 ## Trusted Peer Discovery
 
 OmniClaw instances can discover and trust each other on the network.
