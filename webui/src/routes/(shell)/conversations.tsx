@@ -18,6 +18,7 @@ function paramStr(val: string | string[] | undefined): string | null {
 export default function Conversations() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initChat = paramStr(searchParams.chat);
+  const initQuery = paramStr(searchParams.q);
   const [selectedJid, setSelectedJid] = createSignal<string | null>(initChat);
   const [messageLimit, setMessageLimit] = createSignal(PAGE_SIZE);
 
@@ -46,7 +47,14 @@ export default function Conversations() {
     if (jid === selectedJid()) return;
     setMessageLimit(PAGE_SIZE);
     setSelectedJid(jid);
-    setSearchParams({ chat: jid });
+    setSearchParams({ chat: jid, q: undefined });
+  }
+
+  function handleSearchQueryChange(query: string | null) {
+    setSearchParams({
+      q: query?.trim() || undefined,
+      chat: query ? undefined : selectedJid() || undefined,
+    });
   }
 
   function handleLoadMore() {
@@ -65,8 +73,10 @@ export default function Conversations() {
         <ChatList
           chats={chats() ?? []}
           selectedJid={selectedJid()}
+          initialSearchQuery={initQuery}
           onSelect={handleSelectChat}
           onSearch={handleSearch}
+          onSearchQueryChange={handleSearchQueryChange}
         />
         <MessageList
           chatJid={selectedJid()}
