@@ -1,8 +1,11 @@
 import { Title } from '@solidjs/meta';
-import { createSignal, createResource, onMount, For, Show } from 'solid-js';
+import { useSearchParams } from '@solidjs/router';
+import { createSignal, createResource, createEffect, onMount, For, Show } from 'solid-js';
 
 import { api, type AgentChannelData } from '~/lib/api';
 import LayerEditor from '~/components/context/LayerEditor';
+
+type LayerName = 'channel' | 'category' | 'server' | 'agent';
 
 interface SelectedChannel {
   agentId: string;
@@ -17,6 +20,7 @@ interface SelectedChannel {
 }
 
 export default function Context() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [mounted, setMounted] = createSignal(false);
   onMount(() => setMounted(true));
   const [agents] = createResource(mounted, () => api.getAgents());
@@ -24,6 +28,31 @@ export default function Context() {
   const [expandedAgents, setExpandedAgents] = createSignal<Set<string>>(
     new Set(),
   );
+
+  // Restore selection from URL params once agents load
+  createEffect(() => {
+    const list = agents();
+    if (!list || selected()) return;
+    const agentParam = searchParams.agent as string | undefined;
+    const channelParam = searchParams.channel as string | undefined;
+    if (!agentParam || !channelParam) return;
+    const agent = list.find((a) => a.id === agentParam);
+    if (!agent) return;
+    const channel = agent.channels.find((c) => c.jid === channelParam);
+    if (!channel) return;
+    setExpandedAgents(new Set([agent.id]));
+    setSelected({
+      agentId: agent.id,
+      agentName: agent.name,
+      jid: channel.jid,
+      displayName: channel.displayName,
+      folder: agent.folder,
+      serverFolder: agent.serverFolder ?? '',
+      agentContextFolder: agent.agentContextFolder ?? '',
+      channelFolder: channel.channelFolder ?? '',
+      categoryFolder: channel.categoryFolder ?? '',
+    });
+  });
 
   const [layers, { refetch: refetchLayers }] = createResource(
     selected,
@@ -66,6 +95,18 @@ export default function Context() {
       channelFolder: channel.channelFolder ?? '',
       categoryFolder: channel.categoryFolder ?? '',
     });
+
+    setSearchParams({ agent: agent.id, channel: channel.jid });
+  }
+
+  function handleLayerChange(layer: LayerName) {
+    setSearchParams({ layer: layer === 'channel' ? undefined : layer });
+  }
+
+  function initialLayer(): LayerName {
+    const p = searchParams.layer as string | undefined;
+    if (p === 'category' || p === 'server' || p === 'agent') return p;
+    return 'channel';
   }
 
   function isChannelSelected(agentId: string, jid: string): boolean {
@@ -178,6 +219,8 @@ export default function Context() {
                   {(layerData) => (
                     <LayerEditor
                       layers={layerData()}
+                      initialLayer={initialLayer()}
+                      onLayerChange={handleLayerChange}
                       onSaved={() => refetchLayers()}
                     />
                   )}

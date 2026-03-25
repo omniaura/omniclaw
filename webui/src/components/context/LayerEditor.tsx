@@ -14,12 +14,14 @@ const LAYER_TABS: { key: LayerName; label: string }[] = [
 
 interface LayerEditorProps {
   layers: ContextLayers;
+  initialLayer?: LayerName;
+  onLayerChange?: (layer: LayerName) => void;
   /** Called after a successful save so parent can refresh if needed. */
   onSaved?: () => void;
 }
 
 export default function LayerEditor(props: LayerEditorProps) {
-  const [activeLayer, setActiveLayer] = createSignal<LayerName>('channel');
+  const [activeLayer, setActiveLayer] = createSignal<LayerName>(props.initialLayer ?? 'channel');
   const [content, setContent] = createSignal('');
   const [originalContent, setOriginalContent] = createSignal('');
   const [saving, setSaving] = createSignal(false);
@@ -88,7 +90,10 @@ export default function LayerEditor(props: LayerEditorProps) {
                   ? 'bg-accent/20 text-accent'
                   : 'text-text-dim hover:text-text hover:bg-surface-2'
               }`}
-              onClick={() => setActiveLayer(tab.key)}
+              onClick={() => {
+                setActiveLayer(tab.key);
+                props.onLayerChange?.(tab.key);
+              }}
             >
               <span
                 class={`inline-block w-1.5 h-1.5 rounded-full ${
