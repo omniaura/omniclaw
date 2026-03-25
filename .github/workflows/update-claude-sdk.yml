@@ -92,6 +92,7 @@ jobs:
           cd ../..
 
       - name: Commit and open PR
+        id: create_pr
         if: steps.check.outputs.changed == 'true' && steps.existing_pr.outputs.pr == ''
         run: |
           BRANCH="update/claude-sdk-${{ steps.latest.outputs.version }}"
@@ -103,6 +104,8 @@ jobs:
           git add container/agent-runner/package.json container/agent-runner/bun.lock
           git commit -m "$TITLE"
           git push origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
           BODY_FILE=$(mktemp)
           trap 'rm -f "$BODY_FILE"' EXIT
@@ -119,11 +122,27 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || github.token }}
 
-      - name: Trigger CI for update PR
-        if: steps.check.outputs.changed == 'true' && steps.existing_pr.outputs.pr == '' && steps.check-secrets.outputs.skip == 'true'
+      - name: Ensure CI is queued for update PR
+        if: steps.check.outputs.changed == 'true' && steps.existing_pr.outputs.pr == ''
         run: |
-          gh workflow run ci.yml \
+          BRANCH="${{ steps.create_pr.outputs.branch }}"
+          HEAD_SHA="${{ steps.create_pr.outputs.head_sha }}"
+          sleep 15
+
+          EXISTING_RUN=$(gh run list \
             --repo omniaura/omniclaw \
-            --ref "update/claude-sdk-${{ steps.latest.outputs.version }}"
+            --workflow ci.yml \
+            --branch "$BRANCH" \
+            --json headSha,event,status \
+            --jq 'map(select(.headSha == "'"$HEAD_SHA"'" and (.event == "pull_request" or .event == "workflow_dispatch" or .event == "pull_request_target"))) | length')
+
+          if [ "$EXISTING_RUN" -eq 0 ]; then
+            echo "No CI run detected for $BRANCH@$HEAD_SHA; dispatching workflow manually"
+            gh workflow run ci.yml \
+              --repo omniaura/omniclaw \
+              --ref "$BRANCH"
+          else
+            echo "CI already queued for $BRANCH@$HEAD_SHA"
+          fi
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || github.token }}
