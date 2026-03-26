@@ -37,7 +37,7 @@ Last updated: 2026-03-25
 | Agent/channel decoupling        | Stable   | One agent can own multiple channels                                                                          |
 | Scheduled tasks                 | Stable   | Cron, interval, one-shot, pause/resume, recovery logic                                                       |
 | Persistent session + memory     | Stable   | CLAUDE.md hierarchy, SQLite state, task/run persistence                                                      |
-| Web UI                          | Active   | Agents page, logs, execution status, keyboard shortcuts, settings                                            |
+| Web UI (SolidStart)             | Stable   | 11 pages: dashboard, agents, logs, tasks, conversations, context, IPC, network, system, settings             |
 | LAN discovery + pairing         | Active   | mDNS discovery, trust workflow, `/network` page, remote peer browsing                                        |
 | GitHub context injection        | Stable   | Snapshot context, delta digest, linked PR/issue context                                                      |
 | Inter-agent messaging           | Stable   | `send_message`, agent registry, IPC snapshots                                                                |
@@ -60,12 +60,13 @@ The active multi-machine direction is now LAN discovery plus trust-based pairing
 - next step is useful multi-instance sync: context exchange, remote coordination, and safe cross-instance workflows (#278)
 - keep one orchestrator simple; add networking only where it improves real operator workflows
 
-#### Web UI for OmniClaw (#157)
+#### Web UI for OmniClaw (#157, closed)
 
-The web UI is no longer speculative. It is now core product surface area.
+The web UI is core product surface area, now built on SolidStart (SolidJS + Vinxi + Tailwind CSS).
 
-- shipped foundations: Bun-served UI, live logs, execution status, network page, keyboard shortcuts, settings surface
-- next work: richer agent/task control, better operational visibility, and tighter debugging workflows
+- all original scope delivered: dashboard, agents, logs, tasks, conversations, context viewer, IPC inspector, network, system, settings
+- SolidStart migration from Datastar completed in #418 (11 pages, 8.7K lines)
+- next work tracked in #420: remove `WEB_UI_SOLID` feature flag, clean up old Datastar route handlers, add SolidStart component test coverage
 
 #### Scheduler Reliability and Chat Cohesion (#162, #186)
 
@@ -149,6 +150,7 @@ Push from "personal assistant with tasks" toward a genuine multi-agent factory.
 
 ### Mar 2026
 
+- SolidStart web UI migration completed (#418) — replaced Datastar SSE with SolidJS reactive components, Tailwind CSS, and SolidStart server endpoints across all 11 pages
 - LAN discovery with mDNS, trust-based pairing, remote peer browsing, and `/network` UI shipped (#277)
 - Apple Container split execution landed (#399)
 - auto-update PR CI backstop landed (#394)
