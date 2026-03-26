@@ -78,11 +78,16 @@ describe('solid-handler', () => {
 
   it('initializes the proxy handler and forwards requests to the internal SolidStart server', async () => {
     fs.mkdirSync(solidOutputDir, { recursive: true });
-    fs.writeFileSync(solidOutputFile, 'globalThis.__solidHandlerLoaded = true;\n');
+    fs.writeFileSync(
+      solidOutputFile,
+      'globalThis.__solidHandlerLoaded = true;\n',
+    );
 
     const fetchMock = mock(
       async (_input: string | URL | Request, init?: RequestInit) =>
-        new Response(init?.body ? 'with-body' : 'without-body', { status: 202 }),
+        new Response(init?.body ? 'with-body' : 'without-body', {
+          status: 202,
+        }),
     );
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
