@@ -3,7 +3,11 @@ import { query, createAsync } from '@solidjs/router';
 import { Show } from 'solid-js';
 
 import Badge from '~/components/shared/Badge';
-import { BooleanRow, MetricCard, MetricRow } from '~/components/shared/MetricCard';
+import {
+  BooleanRow,
+  MetricCard,
+  MetricRow,
+} from '~/components/shared/MetricCard';
 import { api } from '~/lib/api';
 
 const fetchSettings = query(() => api.getSettings(), 'settings');
@@ -50,13 +54,18 @@ export default function Settings() {
                   label="model override"
                   value={s().general.anthropicModel ?? 'default'}
                 />
-                <MetricRow label="local runtime" value={s().general.localRuntime} />
+                <MetricRow
+                  label="local runtime"
+                  value={s().general.localRuntime}
+                />
               </MetricCard>
 
               <MetricCard title="web ui">
                 <MetricRow
                   label="port"
-                  value={s().webUi.port != null ? String(s().webUi.port) : 'disabled'}
+                  value={
+                    s().webUi.port != null ? String(s().webUi.port) : 'disabled'
+                  }
                 />
                 <MetricRow label="hostname" value={s().webUi.hostname} />
                 <BooleanRow label="auth" value={s().webUi.authEnabled} />
@@ -69,7 +78,10 @@ export default function Settings() {
               <MetricCard title="containers">
                 <MetricRow label="image" value={s().containers.image} />
                 <MetricRow label="memory" value={s().containers.memory} />
-                <MetricRow label="timeout" value={formatMs(s().containers.timeoutMs)} />
+                <MetricRow
+                  label="timeout"
+                  value={formatMs(s().containers.timeoutMs)}
+                />
                 <MetricRow
                   label="startup timeout"
                   value={formatMs(s().containers.startupTimeoutMs)}
@@ -82,9 +94,18 @@ export default function Settings() {
                   label="max output"
                   value={formatBytes(s().containers.maxOutputSize)}
                 />
-                <MetricRow label="max active" value={String(s().containers.maxActive)} />
-                <MetricRow label="max idle" value={String(s().containers.maxIdle)} />
-                <MetricRow label="max task" value={String(s().containers.maxTask)} />
+                <MetricRow
+                  label="max active"
+                  value={String(s().containers.maxActive)}
+                />
+                <MetricRow
+                  label="max idle"
+                  value={String(s().containers.maxIdle)}
+                />
+                <MetricRow
+                  label="max task"
+                  value={String(s().containers.maxTask)}
+                />
               </MetricCard>
 
               <MetricCard title="channels">
@@ -99,9 +120,7 @@ export default function Settings() {
                   />
                 </Show>
                 <Show when={s().channels.discordDefaultBot}>
-                  {(bot) => (
-                    <MetricRow label="discord default" value={bot()} />
-                  )}
+                  {(bot) => <MetricRow label="discord default" value={bot()} />}
                 </Show>
                 <MetricRow
                   label="telegram bots"
@@ -112,9 +131,7 @@ export default function Settings() {
                   value={String(s().channels.slackBots)}
                 />
                 <Show when={s().channels.slackDefaultBot}>
-                  {(bot) => (
-                    <MetricRow label="slack default" value={bot()} />
-                  )}
+                  {(bot) => <MetricRow label="slack default" value={bot()} />}
                 </Show>
               </MetricCard>
 
@@ -183,7 +200,10 @@ export default function Settings() {
                       : 'disabled'
                   }
                 />
-                <MetricRow label="webhook path" value={s().github.webhookPath} />
+                <MetricRow
+                  label="webhook path"
+                  value={s().github.webhookPath}
+                />
                 <BooleanRow
                   label="webhook secret"
                   value={s().github.secretConfigured}

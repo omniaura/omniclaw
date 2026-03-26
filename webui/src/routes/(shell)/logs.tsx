@@ -123,10 +123,7 @@ export default function LogsPage() {
           <h2 class="text-sm font-semibold text-text-bright mr-2">Logs</h2>
           <span class="text-xs text-text-dim">
             {filteredLogs().length}
-            <Show when={filterActive()}>
-              {' '}/ {logs.lines.length}
-            </Show>
-            {' '}lines
+            <Show when={filterActive()}> / {logs.lines.length}</Show> lines
           </span>
 
           <div class="flex-1" />

@@ -13,6 +13,8 @@ import { buildSettingsData } from './settings.js';
 import { buildAgentDetailData } from './agent-detail.js';
 import { listLocalContextFiles } from './context-files.js';
 import { logger } from '../logger.js';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 type SolidHandler = (req: Request) => Promise<Response>;
 
@@ -40,7 +42,11 @@ export async function initSolidHandler(
     process.env.HOST = '127.0.0.1';
 
     // Dynamically import the compiled SolidStart server
-    await import('../../webui/.output/server/index.mjs');
+    const solidServerEntry = path.join(
+      import.meta.dir,
+      '../../webui/.output/server/index.mjs',
+    );
+    await import(pathToFileURL(solidServerEntry).href);
 
     solidPort = internalPort;
     solidHandler = async (req: Request): Promise<Response> => {
@@ -61,10 +67,7 @@ export async function initSolidHandler(
       return resp;
     };
 
-    logger.info(
-      { solidPort: internalPort },
-      'SolidStart handler initialized',
-    );
+    logger.info({ solidPort: internalPort }, 'SolidStart handler initialized');
     return solidHandler;
   } catch (err) {
     logger.warn(
@@ -97,7 +100,9 @@ export function isMainProcessRoute(pathname: string): boolean {
  * Wrap the WebStateProvider with additional methods that
  * SolidStart API routes expect.
  */
-function createAugmentedState(state: WebStateProvider): Record<string, unknown> {
+function createAugmentedState(
+  state: WebStateProvider,
+): Record<string, unknown> {
   return Object.create(state, {
     getAgentChannelData: {
       value: () => buildAgentChannelData(state),

@@ -34,7 +34,9 @@ export default function MessageList(props: {
         }
       >
         <div class="px-3 py-2 border-b border-border flex items-center gap-2 bg-surface shrink-0">
-          <h2 class="text-[13px] font-semibold text-text-bright">{props.chatName}</h2>
+          <h2 class="text-[13px] font-semibold text-text-bright">
+            {props.chatName}
+          </h2>
           <span class="text-[10px] text-text-dim">{props.chatJid}</span>
           <span class="text-[10px] text-text-dim ml-auto">
             {props.messages.length} msg{props.messages.length !== 1 ? 's' : ''}
@@ -67,7 +69,11 @@ export default function MessageList(props: {
           >
             <Show
               when={props.messages.length > 0}
-              fallback={<div class="text-text-dim text-xs text-center py-4">No messages</div>}
+              fallback={
+                <div class="text-text-dim text-xs text-center py-4">
+                  No messages
+                </div>
+              }
             >
               <For each={props.messages}>
                 {(msg) => {
@@ -92,12 +98,16 @@ export default function MessageList(props: {
                       >
                         <div
                           class={`text-[10px] font-semibold mb-0.5 ${
-                            fromMe ? 'text-accent-hover text-right' : 'text-accent'
+                            fromMe
+                              ? 'text-accent-hover text-right'
+                              : 'text-accent'
                           }`}
                         >
                           {msg.sender_name || msg.sender || 'Unknown'}
                         </div>
-                        <div class="text-xs whitespace-pre-wrap break-words">{displayText()}</div>
+                        <div class="text-xs whitespace-pre-wrap break-words">
+                          {displayText()}
+                        </div>
                         <div
                           class={`text-[9px] text-text-dim mt-0.5 ${fromMe ? 'text-right' : ''}`}
                         >

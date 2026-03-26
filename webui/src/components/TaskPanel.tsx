@@ -20,7 +20,8 @@ export default function TaskPanel() {
       >
         <For each={tasks.list.slice(0, 50)}>
           {(task) => {
-            const agentShort = task.group_folder.split('-')[0] || task.group_folder;
+            const agentShort =
+              task.group_folder.split('-')[0] || task.group_folder;
             const promptShort =
               task.prompt.length > 40
                 ? task.prompt.slice(0, 40) + '\u2026'

@@ -79,18 +79,28 @@ export default function Ipc() {
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatCard
             label="processing"
-            value={() => `${Math.max(0, stats.activeContainers - stats.idleContainers)}/${stats.maxActive}`}
+            value={() =>
+              `${Math.max(0, stats.activeContainers - stats.idleContainers)}/${stats.maxActive}`
+            }
           />
           <StatCard
             label="idle"
             value={() => `${stats.idleContainers}/${stats.maxIdle}`}
           />
-          <StatCard label="groups tracked" value={() => String(queue().length)} />
-          <StatCard label="recent events" value={() => String(events().length)} />
+          <StatCard
+            label="groups tracked"
+            value={() => String(queue().length)}
+          />
+          <StatCard
+            label="recent events"
+            value={() => String(events().length)}
+          />
         </div>
 
         <section>
-          <h2 class="text-text-bright text-sm font-semibold mb-3">group queue state</h2>
+          <h2 class="text-text-bright text-sm font-semibold mb-3">
+            group queue state
+          </h2>
           <Show
             when={queue().length > 0}
             fallback={
@@ -108,7 +118,9 @@ export default function Ipc() {
                     <th class="text-left px-3 py-2 font-medium">msg queue</th>
                     <th class="text-left px-3 py-2 font-medium">tasks</th>
                     <th class="text-left px-3 py-2 font-medium">task queue</th>
-                    <th class="text-left px-3 py-2 font-medium">running task</th>
+                    <th class="text-left px-3 py-2 font-medium">
+                      running task
+                    </th>
                     <th class="text-left px-3 py-2 font-medium">retries</th>
                   </tr>
                 </thead>
@@ -119,28 +131,44 @@ export default function Ipc() {
                       const tStatus = taskLaneStatus(group.taskLane);
                       return (
                         <tr class="border-t border-border hover:bg-surface-2/50">
-                          <td class="px-3 py-2 text-accent">{group.folderKey}</td>
+                          <td class="px-3 py-2 text-accent">
+                            {group.folderKey}
+                          </td>
                           <td class="px-3 py-2">
                             <LaneBadge status={msgStatus} />
                           </td>
-                          <td class="px-3 py-2">{group.messageLane.pendingCount}</td>
+                          <td class="px-3 py-2">
+                            {group.messageLane.pendingCount}
+                          </td>
                           <td class="px-3 py-2">
                             <LaneBadge status={tStatus} />
                           </td>
-                          <td class="px-3 py-2">{group.taskLane.pendingCount}</td>
+                          <td class="px-3 py-2">
+                            {group.taskLane.pendingCount}
+                          </td>
                           <td class="px-3 py-2 text-text-dim">
-                            <Show when={group.taskLane.activeTask} fallback={<span>{'\u2014'}</span>}>
+                            <Show
+                              when={group.taskLane.activeTask}
+                              fallback={<span>{'\u2014'}</span>}
+                            >
                               {(task) => (
                                 <span>
                                   {task().taskId}{' '}
-                                  <span class="text-text-dim">({formatDuration(task().runningMs)})</span>
+                                  <span class="text-text-dim">
+                                    ({formatDuration(task().runningMs)})
+                                  </span>
                                 </span>
                               )}
                             </Show>
                           </td>
                           <td class="px-3 py-2">
-                            <Show when={group.retryCount > 0} fallback={<span>{'\u2014'}</span>}>
-                              <span class="text-yellow font-semibold">{group.retryCount}</span>
+                            <Show
+                              when={group.retryCount > 0}
+                              fallback={<span>{'\u2014'}</span>}
+                            >
+                              <span class="text-yellow font-semibold">
+                                {group.retryCount}
+                              </span>
                             </Show>
                           </td>
                         </tr>
@@ -154,7 +182,9 @@ export default function Ipc() {
         </section>
 
         <section>
-          <h2 class="text-text-bright text-sm font-semibold mb-3">ipc event timeline</h2>
+          <h2 class="text-text-bright text-sm font-semibold mb-3">
+            ipc event timeline
+          </h2>
           <Show
             when={events().length > 0}
             fallback={
@@ -176,7 +206,9 @@ export default function Ipc() {
                 <tbody>
                   <For each={events()}>
                     {(event) => (
-                      <tr class={`border-t border-border ${eventRowBg(event.kind)}`}>
+                      <tr
+                        class={`border-t border-border ${eventRowBg(event.kind)}`}
+                      >
                         <td class="px-3 py-2 text-text-dim whitespace-nowrap">
                           {formatTime(event.timestamp)}
                         </td>
@@ -187,7 +219,9 @@ export default function Ipc() {
                             {event.kind}
                           </span>
                         </td>
-                        <td class="px-3 py-2 text-accent">{event.sourceGroup}</td>
+                        <td class="px-3 py-2 text-accent">
+                          {event.sourceGroup}
+                        </td>
                         <td class="px-3 py-2">{event.summary}</td>
                       </tr>
                     )}
@@ -205,7 +239,9 @@ export default function Ipc() {
 function StatCard(props: { label: string; value: () => string }) {
   return (
     <div class="bg-surface rounded border border-border p-3">
-      <div class="text-text-dim text-[10px] uppercase tracking-wider mb-1">{props.label}</div>
+      <div class="text-text-dim text-[10px] uppercase tracking-wider mb-1">
+        {props.label}
+      </div>
       <div class="text-text-bright text-lg font-semibold">{props.value()}</div>
     </div>
   );
@@ -213,7 +249,9 @@ function StatCard(props: { label: string; value: () => string }) {
 
 function LaneBadge(props: { status: string }) {
   return (
-    <span class={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${laneColor(props.status)}`}>
+    <span
+      class={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${laneColor(props.status)}`}
+    >
       {props.status}
     </span>
   );

@@ -6,8 +6,17 @@ export interface HealthData {
   uptime_seconds: number;
   memory: { rss_mb: number; heap_used_mb: number; heap_total_mb: number };
   runtime: { bun: string; platform: string; arch: string };
-  agents: { total: number; by_backend: Record<string, number>; by_runtime: Record<string, number> };
-  containers: { active: number; idle: number; max_active: number; max_idle: number };
+  agents: {
+    total: number;
+    by_backend: Record<string, number>;
+    by_runtime: Record<string, number>;
+  };
+  containers: {
+    active: number;
+    idle: number;
+    max_active: number;
+    max_idle: number;
+  };
   tasks: { active: number; paused: number; completed: number; total: number };
   sse_clients: number;
   started_at: string;
@@ -149,20 +158,53 @@ export interface AgentDetailData {
 }
 
 export interface SettingsData {
-  general: { timezone: string; anthropicModel: string | null; localRuntime: string };
-  webUi: { port: number | null; hostname: string; authEnabled: boolean; corsOrigin: string | null };
+  general: {
+    timezone: string;
+    anthropicModel: string | null;
+    localRuntime: string;
+  };
+  webUi: {
+    port: number | null;
+    hostname: string;
+    authEnabled: boolean;
+    corsOrigin: string | null;
+  };
   containers: {
-    image: string; memory: string; timeoutMs: number; startupTimeoutMs: number;
-    idleTimeoutMs: number; maxOutputSize: number; maxActive: number; maxIdle: number; maxTask: number;
+    image: string;
+    memory: string;
+    timeoutMs: number;
+    startupTimeoutMs: number;
+    idleTimeoutMs: number;
+    maxOutputSize: number;
+    maxActive: number;
+    maxIdle: number;
+    maxTask: number;
   };
   channels: {
-    discordBots: number; discordBotIds: string[]; discordDefaultBot: string | null;
-    telegramBots: number; slackBots: number; slackDefaultBot: string | null;
+    discordBots: number;
+    discordBotIds: string[];
+    discordDefaultBot: string | null;
+    telegramBots: number;
+    slackBots: number;
+    slackDefaultBot: string | null;
   };
-  scheduling: { sessionMaxAgeMs: number; persistentTaskState: boolean; pollIntervalMs: number };
-  roster: { scope: string; roleFilters: string[]; cacheTtlMs: number; refreshIntervalMs: number };
+  scheduling: {
+    sessionMaxAgeMs: number;
+    persistentTaskState: boolean;
+    pollIntervalMs: number;
+  };
+  roster: {
+    scope: string;
+    roleFilters: string[];
+    cacheTtlMs: number;
+    refreshIntervalMs: number;
+  };
   discovery: { enabled: boolean; instanceName: string; trustLanAdmin: boolean };
-  github: { webhookPort: number; webhookPath: string; secretConfigured: boolean };
+  github: {
+    webhookPort: number;
+    webhookPath: string;
+    secretConfigured: boolean;
+  };
   paths: { store: string; groups: string; data: string };
 }
 
@@ -252,14 +294,31 @@ export const api = {
   // Tasks
   getTasks: (status?: string) =>
     get<ScheduledTask[]>(`/api/tasks${status ? `?status=${status}` : ''}`),
-  getTask: (id: string) => get<ScheduledTask>(`/api/tasks/${encodeURIComponent(id)}`),
-  createTask: (task: Omit<ScheduledTask, 'id' | 'last_run' | 'last_result' | 'executing_since' | 'created_at'>) =>
-    post<ScheduledTask>('/api/tasks', task),
-  updateTask: (id: string, updates: Partial<Pick<ScheduledTask, 'prompt' | 'schedule_type' | 'schedule_value' | 'status'>>) =>
-    patch<ScheduledTask>(`/api/tasks/${encodeURIComponent(id)}`, updates),
-  deleteTask: (id: string) => del<{ deleted: boolean; id: string }>(`/api/tasks/${encodeURIComponent(id)}`),
+  getTask: (id: string) =>
+    get<ScheduledTask>(`/api/tasks/${encodeURIComponent(id)}`),
+  createTask: (
+    task: Omit<
+      ScheduledTask,
+      'id' | 'last_run' | 'last_result' | 'executing_since' | 'created_at'
+    >,
+  ) => post<ScheduledTask>('/api/tasks', task),
+  updateTask: (
+    id: string,
+    updates: Partial<
+      Pick<
+        ScheduledTask,
+        'prompt' | 'schedule_type' | 'schedule_value' | 'status'
+      >
+    >,
+  ) => patch<ScheduledTask>(`/api/tasks/${encodeURIComponent(id)}`, updates),
+  deleteTask: (id: string) =>
+    del<{ deleted: boolean; id: string }>(
+      `/api/tasks/${encodeURIComponent(id)}`,
+    ),
   getTaskRuns: (id: string, limit?: number) =>
-    get<TaskRunLog[]>(`/api/tasks/${encodeURIComponent(id)}/runs${limit ? `?limit=${limit}` : ''}`),
+    get<TaskRunLog[]>(
+      `/api/tasks/${encodeURIComponent(id)}/runs${limit ? `?limit=${limit}` : ''}`,
+    ),
 
   // Chats & messages
   getChats: () => get<ChatInfo[]>('/api/chats'),
@@ -268,7 +327,9 @@ export const api = {
     if (since) params.set('since', since);
     if (limit) params.set('limit', String(limit));
     const qs = params.toString();
-    return get<MessageInfo[]>(`/api/messages/${encodeURIComponent(chatJid)}${qs ? `?${qs}` : ''}`);
+    return get<MessageInfo[]>(
+      `/api/messages/${encodeURIComponent(chatJid)}${qs ? `?${qs}` : ''}`,
+    );
   },
   searchMessages: (query: string, chatJid?: string, limit?: number) => {
     const params = new URLSearchParams({ q: query });
@@ -279,7 +340,13 @@ export const api = {
 
   // Context
   getContextFiles: () => get<ContextFileEntry[]>('/api/context/files'),
-  getContextLayers: (params: { folder?: string; server_folder?: string; agent_context_folder?: string; channel_folder?: string; category_folder?: string }) => {
+  getContextLayers: (params: {
+    folder?: string;
+    server_folder?: string;
+    agent_context_folder?: string;
+    channel_folder?: string;
+    category_folder?: string;
+  }) => {
     const qs = new URLSearchParams(params as Record<string, string>).toString();
     return get<ContextLayers>(`/api/context/layers?${qs}`);
   },
@@ -295,9 +362,14 @@ export const api = {
   getAgentDetail: (id: string) =>
     get<AgentDetailData>(`/api/agents/${encodeURIComponent(id)}/detail`),
   getAgentAvatar: (id: string) =>
-    get<{ avatarUrl: string | null; avatarSource: string | null }>(`/api/agents/${encodeURIComponent(id)}/avatar`),
+    get<{ avatarUrl: string | null; avatarSource: string | null }>(
+      `/api/agents/${encodeURIComponent(id)}/avatar`,
+    ),
   setAgentAvatar: (id: string, url: string | null, source: string | null) =>
-    post<{ success: boolean }>(`/api/agents/${encodeURIComponent(id)}/avatar`, { url, source }),
+    post<{ success: boolean }>(`/api/agents/${encodeURIComponent(id)}/avatar`, {
+      url,
+      source,
+    }),
   getAgentAvatarImageUrl: (id: string) =>
     `/api/agents/${encodeURIComponent(id)}/avatar/image`,
 

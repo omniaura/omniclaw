@@ -21,7 +21,9 @@ interface LayerEditorProps {
 }
 
 export default function LayerEditor(props: LayerEditorProps) {
-  const [activeLayer, setActiveLayer] = createSignal<LayerName>(props.initialLayer ?? 'channel');
+  const [activeLayer, setActiveLayer] = createSignal<LayerName>(
+    props.initialLayer ?? 'channel',
+  );
   const [content, setContent] = createSignal('');
   const [originalContent, setOriginalContent] = createSignal('');
   const [saving, setSaving] = createSignal(false);
@@ -108,14 +110,13 @@ export default function LayerEditor(props: LayerEditorProps) {
 
       {/* Path display */}
       <div class="px-4 py-1.5 text-xs text-text-dim border-b border-border bg-surface font-mono">
-        <Show
-          when={layerPath()}
-          fallback={<span>No path for this layer</span>}
-        >
+        <Show when={layerPath()} fallback={<span>No path for this layer</span>}>
           {(path) => (
             <span>
               {path()}/CLAUDE.md
-              <span class={`ml-2 ${layerExists(activeLayer()) ? 'text-green' : 'text-yellow'}`}>
+              <span
+                class={`ml-2 ${layerExists(activeLayer()) ? 'text-green' : 'text-yellow'}`}
+              >
                 ({layerExists(activeLayer()) ? 'exists' : 'new'})
               </span>
             </span>
@@ -130,7 +131,11 @@ export default function LayerEditor(props: LayerEditorProps) {
           value={content()}
           onInput={(e) => setContent(e.currentTarget.value)}
           onKeyDown={handleKeyDown}
-          placeholder={layerPath() ? 'Enter context content...' : 'No path available for this layer'}
+          placeholder={
+            layerPath()
+              ? 'Enter context content...'
+              : 'No path available for this layer'
+          }
           disabled={!layerPath()}
           spellcheck={false}
         />

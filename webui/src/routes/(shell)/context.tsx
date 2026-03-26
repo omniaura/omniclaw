@@ -1,6 +1,13 @@
 import { Title } from '@solidjs/meta';
 import { useSearchParams } from '@solidjs/router';
-import { createSignal, createResource, createEffect, onMount, For, Show } from 'solid-js';
+import {
+  createSignal,
+  createResource,
+  createEffect,
+  onMount,
+  For,
+  Show,
+} from 'solid-js';
 
 import { api, type AgentChannelData } from '~/lib/api';
 import LayerEditor from '~/components/context/LayerEditor';
@@ -77,7 +84,10 @@ export default function Context() {
     });
   }
 
-  function selectChannel(agent: AgentChannelData, channel: AgentChannelData['channels'][0]) {
+  function selectChannel(
+    agent: AgentChannelData,
+    channel: AgentChannelData['channels'][0],
+  ) {
     setExpandedAgents((prev) => {
       const next = new Set(prev);
       next.add(agent.id);

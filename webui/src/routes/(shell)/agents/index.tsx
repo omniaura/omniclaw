@@ -14,7 +14,10 @@ import AgentCard from '~/components/agents/AgentCard';
 
 export default function Agents() {
   // Skip fetch during SSR — relative URLs have no origin on the server
-  const [agents] = createResource(() => !isServer, (ok) => ok ? api.getAgents() : []);
+  const [agents] = createResource(
+    () => !isServer,
+    (ok) => (ok ? api.getAgents() : []),
+  );
   const [search, setSearch] = createSignal('');
   const [backendFilter, setBackendFilter] = createSignal('');
   const [runtimeFilter, setRuntimeFilter] = createSignal('');
@@ -34,7 +37,12 @@ export default function Agents() {
     const be = backendFilter();
     const rt = runtimeFilter();
     return list().filter((a) => {
-      if (q && !a.name.toLowerCase().includes(q) && !a.id.toLowerCase().includes(q)) return false;
+      if (
+        q &&
+        !a.name.toLowerCase().includes(q) &&
+        !a.id.toLowerCase().includes(q)
+      )
+        return false;
       if (be && a.backend !== be) return false;
       if (rt && a.agentRuntime !== rt) return false;
       return true;
@@ -82,9 +90,7 @@ export default function Agents() {
             class="px-3 py-1.5 rounded bg-surface-2 border border-border text-text text-sm focus:outline-none focus:border-accent"
           >
             <option value="">All backends</option>
-            <For each={backends()}>
-              {(b) => <option value={b}>{b}</option>}
-            </For>
+            <For each={backends()}>{(b) => <option value={b}>{b}</option>}</For>
           </select>
           <select
             value={runtimeFilter()}
@@ -92,13 +98,13 @@ export default function Agents() {
             class="px-3 py-1.5 rounded bg-surface-2 border border-border text-text text-sm focus:outline-none focus:border-accent"
           >
             <option value="">All runtimes</option>
-            <For each={runtimes()}>
-              {(r) => <option value={r}>{r}</option>}
-            </For>
+            <For each={runtimes()}>{(r) => <option value={r}>{r}</option>}</For>
           </select>
         </div>
 
-        <Suspense fallback={<div class="text-text-dim text-sm">Loading agents...</div>}>
+        <Suspense
+          fallback={<div class="text-text-dim text-sm">Loading agents...</div>}
+        >
           <div class="overflow-x-auto rounded border border-border">
             <table class="w-full text-sm">
               <thead>
@@ -112,15 +118,24 @@ export default function Agents() {
                 </tr>
               </thead>
               <tbody>
-                <For each={filtered()} fallback={
-                  <tr>
-                    <td colspan="6" class="px-3 py-8 text-center text-text-dim">
-                      <Show when={list().length > 0} fallback="No agents registered.">
-                        No agents match the current filters.
-                      </Show>
-                    </td>
-                  </tr>
-                }>
+                <For
+                  each={filtered()}
+                  fallback={
+                    <tr>
+                      <td
+                        colspan="6"
+                        class="px-3 py-8 text-center text-text-dim"
+                      >
+                        <Show
+                          when={list().length > 0}
+                          fallback="No agents registered."
+                        >
+                          No agents match the current filters.
+                        </Show>
+                      </td>
+                    </tr>
+                  }
+                >
                   {(agent) => <AgentCard agent={agent} taskCount={0} />}
                 </For>
               </tbody>

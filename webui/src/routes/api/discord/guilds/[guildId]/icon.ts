@@ -11,7 +11,10 @@ export async function GET({ params, request }: APIEvent) {
   const botId = url.searchParams.get('botId') || undefined;
 
   if (typeof state.resolveDiscordGuildImageResponse === 'function') {
-    const response = await state.resolveDiscordGuildImageResponse(params.guildId, botId);
+    const response = await state.resolveDiscordGuildImageResponse(
+      params.guildId,
+      botId,
+    );
     if (response) return response;
   }
 

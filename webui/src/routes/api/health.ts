@@ -14,7 +14,9 @@ export function GET() {
     byRuntime[agent.agentRuntime] = (byRuntime[agent.agentRuntime] || 0) + 1;
   }
 
-  let activeTasks = 0, pausedTasks = 0, completedTasks = 0;
+  let activeTasks = 0,
+    pausedTasks = 0,
+    completedTasks = 0;
   for (const t of tasks) {
     if (t.status === 'active') activeTasks++;
     else if (t.status === 'paused') pausedTasks++;
@@ -46,7 +48,12 @@ export function GET() {
       max_active: stats.maxActive,
       max_idle: stats.maxIdle,
     },
-    tasks: { active: activeTasks, paused: pausedTasks, completed: completedTasks, total: tasks.length },
+    tasks: {
+      active: activeTasks,
+      paused: pausedTasks,
+      completed: completedTasks,
+      total: tasks.length,
+    },
     sse_clients: 0,
     started_at: new Date().toISOString(),
   });

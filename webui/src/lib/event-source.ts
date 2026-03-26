@@ -17,7 +17,8 @@ const EventSourceContext = createContext<EventSourceState>();
 
 export function useEventSource() {
   const ctx = useContext(EventSourceContext);
-  if (!ctx) throw new Error('useEventSource must be used within EventSourceProvider');
+  if (!ctx)
+    throw new Error('useEventSource must be used within EventSourceProvider');
   return ctx;
 }
 
@@ -68,9 +69,7 @@ export function createEventSource(): EventSourceState {
     es.addEventListener('task_update', (e) =>
       onSseEvent<TaskState[]>(e, updateTasks),
     );
-    es.addEventListener('log', (e) =>
-      onSseEvent<LogLine>(e, appendLog),
-    );
+    es.addEventListener('log', (e) => onSseEvent<LogLine>(e, appendLog));
     es.addEventListener('stats', (e) =>
       onSseEvent<Partial<StatsState>>(e, updateStats),
     );

@@ -10,12 +10,14 @@ export function GET({ params }: APIEvent) {
 
   if (typeof state.getAgentDetail === 'function') {
     const data = state.getAgentDetail(agentId);
-    if (!data) return Response.json({ error: 'Agent not found' }, { status: 404 });
+    if (!data)
+      return Response.json({ error: 'Agent not found' }, { status: 404 });
     return Response.json(data);
   }
 
   const agents = state.getAgents();
   const agent = agents[agentId];
-  if (!agent) return Response.json({ error: 'Agent not found' }, { status: 404 });
+  if (!agent)
+    return Response.json({ error: 'Agent not found' }, { status: 404 });
   return Response.json(agent);
 }

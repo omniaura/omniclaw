@@ -38,7 +38,9 @@ export default function LogPanel() {
                   ? 'bg-surface-2 text-text'
                   : 'text-text-dim'
               }`}
-              onClick={() => setEnabledLevels((prev) => toggleLevelSet(prev, level))}
+              onClick={() =>
+                setEnabledLevels((prev) => toggleLevelSet(prev, level))
+              }
             >
               {level}
             </button>
@@ -54,9 +56,7 @@ export default function LogPanel() {
         </button>
       </div>
       <div ref={containerRef} class="flex-1 overflow-auto p-1 text-xs min-h-0">
-        <For each={filteredLogs()}>
-          {(line) => <LogLine line={line} />}
-        </For>
+        <For each={filteredLogs()}>{(line) => <LogLine line={line} />}</For>
       </div>
     </div>
   );
