@@ -462,7 +462,10 @@ describe('basic auth', () => {
       makePeerTrustStore(),
     );
 
-    const body = JSON.stringify({ path: 'team/CLAUDE.md', content: 'peer sync' });
+    const body = JSON.stringify({
+      path: 'team/CLAUDE.md',
+      content: 'peer sync',
+    });
     const res = await fetch(url('/api/context/file'), {
       method: 'PUT',
       headers: buildPeerAuthHeaders('/api/context/file', 'PUT', body),

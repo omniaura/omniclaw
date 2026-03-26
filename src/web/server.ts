@@ -93,9 +93,13 @@ async function hashRequestBodyWithLimit(
   req: Request,
   maxBytes: number,
 ): Promise<RequestBodyHashResult> {
-  const contentLength = Number.parseInt(req.headers.get('content-length') || '', 10);
+  const contentLength = Number.parseInt(
+    req.headers.get('content-length') || '',
+    10,
+  );
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
     return {
+      // Placeholder; callers reject over-limit requests before using the hash.
       hash: createHash('sha256').update('').digest('hex'),
       exceededLimit: true,
     };
@@ -127,6 +131,7 @@ async function hashRequestBodyWithLimit(
           // Ignore cancellation failures; the caller only needs the limit signal.
         }
         return {
+          // Placeholder; callers reject over-limit requests before using the hash.
           hash: createHash('sha256').update('').digest('hex'),
           exceededLimit: true,
         };
