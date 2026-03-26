@@ -1,3 +1,5 @@
+import { createHash, createHmac, randomUUID } from 'crypto';
+
 import { describe, it, expect, afterEach } from 'bun:test';
 
 import {
@@ -175,6 +177,7 @@ function extractInlineShellScript(html: string): string {
 
 const testAuth = { username: 'admin', password: 'secret' };
 const authHeader = `Basic ${btoa(`${testAuth.username}:${testAuth.password}`)}`;
+const peerSecret = 'peer-shared-secret-32-bytes-long!';
 
 let handle: WebServerHandle | null = null;
 
@@ -298,6 +301,37 @@ function testConfig(
   return { port: randomPort(), auth: testAuth, ...overrides };
 }
 
+function buildPeerAuthHeaders(
+  path: string,
+  method: string,
+  body: string,
+  secret: string = peerSecret,
+  instanceId = 'peer-instance',
+): Headers {
+  const timestamp = Date.now().toString();
+  const nonce = randomUUID();
+  const bodyHash = createHash('sha256').update(body).digest('hex');
+  const signature = createHmac('sha256', secret)
+    .update([method.toUpperCase(), path, timestamp, nonce, bodyHash].join('\n'))
+    .digest('hex');
+
+  return new Headers({
+    'Content-Type': 'application/json',
+    'X-OmniClaw-Instance': instanceId,
+    'X-OmniClaw-Timestamp': timestamp,
+    'X-OmniClaw-Nonce': nonce,
+    'X-OmniClaw-Body-SHA256': bodyHash,
+    'X-OmniClaw-Signature': signature,
+  });
+}
+
+function makePeerTrustStore(secret: string = peerSecret) {
+  return {
+    getPeerSecret: () => secret,
+    updatePeerLastSeen: () => {},
+  } as never;
+}
+
 function setTestDiscoveryContext(): void {
   setDiscoveryContext(
     {
@@ -414,6 +448,61 @@ describe('basic auth', () => {
     const res = await fetch(url('/api/discovery/requests'));
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual([]);
+  });
+
+  it('allows authenticated peer routes without Basic Auth', async () => {
+    let writeArgs: { path: string; content: string } | null = null;
+    handle = startWebServer(
+      testConfig(),
+      makeState({
+        writeContextFile: (path, content) => {
+          writeArgs = { path, content };
+        },
+      }),
+      makePeerTrustStore(),
+    );
+
+    const body = JSON.stringify({ path: 'team/CLAUDE.md', content: 'peer sync' });
+    const res = await fetch(url('/api/context/file'), {
+      method: 'PUT',
+      headers: buildPeerAuthHeaders('/api/context/file', 'PUT', body),
+      body,
+    });
+
+    expect(res.status).toBe(200);
+    expect(writeArgs).not.toBeNull();
+    if (!writeArgs) throw new Error('Expected peer write to be captured');
+    const capturedWrite = writeArgs as { path: string; content: string };
+    expect(capturedWrite.path).toBe('team/CLAUDE.md');
+    expect(capturedWrite.content).toBe('peer sync');
+  });
+
+  it('rejects oversized peer-auth bodies before routing', async () => {
+    let writeCalls = 0;
+    handle = startWebServer(
+      testConfig(),
+      makeState({
+        writeContextFile: () => {
+          writeCalls += 1;
+        },
+      }),
+      makePeerTrustStore(),
+    );
+
+    const oversizedContent = 'x'.repeat(1024 * 1024 + 64);
+    const body = JSON.stringify({
+      path: 'team/CLAUDE.md',
+      content: oversizedContent,
+    });
+    const res = await fetch(url('/api/context/file'), {
+      method: 'PUT',
+      headers: buildPeerAuthHeaders('/api/context/file', 'PUT', body),
+      body,
+    });
+
+    expect(res.status).toBe(413);
+    await expect(res.text()).resolves.toBe('Peer request body too large');
+    expect(writeCalls).toBe(0);
   });
 });
 
