@@ -93,7 +93,10 @@ export default function TaskCard(props: TaskCardProps) {
         <Badge>{props.task.schedule_type}</Badge>{' '}
         <span class="text-text-dim">{schedLabel()}</span>
       </td>
-      <td class="px-3 py-2 whitespace-nowrap text-text-dim" title={props.task.next_run ?? ''}>
+      <td
+        class="px-3 py-2 whitespace-nowrap text-text-dim"
+        title={props.task.next_run ?? ''}
+      >
         {nextRun()}
       </td>
       <td

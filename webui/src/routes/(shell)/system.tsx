@@ -22,8 +22,7 @@ function formatUptime(seconds: number): string {
 }
 
 function BreakdownList(props: { items: Record<string, number> }) {
-  const sorted = () =>
-    Object.entries(props.items).sort((a, b) => b[1] - a[1]);
+  const sorted = () => Object.entries(props.items).sort((a, b) => b[1] - a[1]);
 
   return (
     <For each={sorted()}>
@@ -106,10 +105,7 @@ export default function System() {
               </MetricCard>
 
               <MetricCard title="agents">
-                <MetricRow
-                  label="total"
-                  value={String(h().agents.total)}
-                />
+                <MetricRow label="total" value={String(h().agents.total)} />
                 <div class="text-text-dim text-[10px] uppercase tracking-wider mt-2 mb-1">
                   by backend
                 </div>
@@ -121,22 +117,13 @@ export default function System() {
               </MetricCard>
 
               <MetricCard title="tasks">
-                <MetricRow
-                  label="active"
-                  value={String(h().tasks.active)}
-                />
-                <MetricRow
-                  label="paused"
-                  value={String(h().tasks.paused)}
-                />
+                <MetricRow label="active" value={String(h().tasks.active)} />
+                <MetricRow label="paused" value={String(h().tasks.paused)} />
                 <MetricRow
                   label="completed"
                   value={String(h().tasks.completed)}
                 />
-                <MetricRow
-                  label="total"
-                  value={String(h().tasks.total)}
-                />
+                <MetricRow label="total" value={String(h().tasks.total)} />
               </MetricCard>
             </div>
           )}

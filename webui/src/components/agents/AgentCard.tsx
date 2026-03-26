@@ -31,7 +31,10 @@ export default function AgentCard(props: AgentCardProps) {
   return (
     <tr class="border-b border-border hover:bg-surface-2/50 transition-colors">
       <td class="px-3 py-2">
-        <A href={detailHref()} class="flex items-center gap-2 text-text hover:text-accent-hover transition-colors">
+        <A
+          href={detailHref()}
+          class="flex items-center gap-2 text-text hover:text-accent-hover transition-colors"
+        >
           <span class="flex-shrink-0 w-7 h-7 rounded-full bg-surface-2 flex items-center justify-center overflow-hidden text-xs font-medium text-text-dim">
             <Show when={src()} fallback={initial()}>
               <img
@@ -40,17 +43,23 @@ export default function AgentCard(props: AgentCardProps) {
                 class="w-full h-full object-cover"
                 onError={(e) => {
                   (e.currentTarget as HTMLImageElement).style.display = 'none';
-                  (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.setProperty('display', 'flex');
+                  (
+                    e.currentTarget.nextElementSibling as HTMLElement | null
+                  )?.style.setProperty('display', 'flex');
                 }}
               />
-              <span class="hidden items-center justify-center w-full h-full">{initial()}</span>
+              <span class="hidden items-center justify-center w-full h-full">
+                {initial()}
+              </span>
             </Show>
           </span>
           <span class="font-medium">{props.agent.name}</span>
         </A>
       </td>
       <td class="px-3 py-2">
-        <Badge variant={backendVariant(props.agent.backend)}>{props.agent.backend}</Badge>
+        <Badge variant={backendVariant(props.agent.backend)}>
+          {props.agent.backend}
+        </Badge>
       </td>
       <td class="px-3 py-2">
         <Badge>{props.agent.agentRuntime}</Badge>
@@ -63,7 +72,9 @@ export default function AgentCard(props: AgentCardProps) {
             <Badge variant="admin">admin</Badge>
           </Show>
           <Show when={props.agent.remoteInstanceId}>
-            <Badge variant="remote">{props.agent.remoteInstanceName || 'remote'}</Badge>
+            <Badge variant="remote">
+              {props.agent.remoteInstanceName || 'remote'}
+            </Badge>
           </Show>
         </div>
       </td>

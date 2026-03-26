@@ -22,26 +22,57 @@ export async function POST({ request }: APIEvent) {
     return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode } = body;
+  const {
+    group_folder,
+    chat_jid,
+    prompt,
+    schedule_type,
+    schedule_value,
+    context_mode,
+  } = body;
 
   if (!prompt || typeof prompt !== 'string') {
-    return Response.json({ error: 'Missing or invalid "prompt"' }, { status: 400 });
+    return Response.json(
+      { error: 'Missing or invalid "prompt"' },
+      { status: 400 },
+    );
   }
-  if (!schedule_type || !['cron', 'interval', 'once'].includes(schedule_type as string)) {
-    return Response.json({ error: 'Missing or invalid "schedule_type"' }, { status: 400 });
+  if (
+    !schedule_type ||
+    !['cron', 'interval', 'once'].includes(schedule_type as string)
+  ) {
+    return Response.json(
+      { error: 'Missing or invalid "schedule_type"' },
+      { status: 400 },
+    );
   }
   if (!schedule_value || typeof schedule_value !== 'string') {
-    return Response.json({ error: 'Missing or invalid "schedule_value"' }, { status: 400 });
+    return Response.json(
+      { error: 'Missing or invalid "schedule_value"' },
+      { status: 400 },
+    );
   }
   if (!group_folder || typeof group_folder !== 'string') {
-    return Response.json({ error: 'Missing or invalid "group_folder"' }, { status: 400 });
+    return Response.json(
+      { error: 'Missing or invalid "group_folder"' },
+      { status: 400 },
+    );
   }
   if (!chat_jid || typeof chat_jid !== 'string') {
-    return Response.json({ error: 'Missing or invalid "chat_jid"' }, { status: 400 });
+    return Response.json(
+      { error: 'Missing or invalid "chat_jid"' },
+      { status: 400 },
+    );
   }
 
-  const validContextMode = context_mode === 'group' || context_mode === 'isolated' ? context_mode : 'isolated';
-  const nextRun = state.calculateNextRun(schedule_type as string, schedule_value as string);
+  const validContextMode =
+    context_mode === 'group' || context_mode === 'isolated'
+      ? context_mode
+      : 'isolated';
+  const nextRun = state.calculateNextRun(
+    schedule_type as string,
+    schedule_value as string,
+  );
   if (nextRun === null) {
     return Response.json({ error: 'Invalid schedule' }, { status: 400 });
   }
@@ -63,8 +94,14 @@ export async function POST({ request }: APIEvent) {
   try {
     state.createTask(task);
   } catch (err: any) {
-    return Response.json({ error: `Failed to create task: ${err.message}` }, { status: 500 });
+    return Response.json(
+      { error: `Failed to create task: ${err.message}` },
+      { status: 500 },
+    );
   }
 
-  return Response.json({ ...task, last_run: null, last_result: null }, { status: 201 });
+  return Response.json(
+    { ...task, last_run: null, last_result: null },
+    { status: 201 },
+  );
 }

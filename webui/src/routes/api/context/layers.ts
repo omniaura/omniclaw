@@ -15,7 +15,10 @@ export function GET({ request }: APIEvent) {
   const categoryPath = categoryFolder || null;
   const serverPath = serverFolder || null;
 
-  const layers: Record<string, { path: string | null; content: string | null; exists: boolean }> = {
+  const layers: Record<
+    string,
+    { path: string | null; content: string | null; exists: boolean }
+  > = {
     channel: {
       path: channelPath || null,
       content: channelPath ? state.readContextFile(channelPath) : null,
@@ -29,7 +32,9 @@ export function GET({ request }: APIEvent) {
     category: {
       path: categoryPath,
       content: categoryPath ? state.readContextFile(categoryPath) : null,
-      exists: categoryPath ? state.readContextFile(categoryPath) !== null : false,
+      exists: categoryPath
+        ? state.readContextFile(categoryPath) !== null
+        : false,
     },
     server: {
       path: serverPath,

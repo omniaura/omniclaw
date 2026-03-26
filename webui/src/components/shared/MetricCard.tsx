@@ -21,7 +21,9 @@ export function BooleanRow(props: {
     <div class="flex justify-between items-center py-1.5 border-b border-border/50 last:border-b-0">
       <span class="text-text-dim text-xs">{props.label}</span>
       <Badge variant={props.value ? 'active' : 'completed'}>
-        {props.value ? (props.onLabel ?? 'enabled') : (props.offLabel ?? 'disabled')}
+        {props.value
+          ? (props.onLabel ?? 'enabled')
+          : (props.offLabel ?? 'disabled')}
       </Badge>
     </div>
   );

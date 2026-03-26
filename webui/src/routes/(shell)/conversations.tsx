@@ -83,7 +83,10 @@ export default function Conversations() {
           chatName={selectedChatName()}
           messages={messages() ?? []}
           loading={messages.loading}
-          hasMore={messageLimit() === PAGE_SIZE && (messages()?.length ?? 0) >= PAGE_SIZE}
+          hasMore={
+            messageLimit() === PAGE_SIZE &&
+            (messages()?.length ?? 0) >= PAGE_SIZE
+          }
           onLoadMore={handleLoadMore}
         />
       </div>

@@ -4,10 +4,7 @@ import { Suspense } from 'solid-js';
 import Nav from '~/components/Nav';
 import Sidebar from '~/components/Sidebar';
 import ToastContainer from '~/components/shared/Toast';
-import {
-  createEventSource,
-  EventSourceContext,
-} from '~/lib/event-source';
+import { createEventSource, EventSourceContext } from '~/lib/event-source';
 
 export default function ShellLayout(props: RouteSectionProps) {
   const eventSource = createEventSource();

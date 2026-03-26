@@ -1,11 +1,5 @@
 import { Title } from '@solidjs/meta';
-import {
-  createSignal,
-  createResource,
-  For,
-  Show,
-  createMemo,
-} from 'solid-js';
+import { createSignal, createResource, For, Show, createMemo } from 'solid-js';
 import { createStore } from 'solid-js/store';
 
 import Modal from '~/components/shared/Modal';
@@ -64,7 +58,13 @@ function cronPreview(expr: string): string {
   const p = expr.trim().split(/\s+/);
   if (p.length < 5) return '';
   const [min, hr, dom, mon, dow] = p;
-  if (min.includes('/') && hr === '*' && dom === '*' && mon === '*' && dow === '*') {
+  if (
+    min.includes('/') &&
+    hr === '*' &&
+    dom === '*' &&
+    mon === '*' &&
+    dow === '*'
+  ) {
     const n = min.split('/')[1];
     return `Every ${n} minute${n === '1' ? '' : 's'}`;
   }
@@ -72,16 +72,31 @@ function cronPreview(expr: string): string {
     const n = hr.split('/')[1];
     return `Every ${n} hour${n === '1' ? '' : 's'}`;
   }
-  if (/^\d+$/.test(min) && /^\d+$/.test(hr) && dom === '*' && mon === '*' && dow === '*') {
+  if (
+    /^\d+$/.test(min) &&
+    /^\d+$/.test(hr) &&
+    dom === '*' &&
+    mon === '*' &&
+    dow === '*'
+  ) {
     const h = parseInt(hr, 10);
     const m = parseInt(min, 10);
     const ampm = h >= 12 ? 'PM' : 'AM';
     const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
     return `Daily at ${h12}:${m < 10 ? '0' : ''}${m} ${ampm}`;
   }
-  if (/^\d+$/.test(min) && /^\d+$/.test(hr) && dom === '*' && mon === '*' && dow !== '*') {
+  if (
+    /^\d+$/.test(min) &&
+    /^\d+$/.test(hr) &&
+    dom === '*' &&
+    mon === '*' &&
+    dow !== '*'
+  ) {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const dayNames = dow.split(',').map((d) => days[parseInt(d, 10)] || d).join(', ');
+    const dayNames = dow
+      .split(',')
+      .map((d) => days[parseInt(d, 10)] || d)
+      .join(', ');
     const h = parseInt(hr, 10);
     const m = parseInt(min, 10);
     const ampm = h >= 12 ? 'PM' : 'AM';
@@ -105,7 +120,9 @@ export default function Tasks() {
   const [formError, setFormError] = createSignal('');
   const [submitting, setSubmitting] = createSignal(false);
 
-  const [createForm, setCreateForm] = createStore<TaskFormState>({ ...EMPTY_FORM });
+  const [createForm, setCreateForm] = createStore<TaskFormState>({
+    ...EMPTY_FORM,
+  });
   const [editForm, setEditForm] = createStore<TaskFormState>({ ...EMPTY_FORM });
 
   const agentOptions = createMemo(() => {
@@ -130,7 +147,9 @@ export default function Tasks() {
 
   const stats = createMemo(() => {
     const all = tasks() ?? [];
-    let active = 0, paused = 0, completed = 0;
+    let active = 0,
+      paused = 0,
+      completed = 0;
     for (const t of all) {
       if (t.status === 'active') active++;
       else if (t.status === 'paused') paused++;
@@ -142,7 +161,10 @@ export default function Tasks() {
   async function handleToggle(id: string, newStatus: 'active' | 'paused') {
     try {
       await api.updateTask(id, { status: newStatus });
-      showToast(`Task ${newStatus === 'paused' ? 'paused' : 'resumed'}`, 'success');
+      showToast(
+        `Task ${newStatus === 'paused' ? 'paused' : 'resumed'}`,
+        'success',
+      );
       refetch();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed', 'error');
@@ -193,7 +215,10 @@ export default function Tasks() {
       setFormError('');
       setEditOpen(true);
     } catch (err) {
-      showToast(`Failed to load task: ${err instanceof Error ? err.message : 'unknown'}`, 'error');
+      showToast(
+        `Failed to load task: ${err instanceof Error ? err.message : 'unknown'}`,
+        'error',
+      );
     }
   }
 
@@ -311,9 +336,12 @@ export default function Tasks() {
               </For>
             </tbody>
           </table>
-          <Show when={(filteredTasks()).length === 0}>
+          <Show when={filteredTasks().length === 0}>
             <div class="text-text-dim text-xs p-4 text-center">
-              <Show when={(tasks() ?? []).length === 0} fallback="No tasks match the current filter.">
+              <Show
+                when={(tasks() ?? []).length === 0}
+                fallback="No tasks match the current filter."
+              >
                 No scheduled tasks yet. Create one to get started.
               </Show>
             </div>
@@ -488,9 +516,7 @@ function TaskForm(props: TaskFormProps) {
         <select
           class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-xs text-text"
           value={props.form.context_mode}
-          onChange={(e) =>
-            props.setForm('context_mode', e.currentTarget.value)
-          }
+          onChange={(e) => props.setForm('context_mode', e.currentTarget.value)}
         >
           <option value="isolated">Isolated</option>
           <option value="group">Group (with history)</option>

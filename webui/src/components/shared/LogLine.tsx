@@ -32,9 +32,7 @@ interface LogLineProps {
 export default function LogLine(props: LogLineProps) {
   return (
     <div class={`flex gap-1.5 py-px leading-relaxed ${props.class ?? ''}`}>
-      <span class="text-text-dim shrink-0">
-        {formatLogTime(props.line.ts)}
-      </span>
+      <span class="text-text-dim shrink-0">{formatLogTime(props.line.ts)}</span>
       <span
         class={`shrink-0 ${props.badgeWidth ?? 'w-10'} ${levelColors[props.line.level] ?? 'text-text-dim'}`}
       >
@@ -51,11 +49,10 @@ export default function LogLine(props: LogLineProps) {
       <span class="text-text break-all">
         {props.line.msg}
         <Show when={props.line.durationMs != null}>
-          {' '}({props.line.durationMs}ms)
+          {' '}
+          ({props.line.durationMs}ms)
         </Show>
-        <Show when={props.line.costUsd != null}>
-          {' '}${props.line.costUsd}
-        </Show>
+        <Show when={props.line.costUsd != null}> ${props.line.costUsd}</Show>
       </span>
       <Show when={props.line.err}>
         <span class="text-red break-all">{props.line.err}</span>

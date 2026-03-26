@@ -70,8 +70,12 @@ export default function AgentDetail() {
             when={agent()}
             fallback={
               <div class="text-text-dim">
-                <p>Agent not found: <code class="text-accent">{params.id}</code></p>
-                <A href="/agents" class="text-sm mt-2 inline-block">back to agents</A>
+                <p>
+                  Agent not found: <code class="text-accent">{params.id}</code>
+                </p>
+                <A href="/agents" class="text-sm mt-2 inline-block">
+                  back to agents
+                </A>
               </div>
             }
           >
@@ -98,19 +102,27 @@ export default function AgentDetail() {
                   </Show>
 
                   <div class="min-w-0">
-                    <h2 class="text-xl text-text-bright font-semibold mb-1">{data().name}</h2>
+                    <h2 class="text-xl text-text-bright font-semibold mb-1">
+                      {data().name}
+                    </h2>
                     <div class="flex flex-wrap gap-1.5 mb-1">
-                      <Badge variant={backendVariant(data().backend)}>{data().backend}</Badge>
+                      <Badge variant={backendVariant(data().backend)}>
+                        {data().backend}
+                      </Badge>
                       <Badge>{data().agentRuntime}</Badge>
                       <Show when={data().remoteInstanceId}>
-                        <Badge variant="remote">{data().remoteInstanceName || data().remoteInstanceId}</Badge>
+                        <Badge variant="remote">
+                          {data().remoteInstanceName || data().remoteInstanceId}
+                        </Badge>
                       </Show>
                       <Show when={data().isAdmin}>
                         <Badge variant="admin">admin</Badge>
                       </Show>
                     </div>
                     <Show when={data().description}>
-                      <p class="text-sm text-text-dim mt-1">{data().description}</p>
+                      <p class="text-sm text-text-dim mt-1">
+                        {data().description}
+                      </p>
                     </Show>
                   </div>
                 </div>
@@ -119,15 +131,26 @@ export default function AgentDetail() {
                 <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6 text-sm">
                   <InfoItem label="id" value={data().id} />
                   <InfoItem label="folder" value={data().folder} />
-                  <InfoItem label="created" value={formatDate(data().createdAt)} />
+                  <InfoItem
+                    label="created"
+                    value={formatDate(data().createdAt)}
+                  />
                   <Show when={data().remoteInstanceId}>
-                    <InfoItem label="remote peer" value={data().remoteInstanceName || data().remoteInstanceId!} />
+                    <InfoItem
+                      label="remote peer"
+                      value={
+                        data().remoteInstanceName || data().remoteInstanceId!
+                      }
+                    />
                   </Show>
                   <Show when={data().serverFolder}>
                     <InfoItem label="server" value={data().serverFolder!} />
                   </Show>
                   <Show when={data().agentContextFolder}>
-                    <InfoItem label="context folder" value={data().agentContextFolder!} />
+                    <InfoItem
+                      label="context folder"
+                      value={data().agentContextFolder!}
+                    />
                   </Show>
                 </div>
 
@@ -153,7 +176,9 @@ export default function AgentDetail() {
                         >
                           {tab.label}
                           <Show when={count() !== undefined}>
-                            <span class="ml-1 text-xs text-text-dim">({count()})</span>
+                            <span class="ml-1 text-xs text-text-dim">
+                              ({count()})
+                            </span>
                           </Show>
                         </button>
                       );
@@ -192,23 +217,39 @@ export default function AgentDetail() {
                         <Show
                           when={data().channels.length > 0}
                           fallback={
-                            <tr><td colspan="4" class="py-3 text-text-dim">No channels subscribed</td></tr>
+                            <tr>
+                              <td colspan="4" class="py-3 text-text-dim">
+                                No channels subscribed
+                              </td>
+                            </tr>
                           }
                         >
                           <For each={data().channels}>
                             {(ch) => (
                               <tr class="border-b border-border/50 hover:bg-surface-2/50">
                                 <td class="py-2 pr-4">{ch.displayName}</td>
-                                <td class="py-2 pr-4 text-text-dim">{ch.jid}</td>
-                                <td class="py-2 pr-4 text-text-dim">{ch.channelFolder ?? '\u2014'}</td>
+                                <td class="py-2 pr-4 text-text-dim">
+                                  {ch.jid}
+                                </td>
+                                <td class="py-2 pr-4 text-text-dim">
+                                  {ch.channelFolder ?? '\u2014'}
+                                </td>
                                 <td class="py-2">
                                   <Show
                                     when={!data().remoteInstanceId}
-                                    fallback={<span class="text-text-dim text-xs">remote</span>}
+                                    fallback={
+                                      <span class="text-text-dim text-xs">
+                                        remote
+                                      </span>
+                                    }
                                   >
                                     <button
                                       class="px-2 py-0.5 text-xs rounded bg-surface-2 text-text-dim hover:text-text hover:bg-border"
-                                      onClick={() => navigate(`/conversations?chat=${encodeURIComponent(ch.jid)}`)}
+                                      onClick={() =>
+                                        navigate(
+                                          `/conversations?chat=${encodeURIComponent(ch.jid)}`,
+                                        )
+                                      }
                                     >
                                       messages
                                     </button>
@@ -238,14 +279,20 @@ export default function AgentDetail() {
                         <Show
                           when={data().tasks.length > 0}
                           fallback={
-                            <tr><td colspan="4" class="py-3 text-text-dim">No scheduled tasks</td></tr>
+                            <tr>
+                              <td colspan="4" class="py-3 text-text-dim">
+                                No scheduled tasks
+                              </td>
+                            </tr>
                           }
                         >
                           <For each={data().tasks}>
                             {(task) => (
                               <tr class="border-b border-border/50 hover:bg-surface-2/50">
                                 <td class="py-2 pr-4">
-                                  <Badge variant={statusVariant(task.status)}>{task.status}</Badge>
+                                  <Badge variant={statusVariant(task.status)}>
+                                    {task.status}
+                                  </Badge>
                                 </td>
                                 <td class="py-2 pr-4" title={task.prompt}>
                                   {truncate(task.prompt, 80)}
@@ -253,7 +300,9 @@ export default function AgentDetail() {
                                 <td class="py-2 pr-4 text-text-dim">
                                   {task.schedule_type}: {task.schedule_value}
                                 </td>
-                                <td class="py-2 text-text-dim">{formatDate(task.next_run)}</td>
+                                <td class="py-2 text-text-dim">
+                                  {formatDate(task.next_run)}
+                                </td>
                               </tr>
                             )}
                           </For>
@@ -277,18 +326,28 @@ export default function AgentDetail() {
                         <Show
                           when={data().recentChats.length > 0}
                           fallback={
-                            <tr><td colspan="3" class="py-3 text-text-dim">No conversations</td></tr>
+                            <tr>
+                              <td colspan="3" class="py-3 text-text-dim">
+                                No conversations
+                              </td>
+                            </tr>
                           }
                         >
                           <For each={data().recentChats}>
                             {(chat) => (
                               <tr class="border-b border-border/50 hover:bg-surface-2/50">
                                 <td class="py-2 pr-4">{chat.name}</td>
-                                <td class="py-2 pr-4 text-text-dim">{formatDate(chat.last_message_time)}</td>
+                                <td class="py-2 pr-4 text-text-dim">
+                                  {formatDate(chat.last_message_time)}
+                                </td>
                                 <td class="py-2">
                                   <button
                                     class="px-2 py-0.5 text-xs rounded bg-surface-2 text-text-dim hover:text-text hover:bg-border"
-                                    onClick={() => navigate(`/conversations?chat=${encodeURIComponent(chat.jid)}`)}
+                                    onClick={() =>
+                                      navigate(
+                                        `/conversations?chat=${encodeURIComponent(chat.jid)}`,
+                                      )
+                                    }
                                   >
                                     view
                                   </button>

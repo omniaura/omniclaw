@@ -109,7 +109,9 @@ function buildGraph(
   const categorySet: Record<string, boolean> = {};
   const channelSet: Record<string, boolean> = {};
 
-  function makeNode(overrides: Partial<TopoNode> & { id: string; type: TopoNode['type'] }): TopoNode {
+  function makeNode(
+    overrides: Partial<TopoNode> & { id: string; type: TopoNode['type'] },
+  ): TopoNode {
     return {
       label: '',
       sub: '',
@@ -167,7 +169,8 @@ function buildGraph(
         const catK = 'cat:' + ch.categoryFolder;
         if (!categorySet[catK]) {
           categorySet[catK] = true;
-          const catLabel = ch.categoryFolder.split('/').pop() || ch.categoryFolder;
+          const catLabel =
+            ch.categoryFolder.split('/').pop() || ch.categoryFolder;
           const cn = makeNode({
             id: catK,
             type: 'category',
@@ -185,7 +188,10 @@ function buildGraph(
 
           if (a.serverFolder) {
             const sk = 's:' + a.serverFolder;
-            if (nodeMap[sk] && ch.categoryFolder.indexOf(a.serverFolder) === 0) {
+            if (
+              nodeMap[sk] &&
+              ch.categoryFolder.indexOf(a.serverFolder) === 0
+            ) {
               edges.push({ from: sk, to: catK, type: 'hierarchy' });
             }
           }
@@ -214,9 +220,17 @@ function buildGraph(
         nodeMap[chK] = chNode;
 
         if (ch.categoryFolder) {
-          edges.push({ from: 'cat:' + ch.categoryFolder, to: chK, type: 'hierarchy' });
+          edges.push({
+            from: 'cat:' + ch.categoryFolder,
+            to: chK,
+            type: 'hierarchy',
+          });
         } else if (a.serverFolder) {
-          edges.push({ from: 's:' + a.serverFolder, to: chK, type: 'hierarchy' });
+          edges.push({
+            from: 's:' + a.serverFolder,
+            to: chK,
+            type: 'hierarchy',
+          });
         }
       } else {
         nodeMap[chK].r = Math.min(14, nodeMap[chK].r + 1);
@@ -233,7 +247,9 @@ function buildGraph(
       label: a.name,
       sub: a.backend,
       detail:
-        (a.remoteInstanceName ? 'remote:' + a.remoteInstanceName + ' \u2022 ' : '') +
+        (a.remoteInstanceName
+          ? 'remote:' + a.remoteInstanceName + ' \u2022 '
+          : '') +
         a.agentRuntime +
         (a.isAdmin ? ' (admin)' : ''),
       fullName: a.name,
@@ -259,12 +275,14 @@ function buildGraph(
   const agentNodes = nodes.filter((n) => n.type === 'agent');
 
   serverNodes.forEach((n, i) => {
-    const angle = (2 * Math.PI * i) / Math.max(1, serverNodes.length) - Math.PI / 2;
+    const angle =
+      (2 * Math.PI * i) / Math.max(1, serverNodes.length) - Math.PI / 2;
     n.x = centerX + Math.cos(angle) * 60;
     n.y = centerY + Math.sin(angle) * 60;
   });
   catNodes.forEach((n, i) => {
-    const angle = (2 * Math.PI * i) / Math.max(1, catNodes.length) - Math.PI / 4;
+    const angle =
+      (2 * Math.PI * i) / Math.max(1, catNodes.length) - Math.PI / 4;
     n.x = centerX + Math.cos(angle) * 180;
     n.y = centerY + Math.sin(angle) * 180;
   });
@@ -274,7 +292,8 @@ function buildGraph(
     n.y = centerY + Math.sin(angle) * 320;
   });
   agentNodes.forEach((n, i) => {
-    const angle = (2 * Math.PI * i) / Math.max(1, agentNodes.length) + Math.PI / 6;
+    const angle =
+      (2 * Math.PI * i) / Math.max(1, agentNodes.length) + Math.PI / 6;
     n.x = centerX + Math.cos(angle) * 140;
     n.y = centerY + Math.sin(angle) * 140;
   });
@@ -294,7 +313,10 @@ export default function TopologyCanvas() {
   // Fetch full agent topology data when SSE agent list changes (includes initial load)
   createEffect(() => {
     const _count = agents.list.length;
-    api.getAgents().then(setAgentData).catch(() => {});
+    api
+      .getAgents()
+      .then(setAgentData)
+      .catch(() => {});
   });
 
   onMount(() => {
@@ -478,7 +500,13 @@ export default function TopologyCanvas() {
       const a = nodeMap[e.from];
       const b = nodeMap[e.to];
       if (!a || !b) return;
-      particles.push({ from: a, to: b, t: 0, speed: 0.6 + Math.random() * 0.4, color: a.color });
+      particles.push({
+        from: a,
+        to: b,
+        t: 0,
+        speed: 0.6 + Math.random() * 0.4,
+        color: a.color,
+      });
     }
 
     function draw() {
@@ -512,11 +540,15 @@ export default function TopologyCanvas() {
         ctx2d!.moveTo(a.x, a.y);
         ctx2d!.lineTo(b.x, b.y);
         if (e.type === 'hierarchy') {
-          ctx2d!.strokeStyle = isActive ? COLORS.edgeHierarchyActive : COLORS.edgeHierarchy;
+          ctx2d!.strokeStyle = isActive
+            ? COLORS.edgeHierarchyActive
+            : COLORS.edgeHierarchy;
           ctx2d!.lineWidth = isActive ? 2 : 1.2;
           ctx2d!.setLineDash([]);
         } else {
-          ctx2d!.strokeStyle = isActive ? COLORS.edgeAgentActive : COLORS.edgeAgent;
+          ctx2d!.strokeStyle = isActive
+            ? COLORS.edgeAgentActive
+            : COLORS.edgeAgent;
           ctx2d!.lineWidth = isActive ? 1.5 : 0.6;
           ctx2d!.setLineDash([4, 4]);
         }
@@ -543,7 +575,8 @@ export default function TopologyCanvas() {
           const r2 = parseInt(c.slice(1, 3), 16);
           const g2 = parseInt(c.slice(3, 5), 16);
           const b2 = parseInt(c.slice(5, 7), 16);
-          ctx2d!.fillStyle = 'rgba(' + r2 + ',' + g2 + ',' + b2 + ',' + alpha + ')';
+          ctx2d!.fillStyle =
+            'rgba(' + r2 + ',' + g2 + ',' + b2 + ',' + alpha + ')';
         } else {
           ctx2d!.fillStyle = c;
         }
@@ -556,7 +589,9 @@ export default function TopologyCanvas() {
         const isHover = hoverNode === n;
         const isConn = connSet ? !!connSet[n.id] : true;
         const dimmed = connSet && !isConn;
-        const pulse = isHover ? 1.15 : 1 + Math.sin(time * 1.8 + ni * 0.5) * 0.03;
+        const pulse = isHover
+          ? 1.15
+          : 1 + Math.sin(time * 1.8 + ni * 0.5) * 0.03;
         const r = n.r * pulse;
         const nodeAlpha = dimmed ? 0.2 : 1;
 
@@ -571,7 +606,14 @@ export default function TopologyCanvas() {
         // Body gradient
         ctx2d!.beginPath();
         ctx2d!.arc(n.x, n.y, r, 0, Math.PI * 2);
-        const grad = ctx2d!.createRadialGradient(n.x - r * 0.3, n.y - r * 0.3, 0, n.x, n.y, r);
+        const grad = ctx2d!.createRadialGradient(
+          n.x - r * 0.3,
+          n.y - r * 0.3,
+          0,
+          n.x,
+          n.y,
+          r,
+        );
         grad.addColorStop(0, n.color);
         grad.addColorStop(1, n.color + '99');
         ctx2d!.fillStyle = grad;
@@ -590,7 +632,13 @@ export default function TopologyCanvas() {
           ctx2d!.beginPath();
           ctx2d!.arc(n.x, n.y, r * 0.85, 0, Math.PI * 2);
           ctx2d!.clip();
-          ctx2d!.drawImage(n.avatarImg, n.x - r * 0.85, n.y - r * 0.85, r * 1.7, r * 1.7);
+          ctx2d!.drawImage(
+            n.avatarImg,
+            n.x - r * 0.85,
+            n.y - r * 0.85,
+            r * 1.7,
+            r * 1.7,
+          );
           ctx2d!.restore();
         } else {
           ctx2d!.font = '600 ' + r * 0.7 + "px 'JetBrains Mono',monospace";
@@ -598,20 +646,34 @@ export default function TopologyCanvas() {
           ctx2d!.textBaseline = 'middle';
           ctx2d!.fillStyle = 'rgba(0,0,0,.35)';
           const icon =
-            n.type === 'server' ? 'S' : n.type === 'category' ? 'C' : n.type === 'agent' ? 'A' : '#';
+            n.type === 'server'
+              ? 'S'
+              : n.type === 'category'
+                ? 'C'
+                : n.type === 'agent'
+                  ? 'A'
+                  : '#';
           ctx2d!.fillText(icon, n.x, n.y + 1);
         }
 
         // Label
         const fontSize =
-          n.type === 'agent' || n.type === 'server' ? 11 : n.type === 'category' ? 10 : 9;
+          n.type === 'agent' || n.type === 'server'
+            ? 11
+            : n.type === 'category'
+              ? 10
+              : 9;
         ctx2d!.font =
           (n.type === 'agent' || n.type === 'server' ? '600 ' : '500 ') +
           fontSize +
           "px 'JetBrains Mono',monospace";
         ctx2d!.textAlign = 'center';
         ctx2d!.textBaseline = 'top';
-        ctx2d!.fillStyle = isHover ? '#fff' : dimmed ? COLORS.textDim : COLORS.text;
+        ctx2d!.fillStyle = isHover
+          ? '#fff'
+          : dimmed
+            ? COLORS.textDim
+            : COLORS.text;
         ctx2d!.fillText(n.label, n.x, n.y + r + 4);
 
         ctx2d!.globalAlpha = 1;
@@ -651,7 +713,11 @@ export default function TopologyCanvas() {
     }
 
     function escapeHtml(s: string): string {
-      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      return s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
     }
 
     // ---- Mouse move ----
@@ -777,19 +843,31 @@ export default function TopologyCanvas() {
         <h2 class="text-sm font-semibold text-text-bright">agent topology</h2>
         <div class="flex items-center gap-3 text-xs text-text-dim">
           <span class="flex items-center gap-1">
-            <span class="inline-block w-2 h-2 rounded-full" style={{ background: COLORS.agent }} />
+            <span
+              class="inline-block w-2 h-2 rounded-full"
+              style={{ background: COLORS.agent }}
+            />
             agent
           </span>
           <span class="flex items-center gap-1">
-            <span class="inline-block w-2 h-2 rounded-full" style={{ background: COLORS.server }} />
+            <span
+              class="inline-block w-2 h-2 rounded-full"
+              style={{ background: COLORS.server }}
+            />
             server
           </span>
           <span class="flex items-center gap-1">
-            <span class="inline-block w-2 h-2 rounded-full" style={{ background: COLORS.category }} />
+            <span
+              class="inline-block w-2 h-2 rounded-full"
+              style={{ background: COLORS.category }}
+            />
             category
           </span>
           <span class="flex items-center gap-1">
-            <span class="inline-block w-2 h-2 rounded-full" style={{ background: COLORS.channel }} />
+            <span
+              class="inline-block w-2 h-2 rounded-full"
+              style={{ background: COLORS.channel }}
+            />
             channel
           </span>
         </div>

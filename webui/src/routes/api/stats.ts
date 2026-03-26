@@ -6,7 +6,9 @@ export function GET() {
   const agents = state.getAgents();
   const tasks = state.getTasks() as any[];
 
-  let activeTasks = 0, pausedTasks = 0, completedTasks = 0;
+  let activeTasks = 0,
+    pausedTasks = 0,
+    completedTasks = 0;
   for (const t of tasks) {
     if (t.status === 'active') activeTasks++;
     else if (t.status === 'paused') pausedTasks++;

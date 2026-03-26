@@ -12,9 +12,13 @@ export default function ChatList(props: {
   onSearchQueryChange?: (query: string | null) => void;
 }) {
   const hasInitQuery = !!props.initialSearchQuery;
-  const [mode, setMode] = createSignal<TabMode>(hasInitQuery ? 'search' : 'filter');
+  const [mode, setMode] = createSignal<TabMode>(
+    hasInitQuery ? 'search' : 'filter',
+  );
   const [filterText, setFilterText] = createSignal('');
-  const [searchText, setSearchText] = createSignal(props.initialSearchQuery ?? '');
+  const [searchText, setSearchText] = createSignal(
+    props.initialSearchQuery ?? '',
+  );
   const [searchResults, setSearchResults] = createSignal<MessageInfo[]>([]);
   const [searching, setSearching] = createSignal(false);
   const [searchDone, setSearchDone] = createSignal(false);
@@ -94,7 +98,8 @@ export default function ChatList(props: {
     const lower = text.toLowerCase();
     const ql = query.toLowerCase();
     const idx = lower.indexOf(ql);
-    if (idx === -1) return text.length > 120 ? text.slice(0, 117) + '\u2026' : text;
+    if (idx === -1)
+      return text.length > 120 ? text.slice(0, 117) + '\u2026' : text;
     const start = Math.max(0, idx - 40);
     const end = Math.min(text.length, start + 120);
     let snippet = text.slice(start, end);
@@ -154,7 +159,12 @@ export default function ChatList(props: {
           {filteredChats().length} chat{filteredChats().length !== 1 ? 's' : ''}
         </div>
         <div class="flex-1 overflow-y-auto">
-          <For each={filteredChats()} fallback={<div class="p-3 text-text-dim text-xs">No chats found</div>}>
+          <For
+            each={filteredChats()}
+            fallback={
+              <div class="p-3 text-text-dim text-xs">No chats found</div>
+            }
+          >
             {(chat) => (
               <div
                 class={`px-2.5 py-2 cursor-pointer border-b border-border transition-colors hover:bg-accent/5 ${
@@ -168,7 +178,9 @@ export default function ChatList(props: {
                   if (e.key === 'Enter') props.onSelect(chat.jid);
                 }}
               >
-                <div class="text-xs font-semibold text-text-bright truncate">{chat.name || chat.jid}</div>
+                <div class="text-xs font-semibold text-text-bright truncate">
+                  {chat.name || chat.jid}
+                </div>
                 <div class="text-[10px] text-text-dim truncate">{chat.jid}</div>
                 <div class="text-[10px] text-text-dim">
                   {chat.last_message_time
@@ -184,16 +196,20 @@ export default function ChatList(props: {
       <Show when={mode() === 'search'}>
         <div class="flex-1 overflow-y-auto">
           <Show when={searching()}>
-            <div class="text-[10px] text-text-dim px-2.5 py-1.5">searching\u2026</div>
+            <div class="text-[10px] text-text-dim px-2.5 py-1.5">
+              searching\u2026
+            </div>
           </Show>
           <Show when={searchDone() && !searching()}>
             <div class="text-[10px] text-text-dim px-2.5 py-1.5">
-              {searchResults().length} result{searchResults().length !== 1 ? 's' : ''}
+              {searchResults().length} result
+              {searchResults().length !== 1 ? 's' : ''}
             </div>
           </Show>
           <For each={searchResults()}>
             {(result) => {
-              const snippet = () => buildSnippet(result.content || '', searchText());
+              const snippet = () =>
+                buildSnippet(result.content || '', searchText());
               return (
                 <div
                   class="px-2.5 py-2 cursor-pointer border-b border-border transition-colors hover:bg-accent/5"
@@ -208,7 +224,8 @@ export default function ChatList(props: {
                   }}
                 >
                   <div class="text-[10px] text-accent font-semibold mb-0.5">
-                    {result.sender_name || result.sender || 'Unknown'} in {result.chat_jid}
+                    {result.sender_name || result.sender || 'Unknown'} in{' '}
+                    {result.chat_jid}
                   </div>
                   <div class="text-[11px] truncate">{snippet()}</div>
                   <div class="text-[9px] text-text-dim mt-0.5">

@@ -90,7 +90,8 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(
-      (body as Record<string, string>).error ?? `Request failed (${res.status})`,
+      (body as Record<string, string>).error ??
+        `Request failed (${res.status})`,
     );
   }
   return res.json() as Promise<T>;
@@ -152,16 +153,28 @@ function PeerActions(props: {
     >
       <Match when={props.peer.status === 'trusted'}>
         <div class="flex gap-1 flex-wrap">
-          <button class={BTN_DEFAULT} onClick={() => props.onBrowse(props.peer.instanceId)}>
+          <button
+            class={BTN_DEFAULT}
+            onClick={() => props.onBrowse(props.peer.instanceId)}
+          >
             Browse
           </button>
-          <button class={BTN_DEFAULT} onClick={() => props.onLogs(props.peer.instanceId)}>
+          <button
+            class={BTN_DEFAULT}
+            onClick={() => props.onLogs(props.peer.instanceId)}
+          >
             Logs
           </button>
-          <button class={BTN_PRIMARY} onClick={() => props.onSync(props.peer.instanceId)}>
+          <button
+            class={BTN_PRIMARY}
+            onClick={() => props.onSync(props.peer.instanceId)}
+          >
             Sync
           </button>
-          <button class={BTN_DANGER} onClick={() => props.onRevoke(props.peer.instanceId)}>
+          <button
+            class={BTN_DANGER}
+            onClick={() => props.onRevoke(props.peer.instanceId)}
+          >
             Revoke
           </button>
         </div>
@@ -235,10 +248,16 @@ function PendingRequestsPanel(props: {
                   ID: <code>{req.fromInstanceId.slice(0, 8)}...</code>
                 </div>
                 <div class="flex gap-2">
-                  <button class={BTN_PRIMARY} onClick={() => props.onApprove(req.id)}>
+                  <button
+                    class={BTN_PRIMARY}
+                    onClick={() => props.onApprove(req.id)}
+                  >
                     Approve
                   </button>
-                  <button class={BTN_DANGER} onClick={() => props.onReject(req.id)}>
+                  <button
+                    class={BTN_DANGER}
+                    onClick={() => props.onReject(req.id)}
+                  >
                     Reject
                   </button>
                 </div>
@@ -378,15 +397,23 @@ function SyncPanel(props: {
 
       <div class="flex gap-4 px-4 py-3 bg-surface-2 rounded text-xs mx-4 mt-4 mb-4">
         <span class="text-green">{props.comparison.same.length} identical</span>
-        <span class="text-yellow">{props.comparison.differs.length} differ</span>
-        <span class="text-blue">{props.comparison.localOnly.length} local only</span>
-        <span class="text-accent">{props.comparison.remoteOnly.length} remote only</span>
+        <span class="text-yellow">
+          {props.comparison.differs.length} differ
+        </span>
+        <span class="text-blue">
+          {props.comparison.localOnly.length} local only
+        </span>
+        <span class="text-accent">
+          {props.comparison.remoteOnly.length} remote only
+        </span>
       </div>
 
       <Show
         when={total() > 0}
         fallback={
-          <div class="p-8 text-center text-text-dim">No context files found</div>
+          <div class="p-8 text-center text-text-dim">
+            No context files found
+          </div>
         }
       >
         <div class="overflow-x-auto">
@@ -405,7 +432,9 @@ function SyncPanel(props: {
                 {(f) => (
                   <tr class="border-b border-border">
                     <td class="px-4 py-2">
-                      <code class="text-xs">{f.path || '(root)'}/CLAUDE.md</code>
+                      <code class="text-xs">
+                        {f.path || '(root)'}/CLAUDE.md
+                      </code>
                     </td>
                     <td class="px-4 py-2 text-green">identical</td>
                     <td class="px-4 py-2 text-text-dim">{fmtBytes(f.size)}</td>
@@ -418,22 +447,32 @@ function SyncPanel(props: {
                 {(d) => (
                   <tr class="border-b border-border bg-yellow/5">
                     <td class="px-4 py-2">
-                      <code class="text-xs">{d.local.path || '(root)'}/CLAUDE.md</code>
+                      <code class="text-xs">
+                        {d.local.path || '(root)'}/CLAUDE.md
+                      </code>
                     </td>
                     <td class="px-4 py-2 text-yellow">differs</td>
-                    <td class="px-4 py-2 text-text-dim">{fmtBytes(d.local.size)}</td>
-                    <td class="px-4 py-2 text-text-dim">{fmtBytes(d.remote.size)}</td>
+                    <td class="px-4 py-2 text-text-dim">
+                      {fmtBytes(d.local.size)}
+                    </td>
+                    <td class="px-4 py-2 text-text-dim">
+                      {fmtBytes(d.remote.size)}
+                    </td>
                     <td class="px-4 py-2">
                       <div class="flex gap-1">
                         <button
                           class={BTN_DEFAULT}
-                          onClick={() => props.onPush(props.instanceId, d.local.path)}
+                          onClick={() =>
+                            props.onPush(props.instanceId, d.local.path)
+                          }
                         >
                           Push
                         </button>
                         <button
                           class={BTN_DEFAULT}
-                          onClick={() => props.onPull(props.instanceId, d.local.path)}
+                          onClick={() =>
+                            props.onPull(props.instanceId, d.local.path)
+                          }
                         >
                           Pull
                         </button>
@@ -446,7 +485,9 @@ function SyncPanel(props: {
                 {(f) => (
                   <tr class="border-b border-border bg-blue/5">
                     <td class="px-4 py-2">
-                      <code class="text-xs">{f.path || '(root)'}/CLAUDE.md</code>
+                      <code class="text-xs">
+                        {f.path || '(root)'}/CLAUDE.md
+                      </code>
                     </td>
                     <td class="px-4 py-2 text-blue">local only</td>
                     <td class="px-4 py-2 text-text-dim">{fmtBytes(f.size)}</td>
@@ -466,7 +507,9 @@ function SyncPanel(props: {
                 {(f) => (
                   <tr class="border-b border-border bg-accent/5">
                     <td class="px-4 py-2">
-                      <code class="text-xs">{f.path || '(root)'}/CLAUDE.md</code>
+                      <code class="text-xs">
+                        {f.path || '(root)'}/CLAUDE.md
+                      </code>
                     </td>
                     <td class="px-4 py-2 text-accent">remote only</td>
                     <td class="px-4 py-2 text-text-dim">-</td>
@@ -521,19 +564,20 @@ function StatCard(props: { label: string; children: JSX.Element }) {
 }
 
 export default function Network() {
-  const [runtime, { refetch: refetchRuntime }] = createResource<DiscoveryRuntime>(
-    () => fetchJson('/api/discovery/state'),
+  const [runtime, { refetch: refetchRuntime }] =
+    createResource<DiscoveryRuntime>(() => fetchJson('/api/discovery/state'));
+
+  const [peers, { refetch: refetchPeers }] = createResource<PeerView[]>(() =>
+    fetchJson('/api/discovery/peers'),
   );
 
-  const [peers, { refetch: refetchPeers }] = createResource<PeerView[]>(
-    () => fetchJson('/api/discovery/peers'),
-  );
+  const [requests, { refetch: refetchRequests }] = createResource<
+    PairRequest[]
+  >(() => fetchJson('/api/discovery/requests'));
 
-  const [requests, { refetch: refetchRequests }] = createResource<PairRequest[]>(
-    () => fetchJson('/api/discovery/requests'),
+  const [remoteAgents, setRemoteAgents] = createSignal<RemoteAgent[] | null>(
+    null,
   );
-
-  const [remoteAgents, setRemoteAgents] = createSignal<RemoteAgent[] | null>(null);
   const [logLines, setLogLines] = createSignal<string[]>([]);
   const [logStatus, setLogStatus] = createSignal(
     'Select a trusted peer to start streaming logs.',
@@ -693,7 +737,9 @@ export default function Network() {
 
     remoteLogsSource.addEventListener('log', (event) => {
       try {
-        const payload: RemoteLogRecord = JSON.parse((event as MessageEvent).data);
+        const payload: RemoteLogRecord = JSON.parse(
+          (event as MessageEvent).data,
+        );
         const level = (payload.level ?? 'info').toUpperCase();
         const time = payload.time ?? payload.timestamp ?? '';
         const source = payload.source ?? 'remote';
@@ -731,13 +777,21 @@ export default function Network() {
     setSyncComparison(null);
   }
 
-  async function syncFile(direction: 'push' | 'pull', instanceId: string, path: string) {
+  async function syncFile(
+    direction: 'push' | 'pull',
+    instanceId: string,
+    path: string,
+  ) {
     try {
       const d = await postJson<{ ok?: boolean; error?: string }>(
         `/api/discovery/peers/${encodeURIComponent(instanceId)}/context/${direction}`,
         { path },
       );
-      if (d.ok) showToast(`${direction === 'push' ? 'Pushed' : 'Pulled'} ${path}`, 'success');
+      if (d.ok)
+        showToast(
+          `${direction === 'push' ? 'Pushed' : 'Pulled'} ${path}`,
+          'success',
+        );
       else showToast(`Error: ${d.error ?? 'unknown'}`, 'error');
       const sid = syncPeerId();
       if (sid) openSyncPanel(sid);
@@ -763,7 +817,12 @@ export default function Network() {
         showToast(`Nothing to ${direction}`, 'info');
         return;
       }
-      if (!confirm(`${direction === 'push' ? 'Push' : 'Pull'} ${paths.length} file(s)?`)) return;
+      if (
+        !confirm(
+          `${direction === 'push' ? 'Push' : 'Pull'} ${paths.length} file(s)?`,
+        )
+      )
+        return;
 
       let done = 0;
       let errs = 0;
@@ -791,7 +850,8 @@ export default function Network() {
   }
 
   const onlineCount = () => (peers() ?? []).filter((p) => p.online).length;
-  const trustedCount = () => (peers() ?? []).filter((p) => p.status === 'trusted').length;
+  const trustedCount = () =>
+    (peers() ?? []).filter((p) => p.status === 'trusted').length;
 
   return (
     <>
@@ -820,31 +880,42 @@ export default function Network() {
         </div>
 
         <div class="bg-surface rounded-lg border border-border p-4">
-          <h2 class="text-sm font-semibold text-text mb-4">discovery controls</h2>
+          <h2 class="text-sm font-semibold text-text mb-4">
+            discovery controls
+          </h2>
           <div class="flex flex-wrap gap-3 items-center mb-4">
             <Show when={runtime()}>
               <button
-                class={runtime()!.enabled
-                  ? `${BTN} bg-red/20 text-red hover:bg-red/30`
-                  : `${BTN} bg-accent/20 text-accent hover:bg-accent/30`}
+                class={
+                  runtime()!.enabled
+                    ? `${BTN} bg-red/20 text-red hover:bg-red/30`
+                    : `${BTN} bg-accent/20 text-accent hover:bg-accent/30`
+                }
                 onClick={() => toggleDiscovery(!runtime()!.enabled)}
               >
-                {runtime()!.enabled ? 'Turn discovery off' : 'Turn discovery on'}
+                {runtime()!.enabled
+                  ? 'Turn discovery off'
+                  : 'Turn discovery on'}
               </button>
             </Show>
             <button class={BTN_DEFAULT} onClick={trustCurrentNetwork}>
               Trust Wi-Fi
             </button>
             <span class="text-text-dim text-sm">
-              <Show when={runtime()?.currentNetwork} fallback="No Wi-Fi network detected">
+              <Show
+                when={runtime()?.currentNetwork}
+                fallback="No Wi-Fi network detected"
+              >
                 Current Wi-Fi:{' '}
-                <strong class="text-text">{runtime()!.currentNetwork!.label}</strong>
+                <strong class="text-text">
+                  {runtime()!.currentNetwork!.label}
+                </strong>
               </Show>
             </span>
           </div>
           <div class="text-xs text-text-dim mb-3">
-            Trusted networks gate discovery when present. Leave the list empty to
-            allow discovery anywhere the toggle is on.
+            Trusted networks gate discovery when present. Leave the list empty
+            to allow discovery anywhere the toggle is on.
           </div>
           <TrustedNetworksList
             networks={runtime()?.trustedNetworks ?? []}
@@ -881,7 +952,9 @@ export default function Network() {
                     <For each={peers() ?? []}>
                       {(peer) => (
                         <tr class="border-b border-border">
-                          <td class="px-4 py-2 font-semibold text-text">{peer.name}</td>
+                          <td class="px-4 py-2 font-semibold text-text">
+                            {peer.name}
+                          </td>
                           <td class="px-4 py-2">
                             <code class="text-xs text-text-dim">
                               {peer.host}:{peer.port}
@@ -893,7 +966,9 @@ export default function Network() {
                           <td class="px-4 py-2">
                             <Show
                               when={peer.online}
-                              fallback={<span class="text-text-dim">&#9675;</span>}
+                              fallback={
+                                <span class="text-text-dim">&#9675;</span>
+                              }
                             >
                               <span class="text-green">&#9679;</span>
                             </Show>
@@ -932,7 +1007,9 @@ export default function Network() {
           status={logStatus()}
           statusIsError={logStatusIsError()}
           lines={logLines()}
-          scrollRef={(el) => { logOutputEl = el; }}
+          scrollRef={(el) => {
+            logOutputEl = el;
+          }}
         />
 
         <Show when={syncPeerId() && syncComparison()}>
