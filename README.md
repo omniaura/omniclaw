@@ -14,7 +14,7 @@
 
 OmniClaw is no longer just a personal chat bot wrapper.
 
-It is a multi-agent orchestrator for running AI agents across chat surfaces, web operations, scheduled workflows, and trusted peer machines. The core is still one Bun process, but the surrounding system now includes isolated runtimes, layered context, a live Datastar web UI, task execution, peer discovery, and cross-agent messaging.
+It is a multi-agent orchestrator for running AI agents across chat surfaces, web operations, scheduled workflows, and trusted peer machines. The core is still one Bun process, but the surrounding system now includes isolated runtimes, layered context, a SolidStart web UI, task execution, peer discovery, and cross-agent messaging.
 
 If old NanoClaw/early OmniClaw was "Claude in WhatsApp with containers," current OmniClaw is "run and manage a network of agents with real operational tooling."
 
@@ -165,7 +165,7 @@ The web UI is not a demo page. It is the operational surface for the system and 
 - Network discovery and peer management
 - System status and runtime visibility
 
-The UI is server-rendered with Datastar and uses SSE for live updates, which keeps the stack simple while still supporting live logs, topology updates, and task state changes.
+The UI is built with SolidStart (SolidJS + Vinxi) and Tailwind CSS. It uses SSE for live updates to the dashboard, logs, and task state, and REST API endpoints for CRUD operations.
 
 ### Multi-agent coordination
 
@@ -185,7 +185,7 @@ Messaging channels -> router/orchestrator -> group queue -> container backend ->
                       SQLite              task scheduler    file IPC
                          |
                          v
-                   Datastar web UI
+                   SolidStart web UI
 ```
 
 Key modules:
