@@ -306,4 +306,100 @@ describe('startSchedulerLoop task execution', () => {
         originalSetTimeout;
     }
   });
+
+  it('clears the execution lease when handoff writing fails', async () => {
+    const task: ScheduledTask = {
+      id: 'task-handoff-error',
+      group_folder: 'main',
+      chat_jid: 'main@g.us',
+      prompt: 'write handoff',
+      schedule_type: 'interval',
+      schedule_value: '300000',
+      context_mode: 'isolated',
+      next_run: '2026-01-01T00:00:00.000Z',
+      last_run: null,
+      last_result: null,
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+      executing_since: null,
+    };
+    const clearTaskExecutingMock = mock(() => {});
+    const loggerMock = createLoggerMock();
+    const enqueuedRuns: Array<Promise<void>> = [];
+    const originalSetTimeout = globalThis.setTimeout;
+
+    (globalThis as { setTimeout: typeof setTimeout }).setTimeout = ((
+      _fn: Parameters<typeof setTimeout>[0],
+    ) => ({ id: 'poll' })) as unknown as typeof setTimeout;
+
+    try {
+      const deps: SchedulerDependencies = {
+        registeredGroups: () => ({}),
+        getGroupForTask: () => ({
+          name: 'Main',
+          folder: 'main',
+          trigger: '@Bot',
+          added_at: '2026-01-01T00:00:00.000Z',
+        }),
+        getSessions: () => ({}),
+        resumePositionStore: {
+          get: () => undefined,
+          set: () => {},
+          getAll: () => ({}),
+          clear: () => {},
+        },
+        queue: {
+          enqueueTask: (
+            _jid: string,
+            _taskId: string,
+            run: () => Promise<void>,
+          ) => {
+            enqueuedRuns.push(run());
+          },
+          notifyIdle: mock(() => {}),
+          closeStdin: mock(() => {}),
+        } as unknown as SchedulerDependencies['queue'],
+        onProcess: mock(() => {}),
+        sendMessage: mock(async () => undefined),
+        findChannel: () => undefined,
+      };
+
+      startSchedulerLoop(deps, {
+        calculateNextRun: mock(() => '2026-01-01T00:05:00.000Z'),
+        resolveBackend: mock(() => ({
+          runAgent: async () =>
+            ({ status: 'success', result: 'done' }) as ContainerOutput,
+        })),
+        writeTasksSnapshot: mock(() => {}),
+        advanceTaskNextRun: mock(() => {}),
+        markTaskExecuting: mock(() => {}),
+        clearTaskExecuting: clearTaskExecutingMock,
+        getStaleExecutingTasks: mock(() => []),
+        getOrphanedOnceTasks: mock(() => []),
+        hasSuccessfulRun: mock(() => false),
+        getAllTasks: mock(() => [task]),
+        getDueTasks: mock(() => [task]),
+        getTaskById: mock((taskId: string) =>
+          taskId === task.id ? task : null,
+        ),
+        logTaskRun: mock(() => {}),
+        updateTaskAfterRun: mock(() => {}),
+        writeScheduledRunHandoff: mock(() => {
+          throw new Error('disk full');
+        }),
+        logger: loggerMock,
+      } as any);
+
+      await Promise.all(enqueuedRuns);
+
+      expect(clearTaskExecutingMock).toHaveBeenCalledWith('task-handoff-error');
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
+        'Failed to write scheduled task handoff',
+      );
+    } finally {
+      (globalThis as { setTimeout: typeof setTimeout }).setTimeout =
+        originalSetTimeout;
+    }
+  });
 });
