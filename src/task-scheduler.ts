@@ -13,6 +13,7 @@ import type { AgentBackend, ContainerOutput } from './backends/types.js';
 import { writeTasksSnapshot } from './ipc-snapshots.js';
 import {
   advanceTaskNextRun,
+  appendTaskRunPhaseEvent,
   clearTaskExecuting,
   createTask,
   deleteTask,
@@ -38,6 +39,7 @@ import type {
   ScheduledTask,
   TaskOutcomeSignal,
   TaskOutcomeState,
+  TaskRunPhaseName,
 } from './types.js';
 
 const VALID_OUTCOME_STATES = new Set<TaskOutcomeState>([
@@ -83,6 +85,7 @@ interface SchedulerRuntime {
   getDueTasks: typeof getDueTasks;
   getTaskById: typeof getTaskById;
   logTaskRun: typeof logTaskRun;
+  appendTaskRunPhaseEvent: typeof appendTaskRunPhaseEvent;
   updateTaskAfterRun: typeof updateTaskAfterRun;
   writeScheduledRunHandoff: typeof writeScheduledRunHandoff;
   logger: typeof logger;
@@ -102,6 +105,7 @@ const defaultSchedulerRuntime: SchedulerRuntime = {
   getDueTasks,
   getTaskById,
   logTaskRun,
+  appendTaskRunPhaseEvent,
   updateTaskAfterRun,
   writeScheduledRunHandoff,
   logger,
@@ -144,6 +148,26 @@ async function runTask(
   runtime: SchedulerRuntime = defaultSchedulerRuntime,
 ): Promise<void> {
   const runAt = new Date().toISOString();
+  let phaseSequence = 0;
+
+  const appendPhaseEvent = (
+    phase: TaskRunPhaseName,
+    status: 'ok' | 'error',
+    retryable: boolean,
+    error: string | null = null,
+  ) => {
+    phaseSequence += 1;
+    runtime.appendTaskRunPhaseEvent({
+      task_id: task.id,
+      run_at: runAt,
+      sequence: phaseSequence,
+      phase,
+      event_at: new Date().toISOString(),
+      status,
+      retryable,
+      error,
+    });
+  };
 
   // Re-check task status: may have been cancelled/paused while queued
   const freshTask = runtime.getTaskById(task.id);
@@ -182,6 +206,12 @@ async function runTask(
     if (!group) {
       log.error('Group not found for task');
       const groupError = `Group not found: ${task.group_folder}`;
+      appendPhaseEvent(
+        'group_resolved',
+        'error',
+        false,
+        `Group not found: ${task.group_folder}`,
+      );
       runtime.logTaskRun({
         task_id: task.id,
         run_at: runAt,
@@ -209,9 +239,12 @@ async function runTask(
       return;
     }
 
+    appendPhaseEvent('group_resolved', 'ok', false);
+
     // Set execution lease only after preflight validation succeeds so
     // missing-group failures do not leave the task stuck in a running state.
     runtime.markTaskExecuting(task.id);
+    appendPhaseEvent('lease_acquired', 'ok', false);
 
     const prompt = task.prompt;
 
@@ -268,6 +301,7 @@ async function runTask(
 
     try {
       const backend = runtime.resolveBackend(group);
+      appendPhaseEvent('dispatch_started', 'ok', true);
       const output = await backend.runAgent(
         group,
         {
@@ -304,11 +338,25 @@ async function runTask(
 
           if (streamedOutput.result) {
             result = streamedOutput.result;
-            await deps.sendMessage(
-              task.chat_jid,
-              streamedOutput.result,
-              group.discordBotId,
-            );
+            appendPhaseEvent('stream_result_received', 'ok', true);
+            try {
+              await deps.sendMessage(
+                task.chat_jid,
+                streamedOutput.result,
+                group.discordBotId,
+              );
+              appendPhaseEvent('outbound_send_attempted', 'ok', true);
+            } catch (err) {
+              const sendError =
+                err instanceof Error ? err.message : String(err);
+              appendPhaseEvent(
+                'outbound_send_attempted',
+                'error',
+                true,
+                sendError,
+              );
+              throw err;
+            }
             scheduleClose();
           }
           if (streamedOutput.status === 'success') {
@@ -363,7 +411,9 @@ async function runTask(
       : result
         ? result.slice(0, 200)
         : 'Completed';
+      runtime.updateTaskAfterRun(task.id, nextRun, resultSummary, outcome);
     runtime.updateTaskAfterRun(task.id, nextRun, resultSummary, outcome);
+    appendPhaseEvent('run_finalized', error ? 'error' : 'ok', false, error);
     tryWriteHandoff({
       task_id: task.id,
       chat_jid: task.chat_jid,
