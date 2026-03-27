@@ -827,8 +827,12 @@ interface IpcMessage {
 }
 
 let ipcInputDir = '/workspace/ipc/input';
-let ipcCloseFile = path.join(ipcInputDir, '_close');
 let currentChatJid = '';
+
+interface IpcDrainResult {
+  messages: IpcMessage[];
+  shutdown: boolean;
+}
 
 function setCurrentChat(chatJid: string): void {
   currentChatJid = chatJid;
@@ -839,19 +843,7 @@ function setCurrentChat(chatJid: string): void {
   }
 }
 
-function shouldClose(): boolean {
-  if (fs.existsSync(ipcCloseFile)) {
-    try {
-      fs.unlinkSync(ipcCloseFile);
-    } catch {
-      /* ignore */
-    }
-    return true;
-  }
-  return false;
-}
-
-function drainIpcInput(): IpcMessage[] {
+function drainIpcInput(): IpcDrainResult {
   try {
     fs.mkdirSync(ipcInputDir, { recursive: true });
     const files = fs
@@ -860,11 +852,17 @@ function drainIpcInput(): IpcMessage[] {
       .sort();
 
     const messages: IpcMessage[] = [];
+    let shutdown = false;
     for (const file of files) {
       const filePath = path.join(ipcInputDir, file);
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         fs.unlinkSync(filePath);
+        if (data.type === 'shutdown') {
+          log('Shutdown IPC message received');
+          shutdown = true;
+          continue;
+        }
         if (data.type === 'message' && data.text) {
           messages.push({ text: data.text, chatJid: data.chatJid });
           if (data.chatJid) setCurrentChat(data.chatJid);
@@ -880,10 +878,21 @@ function drainIpcInput(): IpcMessage[] {
         }
       }
     }
-    return messages;
+    // Legacy _close sentinel backwards compatibility
+    const legacyClose = path.join(ipcInputDir, '_close');
+    if (fs.existsSync(legacyClose)) {
+      try {
+        fs.unlinkSync(legacyClose);
+      } catch {
+        /* ignore */
+      }
+      log('Legacy _close sentinel detected, treating as shutdown');
+      shutdown = true;
+    }
+    return { messages, shutdown };
   } catch (err) {
     log(`IPC drain error: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
+    return { messages: [], shutdown: false };
   }
 }
 
@@ -894,11 +903,11 @@ function formatIpcMessages(messages: IpcMessage[]): string {
 function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
     const poll = () => {
-      if (shouldClose()) {
+      const { messages, shutdown } = drainIpcInput();
+      if (shutdown) {
         resolve(null);
         return;
       }
-      const messages = drainIpcInput();
       if (messages.length > 0) {
         resolve(formatIpcMessages(messages));
         return;
@@ -1020,14 +1029,7 @@ export async function runCodexRuntime(
   log(`Starting Codex runtime for group: ${containerInput.groupFolder}`);
 
   ipcInputDir = resolveIpcInputDir(containerInput.isScheduledTask);
-  ipcCloseFile = path.join(ipcInputDir, '_close');
   fs.mkdirSync(ipcInputDir, { recursive: true });
-
-  try {
-    fs.unlinkSync(ipcCloseFile);
-  } catch {
-    /* ignore */
-  }
 
   setCurrentChat(containerInput.chatJid);
 
@@ -1066,17 +1068,22 @@ export async function runCodexRuntime(
       prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
     }
 
-    const pending = drainIpcInput();
-    if (pending.length > 0) {
+    const pendingResult = drainIpcInput();
+    if (pendingResult.messages.length > 0) {
       log(
-        `Draining ${pending.length} pending IPC messages into initial prompt`,
+        `Draining ${pendingResult.messages.length} pending IPC messages into initial prompt`,
       );
-      prompt += '\n' + formatIpcMessages(pending);
+      prompt += '\n' + formatIpcMessages(pendingResult.messages);
+    }
+    if (pendingResult.shutdown) {
+      log('Shutdown signal detected before first prompt, exiting');
+      return;
     }
 
     while (true) {
-      if (shouldClose()) {
-        log('Close sentinel detected before prompt, exiting');
+      const { shutdown } = drainIpcInput();
+      if (shutdown) {
+        log('Shutdown signal detected before prompt, exiting');
         break;
       }
 

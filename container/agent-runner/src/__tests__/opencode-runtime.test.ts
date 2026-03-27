@@ -148,12 +148,15 @@ describe('OpenCode runtime IPC protocol', () => {
     expect(data.text).toBe('hello');
   });
 
-  it('detects close sentinel', () => {
-    const closePath = path.join(TEST_IPC_DIR, '_close');
-    fs.writeFileSync(closePath, '');
-    expect(fs.existsSync(closePath)).toBe(true);
-    fs.unlinkSync(closePath);
-    expect(fs.existsSync(closePath)).toBe(false);
+  it('detects shutdown IPC message as a JSON file', () => {
+    const shutdownPath = path.join(TEST_IPC_DIR, '_shutdown-123.json');
+    fs.writeFileSync(shutdownPath, JSON.stringify({ type: 'shutdown' }));
+    expect(fs.existsSync(shutdownPath)).toBe(true);
+    // Verify it's valid JSON that the drain loop would parse
+    const data = JSON.parse(fs.readFileSync(shutdownPath, 'utf-8'));
+    expect(data.type).toBe('shutdown');
+    fs.unlinkSync(shutdownPath);
+    expect(fs.existsSync(shutdownPath)).toBe(false);
   });
 
   it('handles chatJid in IPC messages', () => {

@@ -323,7 +323,6 @@ interface SDKUserMessage {
 // Defaults to the message lane; reassigned to input-task/ after stdin is parsed
 // when containerInput.isScheduledTask is true.
 let IPC_INPUT_DIR = '/workspace/ipc/input';
-let IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 
 /**
  * Determine the IPC input directory based on whether this is a scheduled task.
@@ -862,24 +861,14 @@ function formatTranscriptMarkdown(
   return lines.join('\n');
 }
 
-/**
- * Check for _close sentinel.
- */
-function shouldClose(): boolean {
-  if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
-    try {
-      fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
-    } catch {
-      /* ignore */
-    }
-    return true;
-  }
-  return false;
-}
-
 interface IpcMessage {
   text: string;
   chatJid?: string;
+}
+
+interface IpcDrainResult {
+  messages: IpcMessage[];
+  shutdown: boolean;
 }
 
 // Track the current chat JID for multi-channel agents.
@@ -897,10 +886,11 @@ function setCurrentChat(chatJid: string): void {
 }
 
 /**
- * Drain all pending IPC input messages.
- * Returns structured messages with optional chatJid for multi-channel routing.
+ * Drain all pending IPC input files.
+ * Returns structured messages with optional chatJid for multi-channel routing,
+ * plus a shutdown flag if a `{"type":"shutdown"}` file was consumed.
  */
-function drainIpcInput(): IpcMessage[] {
+function drainIpcInput(): IpcDrainResult {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
     const files = fs
@@ -909,11 +899,17 @@ function drainIpcInput(): IpcMessage[] {
       .sort();
 
     const messages: IpcMessage[] = [];
+    let shutdown = false;
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         fs.unlinkSync(filePath);
+        if (data.type === 'shutdown') {
+          log('Shutdown IPC message received');
+          shutdown = true;
+          continue;
+        }
         if (data.type === 'message' && data.text) {
           messages.push({ text: data.text, chatJid: data.chatJid });
           // Update current chat if this message has a chatJid
@@ -932,10 +928,21 @@ function drainIpcInput(): IpcMessage[] {
         }
       }
     }
-    return messages;
+    // Also check for legacy _close sentinel (backwards compatibility)
+    const legacyClose = path.join(IPC_INPUT_DIR, '_close');
+    if (fs.existsSync(legacyClose)) {
+      try {
+        fs.unlinkSync(legacyClose);
+      } catch {
+        /* ignore */
+      }
+      log('Legacy _close sentinel detected, treating as shutdown');
+      shutdown = true;
+    }
+    return { messages, shutdown };
   } catch (err) {
     log(`IPC drain error: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
+    return { messages: [], shutdown: false };
   }
 }
 
@@ -984,17 +991,17 @@ function formatIpcMessages(messages: IpcMessage[]): string {
 }
 
 /**
- * Wait for a new IPC message or _close sentinel.
- * Returns the messages as a single string, or null if _close.
+ * Wait for a new IPC message or shutdown signal.
+ * Returns the messages as a single string, or null if shutdown.
  */
 function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
     const poll = () => {
-      if (shouldClose()) {
+      const { messages, shutdown } = drainIpcInput();
+      if (shutdown) {
         resolve(null);
         return;
       }
-      const messages = drainIpcInput();
       if (messages.length > 0) {
         resolve(formatIpcMessages(messages));
         return;
@@ -1027,19 +1034,19 @@ async function runQuery(
   const stream = new MessageStream();
   stream.push(prompt);
 
-  // Poll IPC for follow-up messages and _close sentinel during the query
+  // Poll IPC for follow-up messages and shutdown signal during the query
   let ipcPolling = true;
   let closedDuringQuery = false;
   const pollIpcDuringQuery = () => {
     if (!ipcPolling) return;
-    if (shouldClose()) {
-      log('Close sentinel detected during query, ending stream');
+    const { messages, shutdown } = drainIpcInput();
+    if (shutdown) {
+      log('Shutdown signal detected during query, ending stream');
       closedDuringQuery = true;
       stream.end();
       ipcPolling = false;
       return;
     }
-    const messages = drainIpcInput();
     if (messages.length > 0) {
       const formatted = formatIpcMessages(messages);
       log(`Piping IPC message into active query (${formatted.length} chars)`);
@@ -1505,7 +1512,6 @@ async function main(): Promise<void> {
   // follow-up messages don't leak into the task lane.
   if (containerInput.isScheduledTask) {
     IPC_INPUT_DIR = '/workspace/ipc/input-task';
-    IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
     log('Using task IPC lane: /workspace/ipc/input-task');
   }
 
@@ -1523,12 +1529,7 @@ async function main(): Promise<void> {
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
-  // Clean up stale _close sentinel from previous container runs
-  try {
-    fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
-  } catch {
-    /* ignore */
-  }
+  // Legacy _close sentinel cleanup is handled inside drainIpcInput() now.
 
   // Check for auto-update notification
   let updateNotification = '';
@@ -1646,7 +1647,7 @@ Please review these changes to understand your new capabilities and fixes.
       // Don't emit a session-update marker (it would reset the host's
       // idle timer and cause a 30-min delay before the next _close).
       if (effectiveResult.closedDuringQuery) {
-        log('Close sentinel consumed during query, exiting');
+        log('Shutdown signal consumed during query, exiting');
         break;
       }
 
@@ -1663,7 +1664,7 @@ Please review these changes to understand your new capabilities and fixes.
       // Wait for the next message or _close sentinel
       const nextMessage = await waitForIpcMessage();
       if (nextMessage === null) {
-        log('Close sentinel received, exiting');
+        log('Shutdown signal received, exiting');
         break;
       }
 
