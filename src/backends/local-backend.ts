@@ -1464,7 +1464,15 @@ export class LocalBackend implements AgentBackend {
     assertPathWithin(inputDir, ipcBase, 'closeStdin');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
-      fs.writeFileSync(path.join(inputDir, '_close'), '');
+      // Write a shutdown IPC message (atomic via .tmp rename) instead of the
+      // legacy _close sentinel file. The agent-runner drains this like any
+      // other .json IPC file, eliminating the race condition where _close
+      // could be missed between poll cycles.
+      const filename = `_shutdown-${Date.now()}.json`;
+      const filePath = path.join(inputDir, filename);
+      const tempPath = `${filePath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify({ type: 'shutdown' }));
+      fs.renameSync(tempPath, filePath);
     } catch {
       // ignore
     }

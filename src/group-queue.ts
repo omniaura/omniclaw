@@ -578,12 +578,16 @@ export class GroupQueue {
       return;
     }
 
-    // Fallback: direct local filesystem write
+    // Fallback: direct local filesystem write — atomic shutdown IPC message
     const inputSubdir = lane === 'task' ? 'input-task' : 'input';
     const inputDir = path.join(this.dataDir, 'ipc', groupFolder, inputSubdir);
     try {
       this.fsImpl.mkdirSync(inputDir, { recursive: true });
-      this.fsImpl.writeFileSync(path.join(inputDir, '_close'), '');
+      const filename = `_shutdown-${Date.now()}.json`;
+      const filePath = path.join(inputDir, filename);
+      const tempPath = `${filePath}.tmp`;
+      this.fsImpl.writeFileSync(tempPath, JSON.stringify({ type: 'shutdown' }));
+      this.fsImpl.renameSync(tempPath, filePath);
     } catch {
       // ignore
     }

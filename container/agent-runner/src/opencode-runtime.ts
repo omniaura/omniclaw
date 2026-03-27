@@ -104,8 +104,12 @@ interface IpcMessage {
 }
 
 let ipcInputDir = '/workspace/ipc/input';
-let ipcCloseFile = path.join(ipcInputDir, '_close');
 let currentChatJid = '';
+
+interface IpcDrainResult {
+  messages: IpcMessage[];
+  shutdown: boolean;
+}
 
 function setCurrentChat(chatJid: string): void {
   currentChatJid = chatJid;
@@ -116,19 +120,7 @@ function setCurrentChat(chatJid: string): void {
   }
 }
 
-function shouldClose(): boolean {
-  if (fs.existsSync(ipcCloseFile)) {
-    try {
-      fs.unlinkSync(ipcCloseFile);
-    } catch {
-      /* ignore */
-    }
-    return true;
-  }
-  return false;
-}
-
-function drainIpcInput(): IpcMessage[] {
+function drainIpcInput(): IpcDrainResult {
   try {
     fs.mkdirSync(ipcInputDir, { recursive: true });
     const files = fs
@@ -137,11 +129,17 @@ function drainIpcInput(): IpcMessage[] {
       .sort();
 
     const messages: IpcMessage[] = [];
+    let shutdown = false;
     for (const file of files) {
       const filePath = path.join(ipcInputDir, file);
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         fs.unlinkSync(filePath);
+        if (data.type === 'shutdown') {
+          log('Shutdown IPC message received');
+          shutdown = true;
+          continue;
+        }
         if (data.type === 'message' && data.text) {
           messages.push({ text: data.text, chatJid: data.chatJid });
           if (data.chatJid) setCurrentChat(data.chatJid);
@@ -157,10 +155,21 @@ function drainIpcInput(): IpcMessage[] {
         }
       }
     }
-    return messages;
+    // Legacy _close sentinel backwards compatibility
+    const legacyClose = path.join(ipcInputDir, '_close');
+    if (fs.existsSync(legacyClose)) {
+      try {
+        fs.unlinkSync(legacyClose);
+      } catch {
+        /* ignore */
+      }
+      log('Legacy _close sentinel detected, treating as shutdown');
+      shutdown = true;
+    }
+    return { messages, shutdown };
   } catch (err) {
     log(`IPC drain error: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
+    return { messages: [], shutdown: false };
   }
 }
 
@@ -171,11 +180,11 @@ function formatIpcMessages(messages: IpcMessage[]): string {
 function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
     const poll = () => {
-      if (shouldClose()) {
+      const { messages, shutdown } = drainIpcInput();
+      if (shutdown) {
         resolve(null);
         return;
       }
-      const messages = drainIpcInput();
       if (messages.length > 0) {
         resolve(formatIpcMessages(messages));
         return;
@@ -428,7 +437,7 @@ async function injectSystemContext(
 
 /**
  * Run a single prompt against an OpenCode session.
- * Returns the session ID and whether _close was detected during the prompt.
+ * Returns the session ID and whether a shutdown signal was detected during the prompt.
  */
 async function runOpenCodePrompt(
   client: OpencodeClient,
@@ -445,12 +454,13 @@ async function runOpenCodePrompt(
   let closedDuringPrompt = false;
 
   // Poll IPC for follow-up messages during the prompt
-  // (OpenCode prompts are blocking, so we poll in the background and abort if _close)
+  // (OpenCode prompts are blocking, so we poll in the background and abort if shutdown)
   let ipcPolling = true;
   const pollIpc = () => {
     if (!ipcPolling) return;
-    if (shouldClose()) {
-      log('Close sentinel detected during prompt, aborting');
+    const { shutdown } = drainIpcInput();
+    if (shutdown) {
+      log('Shutdown signal detected during prompt, aborting');
       closedDuringPrompt = true;
       ipcPolling = false;
       // Try to abort the running prompt
@@ -644,17 +654,9 @@ export async function runOpenCodeRuntime(
   // Configure IPC directories
   if (containerInput.isScheduledTask) {
     ipcInputDir = '/workspace/ipc/input-task';
-    ipcCloseFile = path.join(ipcInputDir, '_close');
     log('Using task IPC lane: /workspace/ipc/input-task');
   }
   fs.mkdirSync(ipcInputDir, { recursive: true });
-
-  // Clean up stale _close sentinel
-  try {
-    fs.unlinkSync(ipcCloseFile);
-  } catch {
-    /* ignore */
-  }
 
   // Initialize current chat JID
   setCurrentChat(containerInput.chatJid);
