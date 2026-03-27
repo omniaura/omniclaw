@@ -81,6 +81,11 @@ interface GroupState {
   activeTaskInfo: ActiveTaskInfo | null;
 }
 
+interface StartMessageRunResult {
+  started: boolean;
+  processingCount: number;
+}
+
 function toChannelJid(jid: string): string {
   const marker = '::agent::';
   const idx = jid.indexOf(marker);
@@ -186,6 +191,52 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
+  private queuePendingMessage(
+    groupJid: string,
+    addToWaitingList = false,
+  ): void {
+    const state = this.getGroup(groupJid);
+    if (!state.pendingMessageJids.includes(groupJid)) {
+      state.pendingMessageJids.push(groupJid);
+    }
+    if (addToWaitingList && !this.waitingMessageGroups.includes(groupJid)) {
+      this.waitingMessageGroups.push(groupJid);
+    }
+  }
+
+  private dequeuePendingMessage(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    state.pendingMessageJids = state.pendingMessageJids.filter(
+      (jid) => jid !== groupJid,
+    );
+    this.waitingMessageGroups = this.waitingMessageGroups.filter(
+      (jid) => jid !== groupJid,
+    );
+  }
+
+  private startMessageRun(groupJid: string): StartMessageRunResult {
+    const state = this.getGroup(groupJid);
+    const processingCount = this.activeCount - this.idleCount;
+    if (state.messageLaneState !== 'idle') {
+      return { started: false, processingCount };
+    }
+
+    this.transitionMessageLaneState(groupJid, 'running');
+    this.dequeuePendingMessage(groupJid);
+    this.activeCount++;
+    return { started: true, processingCount };
+  }
+
+  private finishMessageRun(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    this.transitionMessageLaneState(groupJid, 'idle');
+    state.messageProcess = null;
+    state.messageContainerName = null;
+    state.messageGroupFolder = null;
+    state.messageBackend = null;
+    this.activeCount--;
+  }
+
   enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) {
       logger.info({ groupJid }, 'enqueueMessageCheck: shutting down, skipping');
@@ -197,9 +248,7 @@ export class GroupQueue {
 
     // Only check the message lane — task lane is independent
     if (state.messageLaneState !== 'idle') {
-      if (!state.pendingMessageJids.includes(groupJid)) {
-        state.pendingMessageJids.push(groupJid);
-      }
+      this.queuePendingMessage(groupJid);
       logger.info(
         { groupJid, folderKey },
         'Message container active, message queued',
@@ -218,12 +267,7 @@ export class GroupQueue {
         );
         this._closeIdleContainer(oldest);
       }
-      if (!state.pendingMessageJids.includes(groupJid)) {
-        state.pendingMessageJids.push(groupJid);
-      }
-      if (!this.waitingMessageGroups.includes(groupJid)) {
-        this.waitingMessageGroups.push(groupJid);
-      }
+      this.queuePendingMessage(groupJid, true);
       logger.info(
         { groupJid, folderKey, processingCount, activeCount: this.activeCount },
         'At active container limit, message queued',
@@ -559,41 +603,16 @@ export class GroupQueue {
     groupJid: string,
     reason: 'messages' | 'drain',
   ): Promise<void> {
-    const state = this.getGroup(groupJid);
-    this.transitionMessageLaneState(groupJid, 'running');
-    // Remove this JID from pending (it's being processed now)
-    state.pendingMessageJids = state.pendingMessageJids.filter(
-      (j) => j !== groupJid,
-    );
-    this.activeCount++;
-
-    logger.debug(
-      { groupJid, reason, activeCount: this.activeCount },
-      'Starting message container for group',
-    );
-
-    try {
-      if (this.processMessagesFn) {
-        const success = await this.processMessagesFn(groupJid);
-        if (success) {
-          state.retryCount = 0;
-        } else {
-          this.scheduleRetry(groupJid, state);
-        }
-      }
-    } catch (err) {
-      logger.error({ groupJid, err }, 'Error processing messages for group');
-      this.scheduleRetry(groupJid, state);
-    } finally {
-      // Clean up idle tracking if container exited while idle
-      this.transitionMessageLaneState(groupJid, 'idle');
-      state.messageProcess = null;
-      state.messageContainerName = null;
-      state.messageGroupFolder = null;
-      state.messageBackend = null;
-      this.activeCount--;
-      this.drainMessageLane(groupJid);
+    const start = this.startMessageRun(groupJid);
+    if (!start.started) {
+      const state = this.getGroup(groupJid);
+      logger.debug(
+        { groupJid, reason, laneState: state.messageLaneState },
+        'Skipping duplicate message dispatch start',
+      );
+      return;
     }
+    await this.runStartedMessageGroup(groupJid, reason);
   }
 
   private async runTask(groupJid: string, task: QueuedTask): Promise<void> {
@@ -732,6 +751,35 @@ export class GroupQueue {
           ),
         );
       }
+    }
+  }
+
+  private async runStartedMessageGroup(
+    groupJid: string,
+    reason: 'messages' | 'drain',
+  ): Promise<void> {
+    const state = this.getGroup(groupJid);
+
+    logger.debug(
+      { groupJid, reason, activeCount: this.activeCount },
+      'Starting message container for group',
+    );
+
+    try {
+      if (this.processMessagesFn) {
+        const success = await this.processMessagesFn(groupJid);
+        if (success) {
+          state.retryCount = 0;
+        } else {
+          this.scheduleRetry(groupJid, state);
+        }
+      }
+    } catch (err) {
+      logger.error({ groupJid, err }, 'Error processing messages for group');
+      this.scheduleRetry(groupJid, state);
+    } finally {
+      this.finishMessageRun(groupJid);
+      this.drainMessageLane(groupJid);
     }
   }
 
