@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'bun:test';
 
+import {
+  formatIssueMarkdown,
+  formatPrMarkdown,
+  invalidateGitHubContextCacheForAgents,
+  fetchGitHubContext,
+  truncate,
+} from './github.js';
+
 import type { GitHubAgentWatch, GitHubWatchesConfig } from './types.js';
 
 // We test the pure functions directly; API calls are tested via mocked fetch.
@@ -156,6 +164,140 @@ describe('github', () => {
     it('clamps excessive values to max list limit', () => {
       const { normalizeLimit } = require('./github.js');
       expect(normalizeLimit(500, 10)).toBe(50);
+    });
+
+    it('floors decimals and falls back for NaN', () => {
+      const { normalizeLimit } = require('./github.js');
+      expect(normalizeLimit(7.9, 10)).toBe(7);
+      expect(normalizeLimit(Number.NaN, 10)).toBe(10);
+    });
+  });
+
+  describe('truncate', () => {
+    it('normalizes line endings, trims whitespace, and truncates with ellipsis', () => {
+      expect(truncate('  hello\r\nworld  ', 7)).toBe('hello\nw…');
+    });
+
+    it('returns an empty string for empty input', () => {
+      expect(truncate('', 10)).toBe('');
+      expect(truncate(null, 10)).toBe('');
+      expect(truncate(undefined, 10)).toBe('');
+    });
+  });
+
+  describe('markdown formatting', () => {
+    it('formats pull requests with filtered reviews and capped comments', () => {
+      const markdown = formatPrMarkdown(
+        {
+          number: 42,
+          title: 'Tighten test coverage',
+          user: { login: 'alice' },
+          head: { ref: 'tests/add-more' },
+          base: { ref: 'main' },
+          state: 'open',
+          draft: true,
+          requested_reviewers: [],
+          html_url: 'https://github.com/omniaura/omniclaw/pull/42',
+          body: '  Adds deterministic tests\r\nfor edge cases.  ',
+          created_at: '2026-03-27T00:00:00.000Z',
+          updated_at: '2026-03-27T00:00:00.000Z',
+        },
+        [
+          { user: { login: 'reviewer-1' }, state: 'APPROVED', body: 'ship it' },
+          { user: { login: 'reviewer-2' }, state: 'COMMENTED', body: 'nit' },
+          { user: { login: 'reviewer-3' }, state: 'PENDING', body: null },
+        ],
+        [
+          {
+            user: { login: 'bob' },
+            body: 'one',
+            path: 'src/a.ts',
+            line: 10,
+            created_at: '2026-03-27T00:00:00.000Z',
+          },
+          {
+            user: { login: 'carol' },
+            body: 'two',
+            path: 'src/b.ts',
+            line: 11,
+            created_at: '2026-03-27T00:00:00.000Z',
+          },
+          {
+            user: { login: 'dave' },
+            body: 'three',
+            path: 'src/c.ts',
+            line: 12,
+            created_at: '2026-03-27T00:00:00.000Z',
+          },
+          {
+            user: { login: 'erin' },
+            body: 'four',
+            path: 'src/d.ts',
+            line: null,
+            created_at: '2026-03-27T00:00:00.000Z',
+          },
+          {
+            user: { login: null },
+            body: 'five',
+            path: '',
+            line: null,
+            created_at: '2026-03-27T00:00:00.000Z',
+          },
+          {
+            user: { login: 'frank' },
+            body: 'six',
+            path: 'src/f.ts',
+            line: 16,
+            created_at: '2026-03-27T00:00:00.000Z',
+          },
+        ],
+        'pending',
+      );
+
+      expect(markdown).toContain('### PR #42: Tighten test coverage (DRAFT)');
+      expect(markdown).toContain('Author: alice | Branch: `tests/add-more` → `main`');
+      expect(markdown).toContain('CI: pending | Reviews: reviewer-1: APPROVED');
+      expect(markdown).toContain('Description: Adds deterministic tests\nfor edge cases.');
+      expect(markdown).toContain('Review comments (6):');
+      expect(markdown).toContain('bob on `src/a.ts`:10: one');
+      expect(markdown).toContain('?');
+      expect(markdown).toContain('... and 1 more comments');
+      expect(markdown).not.toContain('reviewer-2: COMMENTED');
+      expect(markdown).not.toContain('reviewer-3: PENDING');
+      expect(markdown).not.toContain('frank on `src/f.ts`:16: six');
+    });
+
+    it('formats issues with fallback metadata and truncated bodies', () => {
+      const markdown = formatIssueMarkdown({
+        number: 7,
+        title: 'Handle fallback labels',
+        user: null,
+        state: 'open',
+        labels: [],
+        assignee: null,
+        html_url: 'https://github.com/omniaura/omniclaw/issues/7',
+        body: 'x'.repeat(151),
+        created_at: '2026-03-27T00:00:00.000Z',
+        updated_at: '2026-03-27T00:00:00.000Z',
+      });
+
+      expect(markdown).toContain('- **#7**: Handle fallback labels');
+      expect(markdown).toContain('Labels: none | Assignee: unassigned | Author: unknown');
+      expect(markdown.endsWith('…')).toBe(true);
+    });
+  });
+
+  describe('cache invalidation', () => {
+    it('removes cached context for targeted agents only', async () => {
+      await fetchGitHubContext({ agentId: 'cache-a', repos: [] }, 60_000);
+      await fetchGitHubContext({ agentId: 'cache-b', repos: [] }, 60_000);
+
+      expect(
+        invalidateGitHubContextCacheForAgents(['cache-a', 'missing-agent']),
+      ).toBe(1);
+      expect(invalidateGitHubContextCacheForAgents(['cache-a', 'cache-b'])).toBe(
+        1,
+      );
     });
   });
 
