@@ -132,6 +132,7 @@ describe('startSchedulerLoop task execution', () => {
         getTaskById: getTaskByIdMock,
         logTaskRun: mock(() => {}),
         updateTaskAfterRun: mock(() => {}),
+        writeScheduledRunHandoff: mock(() => 'handoff.json'),
         logger: loggerMock,
       } as any);
 
@@ -176,6 +177,7 @@ describe('startSchedulerLoop task execution', () => {
     );
     const logTaskRunMock = mock(() => {});
     const updateTaskAfterRunMock = mock(() => {});
+    const writeScheduledRunHandoffMock = mock(() => 'handoff.json');
     const closeStdinMock = mock(() => {});
     const notifyIdleMock = mock(() => {});
     let backendInput: Record<string, unknown> | undefined;
@@ -267,6 +269,7 @@ describe('startSchedulerLoop task execution', () => {
         getTaskById: getTaskByIdMock,
         logTaskRun: logTaskRunMock,
         updateTaskAfterRun: updateTaskAfterRunMock,
+        writeScheduledRunHandoff: writeScheduledRunHandoffMock,
         logger: loggerMock,
       } as any);
 
@@ -286,6 +289,14 @@ describe('startSchedulerLoop task execution', () => {
         'task-error',
         '2026-01-01T00:05:00.000Z',
         'Error: final failure',
+      );
+      expect(writeScheduledRunHandoffMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          task_id: 'task-error',
+          status: 'error',
+          error: 'final failure',
+          result: null,
+        }),
       );
       expect(notifyIdleMock).not.toHaveBeenCalled();
       expect(closeStdinMock).not.toHaveBeenCalled();

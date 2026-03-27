@@ -940,6 +940,7 @@ describe('recoverStaleTasks', () => {
       getTaskById,
       logTaskRun,
       updateTaskAfterRun,
+      writeScheduledRunHandoff: () => '',
       logger: {
         info: () => {},
         warn: () => {},
@@ -1004,6 +1005,7 @@ describe('recoverStaleTasks', () => {
       getTaskById,
       logTaskRun,
       updateTaskAfterRun,
+      writeScheduledRunHandoff: () => '',
       logger: {
         info: () => {},
         warn: () => {},
@@ -1058,6 +1060,7 @@ describe('recoverStaleTasks', () => {
       getTaskById,
       logTaskRun,
       updateTaskAfterRun,
+      writeScheduledRunHandoff: () => '',
       logger: {
         info: () => {},
         warn: () => {},
@@ -1112,6 +1115,7 @@ describe('recoverStaleTasks', () => {
       getTaskById,
       logTaskRun,
       updateTaskAfterRun,
+      writeScheduledRunHandoff: () => '',
       logger: {
         info: () => {},
         warn: () => {},
@@ -1164,6 +1168,7 @@ describe('recoverStaleTasks', () => {
       getTaskById,
       logTaskRun,
       updateTaskAfterRun,
+      writeScheduledRunHandoff: () => '',
       logger: {
         info: () => {},
         warn: () => {},

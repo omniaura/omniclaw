@@ -57,6 +57,7 @@ describe('startSchedulerLoop harness', () => {
     const updateTaskAfterRunMock = mock(() => {});
     const logTaskRunMock = mock(() => {});
     const writeTasksSnapshotMock = mock(() => {});
+    const writeScheduledRunHandoffMock = mock(() => 'handoff.json');
     const calculateNextRunMock = mock((scheduleType: string) =>
       scheduleType === 'once' ? null : '2026-01-01T01:00:00.000Z',
     );
@@ -152,6 +153,7 @@ describe('startSchedulerLoop harness', () => {
         getTaskById: getTaskByIdMock,
         logTaskRun: logTaskRunMock,
         updateTaskAfterRun: updateTaskAfterRunMock,
+        writeScheduledRunHandoff: writeScheduledRunHandoffMock,
         logger: loggerMock,
       };
 
@@ -227,6 +229,7 @@ describe('startSchedulerLoop harness', () => {
       expect(lastBackendInput?.chatJid).toBe('main@g.us');
 
       expect(logTaskRunMock).toHaveBeenCalledTimes(2);
+      expect(writeScheduledRunHandoffMock).toHaveBeenCalledTimes(2);
       expect(updateTaskAfterRunMock).toHaveBeenCalledTimes(1);
       expect(markTaskExecutingMock).toHaveBeenCalledTimes(1);
       expect(markTaskExecutingMock).toHaveBeenCalledWith('task-success');

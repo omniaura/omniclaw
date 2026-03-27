@@ -31,6 +31,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
 import { ResumePositionStore } from './resume-position-store.js';
+import { writeScheduledRunHandoff } from './task-handoffs.js';
 import {
   Channel,
   ContainerProcess,
@@ -53,6 +54,7 @@ interface SchedulerRuntime {
   getTaskById: typeof getTaskById;
   logTaskRun: typeof logTaskRun;
   updateTaskAfterRun: typeof updateTaskAfterRun;
+  writeScheduledRunHandoff: typeof writeScheduledRunHandoff;
   logger: typeof logger;
 }
 
@@ -71,6 +73,7 @@ const defaultSchedulerRuntime: SchedulerRuntime = {
   getTaskById,
   logTaskRun,
   updateTaskAfterRun,
+  writeScheduledRunHandoff,
   logger,
 };
 
@@ -110,6 +113,8 @@ async function runTask(
   deps: SchedulerDependencies,
   runtime: SchedulerRuntime = defaultSchedulerRuntime,
 ): Promise<void> {
+  const runAt = new Date().toISOString();
+
   // Re-check task status: may have been cancelled/paused while queued
   const freshTask = runtime.getTaskById(task.id);
   if (!freshTask || freshTask.status !== 'active') {
@@ -138,9 +143,21 @@ async function runTask(
       log.error('Group not found for task');
       runtime.logTaskRun({
         task_id: task.id,
-        run_at: new Date().toISOString(),
+        run_at: runAt,
         duration_ms: Date.now() - startTime,
         status: 'error',
+        result: null,
+        error: `Group not found: ${task.group_folder}`,
+      });
+      runtime.writeScheduledRunHandoff({
+        task_id: task.id,
+        chat_jid: task.chat_jid,
+        group_folder: task.group_folder,
+        context_mode: task.context_mode,
+        run_at: runAt,
+        status: 'error',
+        duration_ms: Date.now() - startTime,
+        next_run: task.next_run,
         result: null,
         error: `Group not found: ${task.group_folder}`,
       });
@@ -273,7 +290,7 @@ async function runTask(
 
     runtime.logTaskRun({
       task_id: task.id,
-      run_at: new Date().toISOString(),
+      run_at: runAt,
       duration_ms: durationMs,
       status: error ? 'error' : 'success',
       result,
@@ -292,6 +309,18 @@ async function runTask(
         ? result.slice(0, 200)
         : 'Completed';
     runtime.updateTaskAfterRun(task.id, nextRun, resultSummary);
+    runtime.writeScheduledRunHandoff({
+      task_id: task.id,
+      chat_jid: task.chat_jid,
+      group_folder: task.group_folder,
+      context_mode: task.context_mode,
+      run_at: runAt,
+      status: error ? 'error' : 'success',
+      duration_ms: durationMs,
+      next_run: nextRun,
+      result,
+      error,
+    });
   } finally {
     runtime.clearTaskExecuting(task.id);
   }
