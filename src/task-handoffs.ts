@@ -30,8 +30,16 @@ interface WriteScheduledRunHandoffOptions {
   maxFiles?: number;
 }
 
+interface ReadScheduledRunHandoffsOptions {
+  baseDir?: string;
+  limit?: number;
+  onError?: (error: unknown, filePath: string) => void;
+}
+
 const HANDOFFS_SUBDIR = path.join('context', 'scheduled-runs');
 const DEFAULT_MAX_HANDOFF_FILES = 50;
+const DEFAULT_HANDOFF_READ_LIMIT = 3;
+const MAX_PROMPT_VALUE_CHARS = 200;
 
 function sanitizeFilePart(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, '_');
@@ -86,4 +94,55 @@ export function writeScheduledRunHandoff(
   fsImpl.writeFileSync(filePath, JSON.stringify(handoff, null, 2));
   pruneOldHandoffs(handoffDir, fsImpl, maxFiles);
   return filePath;
+}
+
+export function readScheduledRunHandoffs(
+  groupFolder: string,
+  options: ReadScheduledRunHandoffsOptions = {},
+): ScheduledRunHandoff[] {
+  const baseDir = options.baseDir ?? GROUPS_DIR;
+  const limit = options.limit ?? DEFAULT_HANDOFF_READ_LIMIT;
+  const onError = options.onError;
+  const handoffDir = getHandoffDir(baseDir, groupFolder);
+
+  if (!fs.existsSync(handoffDir)) {
+    return [];
+  }
+
+  return fs
+    .readdirSync(handoffDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .sort((a, b) => b.name.localeCompare(a.name))
+    .slice(0, limit)
+    .flatMap((entry) => {
+      const filePath = path.join(handoffDir, entry.name);
+      try {
+        assertPathWithin(filePath, handoffDir, 'scheduled run handoff file');
+        const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        return parsed ? [parsed as ScheduledRunHandoff] : [];
+      } catch (error) {
+        onError?.(error, filePath);
+        return [];
+      }
+    });
+}
+
+function truncatePromptValue(value: string | null): string | null {
+  if (!value) return null;
+  if (value.length <= MAX_PROMPT_VALUE_CHARS) return value;
+  return `${value.slice(0, MAX_PROMPT_VALUE_CHARS)}...`;
+}
+
+export function formatScheduledRunHandoffsForPrompt(
+  handoffs: ScheduledRunHandoff[],
+): string {
+  if (handoffs.length === 0) return '';
+
+  const lines = handoffs.map((handoff) => {
+    const detail =
+      truncatePromptValue(handoff.error ?? handoff.result) ?? 'No details';
+    return `- ${handoff.run_at} | ${handoff.status} | task=${handoff.task_id} | ${detail}`;
+  });
+
+  return `[Recent Scheduled Runs]\n${lines.join('\n')}`;
 }
