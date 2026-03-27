@@ -20,7 +20,7 @@ import {
 
 import fs from 'fs';
 import path from 'path';
-import { buildTriggerPattern, DATA_DIR, GROUPS_DIR } from '../config.js';
+import { buildTriggerPattern, DATA_DIR } from '../config.js';
 import {
   getAllAgents,
   getSubscriptionsForChannel,
@@ -33,125 +33,43 @@ import {
   renderDiscordFlowPrompt,
 } from '../discord-command-flows.js';
 import { logger } from '../logger.js';
-import { assertPathWithin } from '../path-security.js';
+import {
+  cleanupExpiredMedia,
+  downloadBinaryAttachment,
+  downloadTextAttachment,
+  ensureMediaDir,
+  buildSafeMediaPath,
+  formatImageMarker,
+  formatPlaceholder,
+  formatTextFileMarker,
+  isImageByTypeOrExtension,
+  isTextByExtension,
+  resolveWorkspaceFolder,
+  MAX_TEXT_DOWNLOAD_BYTES,
+} from '../media.js';
 import type { Channel, NewMessage, RegisteredGroup } from '../types.js';
 import { splitMessage } from './utils.js';
 
+/**
+ * Resolve the workspace folder for attachment storage.
+ * Delegates to the shared media pipeline; kept as a named export for
+ * backward compatibility with existing tests.
+ */
 export function getAttachmentWorkspaceFolder(
   group: Pick<RegisteredGroup, 'folder' | 'channelFolder'>,
 ): string {
-  const preferredFolder = group.channelFolder?.trim();
-  const workspaceFolder = preferredFolder ? preferredFolder : group.folder;
-  const mediaDir = path.join(GROUPS_DIR, workspaceFolder, 'media');
-  assertPathWithin(mediaDir, GROUPS_DIR, 'Discord attachment workspace');
-  return workspaceFolder;
-}
-
-function getAttachmentMediaDir(
-  group: Pick<RegisteredGroup, 'folder' | 'channelFolder'>,
-): string {
-  return path.join(GROUPS_DIR, getAttachmentWorkspaceFolder(group), 'media');
-}
-
-const IMAGE_EXTENSIONS = new Set([
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.webp',
-  '.bmp',
-  '.svg',
-]);
-
-const DISCORD_DOWNLOAD_TIMEOUT_MS = 15_000;
-const MAX_DISCORD_BINARY_DOWNLOAD_BYTES = 10 * 1024 * 1024;
-const MAX_DISCORD_TEXT_DOWNLOAD_BYTES = 100 * 1024;
-
-export async function readStreamWithByteLimit(
-  stream: ReadableStream<Uint8Array> | null,
-  maxBytes: number,
-): Promise<Buffer> {
-  if (!stream) return Buffer.alloc(0);
-
-  const reader = stream.getReader();
-  const chunks: Buffer[] = [];
-  let totalBytes = 0;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-
-      totalBytes += value.byteLength;
-      if (totalBytes > maxBytes) {
-        try {
-          await reader.cancel('Discord download exceeded byte limit');
-        } catch {
-          // Ignore cancellation failures; the limit error below is the primary signal.
-        }
-        throw new Error(`Discord download exceeded ${maxBytes} bytes`);
-      }
-
-      chunks.push(Buffer.from(value));
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  return Buffer.concat(chunks);
-}
-
-async function fetchDiscordDownload(url: string): Promise<Response> {
-  return fetch(url, {
-    signal: AbortSignal.timeout(DISCORD_DOWNLOAD_TIMEOUT_MS),
-  });
-}
-
-export async function downloadDiscordBinaryAttachment(
-  url: string,
-): Promise<Buffer> {
-  const response = await fetchDiscordDownload(url);
-  if (!response.ok) {
-    throw new Error(`Discord download failed with status ${response.status}`);
-  }
-
-  return readStreamWithByteLimit(
-    response.body,
-    MAX_DISCORD_BINARY_DOWNLOAD_BYTES,
-  );
-}
-
-export async function downloadDiscordTextAttachment(
-  url: string,
-): Promise<string> {
-  const response = await fetchDiscordDownload(url);
-  if (!response.ok) {
-    throw new Error(`Discord download failed with status ${response.status}`);
-  }
-
-  const bytes = await readStreamWithByteLimit(
-    response.body,
-    MAX_DISCORD_TEXT_DOWNLOAD_BYTES,
-  );
-  return new TextDecoder().decode(bytes);
+  return resolveWorkspaceFolder(group);
 }
 
 /**
- * Determine if a Discord attachment is an image.
- * Discord sometimes sends contentType as null even for images,
- * so we fall back to file extension detection.
+ * Thin wrapper — delegates to `isImageByTypeOrExtension` from the shared
+ * media module. Exported for backward compatibility with existing tests.
  */
-/** @internal exported for testing */
 export function isImageAttachment(a: {
   contentType?: string | null;
   name?: string | null;
 }): boolean {
-  if (a.contentType?.startsWith('image/')) return true;
-  if (a.contentType) return false; // Known non-image type
-  // contentType is null/undefined — check file extension
-  const ext = path.extname(a.name || '').toLowerCase();
-  return IMAGE_EXTENSIONS.has(ext);
+  return isImageByTypeOrExtension(a.contentType, a.name);
 }
 
 /**
@@ -1044,18 +962,15 @@ export class DiscordChannel implements Channel {
       for (const [, a] of message.attachments) {
         if (isImageAttachment(a)) {
           try {
-            const mediaDir = getAttachmentMediaDir(group);
-            fs.mkdirSync(mediaDir, { recursive: true });
-            // Layer 1: Strip directory components to prevent path traversal
-            // (e.g. "../../etc/cron.d/evil.png" → "evil.png")
-            const safeName = path.basename(a.name || 'image.png');
-            const filename = `${msgId}-${safeName}`;
-            const filePath = path.join(mediaDir, filename);
-            // Layer 2: Defense-in-depth — verify resolved path stays within mediaDir
-            assertPathWithin(filePath, mediaDir, 'Discord image attachment');
-            const bytes = await downloadDiscordBinaryAttachment(a.url);
+            const mediaDir = ensureMediaDir(group);
+            const filePath = buildSafeMediaPath(
+              mediaDir,
+              msgId,
+              a.name || 'image.png',
+            );
+            const bytes = await downloadBinaryAttachment(a.url);
             fs.writeFileSync(filePath, bytes);
-            parts.push(`[attachment:image file=${filename}]`);
+            parts.push(formatImageMarker(path.basename(filePath)));
           } catch (err) {
             logger.error(
               { err, url: a.url },
@@ -1064,56 +979,27 @@ export class DiscordChannel implements Channel {
             parts.push('[Image]');
           }
         } else if (a.contentType?.startsWith('video/')) {
-          parts.push('[Video]');
+          parts.push(formatPlaceholder('video'));
         } else if (a.contentType?.startsWith('audio/')) {
-          parts.push('[Audio]');
+          parts.push(formatPlaceholder('audio'));
         } else {
-          // Attempt to inline text-based file attachments
-          const TEXT_EXTENSIONS = new Set([
-            '.txt',
-            '.md',
-            '.json',
-            '.csv',
-            '.log',
-            '.xml',
-            '.yaml',
-            '.yml',
-            '.toml',
-            '.py',
-            '.js',
-            '.ts',
-            '.html',
-            '.css',
-            '.sh',
-            '.cfg',
-            '.ini',
-            '.sql',
-            '.env.example',
-          ]);
-          const MAX_TEXT_SIZE = 100 * 1024; // 100 KB
-          // Strip directory components from filename to prevent path traversal in metadata
           const safeName = path.basename(a.name || 'attachment');
-          const ext = path.extname(safeName).toLowerCase();
-          const fileName = safeName;
-
           if (
-            TEXT_EXTENSIONS.has(ext) &&
-            (a.size ?? Infinity) <= MAX_TEXT_SIZE
+            isTextByExtension(safeName) &&
+            (a.size ?? Infinity) <= MAX_TEXT_DOWNLOAD_BYTES
           ) {
             try {
-              const text = await downloadDiscordTextAttachment(a.url);
-              parts.push(
-                `[attachment:file name=${fileName}]\n${text}\n[/attachment:file]`,
-              );
+              const text = await downloadTextAttachment(a.url);
+              parts.push(formatTextFileMarker(safeName, text));
             } catch (err) {
               logger.error(
                 { err, url: a.url },
                 'Failed to download Discord text attachment',
               );
-              parts.push(`[File: ${fileName}]`);
+              parts.push(formatPlaceholder('file', safeName));
             }
           } else {
-            parts.push(`[File: ${fileName}]`);
+            parts.push(formatPlaceholder('file', safeName));
           }
         }
       }
@@ -1128,16 +1014,18 @@ export class DiscordChannel implements Channel {
         const imageUrl = embed.image?.url || embed.thumbnail?.url;
         if (!imageUrl) continue;
         try {
-          const mediaDir = getAttachmentMediaDir(group);
-          fs.mkdirSync(mediaDir, { recursive: true });
+          const mediaDir = ensureMediaDir(group);
           const urlPath = new URL(imageUrl).pathname;
           const safeName = path.basename(urlPath) || 'embed.png';
-          const filename = `${msgId}-embed-${safeName}`;
-          const filePath = path.join(mediaDir, filename);
-          assertPathWithin(filePath, mediaDir, 'Discord embed image');
-          const bytes = await downloadDiscordBinaryAttachment(imageUrl);
+          const filePath = buildSafeMediaPath(
+            mediaDir,
+            msgId,
+            safeName,
+            'embed',
+          );
+          const bytes = await downloadBinaryAttachment(imageUrl);
           fs.writeFileSync(filePath, bytes);
-          embedParts.push(`[attachment:image file=${filename}]`);
+          embedParts.push(formatImageMarker(path.basename(filePath)));
         } catch (err) {
           logger.warn({ err, url: imageUrl }, 'Failed to download embed image');
         }
@@ -1198,7 +1086,7 @@ export class DiscordChannel implements Channel {
     }
 
     // Clean up media files older than 24 hours
-    this.cleanupOldMedia(group);
+    cleanupExpiredMedia(group);
 
     // Mark this JID as owned by this bot only after we accept/process the message.
     this.ownedJids.add(chatJid);
@@ -1351,26 +1239,6 @@ export class DiscordChannel implements Channel {
       content: `Queued "/${command.name}" for ${group.name}.`,
       ephemeral: true,
     });
-  }
-
-  private cleanupOldMedia(
-    group: Pick<RegisteredGroup, 'folder' | 'channelFolder'>,
-  ): void {
-    try {
-      const mediaDir = getAttachmentMediaDir(group);
-      if (!fs.existsSync(mediaDir)) return;
-      const now = Date.now();
-      const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-      for (const file of fs.readdirSync(mediaDir)) {
-        const filePath = path.join(mediaDir, file);
-        const stat = fs.statSync(filePath);
-        if (now - stat.mtimeMs > maxAge) {
-          fs.unlinkSync(filePath);
-        }
-      }
-    } catch {
-      // Non-critical — ignore cleanup errors
-    }
   }
 }
 

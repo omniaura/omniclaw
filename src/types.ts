@@ -123,6 +123,26 @@ export interface NewMessage {
   }>;
 }
 
+/** Attachment type tag for the unified media pipeline. */
+export type MediaAttachmentType = 'image' | 'file' | 'video' | 'audio';
+
+/**
+ * Channel-agnostic media attachment descriptor.
+ * Produced by channel adapters, consumed by the container agent runtime.
+ */
+export interface MediaAttachment {
+  /** Semantic type of the attachment. */
+  type: MediaAttachmentType;
+  /** MIME type when known (e.g. "image/png"). */
+  mimeType: string | null;
+  /** Absolute path to the downloaded file on the host. */
+  localPath: string;
+  /** Original remote URL the file was fetched from. */
+  originalUrl: string;
+  /** Human-readable filename (sanitised — no directory components). */
+  filename: string;
+}
+
 export interface ScheduledTask {
   id: string;
   group_folder: string;

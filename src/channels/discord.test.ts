@@ -1,14 +1,16 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
 
 import {
-  downloadDiscordBinaryAttachment,
-  downloadDiscordTextAttachment,
   jidToChannelId,
   DiscordChannel,
   getAttachmentWorkspaceFolder,
   isImageAttachment,
-  readStreamWithByteLimit,
 } from './discord.js';
+import {
+  downloadBinaryAttachment,
+  downloadTextAttachment,
+  readStreamWithByteLimit,
+} from '../media.js';
 import type { RegisteredGroup } from '../types.js';
 
 const originalFetch = globalThis.fetch;
@@ -185,7 +187,7 @@ describe('Discord download guards', () => {
   it('rejects streamed responses that exceed the byte limit', async () => {
     await expect(
       readStreamWithByteLimit(createStream(['12345', '67890']), 8),
-    ).rejects.toThrow('Discord download exceeded 8 bytes');
+    ).rejects.toThrow('Download exceeded 8 bytes');
   });
 
   it('applies capped streamed downloads for binary attachments', async () => {
@@ -200,7 +202,7 @@ describe('Discord download guards', () => {
       },
     ) as unknown as typeof globalThis.fetch;
 
-    const bytes = await downloadDiscordBinaryAttachment(
+    const bytes = await downloadBinaryAttachment(
       'https://cdn.discordapp.test/file.png',
     );
 
@@ -216,8 +218,8 @@ describe('Discord download guards', () => {
     ) as unknown as typeof globalThis.fetch;
 
     await expect(
-      downloadDiscordTextAttachment('https://cdn.discordapp.test/file.txt'),
-    ).rejects.toThrow('Discord download exceeded 102400 bytes');
+      downloadTextAttachment('https://cdn.discordapp.test/file.txt'),
+    ).rejects.toThrow('Download exceeded 102400 bytes');
   });
 });
 
