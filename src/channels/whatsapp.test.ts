@@ -881,3 +881,31 @@ describe('WhatsAppChannel LID mapping', () => {
     expect(Object.keys(getPrivate(channel, 'lidToPhoneMap'))).toHaveLength(0);
   });
 });
+
+describe('WhatsAppChannel sender identity', () => {
+  it('uses translated participant JIDs for sender and sender_user_id', async () => {
+    const channel = makeChannel();
+    setPrivate(channel, 'sock', makeMockSocket());
+    setPrivate(channel, 'lidToPhoneMap', {
+      '15551234567': '15551234567@s.whatsapp.net',
+    });
+
+    await expect(
+      (channel as any).buildSenderIdentity('15551234567:12@lid'),
+    ).resolves.toEqual({
+      sender: 'whatsapp:15551234567@s.whatsapp.net',
+      senderUserId: '15551234567@s.whatsapp.net',
+    });
+  });
+
+  it('falls back to the raw JID when no translation is needed', async () => {
+    const channel = makeChannel();
+
+    await expect(
+      (channel as any).buildSenderIdentity('15551234567@s.whatsapp.net'),
+    ).resolves.toEqual({
+      sender: 'whatsapp:15551234567@s.whatsapp.net',
+      senderUserId: '15551234567@s.whatsapp.net',
+    });
+  });
+});
