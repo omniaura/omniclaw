@@ -126,6 +126,10 @@ import {
   hasPriorRuntimeState,
   STARTUP_CONFIRMATION_PROMPT,
 } from './startup-notifications.js';
+import {
+  formatScheduledRunHandoffsForPrompt,
+  readScheduledRunHandoffs,
+} from './task-handoffs.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import {
   parseTelegramApiFileUrl,
@@ -1237,6 +1241,16 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
     ),
     channelRosterHasRoleLabels: true,
   });
+
+  const recentHandoffs = readScheduledRunHandoffs(group.folder, {
+    limit: 3,
+    onError: (err, filePath) =>
+      log.warn({ err, filePath }, 'Failed to load scheduled run handoff'),
+  });
+  const handoffBlock = formatScheduledRunHandoffsForPrompt(recentHandoffs);
+  if (handoffBlock) {
+    prompt = `${handoffBlock}\n\n${prompt}`;
+  }
 
   // Inject context about active background tasks
   const activeTask = queue.getActiveTaskInfo(dispatchJid);
