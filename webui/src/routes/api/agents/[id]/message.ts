@@ -70,6 +70,7 @@ export async function POST({ params, request }: APIEvent) {
 
   try {
     const messageId = state.sendMessage(
+      agentId,
       channel as string,
       content as string,
       senderLabel,

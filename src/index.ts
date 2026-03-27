@@ -2459,7 +2459,7 @@ async function main(): Promise<void> {
           (source as Agent['avatarSource']) || undefined;
       }
     },
-    sendMessage: (chatJid, content, senderName) => {
+    sendMessage: (agentId, chatJid, content, senderName) => {
       const msgId = `web-${randomUUID()}`;
       storeMessage({
         id: msgId,
@@ -2471,7 +2471,7 @@ async function main(): Promise<void> {
         is_from_me: false,
         sender_platform: 'web',
       });
-      queue.enqueueMessageCheck(chatJid);
+      queue.enqueueMessageCheck(makeDispatchKey(chatJid, agentId));
       return msgId;
     },
     resolveChatImage: (chatJid) => resolveChatImageUrl(chatJid),

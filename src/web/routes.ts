@@ -998,7 +998,10 @@ async function handleSendMessage(
 
   const { channel, content, sender_name } = body;
   if (!content || typeof content !== 'string') {
-    return json({ error: 'Missing or invalid "content" (string required)' }, 400);
+    return json(
+      { error: 'Missing or invalid "content" (string required)' },
+      400,
+    );
   }
   if (content.length > 10000) {
     return json({ error: '"content" exceeds 10000 character limit' }, 400);
@@ -1017,7 +1020,9 @@ async function handleSendMessage(
   );
   if (agentChannels.length === 0) {
     return json(
-      { error: `Agent "${agent.name}" is not subscribed to channel "${channel}"` },
+      {
+        error: `Agent "${agent.name}" is not subscribed to channel "${channel}"`,
+      },
       400,
     );
   }
@@ -1028,8 +1033,11 @@ async function handleSendMessage(
       : 'Web UI Admin';
 
   try {
-    const messageId = state.sendMessage(channel, content, senderLabel);
-    return json({ id: messageId, channel, content, sender_name: senderLabel }, 201);
+    const messageId = state.sendMessage(agentId, channel, content, senderLabel);
+    return json(
+      { id: messageId, channel, content, sender_name: senderLabel },
+      201,
+    );
   } catch (err: any) {
     return json({ error: `Failed to send message: ${err.message}` }, 500);
   }

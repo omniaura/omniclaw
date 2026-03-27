@@ -88,6 +88,7 @@ export interface WebStateProvider {
    * Returns the stored message ID.
    */
   sendMessage?(
+    agentId: string,
     chatJid: string,
     content: string,
     senderName?: string,

@@ -806,10 +806,20 @@ describe('handleRequest task run logs', () => {
 
 describe('POST /api/agents/{id}/message', () => {
   it('sends a message and returns 201 with message details', async () => {
-    const sent: Array<{ chatJid: string; content: string; senderName: string }> = [];
+    const sent: Array<{
+      agentId: string;
+      chatJid: string;
+      content: string;
+      senderName: string;
+    }> = [];
     const state = makeState({
-      sendMessage: (chatJid, content, senderName) => {
-        sent.push({ chatJid, content, senderName: senderName ?? 'Web UI Admin' });
+      sendMessage: (agentId, chatJid, content, senderName) => {
+        sent.push({
+          agentId,
+          chatJid,
+          content,
+          senderName: senderName ?? 'Web UI Admin',
+        });
         return 'web-msg-123';
       },
     });
@@ -830,14 +840,15 @@ describe('POST /api/agents/{id}/message', () => {
     expect(body.content).toBe('Hello agent');
     expect(body.sender_name).toBe('Web UI Admin');
     expect(sent).toHaveLength(1);
+    expect(sent[0].agentId).toBe('agent-1');
     expect(sent[0].chatJid).toBe('dc:123');
   });
 
   it('uses custom sender_name when provided', async () => {
-    const sent: Array<{ senderName: string }> = [];
+    const sent: Array<{ agentId: string; senderName: string }> = [];
     const state = makeState({
-      sendMessage: (_chatJid, _content, senderName) => {
-        sent.push({ senderName: senderName ?? 'Web UI Admin' });
+      sendMessage: (agentId, _chatJid, _content, senderName) => {
+        sent.push({ agentId, senderName: senderName ?? 'Web UI Admin' });
         return 'web-msg-456';
       },
     });
@@ -858,6 +869,7 @@ describe('POST /api/agents/{id}/message', () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as any;
     expect(body.sender_name).toBe('Peyton');
+    expect(sent[0].agentId).toBe('agent-1');
     expect(sent[0].senderName).toBe('Peyton');
   });
 
