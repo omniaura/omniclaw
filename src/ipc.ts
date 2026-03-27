@@ -135,6 +135,49 @@ export type MessageResult =
   | { action: 'blocked'; reason: string }
   | { action: 'unknown' };
 
+function sanitizeIpcRequestId(requestId: string): string {
+  return String(requestId).replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
+function writeIpcMessageResponse(
+  ipcBaseDir: string,
+  sourceGroup: string,
+  requestId: string | undefined,
+  body: Record<string, unknown>,
+): { ok: true } | { ok: false; result: MessageResult } {
+  if (!requestId) return { ok: true };
+
+  const safeRequestId = sanitizeIpcRequestId(requestId);
+  if (!safeRequestId) {
+    logger.warn(
+      { requestId },
+      'IPC message response requestId sanitized to empty string — skipping response',
+    );
+    return {
+      ok: false,
+      result: { action: 'blocked', reason: 'requestId sanitized to empty' },
+    };
+  }
+
+  const responseDir = path.join(ipcBaseDir, sourceGroup, 'responses');
+  fs.mkdirSync(responseDir, { recursive: true });
+  const responseFile = path.join(responseDir, `${safeRequestId}.json`);
+  const tempPath = `${responseFile}.tmp`;
+  fs.writeFileSync(
+    tempPath,
+    JSON.stringify(
+      {
+        requestId: safeRequestId,
+        ...body,
+      },
+      null,
+      2,
+    ),
+  );
+  fs.renameSync(tempPath, responseFile);
+  return { ok: true };
+}
+
 /**
  * Process a single IPC message payload. Extracted from startIpcWatcher to
  * enable direct unit testing of message dispatch logic.
@@ -158,22 +201,74 @@ export async function processMessageIpc(
     const messageId = data.messageId;
     const emoji = data.emoji;
     const ch = deps.findChannel?.(chatJid);
-    if (data.remove) {
-      await (ch?.removeReaction?.(chatJid, messageId, emoji) ??
-        Promise.resolve());
+    let reactionError: string | null = null;
+
+    if (!ch) {
+      reactionError = `No channel found for ${chatJid}.`;
+    } else if (data.remove) {
+      if (!ch.removeReaction) {
+        reactionError = 'Channel does not support removing reactions.';
+      } else {
+        try {
+          await ch.removeReaction(chatJid, messageId, emoji);
+        } catch (err) {
+          reactionError = err instanceof Error ? err.message : String(err);
+        }
+      }
+    } else if (!ch.addReaction) {
+      reactionError = 'Channel does not support adding reactions.';
     } else {
-      await (ch?.addReaction?.(chatJid, messageId, emoji) ?? Promise.resolve());
+      try {
+        await ch.addReaction(chatJid, messageId, emoji);
+      } catch (err) {
+        reactionError = err instanceof Error ? err.message : String(err);
+      }
     }
-    logger.info(
-      {
-        chatJid,
-        messageId,
-        emoji,
-        remove: !!data.remove,
-        sourceGroup,
-      },
-      'IPC reaction processed',
+
+    const responseWrite = writeIpcMessageResponse(
+      ipcBaseDir,
+      sourceGroup,
+      data.requestId,
+      reactionError
+        ? {
+            type: 'react_to_message_response',
+            ok: false,
+            error: reactionError,
+          }
+        : {
+            type: 'react_to_message_response',
+            ok: true,
+            result: data.remove ? 'Reaction removed.' : 'Reaction added.',
+          },
     );
+    if (!responseWrite.ok) {
+      return responseWrite.result;
+    }
+
+    if (reactionError) {
+      logger.warn(
+        {
+          chatJid,
+          messageId,
+          emoji,
+          remove: !!data.remove,
+          sourceGroup,
+          err: reactionError,
+        },
+        'IPC reaction failed',
+      );
+    } else {
+      logger.info(
+        {
+          chatJid,
+          messageId,
+          emoji,
+          remove: !!data.remove,
+          sourceGroup,
+        },
+        'IPC reaction processed',
+      );
+    }
     return { action: 'handled' };
   }
 
@@ -209,35 +304,17 @@ export async function processMessageIpc(
       );
     }
     // Write response back so the agent can read the result
-    if (data.requestId) {
-      const safeRequestId = String(data.requestId).replace(
-        /[^a-zA-Z0-9_-]/g,
-        '',
-      );
-      if (!safeRequestId) {
-        logger.warn(
-          { requestId: data.requestId },
-          'format_mention: requestId sanitized to empty string — skipping response',
-        );
-        return { action: 'blocked', reason: 'requestId sanitized to empty' };
-      }
-      const responseDir = path.join(ipcBaseDir, sourceGroup, 'responses');
-      fs.mkdirSync(responseDir, { recursive: true });
-      const responseFile = path.join(responseDir, `${safeRequestId}.json`);
-      const tempPath = `${responseFile}.tmp`;
-      fs.writeFileSync(
-        tempPath,
-        JSON.stringify(
-          {
-            type: 'format_mention_response',
-            requestId: safeRequestId,
-            result: formattedMention,
-          },
-          null,
-          2,
-        ),
-      );
-      fs.renameSync(tempPath, responseFile);
+    const responseWrite = writeIpcMessageResponse(
+      ipcBaseDir,
+      sourceGroup,
+      data.requestId,
+      {
+        type: 'format_mention_response',
+        result: formattedMention,
+      },
+    );
+    if (!responseWrite.ok) {
+      return responseWrite.result;
     }
     logger.info(
       {

@@ -14,6 +14,7 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const RESPONSES_DIR = path.join(IPC_DIR, 'responses');
 const USER_REGISTRY_PATH = path.join(IPC_DIR, 'user_registry.json');
 
 // Context from environment variables (set by the agent runner)
@@ -118,6 +119,43 @@ function writeIpcFile(dir: string, data: object): string {
   fs.renameSync(tempPath, filepath);
 
   return filename;
+}
+
+function sanitizeRequestId(requestId: string): string {
+  return requestId.replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForResponse(
+  requestId: string,
+  timeoutMs = 3000,
+): Promise<Record<string, unknown> | null> {
+  const safeRequestId = sanitizeRequestId(requestId);
+  if (!safeRequestId) return null;
+
+  const responsePath = path.join(RESPONSES_DIR, `${safeRequestId}.json`);
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if (fs.existsSync(responsePath)) {
+      try {
+        const payload = JSON.parse(
+          fs.readFileSync(responsePath, 'utf-8'),
+        ) as Record<string, unknown>;
+        fs.rmSync(responsePath, { force: true });
+        return payload;
+      } catch {
+        fs.rmSync(responsePath, { force: true });
+        return null;
+      }
+    }
+    await sleep(50);
+  }
+
+  return null;
 }
 
 /** Check task ownership from the snapshot. Returns an error response if the
@@ -846,20 +884,56 @@ if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
         .describe('Set to true to remove the reaction instead of adding it'),
     },
     async (args) => {
+      const requestId = `reaction-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       writeIpcFile(MESSAGES_DIR, {
         type: 'react_to_message',
         chatJid: getCurrentChatJid(),
         messageId: args.message_id,
         emoji: args.emoji,
         remove: args.remove || false,
+        requestId,
         groupFolder,
         timestamp: new Date().toISOString(),
       });
+
+      const response = await waitForResponse(requestId);
+      if (!response) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'Timed out waiting for reaction result.',
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      if (response.ok === false) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text:
+                typeof response.error === 'string'
+                  ? response.error
+                  : 'Reaction failed.',
+            },
+          ],
+          isError: true,
+        };
+      }
+
       return {
         content: [
           {
             type: 'text' as const,
-            text: args.remove ? 'Reaction removed.' : 'Reaction added.',
+            text:
+              typeof response.result === 'string'
+                ? response.result
+                : args.remove
+                  ? 'Reaction removed.'
+                  : 'Reaction added.',
           },
         ],
       };
