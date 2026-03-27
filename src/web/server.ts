@@ -50,6 +50,12 @@ const SNAPSHOT_INTERVAL_MS = 5000;
 const PORT_ZERO_RETRY_ATTEMPTS = 10;
 const PORT_ZERO_FALLBACK_START = 40000;
 const PORT_ZERO_FALLBACK_SPAN = 20000;
+const MAX_PEER_AUTH_BODY_BYTES = 1024 * 1024;
+
+interface RequestBodyHashResult {
+  hash: string;
+  exceededLimit: boolean;
+}
 
 interface SseClient {
   subscriptions: Set<string>;
@@ -81,6 +87,66 @@ function randomFallbackPort(): number {
     PORT_ZERO_FALLBACK_START +
     Math.floor(Math.random() * PORT_ZERO_FALLBACK_SPAN)
   );
+}
+
+async function hashRequestBodyWithLimit(
+  req: Request,
+  maxBytes: number,
+): Promise<RequestBodyHashResult> {
+  const contentLength = Number.parseInt(
+    req.headers.get('content-length') || '',
+    10,
+  );
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    return {
+      // Placeholder; callers reject over-limit requests before using the hash.
+      hash: createHash('sha256').update('').digest('hex'),
+      exceededLimit: true,
+    };
+  }
+
+  const cloned = req.clone();
+  const hash = createHash('sha256');
+  if (!cloned.body) {
+    return {
+      hash: hash.update('').digest('hex'),
+      exceededLimit: false,
+    };
+  }
+
+  const reader = cloned.body.getReader();
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        try {
+          await reader.cancel('Peer-auth body exceeded size limit');
+        } catch {
+          // Ignore cancellation failures; the caller only needs the limit signal.
+        }
+        return {
+          // Placeholder; callers reject over-limit requests before using the hash.
+          hash: createHash('sha256').update('').digest('hex'),
+          exceededLimit: true,
+        };
+      }
+
+      hash.update(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return {
+    hash: hash.digest('hex'),
+    exceededLimit: false,
+  };
 }
 
 /**
@@ -124,17 +190,20 @@ export function startWebServer(
     const isPeerRequest =
       isPeerRoute(url.pathname) && req.headers.has('X-OmniClaw-Instance');
     if (isPeerRequest && trustStore) {
-      // Read the raw body and compute its SHA-256 so checkPeerAuth can
-      // verify the claimed X-OmniClaw-Body-SHA256 header matches the
-      // bytes actually received. This prevents body-tampering attacks
-      // where an on-path attacker modifies the body while keeping the
-      // signed headers intact.
-      const cloned = req.clone();
-      const rawBody = await cloned.text();
-      const computedBodyHash = createHash('sha256')
-        .update(rawBody)
-        .digest('hex');
-      if (!checkPeerAuth(req, trustStore, computedBodyHash)) {
+      // Read the body from a clone so checkPeerAuth can verify the claimed
+      // body hash against the bytes actually received without consuming the
+      // original request stream that downstream handlers still need.
+      const bodyHashResult = await hashRequestBodyWithLimit(
+        req,
+        MAX_PEER_AUTH_BODY_BYTES,
+      );
+      if (bodyHashResult.exceededLimit) {
+        return new Response('Peer request body too large', {
+          status: 413,
+          headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
+        });
+      }
+      if (!checkPeerAuth(req, trustStore, bodyHashResult.hash)) {
         return new Response('Unauthorized peer', {
           status: 403,
           headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
