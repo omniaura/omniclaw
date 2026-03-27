@@ -112,6 +112,16 @@ async function processMsg(
 // =============================================================================
 
 describe('processMessageIpc: react_to_message', () => {
+  function readResponse(sourceGroup: string, requestId: string) {
+    const responsePath = path.join(
+      tmpDir,
+      sourceGroup,
+      'responses',
+      `${requestId}.json`,
+    );
+    return JSON.parse(fs.readFileSync(responsePath, 'utf8'));
+  }
+
   it('adds a reaction via channel', async () => {
     const result = await processMsg({
       type: 'react_to_message',
@@ -156,6 +166,84 @@ describe('processMessageIpc: react_to_message', () => {
 
     expect(result).toEqual({ action: 'handled' });
     expect(reactions).toHaveLength(0);
+  });
+
+  it('writes a success response file when requestId is provided', async () => {
+    const result = await processMsg({
+      type: 'react_to_message',
+      chatJid: 'other@g.us',
+      messageId: 'msg-111',
+      emoji: '👍',
+      requestId: 'req-111',
+    });
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(readResponse('main', 'req-111')).toEqual({
+      type: 'react_to_message_response',
+      requestId: 'req-111',
+      ok: true,
+      result: 'Reaction added.',
+    });
+  });
+
+  it('writes an error response file when channel is missing', async () => {
+    deps.findChannel = () => undefined;
+
+    const result = await processMsg({
+      type: 'react_to_message',
+      chatJid: 'unknown@g.us',
+      messageId: 'msg-222',
+      emoji: '🔥',
+      requestId: 'req-222',
+    });
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(readResponse('main', 'req-222')).toEqual({
+      type: 'react_to_message_response',
+      requestId: 'req-222',
+      ok: false,
+      error: 'No channel found for unknown@g.us.',
+    });
+  });
+
+  it('writes an error response file when the channel rejects the reaction', async () => {
+    deps.findChannel = () =>
+      ({
+        addReaction: async () => {
+          throw new Error('Telegram 400: REACTION_INVALID');
+        },
+      }) as Partial<Channel> as Channel;
+
+    const result = await processMsg({
+      type: 'react_to_message',
+      chatJid: 'tg:123',
+      messageId: 'msg-333',
+      emoji: '🧨',
+      requestId: 'req-333',
+    });
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(readResponse('main', 'req-333')).toEqual({
+      type: 'react_to_message_response',
+      requestId: 'req-333',
+      ok: false,
+      error: 'Telegram 400: REACTION_INVALID',
+    });
+  });
+
+  it('blocks when reaction requestId sanitizes to empty string', async () => {
+    const result = await processMsg({
+      type: 'react_to_message',
+      chatJid: 'other@g.us',
+      messageId: 'msg-444',
+      emoji: '👍',
+      requestId: '../../..',
+    });
+
+    expect(result).toEqual({
+      action: 'blocked',
+      reason: 'requestId sanitized to empty',
+    });
   });
 
   it('handles findChannel not set (undefined deps.findChannel)', async () => {
