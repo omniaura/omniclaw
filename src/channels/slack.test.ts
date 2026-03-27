@@ -1,5 +1,24 @@
-import { describe, it, expect } from 'bun:test';
+import fs from 'fs';
+import path from 'path';
+import { afterEach, describe, it, expect, mock } from 'bun:test';
 
+// Mock @slack/bolt before importing SlackChannel so Bolt's internal
+// auth.test call never fires (it leaks unhandled rejections with fake tokens).
+mock.module('@slack/bolt', () => ({
+  App: class MockApp {
+    message() {}
+    event() {}
+    async start() {}
+    async stop() {}
+  },
+}));
+
+import { GROUPS_DIR } from '../config.js';
+import {
+  formatImageMarker,
+  formatPlaceholder,
+  formatTextFileMarker,
+} from '../media.js';
 import {
   jidToChannelId,
   channelIdToJid,
@@ -129,5 +148,338 @@ describe('SlackChannel.ownsJid', () => {
     expect(ownsJid('dc:123')).toBe(false);
     expect(ownsJid('tg:456')).toBe(false);
     expect(ownsJid('main@g.us')).toBe(false);
+  });
+});
+
+// --- Slack media download helpers ---
+
+describe('SlackChannel.downloadSlackFile', () => {
+  it('sends Authorization Bearer header with bot token', async () => {
+    const token = 'xoxb-test-token-12345';
+    const channel = new SlackChannel({
+      botId: 'TEST',
+      token,
+      appToken: 'xapp-test',
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    const testData = Buffer.from('fake-image-data');
+    const mockFetch = mock(() =>
+      Promise.resolve(new Response(testData, { status: 200 })),
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch as any;
+
+    try {
+      const result = await (channel as any).downloadSlackFile(
+        'https://files.slack.com/files-pri/T123/download/photo.png',
+        10 * 1024 * 1024,
+      );
+      expect(result).toEqual(testData);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      const callArgs = mockFetch.mock.calls[0] as unknown as [
+        string,
+        RequestInit & { headers: Record<string, string> },
+      ];
+      expect(callArgs[0]).toBe(
+        'https://files.slack.com/files-pri/T123/download/photo.png',
+      );
+      expect(callArgs[1].headers.Authorization).toBe(`Bearer ${token}`);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('throws on non-OK response', async () => {
+    const channel = new SlackChannel({
+      botId: 'TEST',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mock(() =>
+      Promise.resolve(new Response(null, { status: 403 })),
+    ) as any;
+
+    try {
+      await expect(
+        (channel as any).downloadSlackFile('https://files.slack.com/x', 1024),
+      ).rejects.toThrow('403');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe('SlackChannel.processFileAttachments', () => {
+  const testFolder = `slack-media-test-${Date.now()}`;
+  const makeGroup = () => ({
+    name: 'test',
+    folder: testFolder,
+    trigger: '@test',
+    added_at: new Date().toISOString(),
+  });
+
+  afterEach(() => {
+    const dir = path.join(GROUPS_DIR, testFolder);
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns file placeholder when no download URL is available', async () => {
+    const channel = new SlackChannel({
+      botId: 'TEST',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    const markers = await (channel as any).processFileAttachments(
+      [{ name: 'report.pdf', mimetype: 'application/pdf', size: 5000 }],
+      makeGroup(),
+      'msg1',
+    );
+
+    expect(markers).toEqual(['[File: report.pdf]']);
+  });
+
+  it('uses video placeholder for video files', async () => {
+    const channel = new SlackChannel({
+      botId: 'TEST',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    // Mock download to fail so it falls to type detection
+    (channel as any).downloadSlackFile = mock(() => {
+      throw new Error('fail');
+    });
+
+    const markers = await (channel as any).processFileAttachments(
+      [
+        {
+          name: 'clip.mp4',
+          mimetype: 'video/mp4',
+          size: 5000,
+          url_private_download: 'https://files.slack.com/clip.mp4',
+        },
+      ],
+      makeGroup(),
+      'msg1',
+    );
+
+    expect(markers).toEqual(['[Video]']);
+  });
+
+  it('uses audio placeholder for audio files', async () => {
+    const channel = new SlackChannel({
+      botId: 'TEST',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    const markers = await (channel as any).processFileAttachments(
+      [
+        {
+          name: 'voice.ogg',
+          mimetype: 'audio/ogg',
+          size: 5000,
+          url_private_download: 'https://files.slack.com/voice.ogg',
+        },
+      ],
+      makeGroup(),
+      'msg1',
+    );
+
+    expect(markers).toEqual(['[Audio]']);
+  });
+
+  it('downloads and stores image attachments', async () => {
+    const channel = new SlackChannel({
+      botId: 'TEST',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    const testBytes = Buffer.from('fake-png');
+    (channel as any).downloadSlackFile = mock(() => Promise.resolve(testBytes));
+
+    const group = makeGroup();
+    const markers = await (channel as any).processFileAttachments(
+      [
+        {
+          name: 'screenshot.png',
+          mimetype: 'image/png',
+          size: 1024,
+          url_private_download: 'https://files.slack.com/screenshot.png',
+        },
+      ],
+      group,
+      'msg1',
+    );
+
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatch(
+      /\[attachment:image file=msg1-screenshot\.png\]/,
+    );
+
+    // Verify file was written
+    const mediaDir = path.join(GROUPS_DIR, testFolder, 'media');
+    expect(fs.existsSync(path.join(mediaDir, 'msg1-screenshot.png'))).toBe(
+      true,
+    );
+  });
+
+  it('inlines small text file attachments', async () => {
+    const channel = new SlackChannel({
+      botId: 'TEST',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    const textContent = '{"key": "value"}';
+    (channel as any).downloadSlackFile = mock(() =>
+      Promise.resolve(Buffer.from(textContent)),
+    );
+
+    const markers = await (channel as any).processFileAttachments(
+      [
+        {
+          name: 'config.json',
+          mimetype: 'application/json',
+          size: textContent.length,
+          url_private_download: 'https://files.slack.com/config.json',
+        },
+      ],
+      makeGroup(),
+      'msg1',
+    );
+
+    expect(markers).toEqual([
+      '[attachment:file name=config.json]\n{"key": "value"}\n[/attachment:file]',
+    ]);
+  });
+
+  it('falls back to placeholder on download failure', async () => {
+    const channel = new SlackChannel({
+      botId: 'TEST',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    (channel as any).downloadSlackFile = mock(() => {
+      throw new Error('Network error');
+    });
+
+    const markers = await (channel as any).processFileAttachments(
+      [
+        {
+          name: 'photo.jpg',
+          mimetype: 'image/jpeg',
+          size: 1024,
+          url_private_download: 'https://files.slack.com/photo.jpg',
+        },
+      ],
+      makeGroup(),
+      'msg1',
+    );
+
+    expect(markers).toEqual(['[File: photo.jpg]']);
+  });
+});
+
+// --- Slack media marker formatting ---
+
+describe('Slack media marker formatting', () => {
+  it('formats image marker', () => {
+    expect(formatImageMarker('msg1-photo.png')).toBe(
+      '[attachment:image file=msg1-photo.png]',
+    );
+  });
+
+  it('formats text file marker', () => {
+    expect(formatTextFileMarker('data.csv', 'a,b\n1,2')).toBe(
+      '[attachment:file name=data.csv]\na,b\n1,2\n[/attachment:file]',
+    );
+  });
+
+  it('formats placeholders', () => {
+    expect(formatPlaceholder('video')).toBe('[Video]');
+    expect(formatPlaceholder('audio')).toBe('[Audio]');
+    expect(formatPlaceholder('file', 'doc.pdf')).toBe('[File: doc.pdf]');
+    expect(formatPlaceholder('file')).toBe('[File]');
+  });
+
+  it('appends file markers to existing text content', () => {
+    const text = 'Check this file';
+    const markers = ['[attachment:image file=msg1-photo.png]'];
+    const suffix = markers.join(' ');
+    const content = `${text} ${suffix}`;
+    expect(content).toBe(
+      'Check this file [attachment:image file=msg1-photo.png]',
+    );
+  });
+
+  it('uses file markers alone when no text', () => {
+    const markers = ['[attachment:image file=msg1-photo.png]'];
+    const suffix = markers.join(' ');
+    const content = suffix;
+    expect(content).toBe('[attachment:image file=msg1-photo.png]');
+  });
+});
+
+// --- Media directory security ---
+
+describe('Slack media directory security', () => {
+  const testFolder = `slack-security-test-${Date.now()}`;
+
+  afterEach(() => {
+    const dir = path.join(GROUPS_DIR, testFolder);
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('prevents path traversal in filenames', () => {
+    const { ensureMediaDir, buildSafeMediaPath } = require('../media.js');
+    const group = {
+      name: 'test',
+      folder: testFolder,
+      trigger: '@test',
+      added_at: new Date().toISOString(),
+    };
+    const mediaDir = ensureMediaDir(group);
+    const filePath = buildSafeMediaPath(
+      mediaDir,
+      'msg1',
+      '../../../etc/passwd',
+    );
+    expect(filePath).not.toContain('..');
+    expect(path.dirname(filePath)).toBe(mediaDir);
   });
 });

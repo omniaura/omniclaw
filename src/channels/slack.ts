@@ -1,7 +1,21 @@
+import fs from 'fs';
+import path from 'path';
 import { App } from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
 
 import { logger } from '../logger.js';
+import {
+  MAX_BINARY_DOWNLOAD_BYTES,
+  MAX_TEXT_DOWNLOAD_BYTES,
+  buildSafeMediaPath,
+  ensureMediaDir,
+  formatImageMarker,
+  formatPlaceholder,
+  formatTextFileMarker,
+  isImageByTypeOrExtension,
+  isTextByExtension,
+  readStreamWithByteLimit,
+} from '../media.js';
 import { parseScopedSlackJid } from '../slack-jid.js';
 import type {
   Channel,
@@ -333,8 +347,11 @@ export class SlackChannel implements Channel {
     if (this.botUserId && 'user' in event && event.user === this.botUserId)
       return;
 
-    // Only process text messages
-    if (!('text' in event) || !event.text) return;
+    // Require text or file attachments (skip protocol-only events)
+    const hasText = 'text' in event && !!event.text;
+    const hasFiles =
+      'files' in event && Array.isArray(event.files) && event.files.length > 0;
+    if (!hasText && !hasFiles) return;
 
     const channelId = event.channel;
     const chatJid = channelIdToJid(
@@ -368,7 +385,7 @@ export class SlackChannel implements Channel {
 
     // Resolve <@USERID> mentions to display names
     const { text: resolvedText, mentions } = await resolveMentions(
-      event.text,
+      event.text || '',
       this.client,
     );
     let content = resolvedText;
@@ -409,6 +426,22 @@ export class SlackChannel implements Channel {
       return;
     }
 
+    // Process file attachments (images, documents, etc.)
+    if (hasFiles) {
+      const fileMarkers = await this.processFileAttachments(
+        event.files,
+        group,
+        msgId,
+      );
+      if (fileMarkers.length > 0) {
+        const suffix = fileMarkers.join(' ');
+        content = content ? `${content} ${suffix}` : suffix;
+      }
+    }
+
+    // Skip if still no content after file processing
+    if (!content) return;
+
     this.opts.onMessage(chatJid, {
       id: msgId,
       chat_jid: chatJid,
@@ -426,6 +459,86 @@ export class SlackChannel implements Channel {
       { chatJid, channelName, sender: senderName },
       'Slack message stored',
     );
+  }
+
+  /**
+   * Download a Slack file using the bot token for authentication.
+   * Slack private file URLs require `Authorization: Bearer <token>`.
+   */
+  private async downloadSlackFile(
+    url: string,
+    maxBytes: number,
+  ): Promise<Buffer> {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${this.opts.token}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      throw new Error(`Slack file download failed: ${response.status}`);
+    }
+    return readStreamWithByteLimit(response.body, maxBytes);
+  }
+
+  /**
+   * Process Slack file attachments from a message event, returning
+   * attachment markers to prepend/append to the message content.
+   */
+  private async processFileAttachments(
+    files: any[],
+    group: RegisteredGroup,
+    msgId: string,
+  ): Promise<string[]> {
+    const markers: string[] = [];
+
+    for (const file of files) {
+      const fileName = file.name || 'file';
+      const mimeType = file.mimetype || null;
+      const fileSize = file.size ?? Infinity;
+      const downloadUrl = file.url_private_download || file.url_private;
+
+      if (!downloadUrl) {
+        markers.push(formatPlaceholder('file', fileName));
+        continue;
+      }
+
+      try {
+        if (isImageByTypeOrExtension(mimeType, fileName)) {
+          const bytes = await this.downloadSlackFile(
+            downloadUrl,
+            MAX_BINARY_DOWNLOAD_BYTES,
+          );
+          const mediaDir = ensureMediaDir(group);
+          const filePath = buildSafeMediaPath(mediaDir, msgId, fileName);
+          fs.writeFileSync(filePath, bytes);
+          markers.push(formatImageMarker(path.basename(filePath)));
+        } else if (
+          isTextByExtension(fileName) &&
+          fileSize <= MAX_TEXT_DOWNLOAD_BYTES
+        ) {
+          const bytes = await this.downloadSlackFile(
+            downloadUrl,
+            MAX_TEXT_DOWNLOAD_BYTES,
+          );
+          const safeName = path.basename(fileName);
+          const text = new TextDecoder().decode(bytes);
+          markers.push(formatTextFileMarker(safeName, text));
+        } else if (mimeType?.startsWith('video/')) {
+          markers.push(formatPlaceholder('video'));
+        } else if (mimeType?.startsWith('audio/')) {
+          markers.push(formatPlaceholder('audio'));
+        } else {
+          markers.push(formatPlaceholder('file', fileName));
+        }
+      } catch (err) {
+        logger.warn(
+          { err, msgId, fileName },
+          'Failed to download Slack file — falling back to placeholder',
+        );
+        markers.push(formatPlaceholder('file', fileName));
+      }
+    }
+
+    return markers;
   }
 
   private extractChannelId(jid: string): string | null {
