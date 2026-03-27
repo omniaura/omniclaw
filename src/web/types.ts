@@ -82,6 +82,18 @@ export interface WebStateProvider {
   /** Write a context file (CLAUDE.md) for a given layer path. Creates directories as needed. */
   writeContextFile(layerPath: string, content: string): void;
 
+  // ---- Message injection ----
+  /**
+   * Inject a message into a channel and trigger agent processing.
+   * Returns the stored message ID.
+   */
+  sendMessage?(
+    agentId: string,
+    chatJid: string,
+    content: string,
+    senderName?: string,
+  ): string;
+
   // ---- Avatar operations ----
   /** Update an agent's avatar URL and source. */
   updateAgentAvatar(

@@ -112,7 +112,8 @@ export interface NewMessage {
     | 'telegram'
     | 'slack'
     | 'ipc'
-    | 'system';
+    | 'system'
+    | 'web';
   /** Platform-specific sender ID (e.g., Discord user ID, WhatsApp JID) */
   sender_user_id?: string;
   /** Array of mentioned users with their IDs and display names */

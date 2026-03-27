@@ -801,3 +801,237 @@ describe('handleRequest task run logs', () => {
     expect(res.status).toBe(405);
   });
 });
+
+// ---- Agent messaging ----
+
+describe('POST /api/agents/{id}/message', () => {
+  it('sends a message and returns 201 with message details', async () => {
+    const sent: Array<{
+      agentId: string;
+      chatJid: string;
+      content: string;
+      senderName: string;
+    }> = [];
+    const state = makeState({
+      sendMessage: (agentId, chatJid, content, senderName) => {
+        sent.push({
+          agentId,
+          chatJid,
+          content,
+          senderName: senderName ?? 'Web UI Admin',
+        });
+        return 'web-msg-123';
+      },
+    });
+
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'dc:123', content: 'Hello agent' }),
+      }),
+      state,
+    );
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as any;
+    expect(body.id).toBe('web-msg-123');
+    expect(body.channel).toBe('dc:123');
+    expect(body.content).toBe('Hello agent');
+    expect(body.sender_name).toBe('Web UI Admin');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].agentId).toBe('agent-1');
+    expect(sent[0].chatJid).toBe('dc:123');
+  });
+
+  it('uses custom sender_name when provided', async () => {
+    const sent: Array<{ agentId: string; senderName: string }> = [];
+    const state = makeState({
+      sendMessage: (agentId, _chatJid, _content, senderName) => {
+        sent.push({ agentId, senderName: senderName ?? 'Web UI Admin' });
+        return 'web-msg-456';
+      },
+    });
+
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel: 'dc:123',
+          content: 'Test',
+          sender_name: 'Peyton',
+        }),
+      }),
+      state,
+    );
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as any;
+    expect(body.sender_name).toBe('Peyton');
+    expect(sent[0].agentId).toBe('agent-1');
+    expect(sent[0].senderName).toBe('Peyton');
+  });
+
+  it('returns 404 when agent is not found', async () => {
+    const state = makeState({
+      sendMessage: () => 'msg-id',
+    });
+    const res = await handle(
+      new Request('http://localhost/api/agents/nonexistent/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'dc:123', content: 'Hello' }),
+      }),
+      state,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 400 when content is missing', async () => {
+    const state = makeState({
+      sendMessage: () => 'msg-id',
+    });
+
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'dc:123' }),
+      }),
+      state,
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.error).toContain('content');
+  });
+
+  it('returns 400 when channel is missing', async () => {
+    const state = makeState({
+      sendMessage: () => 'msg-id',
+    });
+
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Hello' }),
+      }),
+      state,
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.error).toContain('channel');
+  });
+
+  it('returns 400 when content exceeds 10000 characters', async () => {
+    const state = makeState({
+      sendMessage: () => 'msg-id',
+    });
+
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'dc:123', content: 'x'.repeat(10001) }),
+      }),
+      state,
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.error).toContain('10000');
+  });
+
+  it('returns 400 when agent is not subscribed to the channel', async () => {
+    const state = makeState({
+      sendMessage: () => 'msg-id',
+    });
+
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'dc:999', content: 'Hello' }),
+      }),
+      state,
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.error).toContain('not subscribed');
+  });
+
+  it('returns 501 when sendMessage is not implemented', async () => {
+    const state = makeState();
+    // The default makeState does not include sendMessage
+
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'dc:123', content: 'Hello' }),
+      }),
+      state,
+    );
+
+    expect(res.status).toBe(501);
+  });
+
+  it('returns 405 for non-POST methods', async () => {
+    const state = makeState({
+      sendMessage: () => 'msg-id',
+    });
+
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/message', {
+        method: 'GET',
+      }),
+      state,
+    );
+
+    expect(res.status).toBe(405);
+  });
+
+  it('returns 400 for invalid JSON body', async () => {
+    const state = makeState({
+      sendMessage: () => 'msg-id',
+    });
+
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'not json',
+      }),
+      state,
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.error).toContain('Invalid JSON');
+  });
+
+  it('returns 500 when sendMessage throws', async () => {
+    const state = makeState({
+      sendMessage: () => {
+        throw new Error('DB write failed');
+      },
+    });
+
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'dc:123', content: 'Hello' }),
+      }),
+      state,
+    );
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as any;
+    expect(body.error).toContain('DB write failed');
+  });
+});

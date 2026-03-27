@@ -373,6 +373,18 @@ export const api = {
   getAgentAvatarImageUrl: (id: string) =>
     `/api/agents/${encodeURIComponent(id)}/avatar/image`,
 
+  // Agent messaging
+  sendAgentMessage: (
+    agentId: string,
+    channel: string,
+    content: string,
+    senderName?: string,
+  ) =>
+    post<{ id: string; channel: string; content: string; sender_name: string }>(
+      `/api/agents/${encodeURIComponent(agentId)}/message`,
+      { channel, content, sender_name: senderName },
+    ),
+
   // Icons
   getChatIconUrl: (chatJid: string) =>
     `/api/chats/${encodeURIComponent(chatJid)}/icon`,
