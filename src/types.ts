@@ -159,6 +159,21 @@ export interface ScheduledTask {
   created_at: string;
   /** ISO timestamp set when a task starts executing; cleared on completion. */
   executing_since: string | null;
+  /** Outcome state from the most recent run (done/blocked/abandoned). */
+  last_outcome_state?: TaskOutcomeState | null;
+  /** Reason string from the most recent outcome signal. */
+  last_outcome_reason?: string | null;
+}
+
+/** Explicit agent outcome signal for scheduled task runs. */
+export type TaskOutcomeState = 'done' | 'blocked' | 'abandoned';
+
+export interface TaskOutcomeSignal {
+  state: TaskOutcomeState;
+  /** Why the task ended in this state (e.g. "Rate limited", "Missing credentials"). */
+  reason?: string;
+  /** For blocked: what input is needed from the user? */
+  question?: string;
 }
 
 export interface TaskRunLog {
@@ -168,6 +183,9 @@ export interface TaskRunLog {
   status: 'success' | 'error';
   result: string | null;
   error: string | null;
+  outcome_state?: TaskOutcomeState;
+  outcome_reason?: string;
+  outcome_question?: string;
 }
 
 // --- Channel abstraction ---

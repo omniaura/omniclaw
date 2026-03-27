@@ -478,7 +478,11 @@ async function handleCreateTask(
   const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const task: Omit<
     ScheduledTask,
-    'last_run' | 'last_result' | 'executing_since'
+    | 'last_run'
+    | 'last_result'
+    | 'executing_since'
+    | 'last_outcome_state'
+    | 'last_outcome_reason'
   > = {
     id: taskId,
     group_folder: group_folder as string,

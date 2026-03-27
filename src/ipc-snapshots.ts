@@ -30,6 +30,8 @@ export function mapTasksForSnapshot(tasks: ScheduledTask[]) {
     schedule_value: t.schedule_value,
     status: t.status,
     next_run: t.next_run,
+    last_outcome_state: t.last_outcome_state ?? null,
+    last_outcome_reason: t.last_outcome_reason ?? null,
   }));
 }
 

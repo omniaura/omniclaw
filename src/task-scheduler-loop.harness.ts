@@ -241,6 +241,7 @@ describe('startSchedulerLoop harness', () => {
         'task-success',
         '2026-01-01T01:00:00.000Z',
         'final result',
+        { state: 'done' },
       );
 
       expect(timeoutCalls).toContain(60000);

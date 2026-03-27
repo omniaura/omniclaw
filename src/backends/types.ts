@@ -115,6 +115,8 @@ export interface ContainerOutput {
   intermediate?: boolean;
   /** The chat JID this output should be routed to (multi-channel agents). */
   chatJid?: string;
+  /** Explicit agent outcome signal (done/blocked/abandoned). */
+  outcome?: import('../types.js').TaskOutcomeSignal;
 }
 
 export interface VolumeMount {

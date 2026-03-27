@@ -37,6 +37,8 @@ describe('ipc-snapshots', () => {
         schedule_value: '60000',
         status: 'active',
         next_run: '2025-06-01T12:00:00.000Z',
+        last_outcome_state: null,
+        last_outcome_reason: null,
       });
     });
 
@@ -59,6 +61,25 @@ describe('ipc-snapshots', () => {
       const tasks = [makeTask({ next_run: null })];
       const result = mapTasksForSnapshot(tasks);
       expect(result[0].next_run).toBeNull();
+    });
+
+    it('includes outcome state and reason when present', () => {
+      const tasks = [
+        makeTask({
+          last_outcome_state: 'blocked',
+          last_outcome_reason: 'Need user input',
+        }),
+      ];
+      const result = mapTasksForSnapshot(tasks);
+      expect(result[0].last_outcome_state).toBe('blocked');
+      expect(result[0].last_outcome_reason).toBe('Need user input');
+    });
+
+    it('returns null outcome fields when task has no outcome', () => {
+      const tasks = [makeTask()];
+      const result = mapTasksForSnapshot(tasks);
+      expect(result[0].last_outcome_state).toBeNull();
+      expect(result[0].last_outcome_reason).toBeNull();
     });
   });
 

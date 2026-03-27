@@ -15,6 +15,12 @@ export interface ScheduledRunHandoff {
   next_run: string | null;
   result: string | null;
   error: string | null;
+  /** Explicit agent outcome state (done/blocked/abandoned). */
+  outcome_state?: string;
+  /** Why the task ended in this state. */
+  outcome_reason?: string;
+  /** For blocked: what input does the agent need? */
+  outcome_question?: string;
 }
 
 interface TaskHandoffFs {
