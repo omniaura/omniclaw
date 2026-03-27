@@ -137,6 +137,16 @@ async function runTask(
     });
     log.info('Running scheduled task');
 
+    const tryWriteHandoff = (
+      handoff: Parameters<typeof runtime.writeScheduledRunHandoff>[0],
+    ) => {
+      try {
+        runtime.writeScheduledRunHandoff(handoff);
+      } catch (err) {
+        log.warn({ err }, 'Failed to write scheduled task handoff');
+      }
+    };
+
     const group = deps.getGroupForTask(task.chat_jid, task.group_folder);
 
     if (!group) {
@@ -149,7 +159,7 @@ async function runTask(
         result: null,
         error: `Group not found: ${task.group_folder}`,
       });
-      runtime.writeScheduledRunHandoff({
+      tryWriteHandoff({
         task_id: task.id,
         chat_jid: task.chat_jid,
         group_folder: task.group_folder,
@@ -309,7 +319,7 @@ async function runTask(
         ? result.slice(0, 200)
         : 'Completed';
     runtime.updateTaskAfterRun(task.id, nextRun, resultSummary);
-    runtime.writeScheduledRunHandoff({
+    tryWriteHandoff({
       task_id: task.id,
       chat_jid: task.chat_jid,
       group_folder: task.group_folder,
