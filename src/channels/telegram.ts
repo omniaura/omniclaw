@@ -1,7 +1,21 @@
+import fs from 'fs';
+import path from 'path';
 import { Bot } from 'grammy';
 import telegramifyMarkdown from 'telegramify-markdown';
 
 import { logger } from '../logger.js';
+import {
+  buildSafeMediaPath,
+  downloadBinaryAttachment,
+  downloadTextAttachment,
+  ensureMediaDir,
+  formatImageMarker,
+  formatPlaceholder,
+  formatTextFileMarker,
+  isImageByTypeOrExtension,
+  isTextByExtension,
+  MAX_TEXT_DOWNLOAD_BYTES,
+} from '../media.js';
 import {
   buildTelegramApiFileUrl,
   buildTelegramFileDescriptor,
@@ -152,6 +166,17 @@ export class TelegramChannel implements Channel {
     };
   }
 
+  /**
+   * Resolve a Telegram file_id to a download URL via the Bot API.
+   * Returns `null` if the file cannot be resolved (bot not connected, no path).
+   */
+  private async getTelegramFileUrl(fileId: string): Promise<string | null> {
+    if (!this.bot) return null;
+    const file = await this.bot.api.getFile(fileId);
+    if (!file.file_path) return null;
+    return buildTelegramApiFileUrl(this.botToken, file.file_path);
+  }
+
   async connect(): Promise<void> {
     this.bot = new Bot(this.botToken);
 
@@ -289,13 +314,130 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
+    // Photos: download the largest resolution and store as image attachment
+    this.bot.on('message:photo', async (ctx) => {
+      const chatId = ctx.chat.id;
+      const chatJid = `tg:${this.botId}:${chatId}`;
+      const legacyChatJid = `tg:${chatId}`;
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid] || groups[legacyChatJid];
+      if (!group) return;
+
+      const msgId = ctx.message.message_id.toString();
+      const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const { sender, senderUserId } = this.buildSenderIdentity(ctx.from);
+      const senderName =
+        ctx.from?.first_name || ctx.from?.username || 'Unknown';
+      const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+
+      // Telegram sends multiple sizes; pick the largest (last in array)
+      const photos = ctx.message.photo;
+      const largest = photos[photos.length - 1];
+      let marker = '[Photo]';
+
+      try {
+        const url = await this.getTelegramFileUrl(largest.file_id);
+        if (url) {
+          const mediaDir = ensureMediaDir(group);
+          const filePath = buildSafeMediaPath(mediaDir, msgId, 'photo.jpg');
+          const bytes = await downloadBinaryAttachment(url);
+          fs.writeFileSync(filePath, bytes);
+          marker = formatImageMarker(path.basename(filePath));
+        }
+      } catch (err) {
+        logger.warn(
+          { err: safeErrorMessage(err), msgId },
+          'Failed to download Telegram photo — falling back to placeholder',
+        );
+      }
+
+      this.opts.onChatMetadata(chatJid, timestamp);
+      this.opts.onChatMetadata(legacyChatJid, timestamp);
+      this.opts.onMessage(chatJid, {
+        id: msgId,
+        chat_jid: chatJid,
+        sender,
+        sender_name: senderName,
+        content: `${marker}${caption}`,
+        timestamp,
+        is_from_me: false,
+        sender_platform: 'telegram',
+        sender_user_id: senderUserId,
+      });
+    });
+
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
-    this.bot.on('message:document', (ctx) => {
-      const name = ctx.message.document?.file_name || 'file';
-      storeNonText(ctx, `[Document: ${name}]`);
+
+    // Documents: download images and text files, placeholder for the rest
+    this.bot.on('message:document', async (ctx) => {
+      const chatId = ctx.chat.id;
+      const chatJid = `tg:${this.botId}:${chatId}`;
+      const legacyChatJid = `tg:${chatId}`;
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid] || groups[legacyChatJid];
+      if (!group) return;
+
+      const doc = ctx.message.document;
+      const fileName = doc?.file_name || 'file';
+      const mimeType = doc?.mime_type || null;
+      const fileSize = doc?.file_size ?? Infinity;
+      const msgId = ctx.message.message_id.toString();
+      const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const { sender, senderUserId } = this.buildSenderIdentity(ctx.from);
+      const senderName =
+        ctx.from?.first_name || ctx.from?.username || 'Unknown';
+      const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+
+      let marker = `[Document: ${fileName}]`;
+
+      try {
+        if (isImageByTypeOrExtension(mimeType, fileName)) {
+          // Image sent as document (uncompressed)
+          const url = await this.getTelegramFileUrl(doc!.file_id);
+          if (url) {
+            const mediaDir = ensureMediaDir(group);
+            const filePath = buildSafeMediaPath(mediaDir, msgId, fileName);
+            const bytes = await downloadBinaryAttachment(url);
+            fs.writeFileSync(filePath, bytes);
+            marker = formatImageMarker(path.basename(filePath));
+          }
+        } else if (
+          isTextByExtension(fileName) &&
+          fileSize <= MAX_TEXT_DOWNLOAD_BYTES
+        ) {
+          // Small text file — inline its content
+          const url = await this.getTelegramFileUrl(doc!.file_id);
+          if (url) {
+            const safeName = path.basename(fileName);
+            const text = await downloadTextAttachment(url);
+            marker = formatTextFileMarker(safeName, text);
+          }
+        } else {
+          marker = formatPlaceholder('file', fileName);
+        }
+      } catch (err) {
+        logger.warn(
+          { err: safeErrorMessage(err), msgId, fileName },
+          'Failed to download Telegram document — falling back to placeholder',
+        );
+        marker = formatPlaceholder('file', fileName);
+      }
+
+      this.opts.onChatMetadata(chatJid, timestamp);
+      this.opts.onChatMetadata(legacyChatJid, timestamp);
+      this.opts.onMessage(chatJid, {
+        id: msgId,
+        chat_jid: chatJid,
+        sender,
+        sender_name: senderName,
+        content: `${marker}${caption}`,
+        timestamp,
+        is_from_me: false,
+        sender_platform: 'telegram',
+        sender_user_id: senderUserId,
+      });
     });
     this.bot.on('message:sticker', (ctx) => {
       const emoji = ctx.message.sticker?.emoji || '';
