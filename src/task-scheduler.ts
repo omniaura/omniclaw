@@ -9,8 +9,7 @@ import {
 } from './config.js';
 import { calculateNextRun } from './schedule-utils.js';
 import { resolveBackend } from './backends/index.js';
-import type { AgentBackend } from './backends/types.js';
-import type { ContainerOutput } from './backends/types.js';
+import type { AgentBackend, ContainerOutput } from './backends/types.js';
 import { writeTasksSnapshot } from './ipc-snapshots.js';
 import {
   advanceTaskNextRun,
@@ -32,12 +31,43 @@ import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
 import { ResumePositionStore } from './resume-position-store.js';
 import { writeScheduledRunHandoff } from './task-handoffs.js';
-import {
+import type {
   Channel,
   ContainerProcess,
   RegisteredGroup,
   ScheduledTask,
+  TaskOutcomeSignal,
+  TaskOutcomeState,
 } from './types.js';
+
+const VALID_OUTCOME_STATES = new Set<TaskOutcomeState>([
+  'done',
+  'blocked',
+  'abandoned',
+]);
+
+/**
+ * Extract the outcome signal from agent output. If the agent signaled
+ * explicitly, use that. Otherwise, infer from error/success:
+ *   success → done, error → blocked, catch/timeout → abandoned.
+ */
+export function inferOutcome(
+  output: ContainerOutput | null,
+  error: string | null,
+  timedOut: boolean,
+): TaskOutcomeSignal {
+  // Prefer explicit agent signal if present and valid
+  if (output?.outcome && VALID_OUTCOME_STATES.has(output.outcome.state)) {
+    return {
+      state: output.outcome.state,
+      reason: output.outcome.reason,
+      question: output.outcome.question,
+    };
+  }
+  if (timedOut) return { state: 'abandoned', reason: 'Execution timed out' };
+  if (error) return { state: 'blocked', reason: error };
+  return { state: 'done' };
+}
 
 interface SchedulerRuntime {
   calculateNextRun: typeof calculateNextRun;
@@ -151,13 +181,16 @@ async function runTask(
 
     if (!group) {
       log.error('Group not found for task');
+      const groupError = `Group not found: ${task.group_folder}`;
       runtime.logTaskRun({
         task_id: task.id,
         run_at: runAt,
         duration_ms: Date.now() - startTime,
         status: 'error',
         result: null,
-        error: `Group not found: ${task.group_folder}`,
+        error: groupError,
+        outcome_state: 'abandoned',
+        outcome_reason: groupError,
       });
       tryWriteHandoff({
         task_id: task.id,
@@ -169,7 +202,9 @@ async function runTask(
         duration_ms: Date.now() - startTime,
         next_run: task.next_run,
         result: null,
-        error: `Group not found: ${task.group_folder}`,
+        error: groupError,
+        outcome_state: 'abandoned',
+        outcome_reason: groupError,
       });
       return;
     }
@@ -194,11 +229,15 @@ async function runTask(
         schedule_value: t.schedule_value,
         status: t.status,
         next_run: t.next_run,
+        last_outcome_state: t.last_outcome_state ?? null,
+        last_outcome_reason: t.last_outcome_reason ?? null,
       })),
     );
 
     let result: string | null = null;
     let error: string | null = null;
+    let finalOutput: ContainerOutput | null = null;
+    let timedOut = false;
 
     // Always use isolated sessions for tasks to prevent session ID conflicts
     // between message and task containers running concurrently.
@@ -282,6 +321,7 @@ async function runTask(
       );
 
       if (closeTimer) clearTimeout(closeTimer);
+      finalOutput = output;
 
       if (output.status === 'error') {
         error = output.error || 'Unknown error';
@@ -293,10 +333,12 @@ async function runTask(
     } catch (err) {
       if (closeTimer) clearTimeout(closeTimer);
       error = err instanceof Error ? err.message : String(err);
+      timedOut = error.includes('timed out') || error.includes('timeout');
       log.error({ err: error }, 'Task failed');
     }
 
     const durationMs = Date.now() - startTime;
+    const outcome = inferOutcome(finalOutput, error, timedOut);
 
     runtime.logTaskRun({
       task_id: task.id,
@@ -305,6 +347,9 @@ async function runTask(
       status: error ? 'error' : 'success',
       result,
       error,
+      outcome_state: outcome.state,
+      outcome_reason: outcome.reason,
+      outcome_question: outcome.question,
     });
 
     // Calculate next run time (null for one-shot 'once' tasks)
@@ -318,7 +363,7 @@ async function runTask(
       : result
         ? result.slice(0, 200)
         : 'Completed';
-    runtime.updateTaskAfterRun(task.id, nextRun, resultSummary);
+    runtime.updateTaskAfterRun(task.id, nextRun, resultSummary, outcome);
     tryWriteHandoff({
       task_id: task.id,
       chat_jid: task.chat_jid,
@@ -330,6 +375,9 @@ async function runTask(
       next_run: nextRun,
       result,
       error,
+      outcome_state: outcome.state,
+      outcome_reason: outcome.reason,
+      outcome_question: outcome.question,
     });
   } finally {
     runtime.clearTaskExecuting(task.id);

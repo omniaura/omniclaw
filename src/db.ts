@@ -421,6 +421,23 @@ export function createSchema(database: Database): void {
   );
   dropColumnIfExists(database, 'registered_groups', 'stream_intermediates');
 
+  // Agent outcome signaling (#161)
+  addColumnIfNotExists(database, 'task_run_logs', 'outcome_state', 'TEXT');
+  addColumnIfNotExists(database, 'task_run_logs', 'outcome_reason', 'TEXT');
+  addColumnIfNotExists(database, 'task_run_logs', 'outcome_question', 'TEXT');
+  addColumnIfNotExists(
+    database,
+    'scheduled_tasks',
+    'last_outcome_state',
+    'TEXT',
+  );
+  addColumnIfNotExists(
+    database,
+    'scheduled_tasks',
+    'last_outcome_reason',
+    'TEXT',
+  );
+
   // Heartbeat feature removed — clear any existing heartbeat config so it doesn't
   // get re-created on startup (reconcileHeartbeats is also removed).
   try {
@@ -1098,7 +1115,14 @@ function escapeSqlLikePattern(value: string): string {
 }
 
 export function createTask(
-  task: Omit<ScheduledTask, 'last_run' | 'last_result' | 'executing_since'>,
+  task: Omit<
+    ScheduledTask,
+    | 'last_run'
+    | 'last_result'
+    | 'executing_since'
+    | 'last_outcome_state'
+    | 'last_outcome_reason'
+  >,
 ): void {
   db.query(
     `
@@ -1224,23 +1248,34 @@ export function updateTaskAfterRun(
   id: string,
   nextRun: string | null,
   lastResult: string,
+  outcome?: { state: string; reason?: string },
 ): void {
   const now = new Date().toISOString();
   db.query(
     `
     UPDATE scheduled_tasks
-    SET next_run = ?, last_run = ?, last_result = ?, status = CASE WHEN ? IS NULL THEN 'completed' ELSE status END
+    SET next_run = ?, last_run = ?, last_result = ?,
+        status = CASE WHEN ? IS NULL THEN 'completed' ELSE status END,
+        last_outcome_state = ?, last_outcome_reason = ?
     WHERE id = ?
   `,
-  ).run(nextRun, now, lastResult, nextRun, id);
+  ).run(
+    nextRun,
+    now,
+    lastResult,
+    nextRun,
+    outcome?.state ?? null,
+    outcome?.reason ?? null,
+    id,
+  );
 }
 
 export function logTaskRun(log: TaskRunLog): void {
   // Use SELECT ... WHERE EXISTS to skip gracefully if the task was deleted while running.
   db.query(
     `
-    INSERT INTO task_run_logs (task_id, run_at, duration_ms, status, result, error)
-    SELECT ?, ?, ?, ?, ?, ?
+    INSERT INTO task_run_logs (task_id, run_at, duration_ms, status, result, error, outcome_state, outcome_reason, outcome_question)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
     WHERE EXISTS (SELECT 1 FROM scheduled_tasks WHERE id = ?)
   `,
   ).run(
@@ -1250,6 +1285,9 @@ export function logTaskRun(log: TaskRunLog): void {
     log.status,
     log.result,
     log.error,
+    log.outcome_state ?? null,
+    log.outcome_reason ?? null,
+    log.outcome_question ?? null,
     log.task_id,
   );
 }

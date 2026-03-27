@@ -289,6 +289,7 @@ describe('startSchedulerLoop task execution', () => {
         'task-error',
         '2026-01-01T00:05:00.000Z',
         'Error: final failure',
+        { state: 'blocked', reason: 'final failure' },
       );
       expect(writeScheduledRunHandoffMock).toHaveBeenCalledWith(
         expect.objectContaining({
