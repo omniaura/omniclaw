@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "solidjs-patterns": {
+      "source": "omniaura/skills",
+      "sourceType": "github",
+      "computedHash": "f4a9658b2208207789d509144c54c72cc51e2a053b2d6a65256250f0622470ff"
+    }
+  }
+}
