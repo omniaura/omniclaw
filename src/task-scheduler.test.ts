@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import {
   _initTestDatabase,
   advanceTaskNextRun,
+  appendTaskRunPhaseEvent,
   clearTaskExecuting,
   createTask,
   deleteTask,
@@ -11,6 +12,7 @@ import {
   getOrphanedOnceTasks,
   getStaleExecutingTasks,
   getTaskById,
+  getTaskRunPhaseEvents,
   getTaskRunLogs,
   hasSuccessfulRun,
   logTaskRun,
@@ -19,7 +21,12 @@ import {
   updateTaskAfterRun,
 } from './db.js';
 import { calculateNextRun, validateSchedule } from './schedule-utils.js';
-import { recoverStaleTasks, triggerTaskNow } from './task-scheduler.js';
+import {
+  recoverStaleTasks,
+  resetSchedulerLoopForTests,
+  startSchedulerLoop,
+  triggerTaskNow,
+} from './task-scheduler.js';
 import {
   findGroupByFolder,
   findJidByFolder,
@@ -532,6 +539,50 @@ describe('DB task lifecycle', () => {
       expect(getTaskRunLogs('does-not-exist')).toEqual([]);
     });
   });
+
+  describe('task run phase events', () => {
+    it('returns ordered phase events for a run', () => {
+      createTask({
+        id: 'phase-task',
+        group_folder: 'main',
+        chat_jid: 'g@g.us',
+        prompt: 'phase me',
+        schedule_type: 'once',
+        schedule_value: '2024-06-01T00:00:00.000Z',
+        context_mode: 'isolated',
+        next_run: null,
+        status: 'active',
+        created_at: '2024-01-01T00:00:00.000Z',
+      });
+
+      appendTaskRunPhaseEvent({
+        task_id: 'phase-task',
+        run_at: '2024-06-01T00:00:01.000Z',
+        sequence: 2,
+        phase: 'run_finalized',
+        event_at: '2024-06-01T00:00:02.000Z',
+        status: 'ok',
+        retryable: false,
+        error: null,
+      });
+      appendTaskRunPhaseEvent({
+        task_id: 'phase-task',
+        run_at: '2024-06-01T00:00:01.000Z',
+        sequence: 1,
+        phase: 'lease_acquired',
+        event_at: '2024-06-01T00:00:01.000Z',
+        status: 'ok',
+        retryable: false,
+        error: null,
+      });
+
+      expect(
+        getTaskRunPhaseEvents('phase-task', '2024-06-01T00:00:01.000Z').map(
+          (event) => event.phase,
+        ),
+      ).toEqual(['lease_acquired', 'run_finalized']);
+    });
+  });
 });
 
 // ============================================================
@@ -861,6 +912,147 @@ describe('execution lease tracking', () => {
     expect(runLogs).toHaveLength(1);
     expect(runLogs[0]?.status).toBe('error');
     expect(runLogs[0]?.error).toContain('Group not found');
+
+    const phases = getTaskRunPhaseEvents(
+      'missing-group-task',
+      runLogs[0]!.run_at,
+    );
+    expect(phases.map((phase) => phase.phase)).toEqual(['group_resolved']);
+    expect(phases[0]).toMatchObject({
+      status: 'error',
+      retryable: false,
+    });
+  });
+
+  it('records the approved ordered phase list when outbound send fails', async () => {
+    createTask({
+      id: 'phase-run-task',
+      group_folder: 'main',
+      chat_jid: 'main@g.us',
+      prompt: 'run phases',
+      schedule_type: 'interval',
+      schedule_value: '60000',
+      next_run: new Date().toISOString(),
+      status: 'active',
+      context_mode: 'isolated',
+      created_at: new Date().toISOString(),
+    });
+
+    resetSchedulerLoopForTests();
+    let runPromise: Promise<void> | null = null;
+    const originalSetTimeout = globalThis.setTimeout;
+
+    (globalThis as { setTimeout: typeof setTimeout }).setTimeout = ((
+      _fn: Parameters<typeof setTimeout>[0],
+    ) =>
+      ({ id: 'poll' }) as unknown as ReturnType<
+        typeof setTimeout
+      >) as unknown as typeof setTimeout;
+
+    try {
+      startSchedulerLoop(
+        {
+          registeredGroups: () => ({}),
+          getGroupForTask: () => ({
+            name: 'Main',
+            folder: 'main',
+            trigger: '@Bot',
+            added_at: '2024-01-01T00:00:00.000Z',
+          }),
+          getSessions: () => ({}),
+          resumePositionStore: { get: () => undefined, set: () => {} } as any,
+          queue: {
+            enqueueTask: (
+              _jid: string,
+              _taskId: string,
+              fn: () => Promise<void>,
+            ) => {
+              runPromise = fn();
+            },
+            notifyIdle: () => {},
+            closeStdin: () => {},
+          } as any,
+          onProcess: () => {},
+          sendMessage: async () => {
+            throw new Error('send failed');
+          },
+          findChannel: () => undefined,
+        },
+        {
+          calculateNextRun,
+          resolveBackend: () => ({
+            runAgent: async (
+              _group,
+              _input,
+              _onProcess,
+              onOutput?: (output: any) => Promise<void>,
+            ) => {
+              if (onOutput) {
+                await onOutput({ result: 'hello', status: 'success' });
+              }
+              return {
+                status: 'error',
+                error: 'send failed',
+                result: null,
+              } as any;
+            },
+          }),
+          writeTasksSnapshot: () => {},
+          advanceTaskNextRun,
+          markTaskExecuting,
+          clearTaskExecuting,
+          getStaleExecutingTasks: () => [],
+          getOrphanedOnceTasks,
+          hasSuccessfulRun,
+          getAllTasks,
+          getDueTasks: () => [getTaskById('phase-run-task')!],
+          getTaskById,
+          logTaskRun,
+          appendTaskRunPhaseEvent,
+          updateTaskAfterRun,
+          writeScheduledRunHandoff: () => '',
+          logger: {
+            info: () => {},
+            warn: () => {},
+            error: () => {},
+            debug: () => {},
+            child: () => ({
+              info: () => {},
+              warn: () => {},
+              error: () => {},
+              debug: () => {},
+            }),
+          } as any,
+        },
+      );
+
+      await runPromise;
+    } finally {
+      (globalThis as { setTimeout: typeof setTimeout }).setTimeout =
+        originalSetTimeout;
+      resetSchedulerLoopForTests();
+    }
+
+    const runLogs = getTaskRunLogs('phase-run-task');
+    expect(runLogs).toHaveLength(1);
+    const phases = getTaskRunPhaseEvents('phase-run-task', runLogs[0]!.run_at);
+    expect(phases.map((phase) => phase.phase)).toEqual([
+      'group_resolved',
+      'lease_acquired',
+      'dispatch_started',
+      'stream_result_received',
+      'outbound_send_attempted',
+      'run_finalized',
+    ]);
+    expect(phases[4]).toMatchObject({
+      status: 'error',
+      retryable: true,
+      error: 'send failed',
+    });
+    expect(phases[5]).toMatchObject({
+      status: 'error',
+      retryable: false,
+    });
   });
 });
 
@@ -939,6 +1131,7 @@ describe('recoverStaleTasks', () => {
       getDueTasks,
       getTaskById,
       logTaskRun,
+      appendTaskRunPhaseEvent: () => {},
       updateTaskAfterRun,
       writeScheduledRunHandoff: () => '',
       logger: {
@@ -1004,6 +1197,7 @@ describe('recoverStaleTasks', () => {
       getDueTasks,
       getTaskById,
       logTaskRun,
+      appendTaskRunPhaseEvent: () => {},
       updateTaskAfterRun,
       writeScheduledRunHandoff: () => '',
       logger: {
@@ -1059,6 +1253,7 @@ describe('recoverStaleTasks', () => {
       getDueTasks,
       getTaskById,
       logTaskRun,
+      appendTaskRunPhaseEvent: () => {},
       updateTaskAfterRun,
       writeScheduledRunHandoff: () => '',
       logger: {
@@ -1114,6 +1309,7 @@ describe('recoverStaleTasks', () => {
       getDueTasks,
       getTaskById,
       logTaskRun,
+      appendTaskRunPhaseEvent: () => {},
       updateTaskAfterRun,
       writeScheduledRunHandoff: () => '',
       logger: {
@@ -1167,6 +1363,7 @@ describe('recoverStaleTasks', () => {
       getDueTasks,
       getTaskById,
       logTaskRun,
+      appendTaskRunPhaseEvent: () => {},
       updateTaskAfterRun,
       writeScheduledRunHandoff: () => '',
       logger: {

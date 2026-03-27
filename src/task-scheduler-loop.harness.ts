@@ -56,6 +56,7 @@ describe('startSchedulerLoop harness', () => {
     const advanceTaskNextRunMock = mock(() => {});
     const updateTaskAfterRunMock = mock(() => {});
     const logTaskRunMock = mock(() => {});
+    const appendTaskRunPhaseEventMock = mock(() => {});
     const writeTasksSnapshotMock = mock(() => {});
     const writeScheduledRunHandoffMock = mock(() => 'handoff.json');
     const calculateNextRunMock = mock((scheduleType: string) =>
@@ -152,6 +153,7 @@ describe('startSchedulerLoop harness', () => {
         getDueTasks: getDueTasksMock,
         getTaskById: getTaskByIdMock,
         logTaskRun: logTaskRunMock,
+        appendTaskRunPhaseEvent: appendTaskRunPhaseEventMock,
         updateTaskAfterRun: updateTaskAfterRunMock,
         writeScheduledRunHandoff: writeScheduledRunHandoffMock,
         logger: loggerMock,

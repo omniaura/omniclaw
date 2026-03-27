@@ -131,6 +131,7 @@ describe('startSchedulerLoop task execution', () => {
         getDueTasks: getDueTasksMock,
         getTaskById: getTaskByIdMock,
         logTaskRun: mock(() => {}),
+        appendTaskRunPhaseEvent: mock(() => {}),
         updateTaskAfterRun: mock(() => {}),
         writeScheduledRunHandoff: mock(() => 'handoff.json'),
         logger: loggerMock,
@@ -176,6 +177,7 @@ describe('startSchedulerLoop task execution', () => {
       taskId === task.id ? task : null,
     );
     const logTaskRunMock = mock(() => {});
+    const appendTaskRunPhaseEventMock = mock(() => {});
     const updateTaskAfterRunMock = mock(() => {});
     const writeScheduledRunHandoffMock = mock(() => 'handoff.json');
     const closeStdinMock = mock(() => {});
@@ -268,6 +270,7 @@ describe('startSchedulerLoop task execution', () => {
         getDueTasks: getDueTasksMock,
         getTaskById: getTaskByIdMock,
         logTaskRun: logTaskRunMock,
+        appendTaskRunPhaseEvent: appendTaskRunPhaseEventMock,
         updateTaskAfterRun: updateTaskAfterRunMock,
         writeScheduledRunHandoff: writeScheduledRunHandoffMock,
         logger: loggerMock,
@@ -384,6 +387,7 @@ describe('startSchedulerLoop task execution', () => {
           taskId === task.id ? task : null,
         ),
         logTaskRun: mock(() => {}),
+        appendTaskRunPhaseEvent: mock(() => {}),
         updateTaskAfterRun: mock(() => {}),
         writeScheduledRunHandoff: mock(() => {
           throw new Error('disk full');

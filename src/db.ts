@@ -14,6 +14,7 @@ import {
   NewMessage,
   RegisteredGroup,
   ScheduledTask,
+  TaskRunPhaseEvent,
   TaskRunLog,
   registeredGroupToAgent,
   registeredGroupToRoute,
@@ -346,6 +347,20 @@ export function createSchema(database: Database): void {
       FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id)
     );
     CREATE INDEX IF NOT EXISTS idx_task_run_logs ON task_run_logs(task_id, run_at);
+
+    CREATE TABLE IF NOT EXISTS task_run_phase_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL,
+      run_at TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      phase TEXT NOT NULL,
+      event_at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      retryable INTEGER NOT NULL,
+      error TEXT,
+      FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_run_phase_events ON task_run_phase_events(task_id, run_at, sequence);
 
     CREATE TABLE IF NOT EXISTS router_state (
       key TEXT PRIMARY KEY,
@@ -1302,6 +1317,55 @@ export function getTaskRunLogs(taskId: string, limit = 20): TaskRunLog[] {
        LIMIT ?`,
     )
     .all(taskId, limit) as TaskRunLog[];
+}
+
+export function appendTaskRunPhaseEvent(event: TaskRunPhaseEvent): void {
+  try {
+    db.query(
+      `
+      INSERT INTO task_run_phase_events
+        (task_id, run_at, sequence, phase, event_at, status, retryable, error)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE EXISTS (SELECT 1 FROM scheduled_tasks WHERE id = ?)
+    `,
+    ).run(
+      event.task_id,
+      event.run_at,
+      event.sequence,
+      event.phase,
+      event.event_at,
+      event.status,
+      event.retryable ? 1 : 0,
+      event.error,
+      event.task_id,
+    );
+  } catch (error) {
+    logger.warn(
+      { taskId: event.task_id, runAt: event.run_at, phase: event.phase, error },
+      'Failed to append task run phase event',
+    );
+  }
+}
+
+export function getTaskRunPhaseEvents(
+  taskId: string,
+  runAt: string,
+): TaskRunPhaseEvent[] {
+  const rows = db
+    .query(
+      `SELECT task_id, run_at, sequence, phase, event_at, status, retryable, error
+       FROM task_run_phase_events
+       WHERE task_id = ? AND run_at = ?
+       ORDER BY sequence ASC`,
+    )
+    .all(taskId, runAt) as Array<
+    Omit<TaskRunPhaseEvent, 'retryable'> & { retryable: number }
+  >;
+
+  return rows.map((row) => ({
+    ...row,
+    retryable: Boolean(row.retryable),
+  }));
 }
 
 /** Mark a task as currently executing (set execution lease). */

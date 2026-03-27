@@ -188,6 +188,25 @@ export interface TaskRunLog {
   outcome_question?: string;
 }
 
+export type TaskRunPhaseName =
+  | 'lease_acquired'
+  | 'group_resolved'
+  | 'dispatch_started'
+  | 'stream_result_received'
+  | 'outbound_send_attempted'
+  | 'run_finalized';
+
+export interface TaskRunPhaseEvent {
+  task_id: string;
+  run_at: string;
+  sequence: number;
+  phase: TaskRunPhaseName;
+  event_at: string;
+  status: 'ok' | 'error';
+  retryable: boolean;
+  error: string | null;
+}
+
 // --- Channel abstraction ---
 
 export interface Channel {
