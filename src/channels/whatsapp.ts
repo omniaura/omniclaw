@@ -6,6 +6,7 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  downloadMediaMessage,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
@@ -14,6 +15,17 @@ import makeWASocket, {
 import { STORE_DIR } from '../config.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
+import {
+  MAX_BINARY_DOWNLOAD_BYTES,
+  MAX_TEXT_DOWNLOAD_BYTES,
+  buildSafeMediaPath,
+  ensureMediaDir,
+  formatImageMarker,
+  formatPlaceholder,
+  formatTextFileMarker,
+  isImageByTypeOrExtension,
+  isTextByExtension,
+} from '../media.js';
 import {
   Channel,
   OnInboundMessage,
@@ -346,7 +358,88 @@ export class WhatsAppChannel implements Channel {
               msg.message?.videoMessage?.caption ||
               '';
 
-            // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
+            // Detect media messages and download attachments
+            const group = groups[chatJid];
+            const m = msg.message!;
+            let mediaMarker = '';
+
+            if (m.imageMessage) {
+              const buffer = await this.downloadWhatsAppMedia(msg);
+              if (buffer) {
+                try {
+                  const mediaDir = ensureMediaDir(group);
+                  const filePath = buildSafeMediaPath(
+                    mediaDir,
+                    msgId,
+                    'photo.jpg',
+                  );
+                  fs.writeFileSync(filePath, buffer);
+                  mediaMarker = formatImageMarker(path.basename(filePath));
+                } catch (err) {
+                  logger.warn({ err, msgId }, 'Failed to store WhatsApp image');
+                  mediaMarker = '[Photo]';
+                }
+              } else {
+                mediaMarker = '[Photo]';
+              }
+            } else if (m.videoMessage) {
+              mediaMarker = formatPlaceholder('video');
+            } else if (m.audioMessage) {
+              mediaMarker = formatPlaceholder('audio');
+            } else if (m.stickerMessage) {
+              mediaMarker = '[Sticker]';
+            } else if (m.documentMessage) {
+              const doc = m.documentMessage;
+              const fileName = doc.fileName || 'file';
+              const mimeType = doc.mimetype || null;
+              const fileSize = doc.fileLength
+                ? Number(doc.fileLength)
+                : Infinity;
+
+              if (isImageByTypeOrExtension(mimeType, fileName)) {
+                const buffer = await this.downloadWhatsAppMedia(msg);
+                if (buffer) {
+                  try {
+                    const mediaDir = ensureMediaDir(group);
+                    const filePath = buildSafeMediaPath(
+                      mediaDir,
+                      msgId,
+                      fileName,
+                    );
+                    fs.writeFileSync(filePath, buffer);
+                    mediaMarker = formatImageMarker(path.basename(filePath));
+                  } catch (err) {
+                    logger.warn(
+                      { err, msgId, fileName },
+                      'Failed to store WhatsApp document image',
+                    );
+                    mediaMarker = formatPlaceholder('file', fileName);
+                  }
+                } else {
+                  mediaMarker = formatPlaceholder('file', fileName);
+                }
+              } else if (
+                isTextByExtension(fileName) &&
+                fileSize <= MAX_TEXT_DOWNLOAD_BYTES
+              ) {
+                const buffer = await this.downloadWhatsAppMedia(msg);
+                if (buffer) {
+                  const safeName = path.basename(fileName);
+                  const text = new TextDecoder().decode(buffer);
+                  mediaMarker = formatTextFileMarker(safeName, text);
+                } else {
+                  mediaMarker = formatPlaceholder('file', fileName);
+                }
+              } else {
+                mediaMarker = formatPlaceholder('file', fileName);
+              }
+            }
+
+            if (mediaMarker) {
+              content = content ? `${mediaMarker} ${content}` : mediaMarker;
+            }
+
+            // Skip protocol messages with no text or media content
             if (!content) continue;
 
             const rawSender = msg.key.participant || msg.key.remoteJid || '';
@@ -567,6 +660,36 @@ export class WhatsAppChannel implements Channel {
     }
 
     return jid;
+  }
+
+  /**
+   * Download media from a WhatsApp message using Baileys' built-in decryption.
+   * Returns the binary buffer, or null on failure.
+   */
+  private async downloadWhatsAppMedia(msg: any): Promise<Buffer | null> {
+    try {
+      const buffer = (await downloadMediaMessage(
+        msg,
+        'buffer',
+        {},
+        {
+          logger: { ...console, child: () => console } as any,
+          reuploadRequest: this.sock.updateMediaMessage,
+        },
+      )) as Buffer;
+      if (!buffer || buffer.length === 0) return null;
+      if (buffer.length > MAX_BINARY_DOWNLOAD_BYTES) {
+        logger.warn(
+          { bytes: buffer.length, max: MAX_BINARY_DOWNLOAD_BYTES },
+          'WhatsApp media exceeds size limit — discarding',
+        );
+        return null;
+      }
+      return buffer;
+    } catch (err) {
+      logger.warn({ err }, 'Failed to download WhatsApp media');
+      return null;
+    }
   }
 
   private async buildSenderIdentity(rawSender: string): Promise<{

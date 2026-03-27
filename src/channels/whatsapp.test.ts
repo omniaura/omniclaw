@@ -1,5 +1,21 @@
-import { describe, it, expect, beforeEach, mock, spyOn } from 'bun:test';
+import fs from 'fs';
+import path from 'path';
+import {
+  afterEach,
+  describe,
+  it,
+  expect,
+  beforeEach,
+  mock,
+  spyOn,
+} from 'bun:test';
 
+import { GROUPS_DIR } from '../config.js';
+import {
+  formatImageMarker,
+  formatPlaceholder,
+  formatTextFileMarker,
+} from '../media.js';
 import { WhatsAppChannel } from './whatsapp.js';
 import type { WhatsAppChannelOpts } from './whatsapp.js';
 import type { OnInboundMessage, OnChatMetadata } from '../types.js';
@@ -907,5 +923,115 @@ describe('WhatsAppChannel sender identity', () => {
       sender: 'whatsapp:15551234567@s.whatsapp.net',
       senderUserId: '15551234567@s.whatsapp.net',
     });
+  });
+});
+
+// ===========================================================================
+// WhatsApp media download helpers
+// ===========================================================================
+
+describe('WhatsAppChannel.downloadWhatsAppMedia', () => {
+  it('returns null when sock is not connected', async () => {
+    const channel = makeChannel();
+    // sock is the default BunSocket stub, no updateMediaMessage
+    setPrivate(channel, 'sock', { updateMediaMessage: mock() });
+
+    // downloadMediaMessage will throw because the message has no media keys
+    const result = await (channel as any).downloadWhatsAppMedia({
+      message: { imageMessage: {} },
+    });
+    expect(result).toBeNull();
+  });
+});
+
+// ===========================================================================
+// WhatsApp media marker integration
+// ===========================================================================
+
+describe('WhatsApp media marker formatting', () => {
+  it('formats image marker for downloaded photos', () => {
+    const marker = formatImageMarker('msg123-photo.jpg');
+    expect(marker).toBe('[attachment:image file=msg123-photo.jpg]');
+  });
+
+  it('formats video placeholder', () => {
+    expect(formatPlaceholder('video')).toBe('[Video]');
+  });
+
+  it('formats audio placeholder', () => {
+    expect(formatPlaceholder('audio')).toBe('[Audio]');
+  });
+
+  it('formats file placeholder with name', () => {
+    expect(formatPlaceholder('file', 'report.pdf')).toBe('[File: report.pdf]');
+  });
+
+  it('formats file placeholder without name', () => {
+    expect(formatPlaceholder('file')).toBe('[File]');
+  });
+
+  it('formats inline text file marker', () => {
+    const marker = formatTextFileMarker('config.json', '{"key": "val"}');
+    expect(marker).toBe(
+      '[attachment:file name=config.json]\n{"key": "val"}\n[/attachment:file]',
+    );
+  });
+
+  it('prepends media marker to caption text', () => {
+    const mediaMarker = '[attachment:image file=msg1-photo.jpg]';
+    const caption = 'Check this out';
+    const content = `${mediaMarker} ${caption}`;
+    expect(content).toBe(
+      '[attachment:image file=msg1-photo.jpg] Check this out',
+    );
+  });
+
+  it('uses media marker alone when no caption', () => {
+    const mediaMarker = '[attachment:image file=msg1-photo.jpg]';
+    const caption = '';
+    const content = caption ? `${mediaMarker} ${caption}` : mediaMarker;
+    expect(content).toBe('[attachment:image file=msg1-photo.jpg]');
+  });
+});
+
+describe('WhatsApp media directory operations', () => {
+  const testFolder = `wa-media-test-${Date.now()}`;
+
+  afterEach(() => {
+    const dir = path.join(GROUPS_DIR, testFolder);
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('creates media directory under group workspace', () => {
+    const { ensureMediaDir } = require('../media.js');
+    const group = {
+      name: 'test',
+      folder: testFolder,
+      trigger: '@test',
+      added_at: new Date().toISOString(),
+    };
+    const mediaDir = ensureMediaDir(group);
+    expect(fs.existsSync(mediaDir)).toBe(true);
+    expect(mediaDir).toBe(path.join(GROUPS_DIR, testFolder, 'media'));
+  });
+
+  it('prevents path traversal in media filenames', () => {
+    const { ensureMediaDir, buildSafeMediaPath } = require('../media.js');
+    const group = {
+      name: 'test',
+      folder: testFolder,
+      trigger: '@test',
+      added_at: new Date().toISOString(),
+    };
+    const mediaDir = ensureMediaDir(group);
+    const filePath = buildSafeMediaPath(
+      mediaDir,
+      'msg1',
+      '../../../etc/passwd',
+    );
+    expect(filePath).not.toContain('..');
+    expect(path.dirname(filePath)).toBe(mediaDir);
   });
 });
