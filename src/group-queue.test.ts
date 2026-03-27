@@ -889,4 +889,89 @@ describe('GroupQueue', () => {
       expect(final.idleContainers).toBe(0);
     });
   });
+
+  describe('atomic message dispatch transitions', () => {
+    it('drains a waiting group exactly once when a slot opens', async () => {
+      queue = new GroupQueue({
+        dataDir: '/tmp/omniclaw-test-data',
+        maxActiveContainers: 1,
+        maxIdleContainers: 0,
+        maxTaskContainers: 2,
+        fsImpl,
+      });
+
+      const started: string[] = [];
+      const resolvers = new Map<string, () => void>();
+      queue.setProcessMessagesFn(
+        mock(
+          (groupJid: string) =>
+            new Promise<boolean>((resolve) => {
+              started.push(groupJid);
+              resolvers.set(groupJid, () => resolve(true));
+            }),
+        ),
+      );
+
+      queue.enqueueMessageCheck('group1@g.us');
+      await Bun.sleep(10);
+
+      queue.enqueueMessageCheck('group2@g.us');
+      queue.enqueueMessageCheck('group2@g.us');
+      await Bun.sleep(10);
+
+      expect(
+        queue.getDetailedStats().find((d) => d.folderKey === 'group2@g.us')
+          ?.messageLane.pendingCount,
+      ).toBe(1);
+
+      resolvers.get('group1@g.us')?.();
+      await Bun.sleep(10);
+
+      expect(started.filter((jid) => jid === 'group2@g.us')).toHaveLength(1);
+      expect(
+        queue.getDetailedStats().find((d) => d.folderKey === 'group2@g.us')
+          ?.messageLane.pendingCount,
+      ).toBe(0);
+
+      resolvers.get('group2@g.us')?.();
+      await Bun.sleep(10);
+    });
+
+    it('resets active counts before scheduling a retry', async () => {
+      const scheduled: Array<() => void> = [];
+      const originalSetTimeout = globalThis.setTimeout;
+      let attempts = 0;
+
+      queue.setProcessMessagesFn(
+        mock(async () => {
+          attempts++;
+          return attempts > 1;
+        }),
+      );
+
+      (globalThis as { setTimeout: typeof setTimeout }).setTimeout = ((
+        fn: Parameters<typeof setTimeout>[0],
+      ) => {
+        scheduled.push(fn as () => void);
+        return { id: 'retry' } as unknown as ReturnType<typeof setTimeout>;
+      }) as unknown as typeof setTimeout;
+
+      try {
+        queue.enqueueMessageCheck('group1@g.us');
+        await Bun.sleep(10);
+
+        expect(queue.getStats().activeContainers).toBe(0);
+        expect(scheduled).toHaveLength(1);
+
+        scheduled[0]();
+        await Bun.sleep(10);
+
+        expect(attempts).toBe(2);
+        expect(queue.getStats().activeContainers).toBe(0);
+      } finally {
+        (globalThis as { setTimeout: typeof setTimeout }).setTimeout =
+          originalSetTimeout;
+      }
+    });
+  });
 });
