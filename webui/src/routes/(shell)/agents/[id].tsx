@@ -3,6 +3,7 @@ import { useParams, A, useNavigate } from '@solidjs/router';
 import { createSignal, createResource, Show, For, Suspense } from 'solid-js';
 import { isServer } from 'solid-js/web';
 import { api } from '~/lib/api';
+import type { AgentDetailData } from '~/lib/api';
 import Badge from '~/components/shared/Badge';
 import AvatarUpload from '~/components/agents/AvatarUpload';
 
@@ -191,6 +192,15 @@ export default function AgentDetail() {
                   <div class="space-y-6">
                     <Show when={!data().remoteInstanceId}>
                       <div>
+                        <h3 class="text-sm text-text-bright mb-3">
+                          send message
+                        </h3>
+                        <MessageCompose
+                          agentId={data().id}
+                          channels={data().channels}
+                        />
+                      </div>
+                      <div>
                         <h3 class="text-sm text-text-bright mb-3">avatar</h3>
                         <AvatarUpload
                           agentId={data().id}
@@ -374,6 +384,105 @@ function InfoItem(props: { label: string; value: string }) {
     <div class="bg-surface rounded px-3 py-2 border border-border">
       <div class="text-text-dim text-xs mb-0.5">{props.label}</div>
       <div class="text-text break-all">{props.value}</div>
+    </div>
+  );
+}
+
+function MessageCompose(props: {
+  agentId: string;
+  channels: AgentDetailData['channels'];
+}) {
+  const [selectedChannel, setSelectedChannel] = createSignal(
+    props.channels.length > 0 ? props.channels[0].jid : '',
+  );
+  const [content, setContent] = createSignal('');
+  const [sending, setSending] = createSignal(false);
+  const [result, setResult] = createSignal<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
+
+  async function send() {
+    const ch = selectedChannel();
+    const msg = content().trim();
+    if (!ch || !msg) return;
+
+    setSending(true);
+    setResult(null);
+    try {
+      await api.sendAgentMessage(props.agentId, ch, msg);
+      setContent('');
+      setResult({ ok: true, text: 'Message sent' });
+    } catch (err: any) {
+      setResult({ ok: false, text: err.message || 'Failed to send' });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div class="space-y-3">
+      <Show
+        when={props.channels.length > 0}
+        fallback={
+          <p class="text-sm text-text-dim">
+            No channels available for this agent.
+          </p>
+        }
+      >
+        <div>
+          <label class="block text-xs text-text-dim mb-1">channel</label>
+          <select
+            class="w-full bg-surface border border-border rounded px-2 py-1.5 text-sm text-text"
+            value={selectedChannel()}
+            onChange={(e) => setSelectedChannel(e.currentTarget.value)}
+          >
+            <For each={props.channels}>
+              {(ch) => (
+                <option value={ch.jid}>
+                  {ch.displayName} ({ch.jid})
+                </option>
+              )}
+            </For>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs text-text-dim mb-1">message</label>
+          <textarea
+            class="w-full bg-surface border border-border rounded px-2 py-1.5 text-sm text-text min-h-[80px] resize-y"
+            placeholder="Type a message to send to this agent..."
+            value={content()}
+            onInput={(e) => setContent(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                send();
+              }
+            }}
+          />
+        </div>
+
+        <div class="flex items-center gap-3">
+          <button
+            class="px-3 py-1.5 text-sm rounded bg-accent text-bg hover:opacity-90 disabled:opacity-50"
+            disabled={sending() || !content().trim()}
+            onClick={send}
+          >
+            {sending() ? 'Sending...' : 'Send'}
+          </button>
+          <span class="text-xs text-text-dim">Ctrl+Enter to send</span>
+          <Show when={result()}>
+            {(r) => (
+              <span
+                class={`text-xs ${r().ok ? 'text-green-400' : 'text-red-400'}`}
+              >
+                {r().text}
+              </span>
+            )}
+          </Show>
+        </div>
+      </Show>
     </div>
   );
 }

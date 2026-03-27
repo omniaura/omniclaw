@@ -181,6 +181,16 @@ export function handleRequest(
   if (pathname === '/api/ipc/queue') return handleGetQueueDetails(state);
   if (pathname === '/api/ipc/events') return handleGetIpcEvents(url, state);
 
+  // Agent message injection
+  if (pathname.startsWith('/api/agents/') && pathname.endsWith('/message')) {
+    const agentId = decodeURIComponent(
+      pathname.slice('/api/agents/'.length, -'/message'.length),
+    );
+    if (!agentId) return json({ error: 'Missing agent ID' }, 400);
+    if (method === 'POST') return handleSendMessage(agentId, req, state);
+    return json({ error: 'Method not allowed' }, 405);
+  }
+
   // Agent detail API
   if (pathname.startsWith('/api/agents/') && pathname.endsWith('/detail')) {
     const agentId = decodeURIComponent(
@@ -964,6 +974,65 @@ function handleServeAvatar(pathname: string): Response {
   return new Response(Bun.file(filePath), {
     headers: { 'Content-Type': 'image/png', 'Cache-Control': 'max-age=3600' },
   });
+}
+
+async function handleSendMessage(
+  agentId: string,
+  req: Request,
+  state: WebStateProvider,
+): Promise<Response> {
+  if (!state.sendMessage) {
+    return json({ error: 'Message sending is not available' }, 501);
+  }
+
+  const agents = state.getAgents();
+  const agent = agents[agentId];
+  if (!agent) return json({ error: 'Agent not found' }, 404);
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { channel, content, sender_name } = body;
+  if (!content || typeof content !== 'string') {
+    return json({ error: 'Missing or invalid "content" (string required)' }, 400);
+  }
+  if (content.length > 10000) {
+    return json({ error: '"content" exceeds 10000 character limit' }, 400);
+  }
+  if (!channel || typeof channel !== 'string') {
+    return json(
+      { error: 'Missing or invalid "channel" (chat JID required)' },
+      400,
+    );
+  }
+
+  // Verify the channel belongs to this agent
+  const subs = state.getChannelSubscriptions();
+  const agentChannels = (subs[channel] || []).filter(
+    (s) => s.agentId === agentId,
+  );
+  if (agentChannels.length === 0) {
+    return json(
+      { error: `Agent "${agent.name}" is not subscribed to channel "${channel}"` },
+      400,
+    );
+  }
+
+  const senderLabel =
+    typeof sender_name === 'string' && sender_name.trim()
+      ? sender_name.trim()
+      : 'Web UI Admin';
+
+  try {
+    const messageId = state.sendMessage(channel, content, senderLabel);
+    return json({ id: messageId, channel, content, sender_name: senderLabel }, 201);
+  } catch (err: any) {
+    return json({ error: `Failed to send message: ${err.message}` }, 500);
+  }
 }
 
 // ---- Helpers ----

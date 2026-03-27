@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { Effect } from 'effect';
 import fs from 'fs';
 import path from 'path';
@@ -2458,6 +2458,21 @@ async function main(): Promise<void> {
         agents[agentId].avatarSource =
           (source as Agent['avatarSource']) || undefined;
       }
+    },
+    sendMessage: (chatJid, content, senderName) => {
+      const msgId = `web-${randomUUID()}`;
+      storeMessage({
+        id: msgId,
+        chat_jid: chatJid,
+        sender: 'web-ui-admin',
+        sender_name: senderName ?? 'Web UI Admin',
+        content,
+        timestamp: new Date().toISOString(),
+        is_from_me: false,
+        sender_platform: 'web',
+      });
+      queue.enqueueMessageCheck(chatJid);
+      return msgId;
     },
     resolveChatImage: (chatJid) => resolveChatImageUrl(chatJid),
     resolveAgentAvatarUrl: (agentId, avatarUrl, avatarSource) =>
