@@ -226,6 +226,32 @@ describe('TelegramChannel bot identity', () => {
   });
 });
 
+describe('TelegramChannel sender identity', () => {
+  const makeChannel = () =>
+    new TelegramChannel('123456:token', {
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+  it('derives sender and sender_user_id from the Telegram user id', () => {
+    const channel = makeChannel();
+
+    expect((channel as any).buildSenderIdentity({ id: 987654321 })).toEqual({
+      sender: 'telegram:987654321',
+      senderUserId: '987654321',
+    });
+  });
+
+  it('returns an empty sender when the Telegram user id is missing', () => {
+    const channel = makeChannel();
+
+    expect((channel as any).buildSenderIdentity(undefined)).toEqual({
+      sender: '',
+    });
+  });
+});
+
 describe('telegram avatar descriptors', () => {
   it('round-trips safe Telegram avatar descriptors', () => {
     const descriptor = buildTelegramFileDescriptor(

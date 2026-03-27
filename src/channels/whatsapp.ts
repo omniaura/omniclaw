@@ -350,7 +350,8 @@ export class WhatsAppChannel implements Channel {
             if (!content) continue;
 
             const rawSender = msg.key.participant || msg.key.remoteJid || '';
-            const sender = rawSender ? `whatsapp:${rawSender}` : '';
+            const { sender, senderUserId } =
+              await this.buildSenderIdentity(rawSender);
             const senderName = msg.pushName?.trim() || '';
 
             if (!senderName) {
@@ -403,6 +404,7 @@ export class WhatsAppChannel implements Channel {
               // which would cause the DB query to drop real user messages.
               is_from_me: false,
               sender_platform: 'whatsapp',
+              sender_user_id: senderUserId,
             });
           }
         } catch (err) {
@@ -565,6 +567,21 @@ export class WhatsAppChannel implements Channel {
     }
 
     return jid;
+  }
+
+  private async buildSenderIdentity(rawSender: string): Promise<{
+    sender: string;
+    senderUserId?: string;
+  }> {
+    if (!rawSender) {
+      return { sender: '' };
+    }
+
+    const senderUserId = await this.translateJid(rawSender);
+    return {
+      sender: `whatsapp:${senderUserId}`,
+      senderUserId,
+    };
   }
 
   private async flushOutgoingQueue(): Promise<void> {

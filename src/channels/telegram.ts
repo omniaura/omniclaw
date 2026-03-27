@@ -139,6 +139,19 @@ export class TelegramChannel implements Channel {
     this.allowLegacyJidRouting = opts.allowLegacyJidRouting !== false;
   }
 
+  private buildSenderIdentity(
+    from: { id?: string | number | bigint } | null | undefined,
+  ): {
+    sender: string;
+    senderUserId?: string;
+  } {
+    const senderUserId = from?.id != null ? String(from.id) : undefined;
+    return {
+      sender: senderUserId ? `telegram:${senderUserId}` : '',
+      senderUserId,
+    };
+  }
+
   async connect(): Promise<void> {
     this.bot = new Bot(this.botToken);
 
@@ -175,8 +188,7 @@ export class TelegramChannel implements Channel {
       const legacyChatJid = `tg:${chatId}`;
       let content = ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
-      const senderId = ctx.from?.id?.toString() || '';
-      const sender = senderId ? `telegram:${senderId}` : '';
+      const { sender, senderUserId } = this.buildSenderIdentity(ctx.from);
       const senderName =
         ctx.from?.first_name || ctx.from?.username || 'Unknown';
       const msgId = ctx.message.message_id.toString();
@@ -238,6 +250,7 @@ export class TelegramChannel implements Channel {
         timestamp,
         is_from_me: false,
         sender_platform: 'telegram',
+        sender_user_id: senderUserId,
       });
 
       logger.info(
@@ -256,8 +269,7 @@ export class TelegramChannel implements Channel {
       if (!group) return;
 
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
-      const senderId = ctx.from?.id?.toString() || '';
-      const sender = senderId ? `telegram:${senderId}` : '';
+      const { sender, senderUserId } = this.buildSenderIdentity(ctx.from);
       const senderName =
         ctx.from?.first_name || ctx.from?.username || 'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
@@ -273,6 +285,7 @@ export class TelegramChannel implements Channel {
         timestamp,
         is_from_me: false,
         sender_platform: 'telegram',
+        sender_user_id: senderUserId,
       });
     };
 
