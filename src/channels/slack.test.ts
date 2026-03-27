@@ -2,6 +2,17 @@ import fs from 'fs';
 import path from 'path';
 import { afterEach, describe, it, expect, mock } from 'bun:test';
 
+// Mock @slack/bolt before importing SlackChannel so Bolt's internal
+// auth.test call never fires (it leaks unhandled rejections with fake tokens).
+mock.module('@slack/bolt', () => ({
+  App: class MockApp {
+    message() {}
+    event() {}
+    async start() {}
+    async stop() {}
+  },
+}));
+
 import { GROUPS_DIR } from '../config.js';
 import {
   formatImageMarker,
