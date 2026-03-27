@@ -412,7 +412,6 @@ async function runTask(
         ? result.slice(0, 200)
         : 'Completed';
     runtime.updateTaskAfterRun(task.id, nextRun, resultSummary, outcome);
-    runtime.updateTaskAfterRun(task.id, nextRun, resultSummary, outcome);
     appendPhaseEvent('run_finalized', error ? 'error' : 'ok', false, error);
     tryWriteHandoff({
       task_id: task.id,
