@@ -790,6 +790,68 @@ describe('GroupQueue', () => {
   });
 
   describe('notifyIdle', () => {
+    it('derives detailed message lane stats from the explicit lane state', async () => {
+      queue = new GroupQueue({
+        dataDir: '/tmp/omniclaw-test-data',
+        maxActiveContainers: 3,
+        maxIdleContainers: 1,
+        maxTaskContainers: 2,
+        fsImpl,
+      });
+      let processResolve: (() => void) | null = null;
+      const backendSend = mock(() => true);
+      queue.setProcessMessagesFn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            processResolve = () => resolve(true);
+          }),
+      );
+
+      queue.enqueueMessageCheck('group1@g.us');
+      await Bun.sleep(5);
+      queue.registerProcess(
+        'group1@g.us',
+        { killed: false } as any,
+        'msg-ctr',
+        'group1-folder',
+        {
+          sendMessage: backendSend,
+          closeStdin: mock(),
+          runAgent: mock(async () => ({
+            status: 'success' as const,
+            result: null,
+          })),
+        } as any,
+        'message',
+      );
+
+      let detail = queue
+        .getDetailedStats()
+        .find((d) => d.folderKey === 'group1@g.us');
+      expect(detail?.messageLane.active).toBe(true);
+      expect(detail?.messageLane.idle).toBe(false);
+
+      queue.notifyIdle('group1@g.us');
+      detail = queue
+        .getDetailedStats()
+        .find((d) => d.folderKey === 'group1@g.us');
+      expect(detail?.messageLane.active).toBe(true);
+      expect(detail?.messageLane.idle).toBe(true);
+
+      const sent = await queue.sendMessage('group1@g.us', 'wake up');
+      expect(sent).toBe(true);
+      expect(backendSend).toHaveBeenCalled();
+
+      detail = queue
+        .getDetailedStats()
+        .find((d) => d.folderKey === 'group1@g.us');
+      expect(detail?.messageLane.active).toBe(true);
+      expect(detail?.messageLane.idle).toBe(false);
+
+      processResolve!();
+      await Bun.sleep(5);
+    });
+
     it('should never let active - idle go negative after container exits', async () => {
       let processResolve: (() => void) | null = null;
       queue.setProcessMessagesFn(

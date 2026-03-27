@@ -28,6 +28,7 @@ const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 5000;
 
 export type Lane = 'message' | 'task';
+type MessageLaneState = 'idle' | 'running' | 'cooldown';
 
 export interface GroupQueueDetail {
   folderKey: string;
@@ -59,9 +60,7 @@ interface ActiveTaskInfo {
 
 interface GroupState {
   // Message lane
-  messageActive: boolean;
-  /** True when the message container is idle-waiting for IPC input (finished work). */
-  idleWaiting: boolean;
+  messageLaneState: MessageLaneState;
   /** JIDs with pending messages. Multiple JIDs can share one GroupState (folder). */
   pendingMessageJids: string[];
   messageProcess: ContainerProcess | null;
@@ -161,8 +160,7 @@ export class GroupQueue {
     let state = this.groups.get(key);
     if (!state) {
       state = {
-        messageActive: false,
-        idleWaiting: false,
+        messageLaneState: 'idle',
         pendingMessageJids: [],
         messageProcess: null,
         messageContainerName: null,
@@ -198,7 +196,7 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
 
     // Only check the message lane — task lane is independent
-    if (state.messageActive) {
+    if (state.messageLaneState !== 'idle') {
       if (!state.pendingMessageJids.includes(groupJid)) {
         state.pendingMessageJids.push(groupJid);
       }
@@ -281,7 +279,7 @@ export class GroupQueue {
     ) {
       state.pendingTasks.push({ id: taskId, groupJid, fn, promptPreview });
       // If the message container is idle, preempt it to free a slot
-      if (state.messageActive && state.idleWaiting) {
+      if (state.messageLaneState === 'cooldown') {
         logger.info(
           { groupJid, taskId },
           'Preempting idle message container for task',
@@ -305,7 +303,7 @@ export class GroupQueue {
 
     // Run immediately — but if message container is idle, preempt it too
     // (frees a global slot for the task to use)
-    if (state.messageActive && state.idleWaiting) {
+    if (state.messageLaneState === 'cooldown') {
       logger.info(
         { groupJid, taskId },
         'Preempting idle message container for task',
@@ -365,10 +363,10 @@ export class GroupQueue {
     // Guard against duplicate idle notifications from the same container.
     // The IPC stream can emit multiple 'success' statuses during a container's
     // lifetime (idle → woken → idle again), each calling notifyIdle. Without
-    // this guard, idleCount drifts up because _clearIdleState only decrements
-    // once (gated on the boolean flag), causing negative "active containers"
+    // this guard, idleCount drifts up because the cooldown->running/idle transition
+    // only decrements once, causing negative "active containers"
     // in the dashboard.
-    if (state.idleWaiting) {
+    if (state.messageLaneState === 'cooldown') {
       logger.debug(
         { groupJid, folderKey },
         'notifyIdle: already idle, skipping duplicate',
@@ -376,11 +374,7 @@ export class GroupQueue {
       return;
     }
 
-    state.idleWaiting = true;
-    this.idleCount++;
-    if (!this.idleGroups.includes(folderKey)) {
-      this.idleGroups.push(folderKey);
-    }
+    this.transitionMessageLaneState(groupJid, 'cooldown');
 
     // A processing slot just freed up — let waiting messages start.
     this.drainWaitingMessages();
@@ -412,19 +406,37 @@ export class GroupQueue {
    * All idle-count bookkeeping goes through this single method to prevent
    * drift from multiple callers decrementing independently.
    */
-  private _clearIdleState(groupJidOrFolder: string): boolean {
+  private transitionMessageLaneState(
+    groupJidOrFolder: string,
+    nextState: MessageLaneState,
+  ): boolean {
     const folderKey = this.resolveFolder(groupJidOrFolder);
     const state = this.groups.get(folderKey);
-    if (!state?.idleWaiting) return false;
-    state.idleWaiting = false;
-    this.idleCount = Math.max(0, this.idleCount - 1);
-    this.idleGroups = this.idleGroups.filter((k) => k !== folderKey);
+    if (!state || state.messageLaneState === nextState) return false;
+
+    const wasCooldown = state.messageLaneState === 'cooldown';
+    const willCooldown = nextState === 'cooldown';
+
+    if (wasCooldown && !willCooldown) {
+      this.idleCount = Math.max(0, this.idleCount - 1);
+      this.idleGroups = this.idleGroups.filter((k) => k !== folderKey);
+    }
+
+    state.messageLaneState = nextState;
+
+    if (!wasCooldown && willCooldown) {
+      this.idleCount++;
+      if (!this.idleGroups.includes(folderKey)) {
+        this.idleGroups.push(folderKey);
+      }
+    }
+
     return true;
   }
 
   /** Close an idle container and update idle tracking. */
   private _closeIdleContainer(groupJidOrFolder: string): void {
-    this._clearIdleState(groupJidOrFolder);
+    this.transitionMessageLaneState(groupJidOrFolder, 'running');
     this.closeStdin(groupJidOrFolder, 'message');
   }
 
@@ -440,9 +452,11 @@ export class GroupQueue {
    */
   async sendMessage(chatJid: string, text: string): Promise<boolean> {
     const state = this.getGroup(chatJid);
-    if (!state.messageActive || !state.messageGroupFolder) return false;
+    if (state.messageLaneState === 'idle' || !state.messageGroupFolder) {
+      return false;
+    }
     // Container was idle — mark it active again (single-method bookkeeping)
-    this._clearIdleState(chatJid);
+    this.transitionMessageLaneState(chatJid, 'running');
     const channelJid = toChannelJid(chatJid);
 
     // Use Effect-based queue if available
@@ -504,7 +518,8 @@ export class GroupQueue {
   closeStdin(groupJid: string, lane: Lane = 'message'): void {
     const state = this.getGroup(groupJid);
 
-    const active = lane === 'message' ? state.messageActive : state.taskActive;
+    const active =
+      lane === 'message' ? state.messageLaneState !== 'idle' : state.taskActive;
     const groupFolder =
       lane === 'message' ? state.messageGroupFolder : state.taskGroupFolder;
     const backend =
@@ -545,8 +560,7 @@ export class GroupQueue {
     reason: 'messages' | 'drain',
   ): Promise<void> {
     const state = this.getGroup(groupJid);
-    state.messageActive = true;
-    this._clearIdleState(groupJid);
+    this.transitionMessageLaneState(groupJid, 'running');
     // Remove this JID from pending (it's being processed now)
     state.pendingMessageJids = state.pendingMessageJids.filter(
       (j) => j !== groupJid,
@@ -572,8 +586,7 @@ export class GroupQueue {
       this.scheduleRetry(groupJid, state);
     } finally {
       // Clean up idle tracking if container exited while idle
-      this._clearIdleState(groupJid);
-      state.messageActive = false;
+      this.transitionMessageLaneState(groupJid, 'idle');
       state.messageProcess = null;
       state.messageContainerName = null;
       state.messageGroupFolder = null;
@@ -748,10 +761,10 @@ export class GroupQueue {
     const folderKey = this.resolveFolder(key);
     const state = this.groups.get(folderKey);
     if (!state) return false;
-    if (lane === 'message') return state.messageActive;
+    if (lane === 'message') return state.messageLaneState !== 'idle';
     if (lane === 'task') return state.taskActive;
     // No lane specified: return true if either lane is active
-    return state.messageActive || state.taskActive;
+    return state.messageLaneState !== 'idle' || state.taskActive;
   }
 
   /** Return a snapshot of queue concurrency stats (for the web UI). */
@@ -776,8 +789,8 @@ export class GroupQueue {
       details.push({
         folderKey,
         messageLane: {
-          active: state.messageActive,
-          idle: state.idleWaiting,
+          active: state.messageLaneState !== 'idle',
+          idle: state.messageLaneState === 'cooldown',
           pendingCount: state.pendingMessageJids.length,
           containerName: state.messageContainerName,
         },
