@@ -2,10 +2,7 @@ import { createSignal, onCleanup, createContext, useContext } from 'solid-js';
 import { isServer } from 'solid-js/web';
 
 import { appendLog, type LogLine } from '~/lib/stores/logs';
-import {
-  appendLiveMessage,
-  type LiveMessage,
-} from '~/lib/stores/messages';
+import { appendLiveMessage, type LiveMessage } from '~/lib/stores/messages';
 import { updateStats, type StatsState } from '~/lib/stores/stats';
 import { updateAgents, type AgentStatus } from '~/lib/stores/agents';
 import { updateTasks, type TaskState } from '~/lib/stores/tasks';
