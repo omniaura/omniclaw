@@ -47,6 +47,7 @@ function UserPage() {
 ```
 
 **Key benefits of query + createAsync:**
+
 - Automatic deduplication — 2 identical requests never fly out
 - Route preloading — data fetches start during navigation, not after render
 - Cache invalidation via `revalidate()`

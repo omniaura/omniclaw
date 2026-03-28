@@ -77,15 +77,15 @@ In Solid Query, options must be wrapped in a function to enable reactive query k
 ```typescript
 // React Query: plain object
 useQuery({
-  queryKey: ["user", userId],
+  queryKey: ['user', userId],
   queryFn: () => fetchUser(userId),
-})
+});
 
 // Solid Query: arrow function wrapper
 createQuery(() => ({
-  queryKey: ["user", userId()],  // userId is a signal
+  queryKey: ['user', userId()], // userId is a signal
   queryFn: () => fetchUser(userId()),
-}))
+}));
 ```
 
 ---
@@ -330,12 +330,12 @@ function AddUserForm() {
 ```typescript
 // ❌ WRONG: Values captured once, never update
 const { data, isLoading } = createQuery(() => ({
-  queryKey: ["users"],
+  queryKey: ['users'],
   queryFn: fetchUsers,
-}))
+}));
 
 // ✅ CORRECT: Access on query object preserves reactivity
-const query = createQuery(/* ... */)
+const query = createQuery(/* ... */);
 // Use query.data, query.isLoading in JSX
 ```
 
@@ -371,16 +371,16 @@ return <div>{userName()}</div>
 // ❌ WRONG: Second query waits for first unnecessarily
 function Dashboard() {
   const usersQuery = createQuery(() => ({
-    queryKey: ["users"],
+    queryKey: ['users'],
     queryFn: fetchUsers,
-  }))
+  }));
 
   // This waits for usersQuery even though it doesn't depend on it
   const statsQuery = createQuery(() => ({
-    queryKey: ["stats"],
+    queryKey: ['stats'],
     queryFn: fetchStats,
-    enabled: !!usersQuery.data,  // Unnecessary dependency!
-  }))
+    enabled: !!usersQuery.data, // Unnecessary dependency!
+  }));
 }
 ```
 
@@ -388,15 +388,15 @@ function Dashboard() {
 // ✅ CORRECT: Independent queries fetch in parallel
 function Dashboard() {
   const usersQuery = createQuery(() => ({
-    queryKey: ["users"],
+    queryKey: ['users'],
     queryFn: fetchUsers,
-  }))
+  }));
 
   const statsQuery = createQuery(() => ({
-    queryKey: ["stats"],
+    queryKey: ['stats'],
     queryFn: fetchStats,
     // No enabled - fetches immediately in parallel
-  }))
+  }));
 }
 ```
 
@@ -447,21 +447,23 @@ When you access `query.data` while the query is loading AND you're inside a Susp
 ```typescript
 // ❌ WRONG: Accessing .data without checking .isLoading triggers Suspense!
 const showSalesPitch = createMemo(
-  () => paymentError() || (user.data?.balance ?? 1_000_000_000) <= 0
-)
+  () => paymentError() || (user.data?.balance ?? 1_000_000_000) <= 0,
+);
 // When user query is loading, this accesses user.data -> SUSPENDS -> whole app skeleton!
 ```
 
 ```typescript
 // ✅ CORRECT: Guard .data access with .isLoading check
 const showSalesPitch = createMemo(
-  () => paymentError() ||
-    (user.isLoading ? false : (user.data?.balance ?? 1_000_000_000) <= 0)
-)
+  () =>
+    paymentError() ||
+    (user.isLoading ? false : (user.data?.balance ?? 1_000_000_000) <= 0),
+);
 // When loading, returns safe default (false) without accessing .data -> NO SUSPENSION
 ```
 
 **The Pattern**: Always check `.isLoading` before accessing `.data`:
+
 ```typescript
 // For boolean decisions
 query.isLoading ? defaultValue : query.data?.someProperty
@@ -475,6 +477,7 @@ query.isLoading ? defaultValue : query.data?.someProperty
 **Alternative approaches**:
 
 1. **Inner Suspense boundaries** - isolate suspension to specific components:
+
 ```typescript
 function App() {
   return (
@@ -491,6 +494,7 @@ function App() {
 ```
 
 2. **Switch/Match for explicit state handling**:
+
 ```typescript
 function SendMessage() {
   const userQuery = createQuery(/* ... */)
@@ -517,9 +521,9 @@ and keeps the UI responsive without needing extra Suspense boundaries.
 // ❌ WRONG: Query key doesn't include reactive dependency
 function UserPosts(props: { userId: Accessor<string> }) {
   const query = createQuery(() => ({
-    queryKey: ["posts"],  // Missing userId - always fetches same cache!
+    queryKey: ['posts'], // Missing userId - always fetches same cache!
     queryFn: () => fetchPosts(props.userId()),
-  }))
+  }));
 }
 ```
 
@@ -527,9 +531,9 @@ function UserPosts(props: { userId: Accessor<string> }) {
 // ✅ CORRECT: Query key includes all dependencies
 function UserPosts(props: { userId: Accessor<string> }) {
   const query = createQuery(() => ({
-    queryKey: ["posts", props.userId()],  // Cache is per-user
+    queryKey: ['posts', props.userId()], // Cache is per-user
     queryFn: () => fetchPosts(props.userId()),
-  }))
+  }));
 }
 ```
 
@@ -537,41 +541,41 @@ function UserPosts(props: { userId: Accessor<string> }) {
 
 ```typescript
 // ❌ WRONG: Effect doesn't re-run when query.data changes
-const query = createQuery(/* ... */)
+const query = createQuery(/* ... */);
 
 createEffect(() => {
   // This captures query.data once - won't re-run when data updates
-  const data = query.data
+  const data = query.data;
   if (data) {
-    analytics.track("data_loaded", { count: data.length })
+    analytics.track('data_loaded', { count: data.length });
   }
-})
+});
 ```
 
 ```typescript
 // ✅ CORRECT: Access query.data inside the effect body
-const query = createQuery(/* ... */)
+const query = createQuery(/* ... */);
 
 createEffect(() => {
   // Accessing query.data here creates a reactive dependency
   if (query.data) {
-    analytics.track("data_loaded", { count: query.data.length })
+    analytics.track('data_loaded', { count: query.data.length });
   }
-})
+});
 ```
 
 ---
 
 ## Quick Reference
 
-| React Query | Solid Query |
-|-------------|-------------|
-| `useQuery({...})` | `createQuery(() => ({...}))` |
+| React Query                      | Solid Query                                  |
+| -------------------------------- | -------------------------------------------- |
+| `useQuery({...})`                | `createQuery(() => ({...}))`                 |
 | `const { data } = useQuery(...)` | `const query = createQuery(...); query.data` |
-| `useMutation({...})` | `createMutation(() => ({...}))` |
-| `useInfiniteQuery({...})` | `createInfiniteQuery(() => ({...}))` |
-| `suspense: true` option | Wrap in `<Suspense>` |
-| `notifyOnChangeProps` | Not needed - automatic |
+| `useMutation({...})`             | `createMutation(() => ({...}))`              |
+| `useInfiniteQuery({...})`        | `createInfiniteQuery(() => ({...}))`         |
+| `suspense: true` option          | Wrap in `<Suspense>`                         |
+| `notifyOnChangeProps`            | Not needed - automatic                       |
 
 ## See Also
 

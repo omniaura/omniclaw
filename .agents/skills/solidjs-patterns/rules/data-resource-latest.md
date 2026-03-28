@@ -1,7 +1,7 @@
 ---
 title: Use resource.latest for Consistent Stale-While-Revalidate UI
 impact: MEDIUM
-impactDescription: "inconsistent data display during error states and initial loads"
+impactDescription: 'inconsistent data display during error states and initial loads'
 tags: data, resource, stale-while-revalidate, UX
 ---
 
@@ -31,10 +31,10 @@ return (
 
 **resource() vs resource.latest:**
 
-| Accessor | Initial Load | Refetch (`"refreshing"`) | On Error |
-|----------|-------------|--------------------------|----------|
-| `resource()` | `undefined` | Previous value | Throws (triggers ErrorBoundary) |
-| `resource.latest` | `undefined` | Previous value | Last successful value |
+| Accessor          | Initial Load | Refetch (`"refreshing"`) | On Error                        |
+| ----------------- | ------------ | ------------------------ | ------------------------------- |
+| `resource()`      | `undefined`  | Previous value           | Throws (triggers ErrorBoundary) |
+| `resource.latest` | `undefined`  | Previous value           | Last successful value           |
 
 **When resource.latest matters most — error resilience:**
 
@@ -72,14 +72,15 @@ const navigate = (page: number) => start(() => setPage(page))
 
 ```typescript
 // Without initialValue: data() can be undefined during initial load
-const [data] = createResource(source, fetcher)
+const [data] = createResource(source, fetcher);
 
 // With initialValue: data() always returns T (never undefined)
-const [data] = createResource(source, fetcher, { initialValue: [] })
+const [data] = createResource(source, fetcher, { initialValue: [] });
 // data.latest is also always T
 ```
 
 **Notes:**
+
 - During refetch, both `resource()` and `resource.latest` return the previous value — the difference is only on error
 - `resource.latest` is most valuable for error-resilient UIs where you want data to remain visible
 - Use `resource.state` for fine-grained status: `"unresolved"`, `"pending"`, `"ready"`, `"refreshing"`, `"errored"`

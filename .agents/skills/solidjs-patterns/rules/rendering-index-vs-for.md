@@ -1,7 +1,7 @@
 ---
 title: Choose Between For and Index Based on What Changes
 impact: MEDIUM
-impactDescription: "unnecessary re-renders in dynamic lists"
+impactDescription: 'unnecessary re-renders in dynamic lists'
 tags: For, Index, indexArray, mapArray, lists
 ---
 
@@ -44,6 +44,7 @@ import { For } from "solid-js"
 ```
 
 **Notes:**
+
 - `<For>`: item is a plain value, index is a signal. Use when items are objects with identity (chat messages, users, todos)
 - `<Index>`: item is a signal, index is a plain number. Use when items are primitives that update in place (scores, sensor readings, pixel grids)
 - Rule of thumb: if you would use a `key` prop in React, use `<For>`; if items are positional, use `<Index>`

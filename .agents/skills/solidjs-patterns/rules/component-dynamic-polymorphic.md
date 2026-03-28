@@ -1,7 +1,7 @@
 ---
 title: Use Dynamic for Polymorphic Components
 impact: MEDIUM
-impactDescription: "verbose conditional JSX for component-switching, duplicated prop spreading"
+impactDescription: 'verbose conditional JSX for component-switching, duplicated prop spreading'
 tags: component, Dynamic, polymorphic, composition
 ---
 
@@ -70,6 +70,7 @@ const Icon = (props) => {
 ```
 
 **Notes:**
+
 - `component` accepts strings (`"div"`, `"a"`) or components (`MyComponent`)
 - When `component` is reactive, `Dynamic` handles unmounting/remounting automatically
 - Combine with `splitProps` to separate the `as`/`component` prop from pass-through props

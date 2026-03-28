@@ -14,36 +14,36 @@ Testing reactive primitives (signals, stores, effects) requires a reactive owner
 **Correct pattern:**
 
 ```typescript
-import { createRoot } from "solid-js"
-import { createStore } from "solid-js/store"
+import { createRoot } from 'solid-js';
+import { createStore } from 'solid-js/store';
 
-it("toggles items independently", () => {
-  createRoot(dispose => {
-    const [expanded, setExpanded] = createStore<boolean[]>([])
+it('toggles items independently', () => {
+  createRoot((dispose) => {
+    const [expanded, setExpanded] = createStore<boolean[]>([]);
 
-    setExpanded(0, true)
-    expect(expanded[0]).toBe(true)
+    setExpanded(0, true);
+    expect(expanded[0]).toBe(true);
 
-    setExpanded(1, true)
-    expect(expanded[0]).toBe(true)   // unchanged
-    expect(expanded[1]).toBe(true)
+    setExpanded(1, true);
+    expect(expanded[0]).toBe(true); // unchanged
+    expect(expanded[1]).toBe(true);
 
-    dispose()  // Clean up reactive context
-  })
-})
+    dispose(); // Clean up reactive context
+  });
+});
 ```
 
 **For hooks, use `renderHook`:**
 
 ```typescript
-import { renderHook } from "@solidjs/testing-library"
+import { renderHook } from '@solidjs/testing-library';
 
-it("increments counter", () => {
-  const { result } = renderHook(() => useCounter())
-  expect(result.count()).toBe(0)
-  result.increment()
-  expect(result.count()).toBe(1)
-})
+it('increments counter', () => {
+  const { result } = renderHook(() => useCounter());
+  expect(result.count()).toBe(0);
+  result.increment();
+  expect(result.count()).toBe(1);
+});
 ```
 
 Reference: [Solid Testing Library](https://github.com/solidjs/solid-testing-library)
