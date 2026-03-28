@@ -108,6 +108,15 @@ stop:
     echo "OmniClaw stopped"
 
 
+# Clean up stopped containers, dangling images, and unused volumes.
+# Add --flush-builder to also wipe the buildkit cache (~24 GB).
+clean:
+    CONTAINER_CMD={{_container_cmd}} ./scripts/cleanup-containers.sh
+
+# Full clean including buildkit builder cache flush
+clean-all:
+    CONTAINER_CMD={{_container_cmd}} ./scripts/cleanup-containers.sh --flush-builder
+
 # Disable project access (unmount /workspace/project) for a group.
 # Usage: just disable-project-access [group_folder]  (default: main)
 disable-project-access group="main":
