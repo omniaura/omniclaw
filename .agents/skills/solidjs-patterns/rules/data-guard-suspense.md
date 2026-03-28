@@ -15,8 +15,8 @@ In Solid Query, queries suspend by DEFAULT inside Suspense boundaries. Accessing
 
 ```typescript
 const showSalesPitch = createMemo(
-  () => paymentError() || (user.data?.balance ?? 1_000_000_000) <= 0
-)
+  () => paymentError() || (user.data?.balance ?? 1_000_000_000) <= 0,
+);
 // When user query is loading, this accesses user.data → SUSPENDS → whole app skeleton!
 ```
 
@@ -24,9 +24,10 @@ const showSalesPitch = createMemo(
 
 ```typescript
 const showSalesPitch = createMemo(
-  () => paymentError() ||
-    (user.isLoading ? false : (user.data?.balance ?? 1_000_000_000) <= 0)
-)
+  () =>
+    paymentError() ||
+    (user.isLoading ? false : (user.data?.balance ?? 1_000_000_000) <= 0),
+);
 // When loading, returns safe default without accessing .data → NO SUSPENSION
 ```
 

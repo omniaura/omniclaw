@@ -1,7 +1,7 @@
 ---
 title: Use createStore for Multi-Field Form State
 impact: MEDIUM
-impactDescription: "over-rendering on every field change"
+impactDescription: 'over-rendering on every field change'
 tags: createStore, forms, state, fine-grained
 ---
 
@@ -54,6 +54,7 @@ const [form, setForm] = createStore({
 ```
 
 **Notes:**
+
 - Store property access (`form.name`) creates a subscription to only that property
 - The path-based setter (`setForm("name", value)`) updates a single field without replacing the object
 - For nested form data (e.g., `address.city`), use nested paths: `setForm("address", "city", value)`

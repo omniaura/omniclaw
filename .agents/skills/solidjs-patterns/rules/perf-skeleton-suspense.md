@@ -1,7 +1,7 @@
 ---
 title: Use Skeleton Components as Suspense Fallbacks
 impact: MEDIUM
-impactDescription: "layout shift and visual jank during loading"
+impactDescription: 'layout shift and visual jank during loading'
 tags: Suspense, skeleton, loading, layout shift, UX
 ---
 
@@ -47,6 +47,7 @@ function DashboardSkeleton() {
 ```
 
 **Notes:**
+
 - Compose small skeleton primitives into page-level skeletons that mirror actual layout
 - For app-level loading, wrap the router in a Suspense with a full-page skeleton (sidebar + header + content area)
 - Skeletons should use the same grid, flex, and spacing as the real content

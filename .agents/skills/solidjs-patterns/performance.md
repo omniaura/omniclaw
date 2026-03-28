@@ -88,9 +88,9 @@ function App() {
 // Don't lazy load small components - overhead not worth it
 // DO lazy load: modals, charts, editors, large forms
 
-const SettingsModal = lazy(() => import("./modals/SettingsModal"))
-const MarkdownEditor = lazy(() => import("./components/MarkdownEditor"))
-const DataVisualization = lazy(() => import("./components/DataVisualization"))
+const SettingsModal = lazy(() => import('./modals/SettingsModal'));
+const MarkdownEditor = lazy(() => import('./components/MarkdownEditor'));
+const DataVisualization = lazy(() => import('./components/DataVisualization'));
 ```
 
 ## Skeleton Components
@@ -155,25 +155,25 @@ function App() {
 ## Memoization for Expensive Computations
 
 ```typescript
-import { createMemo } from "solid-js"
+import { createMemo } from 'solid-js';
 
 // ✅ Memoize expensive markdown rendering
 const renderedContent = createMemo(() => {
-  const raw = content()
-  if (!raw) return ""
-  return renderMarkdown(raw) // Only re-runs when content() changes
-})
+  const raw = content();
+  if (!raw) return '';
+  return renderMarkdown(raw); // Only re-runs when content() changes
+});
 
 // ✅ Memoize filtered/sorted lists
 const sortedItems = createMemo(() =>
   items()
-    .filter(item => item.active)
-    .sort((a, b) => a.name.localeCompare(b.name))
-)
+    .filter((item) => item.active)
+    .sort((a, b) => a.name.localeCompare(b.name)),
+);
 
 // ❌ Don't memoize simple property access
 // This adds overhead without benefit
-const name = createMemo(() => user().name) // Unnecessary
+const name = createMemo(() => user().name); // Unnecessary
 ```
 
 ## Bundle Analysis
@@ -189,11 +189,11 @@ bun run build -- --analyze
 
 ### Common Bundle Bloat Sources
 
-| Library | Size | Alternative |
-|---------|------|-------------|
-| moment.js | ~300KB | date-fns (~30KB) or dayjs (~7KB) |
-| lodash (full) | ~70KB | lodash-es with tree shaking |
-| markdown-it + plugins | ~50KB+ | Consider lazy loading |
+| Library               | Size   | Alternative                      |
+| --------------------- | ------ | -------------------------------- |
+| moment.js             | ~300KB | date-fns (~30KB) or dayjs (~7KB) |
+| lodash (full)         | ~70KB  | lodash-es with tree shaking      |
+| markdown-it + plugins | ~50KB+ | Consider lazy loading            |
 
 ## Performance Metrics
 

@@ -15,26 +15,26 @@ tags: solidstart, use-server, validation, security, server-functions
 
 ```typescript
 async function updateUser(email: string, name: string) {
-  "use server"
+  'use server';
   // email might not be a string! Could be an object, null, or malicious input
-  await db.users.update({ email, name })
+  await db.users.update({ email, name });
 }
 ```
 
 **Correct (validate all inputs server-side):**
 
 ```typescript
-import { z } from "zod"
+import { z } from 'zod';
 
 const UpdateUserSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1).max(100),
-})
+});
 
 async function updateUser(input: unknown) {
-  "use server"
-  const { email, name } = UpdateUserSchema.parse(input)
-  await db.users.update({ email, name })
+  'use server';
+  const { email, name } = UpdateUserSchema.parse(input);
+  await db.users.update({ email, name });
 }
 ```
 
@@ -42,12 +42,12 @@ async function updateUser(input: unknown) {
 
 ```typescript
 async function createPost(input: unknown) {
-  "use server"
+  'use server';
   try {
-    const data = PostSchema.parse(input)
-    return await db.posts.create(data)
+    const data = PostSchema.parse(input);
+    return await db.posts.create(data);
   } catch (e) {
-    throw { message: "Failed to create post", code: "CREATE_FAILED" }
+    throw { message: 'Failed to create post', code: 'CREATE_FAILED' };
   }
 }
 ```

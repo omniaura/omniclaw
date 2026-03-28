@@ -1,7 +1,7 @@
 ---
 title: Use Switch/Match for Multi-Condition Rendering
 impact: MEDIUM
-impactDescription: "unreadable nested conditionals, potential remount bugs"
+impactDescription: 'unreadable nested conditionals, potential remount bugs'
 tags: Switch, Match, control flow, conditional rendering
 ---
 
@@ -49,6 +49,7 @@ import { Switch, Match } from "solid-js"
 ```
 
 **Notes:**
+
 - `Switch` evaluates `Match` children top-to-bottom and renders only the first truthy match
 - The `fallback` prop on `Switch` acts as the default/else branch
 - `Match` supports the same callback-children pattern as `Show` for type narrowing

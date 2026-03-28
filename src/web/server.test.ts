@@ -1239,6 +1239,46 @@ describe('SSE', () => {
     reader.releaseLock();
   });
 
+  it('does not deliver new_message events to clients not subscribed to messages channel', async () => {
+    handle = startWebServer(testConfig(), makeState());
+
+    // Subscribe to stats only — should NOT receive messages
+    const res = await authedFetch('/api/events?channels=stats', {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toBeTruthy();
+
+    const reader = res.body!.getReader();
+
+    handle.broadcast({
+      type: 'new_message',
+      data: {
+        id: 'msg-test-1',
+        chat_jid: 'dc:123',
+        sender: 'user1',
+        sender_name: 'User One',
+        content: 'should not arrive via SSE',
+        timestamp: new Date().toISOString(),
+      },
+      timestamp: new Date().toISOString(),
+    });
+    handle.broadcast({
+      type: 'agent_status',
+      data: {
+        activeContainers: 2,
+        idleContainers: 1,
+        maxActive: 8,
+        maxIdle: 4,
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    const payload = await readUntilContains(reader, 'id="stat-active"');
+    expect(payload).not.toContain('should not arrive via SSE');
+    reader.releaseLock();
+  });
+
   it('rejects SSE when no credentials given', async () => {
     handle = startWebServer(testConfig(), makeState());
 

@@ -52,6 +52,7 @@ const name = createMemo(() => user().name)
 ```
 
 **Notes:**
+
 - `createMemo` is lazy — it only runs when read and when dependencies changed
 - Chain memos for multi-step transformations: filter → sort → paginate
 - Don't wrap simple getters or property access — the memo overhead costs more than it saves

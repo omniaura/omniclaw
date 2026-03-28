@@ -40,6 +40,7 @@ describe("Counter", () => {
 ```
 
 **Notes:**
+
 - Always wrap in `render(() => ...)` — SolidJS components are functions that run once
 - Use `renderHook(() => useMyHook())` for testing custom hooks without a component
 - For async content, use `waitFor()` to wait for Suspense/resource resolution

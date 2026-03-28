@@ -1,7 +1,7 @@
 ---
 title: Use children() Helper to Resolve and Memoize Children
 impact: MEDIUM
-impactDescription: "repeated expensive child evaluation, inability to inspect/manipulate children"
+impactDescription: 'repeated expensive child evaluation, inability to inspect/manipulate children'
 tags: component, children, memoization, render props
 ---
 
@@ -71,6 +71,7 @@ const Tabs = (props) => {
 ```
 
 **Notes:**
+
 - `children()` returns a memo — call it as `resolved()` to get the resolved value
 - Use `.toArray()` to get a flat array of all child nodes
 - Only use `children()` when you need to inspect or manipulate — for simple pass-through, `props.children` is fine

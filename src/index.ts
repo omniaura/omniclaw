@@ -2475,7 +2475,7 @@ async function main(): Promise<void> {
     },
     sendMessage: (agentId, chatJid, content, senderName) => {
       const msgId = `web-${randomUUID()}`;
-      storeMessage({
+      storeAndBroadcast({
         id: msgId,
         chat_jid: chatJid,
         sender: 'web-ui-admin',
@@ -2548,6 +2548,23 @@ async function main(): Promise<void> {
       trustStore,
     );
     stopLogStream = startLogStream(webServer);
+  }
+
+  /** Store a message and broadcast it to web UI SSE clients. */
+  function storeAndBroadcast(msg: NewMessage): void {
+    storeMessage(msg);
+    webServer?.broadcast({
+      type: 'new_message',
+      data: {
+        id: msg.id,
+        chat_jid: msg.chat_jid,
+        sender: msg.sender,
+        sender_name: msg.sender_name,
+        content: msg.content,
+        timestamp: msg.timestamp,
+      },
+      timestamp: msg.timestamp,
+    });
   }
 
   // --- Network Discovery (runtime toggle + trusted Wi-Fi support) ---
@@ -2758,7 +2775,7 @@ async function main(): Promise<void> {
         const withLink = notification.url
           ? `${notification.summary}\n${notification.url}`
           : notification.summary;
-        storeMessage({
+        storeAndBroadcast({
           id: `ghhook-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           chat_jid: chatJid,
           sender: 'system',
@@ -2796,7 +2813,7 @@ async function main(): Promise<void> {
 
   const createWhatsAppChannel = () =>
     new WhatsAppChannel({
-      onMessage: (chatJid, msg) => storeMessage(msg),
+      onMessage: (chatJid, msg) => storeAndBroadcast(msg),
       onChatMetadata: (chatJid, timestamp) =>
         storeChatMetadata(chatJid, timestamp),
       registeredGroups: () => registeredGroups,
@@ -2867,7 +2884,7 @@ async function main(): Promise<void> {
                 botId: bot.id,
                 token: bot.token,
                 multiBotMode: DISCORD_BOTS.length > 1,
-                onSyntheticMessage: (message) => storeMessage(message),
+                onSyntheticMessage: (message) => storeAndBroadcast(message),
                 registeredGroups: () => registeredGroups,
                 onReaction: async (chatJid, messageId, emoji, userName) => {
                   await handleReactionNotification(
@@ -2911,7 +2928,7 @@ async function main(): Promise<void> {
           (token, idx) =>
             Effect.gen(function* () {
               const telegram = new TelegramChannel(token, {
-                onMessage: (chatJid, msg) => storeMessage(msg),
+                onMessage: (chatJid, msg) => storeAndBroadcast(msg),
                 onChatMetadata: (chatJid, timestamp, name) =>
                   storeChatMetadata(chatJid, timestamp, name),
                 registeredGroups: () => registeredGroups,
@@ -2953,7 +2970,7 @@ async function main(): Promise<void> {
                 multiBotMode: SLACK_BOTS.length > 1,
                 allowLegacyJidRouting:
                   SLACK_BOTS.length <= 1 || bot.id === SLACK_DEFAULT_BOT_ID,
-                onMessage: (chatJid, msg) => storeMessage(msg),
+                onMessage: (chatJid, msg) => storeAndBroadcast(msg),
                 onChatMetadata: (chatJid, timestamp, name) =>
                   storeChatMetadata(chatJid, timestamp, name),
                 registeredGroups: () => registeredGroups,
@@ -3131,7 +3148,7 @@ async function main(): Promise<void> {
       // Prefix with the group's trigger so it passes requiresTrigger filter
       const group = getRegisteredGroupForJid(jid);
       const trigger = group?.trigger || '';
-      storeMessage({
+      storeAndBroadcast({
         id: `notify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         chat_jid: jid,
         // Tag with source agent so routing skips echoing back to it
