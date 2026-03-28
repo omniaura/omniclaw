@@ -14,12 +14,12 @@ Use `lazy()` for components that aren't visible on initial render: modals, setti
 **When to lazy load:**
 
 ```typescript
-import { lazy } from "solid-js"
+import { lazy } from 'solid-js';
 
 // ✅ DO lazy load: modals, charts, editors, large forms
-const SettingsModal = lazy(() => import("./modals/SettingsModal"))
-const MarkdownEditor = lazy(() => import("./components/MarkdownEditor"))
-const DataVisualization = lazy(() => import("./components/DataVisualization"))
+const SettingsModal = lazy(() => import('./modals/SettingsModal'));
+const MarkdownEditor = lazy(() => import('./components/MarkdownEditor'));
+const DataVisualization = lazy(() => import('./components/DataVisualization'));
 
 // ❌ DON'T lazy load: small components, frequently-used UI elements
 // const Badge = lazy(() => import("./Badge"))  // Overhead not worth it

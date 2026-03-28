@@ -1,7 +1,7 @@
 ---
 title: Use Specific Component Type Annotations
 impact: MEDIUM
-impactDescription: "unclear children expectations, weaker type checking"
+impactDescription: 'unclear children expectations, weaker type checking'
 tags: component, TypeScript, types, children
 ---
 
@@ -31,12 +31,12 @@ const Tooltip: FlowComponent<{ text: string }, JSX.Element> = (props) => ...
 
 **When to use each:**
 
-| Type | Children | Use For |
-|------|----------|---------|
-| `VoidComponent<P>` | None | Leaf components: icons, inputs, badges |
-| `ParentComponent<P>` | Optional `JSX.Element` | Wrappers: cards, layouts, panels |
+| Type                  | Children                             | Use For                                      |
+| --------------------- | ------------------------------------ | -------------------------------------------- |
+| `VoidComponent<P>`    | None                                 | Leaf components: icons, inputs, badges       |
+| `ParentComponent<P>`  | Optional `JSX.Element`               | Wrappers: cards, layouts, panels             |
 | `FlowComponent<P, C>` | Required `C` (default `JSX.Element`) | Control flow: modals, render-prop components |
-| `Component<P>` | Unconstrained | When none of the above fit |
+| `Component<P>`        | Unconstrained                        | When none of the above fit                   |
 
 **Example — VoidComponent prevents accidental children:**
 
@@ -61,6 +61,7 @@ const Repeat: FlowComponent<{ times: number }, (i: number) => JSX.Element> = (pr
 ```
 
 **Notes:**
+
 - Default to `VoidComponent` for leaf components — it catches accidental children at compile time
 - `ParentComponent` adds `children?: JSX.Element` to props automatically
 - These types are purely for TypeScript — they compile away with zero runtime cost

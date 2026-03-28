@@ -16,15 +16,15 @@ Independent queries should fetch in parallel. Don't gate one query on another un
 ```typescript
 function Dashboard() {
   const usersQuery = createQuery(() => ({
-    queryKey: ["users"],
+    queryKey: ['users'],
     queryFn: fetchUsers,
-  }))
+  }));
 
   const statsQuery = createQuery(() => ({
-    queryKey: ["stats"],
+    queryKey: ['stats'],
     queryFn: fetchStats,
-    enabled: !!usersQuery.data,  // Unnecessary dependency!
-  }))
+    enabled: !!usersQuery.data, // Unnecessary dependency!
+  }));
 }
 ```
 
@@ -33,15 +33,15 @@ function Dashboard() {
 ```typescript
 function Dashboard() {
   const usersQuery = createQuery(() => ({
-    queryKey: ["users"],
+    queryKey: ['users'],
     queryFn: fetchUsers,
-  }))
+  }));
 
   const statsQuery = createQuery(() => ({
-    queryKey: ["stats"],
+    queryKey: ['stats'],
     queryFn: fetchStats,
     // No enabled — fetches immediately in parallel
-  }))
+  }));
 }
 ```
 

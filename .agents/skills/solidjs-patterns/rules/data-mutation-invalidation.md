@@ -16,7 +16,7 @@ After a successful mutation with Solid Query, always invalidate related queries 
 const mutation = createMutation(() => ({
   mutationFn: (data: UserUpdate) => updateUser(props.userId, data),
   // ❌ No onSuccess — cached user data is now stale
-}))
+}));
 ```
 
 **Correct (invalidate related queries on success):**
@@ -47,6 +47,7 @@ function UpdateButton(props: { userId: string }) {
 ```
 
 **Notes:**
+
 - Use `queryClient.invalidateQueries()` with the query key to mark cached data as stale
 - For optimistic updates, use `onMutate` to update the cache before the server responds
 - Invalidate with partial keys to refetch related queries: `{ queryKey: ["users"] }` invalidates all user queries

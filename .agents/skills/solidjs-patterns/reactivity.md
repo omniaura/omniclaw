@@ -5,16 +5,16 @@ Understanding how SolidJS reactivity works is crucial for writing correct code.
 ## Signals: The Basic Reactive Primitive
 
 ```typescript
-import { createSignal } from "solid-js"
+import { createSignal } from 'solid-js';
 
-const [count, setCount] = createSignal(0)
+const [count, setCount] = createSignal(0);
 
 // Reading: call the getter
-console.log(count()) // 0
+console.log(count()); // 0
 
 // Writing: call the setter
-setCount(1)
-setCount(prev => prev + 1)
+setCount(1);
+setCount((prev) => prev + 1);
 ```
 
 ### When Signals Track
@@ -45,31 +45,31 @@ function getCount() {
 Stores provide **per-property reactivity** for objects and arrays:
 
 ```typescript
-import { createStore } from "solid-js/store"
+import { createStore } from 'solid-js/store';
 
 const [state, setState] = createStore({
   users: [],
-  settings: { theme: "dark" }
-})
+  settings: { theme: 'dark' },
+});
 
 // Reading: access like a normal object (no function call)
-console.log(state.settings.theme) // "dark"
+console.log(state.settings.theme); // "dark"
 
 // Writing: path-based setters
-setState("settings", "theme", "light")
-setState("users", users => [...users, newUser])
+setState('settings', 'theme', 'light');
+setState('users', (users) => [...users, newUser]);
 ```
 
 ### Store vs Signal for Collections
 
 ```typescript
 // ❌ BAD: Signal with array - changing one item updates ALL subscribers
-const [items, setItems] = createSignal<Item[]>([])
-setItems(prev => prev.map((item, i) => i === 2 ? newItem : item))
+const [items, setItems] = createSignal<Item[]>([]);
+setItems((prev) => prev.map((item, i) => (i === 2 ? newItem : item)));
 
 // ✅ GOOD: Store with array - changing items[2] only updates that subscriber
-const [items, setItems] = createStore<Item[]>([])
-setItems(2, newItem)
+const [items, setItems] = createStore<Item[]>([]);
+setItems(2, newItem);
 ```
 
 ## Reactive Contexts
@@ -125,22 +125,22 @@ Use `createEffect` for side effects that should run when dependencies change:
 ```typescript
 createEffect(() => {
   // Runs whenever user() changes
-  const currentUser = user()
+  const currentUser = user();
   if (currentUser) {
-    analytics.identify(currentUser.id)
+    analytics.identify(currentUser.id);
   }
-})
+});
 ```
 
 ### Effect Cleanup
 
 ```typescript
 createEffect(() => {
-  const handler = () => console.log("resize")
-  window.addEventListener("resize", handler)
+  const handler = () => console.log('resize');
+  window.addEventListener('resize', handler);
 
   onCleanup(() => {
-    window.removeEventListener("resize", handler)
-  })
-})
+    window.removeEventListener('resize', handler);
+  });
+});
 ```

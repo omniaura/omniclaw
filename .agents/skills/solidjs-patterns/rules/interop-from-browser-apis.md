@@ -15,9 +15,9 @@ tags: interop, from, browser-api, matchMedia, observer, subscription
 
 ```typescript
 createEffect(() => {
-  const isSmall = window.matchMedia("(max-width: 768px)").matches
-  if (isSmall) doSomething()  // Only checks once
-})
+  const isSmall = window.matchMedia('(max-width: 768px)').matches;
+  if (isSmall) doSomething(); // Only checks once
+});
 ```
 
 **Correct (reactive, updates when condition changes):**
@@ -25,23 +25,24 @@ createEffect(() => {
 ```typescript
 function useMediaQuery(query: string): Accessor<boolean | undefined> {
   return from((set) => {
-    if (typeof window === "undefined") {
-      set(false)
-      return () => {}
+    if (typeof window === 'undefined') {
+      set(false);
+      return () => {};
     }
-    const media = window.matchMedia(query)
-    set(media.matches)
-    const listener = () => set(media.matches)
-    media.addEventListener("change", listener)
-    return () => media.removeEventListener("change", listener)
-  })
+    const media = window.matchMedia(query);
+    set(media.matches);
+    const listener = () => set(media.matches);
+    media.addEventListener('change', listener);
+    return () => media.removeEventListener('change', listener);
+  });
 }
 
 // Usage — reactive!
-const isWidescreen = useMediaQuery("(min-width: 1280px)")
+const isWidescreen = useMediaQuery('(min-width: 1280px)');
 ```
 
 **Key rules for `from`:**
+
 1. Always return a cleanup function (even if empty)
 2. Return type is `T | undefined` until first `set()` call
 3. Check `typeof window` for SSR safety

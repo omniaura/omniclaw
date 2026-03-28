@@ -4,7 +4,7 @@ description: SolidJS and SolidStart performance and correctness guidelines for A
 license: MIT
 metadata:
   author: omniaura
-  version: "2.1.0"
+  version: '2.1.0'
 ---
 
 # SolidJS Patterns and Best Practices
@@ -14,6 +14,7 @@ Comprehensive correctness and performance guide for SolidJS and SolidStart appli
 ## When to Apply
 
 Reference these guidelines when:
+
 - Writing new SolidJS components or SolidStart pages
 - Migrating React code to SolidJS
 - Implementing data fetching (Solid Query, createAsync, createResource)
@@ -25,17 +26,17 @@ Reference these guidelines when:
 
 ## Rule Categories by Priority
 
-| Priority | Category | Impact | Prefix |
-|----------|----------|--------|--------|
-| 1 | Reactivity Correctness | CRITICAL | `reactivity-` |
-| 2 | Data Fetching & Server | CRITICAL | `data-` |
-| 3 | Component Patterns | HIGH | `component-` |
-| 4 | State Management | HIGH | `state-` |
-| 5 | Rendering & Control Flow | MEDIUM-HIGH | `rendering-` |
-| 6 | SolidStart Patterns | MEDIUM-HIGH | `start-` |
-| 7 | Performance Optimization | MEDIUM | `perf-` |
-| 8 | Testing | LOW-MEDIUM | `testing-` |
-| 9 | External Interop | LOW | `interop-` |
+| Priority | Category                 | Impact      | Prefix        |
+| -------- | ------------------------ | ----------- | ------------- |
+| 1        | Reactivity Correctness   | CRITICAL    | `reactivity-` |
+| 2        | Data Fetching & Server   | CRITICAL    | `data-`       |
+| 3        | Component Patterns       | HIGH        | `component-`  |
+| 4        | State Management         | HIGH        | `state-`      |
+| 5        | Rendering & Control Flow | MEDIUM-HIGH | `rendering-`  |
+| 6        | SolidStart Patterns      | MEDIUM-HIGH | `start-`      |
+| 7        | Performance Optimization | MEDIUM      | `perf-`       |
+| 8        | Testing                  | LOW-MEDIUM  | `testing-`    |
+| 9        | External Interop         | LOW         | `interop-`    |
 
 ## Quick Reference
 
@@ -126,6 +127,7 @@ rules/start-use-server-validation.md
 ```
 
 Each rule file contains:
+
 - Brief explanation of why it matters
 - Incorrect code example with explanation
 - Correct code example with explanation
@@ -139,6 +141,7 @@ For the complete guide with all rules expanded: `AGENTS.md`
 ## Legacy Files
 
 The following files contain additional detailed patterns and are being migrated into individual rules:
+
 - `reactivity.md` - Reactivity fundamentals
 - `explicit-tracking.md` - on() and untrack() patterns
 - `state-patterns.md` - State management patterns

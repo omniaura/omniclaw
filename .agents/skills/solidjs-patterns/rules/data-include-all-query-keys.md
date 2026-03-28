@@ -16,9 +16,9 @@ Query keys determine cache identity. Missing a dependency means different reques
 ```typescript
 function UserPosts(props: { userId: Accessor<string> }) {
   const query = createQuery(() => ({
-    queryKey: ["posts"],  // Missing userId!
+    queryKey: ['posts'], // Missing userId!
     queryFn: () => fetchPosts(props.userId()),
-  }))
+  }));
 }
 ```
 
@@ -27,9 +27,9 @@ function UserPosts(props: { userId: Accessor<string> }) {
 ```typescript
 function UserPosts(props: { userId: Accessor<string> }) {
   const query = createQuery(() => ({
-    queryKey: ["posts", props.userId()],  // Cache is per-user
+    queryKey: ['posts', props.userId()], // Cache is per-user
     queryFn: () => fetchPosts(props.userId()),
-  }))
+  }));
 }
 ```
 

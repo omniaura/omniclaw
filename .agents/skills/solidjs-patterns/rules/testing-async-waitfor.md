@@ -1,7 +1,7 @@
 ---
 title: Use waitFor for Async Component Assertions
 impact: LOW
-impactDescription: "flaky tests from timing-dependent assertions"
+impactDescription: 'flaky tests from timing-dependent assertions'
 tags: testing, async, waitFor, Suspense
 ---
 
@@ -42,6 +42,7 @@ it("shows user data", async () => {
 ```
 
 **Notes:**
+
 - `waitFor` retries the assertion function on a short interval until it passes or times out
 - Always `await` the `waitFor` call — forgetting `await` causes the test to pass vacuously
 - For simpler cases, `findByText` combines query + waitFor: `await screen.findByText("John Doe")`

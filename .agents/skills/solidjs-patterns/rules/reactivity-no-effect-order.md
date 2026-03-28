@@ -15,14 +15,14 @@ Effects run when their dependencies change, not in source code order. Two effect
 
 ```typescript
 createEffect(() => {
-  wasPaginatingRef.current = props.isFetchingNextPage
-})
+  wasPaginatingRef.current = props.isFetchingNextPage;
+});
 
 createEffect(() => {
   if (!wasPaginatingRef.current) {
-    scrollToBottom()  // ❌ May run BEFORE the first effect!
+    scrollToBottom(); // ❌ May run BEFORE the first effect!
   }
-})
+});
 ```
 
 **Correct (single effect or shared signal):**
@@ -30,21 +30,21 @@ createEffect(() => {
 ```typescript
 // Best: single effect with all logic
 createEffect(() => {
-  if (props.isFetchingNextPage) return
-  scrollToBottom()
-})
+  if (props.isFetchingNextPage) return;
+  scrollToBottom();
+});
 
 // Alternative: shared signal state
-const [isBlocked, setIsBlocked] = createSignal(false)
+const [isBlocked, setIsBlocked] = createSignal(false);
 
 createEffect(() => {
-  setIsBlocked(props.isFetchingNextPage)
-})
+  setIsBlocked(props.isFetchingNextPage);
+});
 
 createEffect(() => {
-  if (isBlocked()) return
-  scrollToBottom()
-})
+  if (isBlocked()) return;
+  scrollToBottom();
+});
 ```
 
 Reference: [SolidJS Effects](https://docs.solidjs.com/concepts/effects)

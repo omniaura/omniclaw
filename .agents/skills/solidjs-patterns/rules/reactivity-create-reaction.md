@@ -15,24 +15,25 @@ tags: reactivity, advanced, tracking
 ```typescript
 createEffect(() => {
   // Tracks ALL properties of user() — re-runs on any change
-  console.log("User ID changed:", user().id)
-})
+  console.log('User ID changed:', user().id);
+});
 ```
 
 **Correct (track only what matters):**
 
 ```typescript
-import { createReaction } from "solid-js"
+import { createReaction } from 'solid-js';
 
 const track = createReaction(() => {
-  console.log("User ID changed:", user().id)
-})
+  console.log('User ID changed:', user().id);
+});
 
 // Only re-runs when user().id changes, not on other user property changes
-track(() => user().id)
+track(() => user().id);
 ```
 
 **Notes:**
+
 - The tracking function (passed to `track()`) defines which signals to observe
 - The reaction function (passed to `createReaction()`) runs when tracked signals change
 - Useful for preventing unnecessary effect re-runs on complex objects
