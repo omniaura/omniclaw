@@ -211,12 +211,19 @@ describe('discord command flows', () => {
         }),
       );
 
-      const commands = getDiscordFlowDefinitionsForGroup(makeGroup(), groupsDir);
-      const validFlow = commands.find((command) => command.name === 'valid-flow');
+      const commands = getDiscordFlowDefinitionsForGroup(
+        makeGroup(),
+        groupsDir,
+      );
+      const validFlow = commands.find(
+        (command) => command.name === 'valid-flow',
+      );
 
       expect(validFlow).toBeDefined();
       expect(validFlow?.options).toHaveLength(2);
-      expect(commands.find((command) => command.name === 'bad command!')).toBeUndefined();
+      expect(
+        commands.find((command) => command.name === 'bad command!'),
+      ).toBeUndefined();
       expect(
         renderDiscordFlowPrompt(validFlow!, { count: 5, enabled: false }),
       ).toBe('Run 5 times with false');
@@ -255,10 +262,14 @@ describe('discord command flows', () => {
         groupsDir,
       );
 
-      expect(commands.find((command) => command.name === 'shared-flow')).toBeDefined();
+      expect(
+        commands.find((command) => command.name === 'shared-flow'),
+      ).toBeDefined();
       expect(
         readSpy.mock.calls.filter((call) =>
-          String(call[0]).endsWith(path.join('shared', 'discord-commands.json')),
+          String(call[0]).endsWith(
+            path.join('shared', 'discord-commands.json'),
+          ),
         ),
       ).toHaveLength(1);
     } finally {
@@ -324,9 +335,10 @@ describe('discord command flows', () => {
         '{ not valid json',
       );
 
-      const names = getDiscordFlowDefinitionsForGroup(makeGroup(), groupsDir).map(
-        (command) => command.name,
-      );
+      const names = getDiscordFlowDefinitionsForGroup(
+        makeGroup(),
+        groupsDir,
+      ).map((command) => command.name);
 
       expect(names).toContain('mergemaster');
       expect(names).not.toContain('test-agent');

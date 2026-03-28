@@ -237,7 +237,7 @@ describe('github', () => {
             created_at: '2026-03-27T00:00:00.000Z',
           },
           {
-            user: { login: null },
+            user: null,
             body: 'five',
             path: '',
             line: null,
@@ -255,12 +255,16 @@ describe('github', () => {
       );
 
       expect(markdown).toContain('### PR #42: Tighten test coverage (DRAFT)');
-      expect(markdown).toContain('Author: alice | Branch: `tests/add-more` → `main`');
+      expect(markdown).toContain(
+        'Author: alice | Branch: `tests/add-more` → `main`',
+      );
       expect(markdown).toContain('CI: pending | Reviews: reviewer-1: APPROVED');
-      expect(markdown).toContain('Description: Adds deterministic tests\nfor edge cases.');
+      expect(markdown).toContain(
+        'Description: Adds deterministic tests\nfor edge cases.',
+      );
       expect(markdown).toContain('Review comments (6):');
       expect(markdown).toContain('bob on `src/a.ts`:10: one');
-      expect(markdown).toContain('?');
+      expect(markdown).toContain('?: five');
       expect(markdown).toContain('... and 1 more comments');
       expect(markdown).not.toContain('reviewer-2: COMMENTED');
       expect(markdown).not.toContain('reviewer-3: PENDING');
@@ -282,7 +286,9 @@ describe('github', () => {
       });
 
       expect(markdown).toContain('- **#7**: Handle fallback labels');
-      expect(markdown).toContain('Labels: none | Assignee: unassigned | Author: unknown');
+      expect(markdown).toContain(
+        'Labels: none | Assignee: unassigned | Author: unknown',
+      );
       expect(markdown.endsWith('…')).toBe(true);
     });
   });
@@ -295,9 +301,9 @@ describe('github', () => {
       expect(
         invalidateGitHubContextCacheForAgents(['cache-a', 'missing-agent']),
       ).toBe(1);
-      expect(invalidateGitHubContextCacheForAgents(['cache-a', 'cache-b'])).toBe(
-        1,
-      );
+      expect(
+        invalidateGitHubContextCacheForAgents(['cache-a', 'cache-b']),
+      ).toBe(1);
     });
   });
 
