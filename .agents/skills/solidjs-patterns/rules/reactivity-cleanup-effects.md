@@ -15,17 +15,17 @@ Effects re-run when dependencies change. Without cleanup, each re-run adds anoth
 
 ```typescript
 createEffect(() => {
-  window.addEventListener("resize", handleResize)
-})
+  window.addEventListener('resize', handleResize);
+});
 ```
 
 **Correct (cleanup on re-run and unmount):**
 
 ```typescript
 createEffect(() => {
-  window.addEventListener("resize", handleResize)
-  onCleanup(() => window.removeEventListener("resize", handleResize))
-})
+  window.addEventListener('resize', handleResize);
+  onCleanup(() => window.removeEventListener('resize', handleResize));
+});
 ```
 
 Always clean up: event listeners, setInterval/setTimeout, WebSocket connections, ResizeObserver/IntersectionObserver, and any subscriptions.

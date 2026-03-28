@@ -57,6 +57,7 @@ function App() {
 ```
 
 **Notes:**
+
 - Only lazy-load routes and heavy components (modals, charts, editors) — small components aren't worth the overhead
 - Combine with route preloading (`preload` in SolidStart) to start loading before navigation
 - Target < 50KB per route chunk for optimal loading

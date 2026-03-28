@@ -12,22 +12,22 @@ Use `from` when you have an external subscription-based API and want to consume 
 ### Signature
 
 ```typescript
-import { from } from "solid-js"
+import { from } from 'solid-js';
 
 function from<T>(
-  producer: ((set: (v: T) => T) => () => void) | { subscribe: Function }
-): Accessor<T | undefined>
+  producer: ((set: (v: T) => T) => () => void) | { subscribe: Function },
+): Accessor<T | undefined>;
 ```
 
 ### When to Use `from`
 
-| Use Case | Example |
-|----------|---------|
-| Browser APIs with event listeners | `matchMedia`, `ResizeObserver`, `IntersectionObserver` |
-| RxJS observables | `from(myObservable$)` |
-| Svelte stores | `from(svelteStore)` |
-| Custom subscription patterns | Websockets, EventEmitters |
-| Any "subscribe/unsubscribe" pattern | Third-party state managers |
+| Use Case                            | Example                                                |
+| ----------------------------------- | ------------------------------------------------------ |
+| Browser APIs with event listeners   | `matchMedia`, `ResizeObserver`, `IntersectionObserver` |
+| RxJS observables                    | `from(myObservable$)`                                  |
+| Svelte stores                       | `from(svelteStore)`                                    |
+| Custom subscription patterns        | Websockets, EventEmitters                              |
+| Any "subscribe/unsubscribe" pattern | Third-party state managers                             |
 
 ### Real Example: `useMediaQuery` Hook
 
@@ -35,37 +35,38 @@ Our codebase uses `from` to create a reactive media query hook:
 
 ```typescript
 // src/hooks/useMediaQuery.tsx
-import { Accessor, from } from "solid-js"
+import { Accessor, from } from 'solid-js';
 
 export function useMediaQuery(query: string): Accessor<boolean | undefined> {
   return from((set) => {
-    if (typeof window === "undefined") {
-      set(false)
-      return () => {}  // Must always return cleanup function
+    if (typeof window === 'undefined') {
+      set(false);
+      return () => {}; // Must always return cleanup function
     }
 
-    const media = window.matchMedia(query)
-    set(media.matches)  // Set initial value
+    const media = window.matchMedia(query);
+    set(media.matches); // Set initial value
 
-    const listener = () => set(media.matches)
-    media.addEventListener("change", listener)
+    const listener = () => set(media.matches);
+    media.addEventListener('change', listener);
 
-    return () => media.removeEventListener("change", listener)  // Cleanup
-  })
+    return () => media.removeEventListener('change', listener); // Cleanup
+  });
 }
 ```
 
 **Usage:**
+
 ```typescript
-const isWidescreen = useMediaQuery("(min-width: 1280px)")
-const prefersDark = useMediaQuery("(prefers-color-scheme: dark)")
+const isWidescreen = useMediaQuery('(min-width: 1280px)');
+const prefersDark = useMediaQuery('(prefers-color-scheme: dark)');
 
 // In JSX or effects - reactive!
 createEffect(() => {
   if (isWidescreen()) {
     // This re-runs when screen size crosses 1280px
   }
-})
+});
 ```
 
 ### Producer Function Pattern
@@ -75,59 +76,62 @@ The producer function receives a `set` callback and must return a cleanup functi
 ```typescript
 const signal = from((set) => {
   // 1. Set initial value (optional)
-  set(initialValue)
+  set(initialValue);
 
   // 2. Subscribe to changes
   const unsubscribe = someAPI.subscribe((newValue) => {
-    set(newValue)
-  })
+    set(newValue);
+  });
 
   // 3. MUST return cleanup function (even if empty)
-  return () => unsubscribe()
-})
+  return () => unsubscribe();
+});
 ```
 
 ### Common Patterns
 
 **Interval/Timer:**
+
 ```typescript
 const elapsed = from((set) => {
-  let count = 0
-  set(count)
-  const id = setInterval(() => set(++count), 1000)
-  return () => clearInterval(id)
-})
+  let count = 0;
+  set(count);
+  const id = setInterval(() => set(++count), 1000);
+  return () => clearInterval(id);
+});
 ```
 
 **ResizeObserver:**
+
 ```typescript
 function useElementSize(element: () => HTMLElement | null) {
   return from((set) => {
-    const el = element()
+    const el = element();
     if (!el) {
-      set({ width: 0, height: 0 })
-      return () => {}
+      set({ width: 0, height: 0 });
+      return () => {};
     }
 
     const observer = new ResizeObserver((entries) => {
-      const { width, height } = entries[0].contentRect
-      set({ width, height })
-    })
+      const { width, height } = entries[0].contentRect;
+      set({ width, height });
+    });
 
-    observer.observe(el)
-    return () => observer.disconnect()
-  })
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
 }
 ```
 
 **WebSocket:**
+
 ```typescript
 function useWebSocket(url: string) {
   return from((set) => {
-    const ws = new WebSocket(url)
-    ws.onmessage = (e) => set(JSON.parse(e.data))
-    return () => ws.close()
-  })
+    const ws = new WebSocket(url);
+    ws.onmessage = (e) => set(JSON.parse(e.data));
+    return () => ws.close();
+  });
 }
 ```
 
@@ -145,47 +149,44 @@ Use `observable` when you need to expose a Solid signal to an external library t
 ### Signature
 
 ```typescript
-import { observable } from "solid-js"
+import { observable } from 'solid-js';
 
-function observable<T>(input: Accessor<T>): Observable<T>
+function observable<T>(input: Accessor<T>): Observable<T>;
 ```
 
 ### When to Use `observable`
 
-| Use Case | Example |
-|----------|---------|
-| RxJS integration | Piping through RxJS operators |
-| External libraries expecting observables | Analytics, logging pipelines |
-| Interop with other reactive systems | Connecting to non-Solid code |
+| Use Case                                 | Example                       |
+| ---------------------------------------- | ----------------------------- |
+| RxJS integration                         | Piping through RxJS operators |
+| External libraries expecting observables | Analytics, logging pipelines  |
+| Interop with other reactive systems      | Connecting to non-Solid code  |
 
 ### Example with RxJS
 
 ```typescript
-import { observable } from "solid-js"
-import { from as rxFrom, debounceTime, distinctUntilChanged } from "rxjs"
+import { observable } from 'solid-js';
+import { from as rxFrom, debounceTime, distinctUntilChanged } from 'rxjs';
 
-const [searchTerm, setSearchTerm] = createSignal("")
+const [searchTerm, setSearchTerm] = createSignal('');
 
 // Convert Solid signal to RxJS observable
-const search$ = rxFrom(observable(searchTerm))
+const search$ = rxFrom(observable(searchTerm));
 
 // Use RxJS operators
-search$.pipe(
-  debounceTime(300),
-  distinctUntilChanged()
-).subscribe((term) => {
-  performSearch(term)
-})
+search$.pipe(debounceTime(300), distinctUntilChanged()).subscribe((term) => {
+  performSearch(term);
+});
 ```
 
 ## Comparison: `from` vs `observable`
 
-| Aspect | `from` | `observable` |
-|--------|--------|--------------|
-| Direction | External → Solid | Solid → External |
-| Input | Producer function or subscribable | Solid accessor |
-| Output | Solid accessor | Observable |
-| Use case | Consume external data reactively | Expose signals to RxJS/etc |
+| Aspect    | `from`                            | `observable`               |
+| --------- | --------------------------------- | -------------------------- |
+| Direction | External → Solid                  | Solid → External           |
+| Input     | Producer function or subscribable | Solid accessor             |
+| Output    | Solid accessor                    | Observable                 |
+| Use case  | Consume external data reactively  | Expose signals to RxJS/etc |
 
 ## When NOT to Use These
 
@@ -199,15 +200,15 @@ search$.pipe(
 ```typescript
 // BAD: One-shot check, won't react to window resize
 createEffect(() => {
-  const isSmall = window.matchMedia("(max-width: 768px)").matches
-  if (isSmall) doSomething()
-})
+  const isSmall = window.matchMedia('(max-width: 768px)').matches;
+  if (isSmall) doSomething();
+});
 
 // GOOD: Reactive, updates when screen size changes
-const isSmall = useMediaQuery("(max-width: 768px)")
+const isSmall = useMediaQuery('(max-width: 768px)');
 createEffect(() => {
-  if (isSmall()) doSomething()
-})
+  if (isSmall()) doSomething();
+});
 ```
 
 ## Related

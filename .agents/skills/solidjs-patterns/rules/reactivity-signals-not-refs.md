@@ -14,43 +14,45 @@ Plain JS variables (refs) are captured when closures are created. Signals are re
 **Incorrect (ref value captured at scheduling time):**
 
 ```typescript
-let isPaginating = false
+let isPaginating = false;
 
 const handleLoadMore = () => {
-  isPaginating = true
-  fetchNextPage()
-}
+  isPaginating = true;
+  fetchNextPage();
+};
 
 createEffect(() => {
   const timeout = setTimeout(() => {
-    if (!isPaginating) {  // ❌ Reads OLD value from closure
-      scrollToBottom()     // Scrolls even though isPaginating was set!
+    if (!isPaginating) {
+      // ❌ Reads OLD value from closure
+      scrollToBottom(); // Scrolls even though isPaginating was set!
     }
-  }, 100)
-  return () => clearTimeout(timeout)
-})
+  }, 100);
+  return () => clearTimeout(timeout);
+});
 ```
 
 **Correct (signal read at execution time):**
 
 ```typescript
-const [isPaginating, setIsPaginating] = createSignal(false)
+const [isPaginating, setIsPaginating] = createSignal(false);
 
 const handleLoadMore = () => {
-  setIsPaginating(true)
-  fetchNextPage()
-}
+  setIsPaginating(true);
+  fetchNextPage();
+};
 
 createEffect(() => {
   const timeout = setTimeout(() => {
-    if (!isPaginating()) {  // ✅ Reads CURRENT value
-      scrollToBottom()
+    if (!isPaginating()) {
+      // ✅ Reads CURRENT value
+      scrollToBottom();
     }
-  }, 100)
-  return () => clearTimeout(timeout)
-})
+  }, 100);
+  return () => clearTimeout(timeout);
+});
 ```
 
-**Key insight**: Signals are *read* when called. Refs are *captured* when closures are created.
+**Key insight**: Signals are _read_ when called. Refs are _captured_ when closures are created.
 
 Reference: [SolidJS Signals](https://docs.solidjs.com/concepts/signals)

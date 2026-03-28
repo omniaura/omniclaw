@@ -97,16 +97,16 @@ const isExpanded = (index: number) => expanded[index] === true
 
 ```typescript
 // ❌ BAD: Changing any item causes ALL subscribers to update
-const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set())
+const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
 
 const toggle = (id: string) => {
-  setExpandedIds(prev => {
-    const next = new Set(prev)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    return next
-  })
-}
+  setExpandedIds((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+};
 
 // Every component using expandedIds() updates when ANY id changes
 ```
@@ -115,11 +115,11 @@ const toggle = (id: string) => {
 
 ```typescript
 // ✅ GOOD: Fine-grained reactivity per index/key
-const [expanded, setExpanded] = createStore<boolean[]>([])
+const [expanded, setExpanded] = createStore<boolean[]>([]);
 
 const toggle = (index: number) => {
-  setExpanded(index, prev => !prev)
-}
+  setExpanded(index, (prev) => !prev);
+};
 
 // Only components reading expanded[specificIndex] update
 ```
@@ -224,24 +224,26 @@ Note: SolidJS's `<For>` is actually smart about this and tracks by reference by 
 
 ```typescript
 // ❌ BAD: Direct mutation - no update triggered
-const [state, setState] = createStore({ items: [] })
+const [state, setState] = createStore({ items: [] });
 
-state.items.push(newItem) // Won't trigger reactivity!
+state.items.push(newItem); // Won't trigger reactivity!
 ```
 
 **Solution**: Always use the setter function.
 
 ```typescript
 // ✅ GOOD: Use setter for mutations
-setState("items", items => [...items, newItem])
+setState('items', (items) => [...items, newItem]);
 
 // Or use produce for complex mutations
-import { produce } from "solid-js/store"
+import { produce } from 'solid-js/store';
 
-setState(produce(state => {
-  state.items.push(newItem)
-  state.count++
-}))
+setState(
+  produce((state) => {
+    state.items.push(newItem);
+    state.count++;
+  }),
+);
 ```
 
 ## Anti-Pattern 7: Accessing Signals in Event Handler Setup
@@ -251,11 +253,11 @@ setState(produce(state => {
 ```typescript
 // ❌ BAD: multiplier() is evaluated once when effect runs
 createEffect(() => {
-  element.addEventListener("click", () => {
+  element.addEventListener('click', () => {
     // multiplier() was captured when effect ran, not when clicked
-    setCount(c => c * multiplier())
-  })
-})
+    setCount((c) => c * multiplier());
+  });
+});
 ```
 
 **Solution**: Access signals inside the handler.
@@ -274,8 +276,8 @@ createEffect(() => {
 ```typescript
 // ❌ BAD: Listener never removed
 createEffect(() => {
-  window.addEventListener("resize", handleResize)
-})
+  window.addEventListener('resize', handleResize);
+});
 ```
 
 **Solution**: Always clean up side effects.
@@ -283,9 +285,9 @@ createEffect(() => {
 ```typescript
 // ✅ GOOD: Cleanup on effect re-run or component unmount
 createEffect(() => {
-  window.addEventListener("resize", handleResize)
-  onCleanup(() => window.removeEventListener("resize", handleResize))
-})
+  window.addEventListener('resize', handleResize);
+  onCleanup(() => window.removeEventListener('resize', handleResize));
+});
 ```
 
 ## Anti-Pattern 9: Using Rest Spread Instead of splitProps
@@ -351,22 +353,23 @@ See [Performance Patterns](performance.md) for the full LazyShow implementation.
 
 ```typescript
 // ❌ BAD: Ref value captured when setTimeout is scheduled
-let isPaginating = false
+let isPaginating = false;
 
 const handleLoadMore = () => {
-  isPaginating = true  // Set the flag
-  fetchNextPage()      // Async - returns immediately
-}
+  isPaginating = true; // Set the flag
+  fetchNextPage(); // Async - returns immediately
+};
 
 createEffect(() => {
   // This setTimeout captures isPaginating at scheduling time
   const timeout = setTimeout(() => {
-    if (!isPaginating) {  // ❌ Reads OLD value from closure
-      scrollToBottom()     // Scroll happens even though isPaginating was set!
+    if (!isPaginating) {
+      // ❌ Reads OLD value from closure
+      scrollToBottom(); // Scroll happens even though isPaginating was set!
     }
-  }, 100)
-  return () => clearTimeout(timeout)
-})
+  }, 100);
+  return () => clearTimeout(timeout);
+});
 ```
 
 **Why this fails**: When `setTimeout` callback is created, it captures `isPaginating` by reference at that moment. Even if `isPaginating` changes before the callback runs, the callback reads the stale captured value.
@@ -375,21 +378,22 @@ createEffect(() => {
 
 ```typescript
 // ✅ GOOD: Signal is read at execution time, not captured
-const [isPaginating, setIsPaginating] = createSignal(false)
+const [isPaginating, setIsPaginating] = createSignal(false);
 
 const handleLoadMore = () => {
-  setIsPaginating(true)
-  fetchNextPage()
-}
+  setIsPaginating(true);
+  fetchNextPage();
+};
 
 createEffect(() => {
   const timeout = setTimeout(() => {
-    if (!isPaginating()) {  // ✅ Reads CURRENT value
-      scrollToBottom()
+    if (!isPaginating()) {
+      // ✅ Reads CURRENT value
+      scrollToBottom();
     }
-  }, 100)
-  return () => clearTimeout(timeout)
-})
+  }, 100);
+  return () => clearTimeout(timeout);
+});
 ```
 
 ### Real-World Example: Pagination Scroll Blocking
@@ -400,28 +404,28 @@ When loading older messages, we need to prevent scroll-to-bottom during the asyn
 // Problem: React Query's isFetchingNextPage updates AFTER fetchNextPage() returns
 // Solution: Set a blocking signal SYNCHRONOUSLY before the async call
 
-const [isPaginatingNow, setIsPaginatingNow] = createSignal(false)
+const [isPaginatingNow, setIsPaginatingNow] = createSignal(false);
 
 const handleLoadMore = () => {
   // Set IMMEDIATELY, BEFORE async fetchNextPage
-  setIsPaginatingNow(true)
-  fetchNextPage()  // Async - isFetchingNextPage updates later
-}
+  setIsPaginatingNow(true);
+  fetchNextPage(); // Async - isFetchingNextPage updates later
+};
 
 // Clear after pagination completes
 createEffect(() => {
   if (!isFetchingNextPage && isPaginatingNow()) {
-    setTimeout(() => setIsPaginatingNow(false), 500)
+    setTimeout(() => setIsPaginatingNow(false), 500);
   }
-})
+});
 
 // Effects read the signal at execution time
 createEffect(() => {
   if (isPaginatingNow()) {
-    return  // Block scroll-to-bottom
+    return; // Block scroll-to-bottom
   }
-  scrollToBottom()
-})
+  scrollToBottom();
+});
 ```
 
 **Key insight**: Signals are **read** when called. Refs are **captured** when closures are created.
@@ -434,15 +438,15 @@ createEffect(() => {
 // ❌ BAD: Assuming first effect runs before second
 createEffect(() => {
   // "I'll set the flag here first"
-  wasPaginatingRef.current = props.isFetchingNextPage
-})
+  wasPaginatingRef.current = props.isFetchingNextPage;
+});
 
 createEffect(() => {
   // "Then this will see the flag"
   if (!wasPaginatingRef.current) {
-    scrollToBottom()  // ❌ May run BEFORE the first effect!
+    scrollToBottom(); // ❌ May run BEFORE the first effect!
   }
-})
+});
 ```
 
 **Why this fails**: SolidJS effects run when their dependencies change, not in source code order. The second effect might run before the first if their dependencies update in different orders.
@@ -451,18 +455,18 @@ createEffect(() => {
 
 ```typescript
 // ✅ GOOD: Shared signal state, read at execution time
-const [isBlocked, setIsBlocked] = createSignal(false)
+const [isBlocked, setIsBlocked] = createSignal(false);
 
 // One effect manages the signal
 createEffect(() => {
-  setIsBlocked(props.isFetchingNextPage)
-})
+  setIsBlocked(props.isFetchingNextPage);
+});
 
 // Other effects read it
 createEffect(() => {
-  if (isBlocked()) return
-  scrollToBottom()
-})
+  if (isBlocked()) return;
+  scrollToBottom();
+});
 ```
 
 Or better - avoid the two-effect pattern entirely by combining logic:
@@ -470,7 +474,7 @@ Or better - avoid the two-effect pattern entirely by combining logic:
 ```typescript
 // ✅ BEST: Single effect with all logic
 createEffect(() => {
-  if (props.isFetchingNextPage) return
-  scrollToBottom()
-})
+  if (props.isFetchingNextPage) return;
+  scrollToBottom();
+});
 ```

@@ -16,18 +16,18 @@ In Solid Query, options must be wrapped in a function `() => ({...})` to enable 
 ```typescript
 // React Query pattern — WRONG in Solid Query
 const query = createQuery({
-  queryKey: ["user", userId()],
+  queryKey: ['user', userId()],
   queryFn: () => fetchUser(userId()),
-})
+});
 ```
 
 **Correct (arrow function wrapper enables reactivity):**
 
 ```typescript
 const query = createQuery(() => ({
-  queryKey: ["user", userId()],  // userId is a signal — re-fetches when it changes
+  queryKey: ['user', userId()], // userId is a signal — re-fetches when it changes
   queryFn: () => fetchUser(userId()),
-}))
+}));
 ```
 
 This applies to `createQuery`, `createMutation`, and `createInfiniteQuery`.

@@ -171,17 +171,17 @@ export const useTheme = () => {
 ## Pattern 6: Derived State with Memos
 
 ```typescript
-const [items, setItems] = createSignal<Item[]>([])
-const [filter, setFilter] = createSignal("")
+const [items, setItems] = createSignal<Item[]>([]);
+const [filter, setFilter] = createSignal('');
 
 // Derived state - automatically updates when items or filter changes
 const filteredItems = createMemo(() =>
-  items().filter(item =>
-    item.name.toLowerCase().includes(filter().toLowerCase())
-  )
-)
+  items().filter((item) =>
+    item.name.toLowerCase().includes(filter().toLowerCase()),
+  ),
+);
 
-const itemCount = createMemo(() => filteredItems().length)
+const itemCount = createMemo(() => filteredItems().length);
 ```
 
 ## Pattern 7: Data Fetching with Solid Query
@@ -300,9 +300,9 @@ Use `createSignal` when:
 
 ```typescript
 // ✅ Good use of createSignal - simple object replaced entirely
-const [position, setPosition] = createSignal({ x: 0, y: 0 })
-setPosition({ x: 10, y: 20 }) // Replaces entire object
+const [position, setPosition] = createSignal({ x: 0, y: 0 });
+setPosition({ x: 10, y: 20 }); // Replaces entire object
 
 // ✅ Good use of createSignal - primitive
-const [isOpen, setIsOpen] = createSignal(false)
+const [isOpen, setIsOpen] = createSignal(false);
 ```

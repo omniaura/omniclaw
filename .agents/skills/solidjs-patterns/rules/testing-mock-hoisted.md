@@ -1,7 +1,7 @@
 ---
 title: Use vi.hoisted for Mock Definitions
 impact: LOW
-impactDescription: "mock reference errors or stale mock state"
+impactDescription: 'mock reference errors or stale mock state'
 tags: testing, vitest, mocking, vi.hoisted
 ---
 
@@ -14,43 +14,44 @@ When mocking modules in vitest, define mock implementations inside `vi.hoisted` 
 **Incorrect (mock function defined after vi.mock — hoisting issue):**
 
 ```typescript
-import { vi } from "vitest"
+import { vi } from 'vitest';
 
 // vi.mock is hoisted to the top of the file at runtime
-vi.mock("@/api/users", () => ({
-  fetchUser: mockFetchUser  // ReferenceError: mockFetchUser is not defined
-}))
+vi.mock('@/api/users', () => ({
+  fetchUser: mockFetchUser, // ReferenceError: mockFetchUser is not defined
+}));
 
 // This line runs AFTER vi.mock in source, but vi.mock is hoisted above it
-const mockFetchUser = vi.fn()
+const mockFetchUser = vi.fn();
 ```
 
 **Correct (vi.hoisted ensures mocks are defined before vi.mock runs):**
 
 ```typescript
-import { beforeEach, vi } from "vitest"
+import { beforeEach, vi } from 'vitest';
 
 const { mocks } = vi.hoisted(() => ({
   mocks: {
-    fetchUser: vi.fn(() => Promise.resolve({ id: "1", name: "Test" })),
-    useAuth: vi.fn(() => ({ user: () => ({ uid: "test-123" }) }))
-  }
-}))
+    fetchUser: vi.fn(() => Promise.resolve({ id: '1', name: 'Test' })),
+    useAuth: vi.fn(() => ({ user: () => ({ uid: 'test-123' }) })),
+  },
+}));
 
-vi.mock("@/api/users", () => ({
-  fetchUser: mocks.fetchUser
-}))
+vi.mock('@/api/users', () => ({
+  fetchUser: mocks.fetchUser,
+}));
 
-vi.mock("@/hooks/useAuth", () => ({
-  useAuth: mocks.useAuth
-}))
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: mocks.useAuth,
+}));
 
 beforeEach(() => {
-  vi.clearAllMocks()
-})
+  vi.clearAllMocks();
+});
 ```
 
 **Notes:**
+
 - `vi.hoisted` runs its callback before any `vi.mock` calls, regardless of source order
 - Group related mocks into a single `vi.hoisted` block for clarity
 - Always call `vi.clearAllMocks()` in `beforeEach` to reset call counts and return values between tests

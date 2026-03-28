@@ -15,38 +15,41 @@ When an effect reads a signal it also writes, it creates a circular dependency. 
 
 ```typescript
 createEffect(() => {
-  const status = streamStatusQuery.data  // tracked
-  if (!status) return
-  if (status.isStreaming && !isWaitingForResponse()) {  // tracked!
-    setIsWaitingForResponse(true)  // triggers re-run!
+  const status = streamStatusQuery.data; // tracked
+  if (!status) return;
+  if (status.isStreaming && !isWaitingForResponse()) {
+    // tracked!
+    setIsWaitingForResponse(true); // triggers re-run!
   }
-})
+});
 ```
 
 **Correct (on() — only track query data, not the signal being written):**
 
 ```typescript
-createEffect(on(
-  () => streamStatusQuery.data,
-  (status) => {
-    if (!status) return
-    // isWaitingForResponse() read here is UNTRACKED
-    if (status.isStreaming && !isWaitingForResponse()) {
-      setIsWaitingForResponse(true)
-    }
-  },
-  { defer: true }
-))
+createEffect(
+  on(
+    () => streamStatusQuery.data,
+    (status) => {
+      if (!status) return;
+      // isWaitingForResponse() read here is UNTRACKED
+      if (status.isStreaming && !isWaitingForResponse()) {
+        setIsWaitingForResponse(true);
+      }
+    },
+    { defer: true },
+  ),
+);
 ```
 
 **Use `untrack()` for surgical opt-out** when most reads should track but one shouldn't:
 
 ```typescript
 createEffect(() => {
-  const value = importantSignal()  // tracked
-  const context = untrack(() => otherSignal())  // NOT tracked
-  process(value, context)
-})
+  const value = importantSignal(); // tracked
+  const context = untrack(() => otherSignal()); // NOT tracked
+  process(value, context);
+});
 ```
 
 Reference: [SolidJS on()](https://docs.solidjs.com/reference/reactive-utilities/on)

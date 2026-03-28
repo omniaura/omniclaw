@@ -9,14 +9,14 @@ Beyond the core `createSignal`, `createStore`, `createEffect`, and `createMemo`,
 Runs **during** the render phase, before DOM is committed. Use for immediate DOM measurements or synchronous updates.
 
 ```typescript
-import { createRenderEffect } from "solid-js"
+import { createRenderEffect } from 'solid-js';
 
 createRenderEffect(() => {
   // Runs synchronously during render
   // Use for DOM measurements that must happen before paint
-  const height = containerRef.offsetHeight
-  updateLayout(height)
-})
+  const height = containerRef.offsetHeight;
+  updateLayout(height);
+});
 ```
 
 **When to use**: DOM measurements, layout synchronization, immediate style updates.
@@ -28,15 +28,15 @@ createRenderEffect(() => {
 Runs **before** render, synchronously when dependencies change. Creates derived state that's always in sync.
 
 ```typescript
-import { createComputed } from "solid-js"
+import { createComputed } from 'solid-js';
 
-const [firstName, setFirstName] = createSignal("John")
-const [lastName, setLastName] = createSignal("Doe")
+const [firstName, setFirstName] = createSignal('John');
+const [lastName, setLastName] = createSignal('Doe');
 
-let fullName = ""
+let fullName = '';
 createComputed(() => {
-  fullName = `${firstName()} ${lastName()}`
-})
+  fullName = `${firstName()} ${lastName()}`;
+});
 // fullName is immediately updated when either signal changes
 ```
 
@@ -49,15 +49,15 @@ createComputed(() => {
 Separates **tracking** from **side effects**. First function tracks dependencies, second runs when they change.
 
 ```typescript
-import { createReaction } from "solid-js"
+import { createReaction } from 'solid-js';
 
 const track = createReaction(() => {
   // This runs when tracked dependencies change
-  console.log("User changed:", user())
-})
+  console.log('User changed:', user());
+});
 
 // Start tracking
-track(() => user().id) // Only tracks user().id, not other user properties
+track(() => user().id); // Only tracks user().id, not other user properties
 ```
 
 **When to use**: Fine-grained control over what triggers effects, avoiding unwanted re-runs.
@@ -150,12 +150,12 @@ function TabSwitcher() {
 For arrays where items are fixed but indices change (filtering, sorting).
 
 ```typescript
-import { indexArray } from "solid-js"
+import { indexArray } from 'solid-js';
 
-const [items, setItems] = createSignal([1, 2, 3])
+const [items, setItems] = createSignal([1, 2, 3]);
 
 // Items are keyed by index - efficient when indices change frequently
-const doubled = indexArray(items, (item, index) => item() * 2)
+const doubled = indexArray(items, (item, index) => item() * 2);
 ```
 
 ### mapArray
@@ -174,6 +174,7 @@ const userCards = mapArray(users, (user, index) => (
 ```
 
 **Rule of thumb**:
+
 - `mapArray` (default `<For>` behavior): Items stable, indices change
 - `indexArray`: Indices stable, item values change
 
@@ -203,19 +204,19 @@ function Component() {
 Runs when effect re-runs or component unmounts. Essential for preventing memory leaks.
 
 ```typescript
-import { createEffect, onCleanup } from "solid-js"
+import { createEffect, onCleanup } from 'solid-js';
 
 createEffect(() => {
   const handler = (e: KeyboardEvent) => {
-    if (e.key === "Escape") close()
-  }
+    if (e.key === 'Escape') close();
+  };
 
-  window.addEventListener("keydown", handler)
+  window.addEventListener('keydown', handler);
 
   onCleanup(() => {
-    window.removeEventListener("keydown", handler)
-  })
-})
+    window.removeEventListener('keydown', handler);
+  });
+});
 ```
 
 **Critical**: Always clean up subscriptions, event listeners, timers, and WebSocket connections.

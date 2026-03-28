@@ -1,7 +1,7 @@
 ---
 title: Use createRenderEffect for Synchronous DOM Measurements
 impact: MEDIUM
-impactDescription: "layout flicker from deferred DOM reads"
+impactDescription: 'layout flicker from deferred DOM reads'
 tags: createRenderEffect, DOM, layout, synchronous
 ---
 
@@ -48,6 +48,7 @@ function AutoLayout() {
 ```
 
 **Notes:**
+
 - `createRenderEffect` blocks rendering, so avoid heavy computation — keep it limited to DOM reads and immediate style updates
 - Good use cases: scroll position sync, element dimension measurements, immediate style calculations
 - Bad use cases: data fetching, complex state updates, anything async
