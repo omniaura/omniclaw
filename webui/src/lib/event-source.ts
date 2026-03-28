@@ -2,6 +2,7 @@ import { createSignal, onCleanup, createContext, useContext } from 'solid-js';
 import { isServer } from 'solid-js/web';
 
 import { appendLog, type LogLine } from '~/lib/stores/logs';
+import { appendLiveMessage, type LiveMessage } from '~/lib/stores/messages';
 import { updateStats, type StatsState } from '~/lib/stores/stats';
 import { updateAgents, type AgentStatus } from '~/lib/stores/agents';
 import { updateTasks, type TaskState } from '~/lib/stores/tasks';
@@ -70,6 +71,9 @@ export function createEventSource(): EventSourceState {
       onSseEvent<TaskState[]>(e, updateTasks),
     );
     es.addEventListener('log', (e) => onSseEvent<LogLine>(e, appendLog));
+    es.addEventListener('new_message', (e) =>
+      onSseEvent<LiveMessage>(e, appendLiveMessage),
+    );
     es.addEventListener('stats', (e) =>
       onSseEvent<Partial<StatsState>>(e, updateStats),
     );
