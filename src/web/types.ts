@@ -144,6 +144,7 @@ export type WsEventType =
   | 'task_update'
   | 'log'
   | 'ipc_event'
+  | 'new_message'
   | 'peer_discovered'
   | 'peer_lost'
   | 'pair_request'

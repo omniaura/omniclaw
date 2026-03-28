@@ -1,9 +1,10 @@
-import { For, Show } from 'solid-js';
+import { createEffect, createMemo, For, on, Show } from 'solid-js';
 import type { MessageInfo } from '~/lib/api';
+import type { LiveMessage } from '~/lib/stores/messages';
 
 const MAX_TEXT_LENGTH = 2000;
 
-function isFromMe(msg: MessageInfo): boolean {
+function isFromMe(msg: MessageInfo | LiveMessage): boolean {
   return msg.sender === 'me' || msg.sender === 'bot';
 }
 
@@ -11,6 +12,7 @@ export default function MessageList(props: {
   chatJid: string | null;
   chatName: string;
   messages: MessageInfo[];
+  liveMessages: LiveMessage[];
   loading: boolean;
   hasMore: boolean;
   onLoadMore: () => void;
@@ -22,6 +24,40 @@ export default function MessageList(props: {
       containerRef.scrollTop = containerRef.scrollHeight;
     }
   }
+
+  /** Merge loaded messages with live SSE messages, deduplicating by id. */
+  const allMessages = createMemo(() => {
+    const loaded = props.messages;
+    const live = props.liveMessages;
+    if (live.length === 0) return loaded;
+    const loadedIds = new Set(loaded.map((m) => m.id));
+    const newLive = live.filter((m) => !loadedIds.has(m.id));
+    if (newLive.length === 0) return loaded;
+    return [
+      ...loaded,
+      ...newLive.map((m) => ({
+        ...m,
+        chat_jid: m.chat_jid,
+        sender_name: m.sender_name,
+      })),
+    ];
+  });
+
+  // Auto-scroll when new live messages arrive
+  createEffect(
+    on(
+      () => props.liveMessages.length,
+      () => {
+        if (!containerRef) return;
+        // Only auto-scroll if user is near the bottom
+        const { scrollTop, scrollHeight, clientHeight } = containerRef;
+        const nearBottom = scrollHeight - scrollTop - clientHeight < 80;
+        if (nearBottom) {
+          requestAnimationFrame(scrollToBottom);
+        }
+      },
+    ),
+  );
 
   return (
     <main class="flex-1 flex flex-col min-w-0">
@@ -39,7 +75,13 @@ export default function MessageList(props: {
           </h2>
           <span class="text-[10px] text-text-dim">{props.chatJid}</span>
           <span class="text-[10px] text-text-dim ml-auto">
-            {props.messages.length} msg{props.messages.length !== 1 ? 's' : ''}
+            {allMessages().length} msg{allMessages().length !== 1 ? 's' : ''}
+            <Show when={props.liveMessages.length > 0}>
+              {' '}
+              <span class="text-green-400" title="Live messages from SSE">
+                +{props.liveMessages.length} live
+              </span>
+            </Show>
           </span>
         </div>
 
@@ -56,7 +98,7 @@ export default function MessageList(props: {
 
         <Show when={props.loading}>
           <div class="flex-1 flex items-center justify-center text-text-dim text-xs">
-            Loading\u2026
+            Loading…
           </div>
         </Show>
         <Show when={!props.loading}>
@@ -68,20 +110,20 @@ export default function MessageList(props: {
             class="flex-1 overflow-y-auto p-3 flex flex-col gap-2"
           >
             <Show
-              when={props.messages.length > 0}
+              when={allMessages().length > 0}
               fallback={
                 <div class="text-text-dim text-xs text-center py-4">
                   No messages
                 </div>
               }
             >
-              <For each={props.messages}>
+              <For each={allMessages()}>
                 {(msg) => {
                   const fromMe = isFromMe(msg);
                   const displayText = () => {
                     const text = msg.content || '';
                     return text.length > MAX_TEXT_LENGTH
-                      ? text.slice(0, MAX_TEXT_LENGTH) + '\u2026 [truncated]'
+                      ? text.slice(0, MAX_TEXT_LENGTH) + '… [truncated]'
                       : text;
                   };
 

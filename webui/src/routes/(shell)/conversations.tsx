@@ -1,8 +1,9 @@
-import { createSignal, createResource } from 'solid-js';
+import { createSignal, createResource, createMemo } from 'solid-js';
 import { Title } from '@solidjs/meta';
 import { useSearchParams } from '@solidjs/router';
 
 import { api, type MessageInfo } from '~/lib/api';
+import { liveMessages } from '~/lib/stores/messages';
 import ChatList from '~/components/conversations/ChatList';
 import MessageList from '~/components/conversations/MessageList';
 
@@ -43,6 +44,13 @@ export default function Conversations() {
     return chat?.name || jid;
   }
 
+  /** Filter live messages to only show ones for the selected chat. */
+  const chatLiveMessages = createMemo(() => {
+    const jid = selectedJid();
+    if (!jid) return [];
+    return liveMessages.items.filter((m) => m.chat_jid === jid);
+  });
+
   function handleSelectChat(jid: string) {
     if (jid === selectedJid()) return;
     setMessageLimit(PAGE_SIZE);
@@ -82,6 +90,7 @@ export default function Conversations() {
           chatJid={selectedJid()}
           chatName={selectedChatName()}
           messages={messages() ?? []}
+          liveMessages={chatLiveMessages()}
           loading={messages.loading}
           hasMore={
             messageLimit() === PAGE_SIZE &&

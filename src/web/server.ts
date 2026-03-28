@@ -860,6 +860,7 @@ function eventChannel(event: WsEvent): string {
   if (event.type === 'agent_status' || event.type === 'task_update') {
     return 'stats';
   }
+  if (event.type === 'new_message') return 'messages';
   if (
     event.type === 'peer_discovered' ||
     event.type === 'peer_lost' ||
