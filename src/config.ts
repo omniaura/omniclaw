@@ -69,6 +69,11 @@ const configSchema = z
       parseBooleanString,
       z.boolean().default(false),
     ),
+    SHARED_CLAUDE_VM: z.preprocess(
+      parseBooleanString,
+      z.boolean().default(false),
+    ),
+    SHARED_CLAUDE_VM_MEMORY: z.string().default('16G'),
     EXEC_CONTAINER_MEMORY: z.string().optional(),
     CONTAINER_TIMEOUT: z.preprocess(
       parseIntegerString,
@@ -341,6 +346,8 @@ export const STARTUP_CONFIRMATIONS = CONFIG.STARTUP_CONFIRMATIONS;
 export const CONTAINER_IMAGE = CONFIG.CONTAINER_IMAGE;
 export const CONTAINER_MEMORY = CONFIG.CONTAINER_MEMORY;
 export const SPLIT_EXECUTION = CONFIG.SPLIT_EXECUTION;
+export const SHARED_CLAUDE_VM = CONFIG.SHARED_CLAUDE_VM;
+export const SHARED_CLAUDE_VM_MEMORY = CONFIG.SHARED_CLAUDE_VM_MEMORY;
 export const EXEC_CONTAINER_MEMORY =
   CONFIG.EXEC_CONTAINER_MEMORY || CONTAINER_MEMORY;
 export const CONTAINER_TIMEOUT = CONFIG.CONTAINER_TIMEOUT; // 2h default — inactivity timeout for agent output (tool calls, results, text)

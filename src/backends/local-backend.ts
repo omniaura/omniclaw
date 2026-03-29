@@ -21,6 +21,7 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   LOCAL_RUNTIME,
+  SHARED_CLAUDE_VM,
   SPLIT_EXECUTION,
   TIMEZONE,
 } from '../config.js';
@@ -28,6 +29,7 @@ import { logger } from '../logger.js';
 import { validateAdditionalMounts } from '../mount-security.js';
 import { assertPathWithin } from '../path-security.js';
 import { ContainerProcess } from '../types.js';
+import { SharedVmManager } from './shared-vm.js';
 import { StreamParser } from './stream-parser.js';
 import {
   AgentBackend,
@@ -1122,8 +1124,16 @@ function startExecBroker(
   };
 }
 
+function isSharedVmEnabled(): boolean {
+  return (
+    (SHARED_CLAUDE_VM || process.env.SHARED_CLAUDE_VM === 'true') &&
+    LOCAL_RUNTIME !== 'docker'
+  );
+}
+
 export class LocalBackend implements AgentBackend {
   readonly name = LOCAL_RUNTIME === 'docker' ? 'docker' : 'apple-container';
+  private sharedVm = new SharedVmManager();
 
   async runAgent(
     group: AgentOrGroup,
@@ -1131,6 +1141,9 @@ export class LocalBackend implements AgentBackend {
     onProcess: (proc: ContainerProcess, containerName: string) => void,
     onOutput?: (output: ContainerOutput) => Promise<void>,
   ): Promise<ContainerOutput> {
+    if (isSharedVmEnabled()) {
+      return this.runAgentSharedVm(group, input, onProcess, onOutput);
+    }
     const startTime = Date.now();
     const folder = getFolder(group);
     const runtimeFolder = input.runtimeFolder || folder;
@@ -1502,6 +1515,367 @@ export class LocalBackend implements AgentBackend {
     }
   }
 
+  /**
+   * Run agent in the shared Claude VM via `container exec`.
+   * The shared VM is long-running with broad parent mounts;
+   * each agent gets its own stdin/stdout pipe and isolated workspace paths.
+   */
+  private async runAgentSharedVm(
+    group: AgentOrGroup,
+    input: ContainerInput,
+    onProcess: (proc: ContainerProcess, containerName: string) => void,
+    onOutput?: (output: ContainerOutput) => Promise<void>,
+  ): Promise<ContainerOutput> {
+    const startTime = Date.now();
+    const folder = getFolder(group);
+    const runtimeFolder = input.runtimeFolder || folder;
+    const groupName = getName(group);
+    const containerCfg = getContainerConfig(group);
+
+    const groupDir = path.join(GROUPS_DIR, folder);
+    fs.mkdirSync(groupDir, { recursive: true });
+
+    // Prepare agent directories (IPC, sessions, env) — same side effects as per-VM mode
+    const mounts = buildVolumeMounts(
+      group,
+      input.isMain,
+      input.isScheduledTask,
+      runtimeFolder,
+      input.agentRuntime || getAgentRuntime(group),
+      {
+        channelFolder: input.channelFolder,
+        categoryFolder: input.categoryFolder,
+        agentContextFolder: input.agentContextFolder,
+      },
+      undefined,
+      { allowGcpCredentials: !!containerCfg?.allowGcpCredentials },
+    );
+
+    const effectiveNetwork =
+      containerCfg?.networkMode ?? (input.isMain ? 'full' : 'none');
+    const splitExecutionEnabled = isSplitExecutionEnabled();
+
+    // Exec container stays per-agent (unchanged from per-VM mode)
+    let execContainer: { name: string; cleanup: () => Promise<void> } | null =
+      null;
+    const agentContainerName = makeContainerName(folder, runtimeFolder);
+    if (splitExecutionEnabled) {
+      try {
+        execContainer = await spawnExecutionContainer(
+          mounts,
+          agentContainerName,
+          input.isMain,
+          effectiveNetwork,
+        );
+      } catch (err) {
+        logger.warn(
+          { err, group: groupName, backend: this.name },
+          'Failed to start execution sidecar, falling back to single container',
+        );
+      }
+    }
+
+    // Ensure shared VM is running
+    const vmName = await this.sharedVm.ensureRunning();
+
+    // Build `container exec` args with per-agent env vars
+    const workspaceFolder = input.channelFolder || folder;
+    const execArgs: string[] = [
+      'exec',
+      '-i',
+      '-w',
+      `/workspace/groups/${workspaceFolder}`,
+      '-e',
+      `AGENT_WORKSPACE=/workspace/groups/${workspaceFolder}`,
+      '-e',
+      `AGENT_IPC_DIR=/data/ipc/${runtimeFolder}`,
+      '-e',
+      `AGENT_SESSION_DIR=/data/sessions/${runtimeFolder}/.claude`,
+      '-e',
+      `AGENT_GLOBAL_DIR=/workspace/groups/global`,
+      '-e',
+      `AGENT_ENV_DIR=/data/env/${runtimeFolder}`,
+      '-e',
+      `AGENT_PROJECT_DIR=/workspace/project`,
+      '-e',
+      `TZ=${TIMEZONE}`,
+    ];
+
+    // Optional context directories
+    if (input.agentContextFolder) {
+      execArgs.push(
+        '-e',
+        `AGENT_CONTEXT_DIR=/workspace/groups/${input.agentContextFolder}`,
+      );
+    }
+    if (input.categoryFolder) {
+      execArgs.push(
+        '-e',
+        `AGENT_CATEGORY_DIR=/workspace/groups/${input.categoryFolder}`,
+      );
+    }
+    const srvFolder = getServerFolder(group);
+    if (srvFolder) {
+      execArgs.push(
+        '-e',
+        `AGENT_SERVER_DIR=/workspace/groups/${srvFolder}`,
+      );
+    }
+
+    // Exec container env vars
+    if (execContainer) {
+      execArgs.push(
+        '-e',
+        `EXEC_CONTAINER_NAME=${execContainer.name}`,
+        '-e',
+        `EXEC_RUNTIME=apple-container`,
+        '-e',
+        `EXEC_BROKER_REQUEST_DIR=/data/ipc/${runtimeFolder}/exec-requests`,
+        '-e',
+        `EXEC_BROKER_RESPONSE_DIR=/data/ipc/${runtimeFolder}/exec-responses`,
+      );
+    }
+
+    execArgs.push(vmName, '/app/agent-exec.sh');
+
+    const configTimeout = containerCfg?.timeout || CONTAINER_TIMEOUT;
+    const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
+
+    const log = logger.child({
+      op: 'containerExec',
+      group: groupName,
+      sharedVm: vmName,
+      backend: this.name,
+      splitExecutionEnabled,
+    });
+
+    log.info({ isMain: input.isMain }, 'Exec-ing agent in shared Claude VM');
+
+    const logsDir = path.join(GROUPS_DIR, folder, 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+
+    let container: ReturnType<typeof Bun.spawn>;
+    const execBroker =
+      execContainer
+        ? startExecBroker(runtimeFolder, execContainer.name, log)
+        : null;
+    try {
+      container = Bun.spawn([LOCAL_RUNTIME, ...execArgs], {
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+    } catch (err) {
+      log.error({ err }, 'Container exec spawn error');
+      execBroker?.stop();
+      if (execContainer) execContainer.cleanup().catch(() => {});
+      return {
+        status: 'error',
+        result: null,
+        error: `Container exec spawn error: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+
+    onProcess(container, `${vmName}:${runtimeFolder}`);
+
+    // Write input and close stdin
+    if (typeof container.stdin === 'number' || !container.stdin) {
+      throw new Error('Container stdin is not a writable stream');
+    }
+    container.stdin.write(
+      JSON.stringify({
+        ...input,
+        networkMode: effectiveNetwork,
+      }),
+    );
+    container.stdin.end();
+
+    const killOnTimeout = () => {
+      log.error('Agent exec timeout, killing process');
+      execBroker?.stop();
+      if (execContainer) execContainer.cleanup().catch(() => {});
+      container.kill(9);
+    };
+
+    const parser = new StreamParser({
+      groupName,
+      containerName: `${vmName}:${runtimeFolder}`,
+      timeoutMs,
+      startupTimeoutMs: CONTAINER_STARTUP_TIMEOUT,
+      maxOutputSize: CONTAINER_MAX_OUTPUT_SIZE,
+      onOutput,
+      onTimeout: killOnTimeout,
+    });
+
+    // Read stderr concurrently
+    if (typeof container.stderr === 'number' || !container.stderr) {
+      throw new Error('Container stderr is not a readable stream');
+    }
+    const stderrReader = container.stderr.getReader();
+    const stderrDecoder = new TextDecoder();
+    const stderrPromise = (async () => {
+      try {
+        while (true) {
+          const { done, value } = await stderrReader.read();
+          if (done) break;
+          const chunk = stderrDecoder.decode(value, { stream: true });
+          parser.feedStderr(chunk);
+        }
+      } catch {
+        // stream closed
+      }
+    })();
+
+    // Read stdout
+    if (typeof container.stdout === 'number' || !container.stdout) {
+      throw new Error('Container stdout is not a readable stream');
+    }
+    const stdoutReader = container.stdout.getReader();
+    const stdoutDecoder = new TextDecoder();
+    try {
+      while (true) {
+        const { done, value } = await stdoutReader.read();
+        if (done) break;
+        const chunk = stdoutDecoder.decode(value, { stream: true });
+        parser.feedStdout(chunk);
+      }
+    } catch {
+      // stream closed
+    }
+
+    // Wait for process exit
+    const exitCode = await container.exited;
+    await stderrPromise;
+    parser.cleanup();
+
+    // Clean up execution sidecar
+    execBroker?.stop();
+    if (execBroker) {
+      await execBroker.done.catch((err) => {
+        log.warn({ err }, 'Execution broker shutdown failed');
+      });
+    }
+    if (execContainer) {
+      execContainer.cleanup().catch((err) => {
+        log.warn({ err }, 'Failed to stop execution sidecar');
+      });
+    }
+
+    const duration = Date.now() - startTime;
+    const state = parser.getState();
+    const exitLog = log.child({
+      op: 'containerExit',
+      exitCode,
+      durationMs: duration,
+    });
+
+    if (state.timedOut) {
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const timeoutLog = path.join(logsDir, `container-${ts}.log`);
+      fs.writeFileSync(
+        timeoutLog,
+        [
+          `=== Container Run Log (TIMEOUT) ===`,
+          `Timestamp: ${new Date().toISOString()}`,
+          `Group: ${groupName}`,
+          `SharedVM: ${vmName}`,
+          `Duration: ${duration}ms`,
+          `Exit Code: ${exitCode}`,
+          `Had Streaming Output: ${state.hadStreamingOutput}`,
+        ].join('\n'),
+      );
+
+      if (state.hadStreamingOutput) {
+        exitLog.info('Agent exec timed out after output (idle cleanup)');
+        await state.outputChain;
+        return {
+          status: 'success',
+          result: null,
+          newSessionId: state.newSessionId,
+        };
+      }
+
+      exitLog.error({ timedOut: true }, 'Agent exec timed out with no output');
+      return {
+        status: 'error',
+        result: null,
+        error: `Agent exec timed out after ${configTimeout}ms`,
+      };
+    }
+
+    // Write log file
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const logFile = path.join(logsDir, `container-${timestamp}.log`);
+    const isVerbose =
+      process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
+    const logLines = [
+      `=== Container Exec Log ===`,
+      `Timestamp: ${new Date().toISOString()}`,
+      `Group: ${groupName}`,
+      `SharedVM: ${vmName}`,
+      `IsMain: ${input.isMain}`,
+      `Duration: ${duration}ms`,
+      `Exit Code: ${exitCode}`,
+    ];
+    if (isVerbose || exitCode !== 0) {
+      logLines.push(
+        ``,
+        `=== Stderr ===`,
+        state.stderr,
+        ``,
+        `=== Stdout ===`,
+        state.stdout,
+      );
+    }
+    fs.writeFileSync(logFile, logLines.join('\n'));
+
+    if (exitCode !== 0) {
+      exitLog.error(
+        { stderr: state.stderr, logFile },
+        'Agent exec exited with error',
+      );
+      return {
+        status: 'error',
+        result: null,
+        error: `Agent exec exited with code ${exitCode}: ${state.stderr.slice(-200)}`,
+      };
+    }
+
+    // Streaming mode
+    if (onOutput) {
+      await state.outputChain;
+      exitLog.info(
+        { newSessionId: state.newSessionId },
+        'Agent exec completed (streaming mode)',
+      );
+      return {
+        status: 'success',
+        result: null,
+        newSessionId: state.newSessionId,
+      };
+    }
+
+    // Legacy mode
+    try {
+      const output = parser.parseFinalOutput();
+      exitLog.info(
+        { status: output.status, hasResult: !!output.result },
+        'Agent exec completed',
+      );
+      return output;
+    } catch (err) {
+      exitLog.error(
+        { stdout: state.stdout, stderr: state.stderr, err },
+        'Failed to parse agent exec output',
+      );
+      return {
+        status: 'error',
+        result: null,
+        error: `Failed to parse agent exec output: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
   sendMessage(
     groupFolder: string,
     text: string,
@@ -1688,6 +2062,13 @@ export class LocalBackend implements AgentBackend {
     }
 
     await this.cleanupOrphanedContainers();
+
+    // Start shared Claude VM if enabled
+    if (isSharedVmEnabled()) {
+      await this.sharedVm.cleanupOrphans();
+      await this.sharedVm.ensureRunning();
+      logger.info('Shared Claude VM mode enabled');
+    }
   }
 
   private printContainerSystemError(): void {
@@ -1725,7 +2106,11 @@ export class LocalBackend implements AgentBackend {
       // CLI flag injection (e.g. a name like "--all").
       const SAFE_CONTAINER_NAME =
         /^omniclaw-[a-zA-Z0-9_-]+-[a-f0-9-]+(-exec)?$/;
+      // Don't kill the shared Claude VM — it's managed separately
+      const sharedVmName = this.sharedVm.getName();
       const safeOrphans = orphans.filter((name) => {
+        if (name === sharedVmName) return false;
+        if (name.startsWith('omniclaw-shared-claude-')) return false;
         if (!SAFE_CONTAINER_NAME.test(name)) {
           logger.warn(
             { name },
@@ -1756,6 +2141,7 @@ export class LocalBackend implements AgentBackend {
   }
 
   async shutdown(): Promise<void> {
-    // Containers clean themselves up via --rm flag
+    // Stop shared Claude VM if running
+    await this.sharedVm.stop();
   }
 }

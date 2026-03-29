@@ -13,11 +13,14 @@ RUN bun install
 # Copy source code
 COPY agent-runner/ ./
 
-# Copy entrypoint script
-# Sources env, configures git, pre-installs cross-platform deps for host mounts,
-# buffers stdin, then runs agent-runner
+# Copy entrypoint scripts
+# entrypoint.sh: legacy per-VM mode (sources env, configures git, buffers stdin, runs agent-runner)
+# shared-entrypoint.sh: shared VM mode (minimal setup, sleeps forever)
+# agent-exec.sh: per-agent wrapper for shared VM mode (invoked via container exec)
 COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+COPY shared-entrypoint.sh /app/shared-entrypoint.sh
+COPY agent-exec.sh /app/agent-exec.sh
+RUN chmod +x /app/entrypoint.sh /app/shared-entrypoint.sh /app/agent-exec.sh
 
 # Install bash shim for split-execution mode.
 # Renames real bash to bash.real, installs shim at /usr/local/bin/bash.
