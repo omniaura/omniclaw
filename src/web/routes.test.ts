@@ -9,6 +9,7 @@ import type {
   ChannelSubscription,
   ScheduledTask,
   TaskRunLog,
+  TaskRunPhaseEvent,
 } from '../types.js';
 import {
   createRemotePeerResolver,
@@ -113,6 +114,7 @@ function makeState(
       tasks.delete(id);
     },
     getTaskRunLogs: () => [],
+    getTaskRunPhaseEvents: () => [],
     searchMessages: () => [],
     calculateNextRun: () => '2026-03-06T09:00:00.000Z',
     readContextFile: () => null,
@@ -796,6 +798,156 @@ describe('handleRequest task run logs', () => {
       new Request('http://localhost/api/tasks/task-001/runs', {
         method: 'POST',
       }),
+      state,
+    );
+    expect(res.status).toBe(405);
+  });
+});
+
+// ---- Task run phase events ----
+
+describe('GET /api/tasks/{id}/runs/{runAt}/phases', () => {
+  const samplePhases: TaskRunPhaseEvent[] = [
+    {
+      task_id: 'task-001',
+      run_at: '2026-03-10T12:00:00.000Z',
+      sequence: 1,
+      phase: 'lease_acquired',
+      event_at: '2026-03-10T12:00:00.100Z',
+      status: 'ok',
+      retryable: false,
+      error: null,
+    },
+    {
+      task_id: 'task-001',
+      run_at: '2026-03-10T12:00:00.000Z',
+      sequence: 2,
+      phase: 'group_resolved',
+      event_at: '2026-03-10T12:00:00.200Z',
+      status: 'ok',
+      retryable: false,
+      error: null,
+    },
+    {
+      task_id: 'task-001',
+      run_at: '2026-03-10T12:00:00.000Z',
+      sequence: 3,
+      phase: 'dispatch_started',
+      event_at: '2026-03-10T12:00:00.300Z',
+      status: 'error',
+      retryable: true,
+      error: 'Container timeout',
+    },
+  ];
+
+  it('returns 404 for unknown task', async () => {
+    const res = await handleRequest(
+      new Request(
+        'http://localhost/api/tasks/nonexistent/runs/2026-03-10T12:00:00.000Z/phases',
+      ),
+      makeState(makeAgent()),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('returns phase events for existing task run', async () => {
+    const state: WebStateProvider = {
+      ...makeState(makeAgent()),
+      getTaskById: (id) =>
+        id === 'task-001'
+          ? {
+              id: 'task-001',
+              group_folder: 'test',
+              chat_jid: 'dc:123',
+              prompt: 'do stuff',
+              schedule_type: 'cron' as const,
+              schedule_value: '0 * * * *',
+              context_mode: 'isolated' as const,
+              next_run: null,
+              last_run: '2026-03-10T12:00:00.000Z',
+              last_result: 'success',
+              executing_since: null,
+              status: 'active' as const,
+              created_at: '2026-03-01T00:00:00.000Z',
+            }
+          : undefined,
+      getTaskRunPhaseEvents: (taskId, runAt) => {
+        if (taskId !== 'task-001') return [];
+        return samplePhases.filter((p) => p.run_at === runAt);
+      },
+    };
+
+    const res = await handleRequest(
+      new Request(
+        'http://localhost/api/tasks/task-001/runs/2026-03-10T12:00:00.000Z/phases',
+      ),
+      state,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as typeof samplePhases;
+    expect(body).toHaveLength(3);
+    expect(body[0].phase).toBe('lease_acquired');
+    expect(body[2].status).toBe('error');
+    expect(body[2].retryable).toBe(true);
+  });
+
+  it('returns empty array for run with no phases', async () => {
+    const state: WebStateProvider = {
+      ...makeState(makeAgent()),
+      getTaskById: () => ({
+        id: 'task-001',
+        group_folder: 'test',
+        chat_jid: 'dc:123',
+        prompt: 'do stuff',
+        schedule_type: 'cron' as const,
+        schedule_value: '0 * * * *',
+        context_mode: 'isolated' as const,
+        next_run: null,
+        last_run: null,
+        last_result: null,
+        executing_since: null,
+        status: 'active' as const,
+        created_at: '2026-03-01T00:00:00.000Z',
+      }),
+      getTaskRunPhaseEvents: () => [],
+    };
+
+    const res = await handleRequest(
+      new Request(
+        'http://localhost/api/tasks/task-001/runs/2026-03-10T12:00:00.000Z/phases',
+      ),
+      state,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as unknown[];
+    expect(body).toEqual([]);
+  });
+
+  it('rejects non-GET methods', async () => {
+    const state: WebStateProvider = {
+      ...makeState(makeAgent()),
+      getTaskById: () => ({
+        id: 'task-001',
+        group_folder: 'test',
+        chat_jid: 'dc:123',
+        prompt: 'do stuff',
+        schedule_type: 'cron' as const,
+        schedule_value: '0 * * * *',
+        context_mode: 'isolated' as const,
+        next_run: null,
+        last_run: null,
+        last_result: null,
+        executing_since: null,
+        status: 'active' as const,
+        created_at: '2026-03-01T00:00:00.000Z',
+      }),
+    };
+
+    const res = await handleRequest(
+      new Request(
+        'http://localhost/api/tasks/task-001/runs/2026-03-10T12:00:00.000Z/phases',
+        { method: 'POST' },
+      ),
       state,
     );
     expect(res.status).toBe(405);

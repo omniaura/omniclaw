@@ -116,6 +116,7 @@ function makeState(
     getQueueDetails: () => [],
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
+    getTaskRunPhaseEvents: () => [],
     searchMessages: (query, chatJid, limit) => {
       const q = query.toLowerCase();
       let results = testMessages.filter((m) =>

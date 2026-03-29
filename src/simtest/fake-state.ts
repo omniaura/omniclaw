@@ -8,6 +8,7 @@ import type {
   ChannelSubscription,
   ScheduledTask,
   TaskRunLog,
+  TaskRunPhaseEvent,
 } from '../types.js';
 import type { GroupQueueDetail } from '../group-queue.js';
 import type { IpcEvent, IpcEventKind } from '../web/ipc-events.js';
@@ -511,6 +512,10 @@ export class FakeState implements WebStateProvider {
   getTaskRunLogs(taskId: string, limit?: number): TaskRunLog[] {
     const logs = this.taskRunLogs[taskId] ?? [];
     return logs.slice(0, limit ?? 20);
+  }
+
+  getTaskRunPhaseEvents(_taskId: string, _runAt: string): TaskRunPhaseEvent[] {
+    return [];
   }
 
   searchMessages(

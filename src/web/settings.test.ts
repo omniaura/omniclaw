@@ -25,6 +25,7 @@ function makeState(): WebStateProvider {
     getQueueDetails: () => [],
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
+    getTaskRunPhaseEvents: () => [],
     searchMessages: () => [],
     createTask: () => {},
     updateTask: () => {},

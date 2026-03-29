@@ -1310,7 +1310,8 @@ export function logTaskRun(log: TaskRunLog): void {
 export function getTaskRunLogs(taskId: string, limit = 20): TaskRunLog[] {
   return db
     .query(
-      `SELECT task_id, run_at, duration_ms, status, result, error
+      `SELECT task_id, run_at, duration_ms, status, result, error,
+              outcome_state, outcome_reason, outcome_question
        FROM task_run_logs
        WHERE task_id = ?
        ORDER BY run_at DESC

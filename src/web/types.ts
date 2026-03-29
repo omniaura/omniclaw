@@ -3,6 +3,7 @@ import type {
   ChannelSubscription,
   ScheduledTask,
   TaskRunLog,
+  TaskRunPhaseEvent,
 } from '../types.js';
 import type { GroupQueueDetail } from '../group-queue.js';
 import type { IpcEvent } from './ipc-events.js';
@@ -42,6 +43,8 @@ export interface WebStateProvider {
   getIpcEvents(count?: number): IpcEvent[];
   /** Execution history for a specific task. */
   getTaskRunLogs(taskId: string, limit?: number): TaskRunLog[];
+  /** Phase events for a specific task run (identified by taskId + run_at timestamp). */
+  getTaskRunPhaseEvents(taskId: string, runAt: string): TaskRunPhaseEvent[];
   /** Search messages by content, optionally within a specific chat. */
   searchMessages(
     query: string,

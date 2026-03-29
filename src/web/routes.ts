@@ -134,6 +134,24 @@ export function handleRequest(
   if (pathname.startsWith('/api/tasks/')) {
     const rest = pathname.slice('/api/tasks/'.length);
 
+    // Phase events: /api/tasks/{id}/runs/{runAt}/phases
+    const phasesMatch = rest.match(/^(.+?)\/runs\/(.+?)\/phases$/);
+    if (phasesMatch) {
+      let taskId: string;
+      let runAt: string;
+      try {
+        taskId = decodeURIComponent(phasesMatch[1]!);
+        runAt = decodeURIComponent(phasesMatch[2]!);
+      } catch {
+        return json({ error: 'Invalid encoding' }, 400);
+      }
+      if (!taskId || !runAt)
+        return json({ error: 'Missing task ID or run timestamp' }, 400);
+      if (method === 'GET')
+        return handleGetTaskRunPhases(taskId, runAt, state);
+      return json({ error: 'Method not allowed' }, 405);
+    }
+
     // Task run logs: /api/tasks/{id}/runs
     if (rest.endsWith('/runs')) {
       let taskId: string;
@@ -401,6 +419,18 @@ function handleGetTaskRuns(
 
   const runs = state.getTaskRunLogs(taskId, limit);
   return json(runs);
+}
+
+function handleGetTaskRunPhases(
+  taskId: string,
+  runAt: string,
+  state: WebStateProvider,
+): Response {
+  const task = state.getTaskById(taskId);
+  if (!task) return json({ error: 'Task not found' }, 404);
+
+  const phases = state.getTaskRunPhaseEvents(taskId, runAt);
+  return json(phases);
 }
 
 async function handleCreateTask(
