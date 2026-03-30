@@ -125,7 +125,12 @@ describe('ipc-snapshots', () => {
   describe('task visibility filtering', () => {
     it('writes only matching tasks for non-main groups', () => {
       const groupFolder = uniqueFolder('ipc-snapshot-tasks');
-      const tasksFile = path.join(DATA_DIR, 'ipc', groupFolder, 'current_tasks.json');
+      const tasksFile = path.join(
+        DATA_DIR,
+        'ipc',
+        groupFolder,
+        'current_tasks.json',
+      );
       const allTasks = [
         {
           id: 't1',
@@ -189,7 +194,12 @@ describe('ipc-snapshots', () => {
 
     it('writes all tasks for the main group', () => {
       const groupFolder = uniqueFolder('ipc-snapshot-tasks-main');
-      const tasksFile = path.join(DATA_DIR, 'ipc', groupFolder, 'current_tasks.json');
+      const tasksFile = path.join(
+        DATA_DIR,
+        'ipc',
+        groupFolder,
+        'current_tasks.json',
+      );
       const allTasks = [
         {
           id: 't1',
@@ -321,7 +331,13 @@ describe('ipc-snapshots', () => {
       const subscribedJids = new Set(['j1', 'j3']);
 
       try {
-        writeGroupsSnapshot(groupFolder, false, groups, new Set(), subscribedJids);
+        writeGroupsSnapshot(
+          groupFolder,
+          false,
+          groups,
+          new Set(),
+          subscribedJids,
+        );
         expect(readJson(groupsFile)).toEqual({
           groups: [groups[0], groups[2]],
           lastSync: '2026-03-28T12:34:56.000Z',
@@ -339,34 +355,40 @@ describe('ipc-snapshots', () => {
     it('writes guild rosters and a deterministic lastSync timestamp', () => {
       installFixedDate('2026-03-28T15:00:00.000Z');
       const groupFolder = uniqueFolder('ipc-snapshot-rosters');
-      const rostersFile = path.join(DATA_DIR, 'ipc', groupFolder, 'guild_rosters.json');
-      const rosters: Array<{ guild: GuildInfo; members: GuildRosterMember[] }> = [
-        {
-          guild: {
-            id: 'guild-1',
-            name: 'OmniAura',
-            ownerId: 'user-1',
-            memberCount: 2,
-            lastSynced: '2026-03-28T14:59:00.000Z',
+      const rostersFile = path.join(
+        DATA_DIR,
+        'ipc',
+        groupFolder,
+        'guild_rosters.json',
+      );
+      const rosters: Array<{ guild: GuildInfo; members: GuildRosterMember[] }> =
+        [
+          {
+            guild: {
+              id: 'guild-1',
+              name: 'OmniAura',
+              ownerId: 'user-1',
+              memberCount: 2,
+              lastSynced: '2026-03-28T14:59:00.000Z',
+            },
+            members: [
+              {
+                userId: 'user-1',
+                username: 'peyton',
+                displayName: 'Peyton',
+                isBot: false,
+                roles: ['admin'],
+              },
+              {
+                userId: 'bot-1',
+                username: 'ocpeyton',
+                displayName: 'OCPeyton',
+                isBot: true,
+                roles: ['agent'],
+              },
+            ],
           },
-          members: [
-            {
-              userId: 'user-1',
-              username: 'peyton',
-              displayName: 'Peyton',
-              isBot: false,
-              roles: ['admin'],
-            },
-            {
-              userId: 'bot-1',
-              username: 'ocpeyton',
-              displayName: 'OCPeyton',
-              isBot: true,
-              roles: ['agent'],
-            },
-          ],
-        },
-      ];
+        ];
 
       try {
         writeRostersSnapshot(groupFolder, rosters);
