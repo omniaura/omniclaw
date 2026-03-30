@@ -1168,7 +1168,7 @@ async function runQuery(
     containerInput.mcpServers,
   );
 
-  for await (const message of query({
+  const activeQuery = query({
     prompt: stream,
     options: {
       model: sdkEnv.CLAUDE_MODEL || 'claude-opus-4-6',
@@ -1235,7 +1235,9 @@ async function runQuery(
         ],
       },
     },
-  })) {
+  });
+
+  for await (const message of activeQuery) {
     messageCount++;
     const msgType =
       message.type === 'system'
@@ -1404,6 +1406,7 @@ async function runQuery(
       );
       ipcPolling = false;
       stream.end();
+      activeQuery.close();
       return {
         newSessionId: undefined,
         lastAssistantUuid: undefined,
@@ -1454,6 +1457,12 @@ async function runQuery(
       break;
     }
   }
+
+  // Close the SDK query to kill the underlying CLI subprocess.
+  // Without this, the subprocess lingers after the for-await loop breaks
+  // on a result message, and subsequent runQuery calls accumulate orphaned
+  // processes that consume memory and CPU indefinitely.
+  activeQuery.close();
 
   ipcPolling = false;
   stopHeartbeat();
