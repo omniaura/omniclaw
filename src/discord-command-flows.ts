@@ -27,6 +27,8 @@ export interface DiscordFlowDefinition {
   description: string;
   prompt: string;
   options?: DiscordFlowOptionDefinition[];
+  /** System commands are handled by the host, not sent to the agent. */
+  system?: boolean;
 }
 
 interface DiscordFlowFile {
@@ -115,6 +117,25 @@ const BUILTIN_COMMANDS: DiscordFlowDefinition[] = [
         defaultValue: 30,
       },
     ],
+  },
+  {
+    name: 'resume',
+    description: 'Resume a previous agent session in this channel',
+    prompt: '',
+    system: true,
+    options: [
+      {
+        name: 'session_id',
+        description: 'Session ID to resume (omit to see recent sessions)',
+        type: 'string',
+      },
+    ],
+  },
+  {
+    name: 'sessions',
+    description: 'List recent agent sessions for this channel',
+    prompt: '',
+    system: true,
   },
 ];
 
@@ -338,6 +359,11 @@ function stringifyOptionValue(value: string | number | boolean): string {
       : 'false'
     : String(value);
 }
+
+/** Names of built-in system commands (handled by host, not agent). */
+export const SYSTEM_COMMAND_NAMES = new Set(
+  BUILTIN_COMMANDS.filter((c) => c.system).map((c) => c.name),
+);
 
 export function renderDiscordFlowPrompt(
   command: DiscordFlowDefinition,

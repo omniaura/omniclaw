@@ -308,6 +308,94 @@ function getRuntimeGroupFolder(
   return runtimeFolder;
 }
 
+/**
+ * Handle /resume and /sessions Discord slash commands.
+ * These operate on the host's session store directly rather than sending
+ * a prompt to the agent.
+ */
+function handleSessionCommand(
+  command: 'resume' | 'sessions',
+  chatJid: string,
+  group: RegisteredGroup,
+  sessionId?: string,
+): { message: string } {
+  const runtimeFolder = getRuntimeGroupFolder(group.folder, chatJid);
+  const sessionsDir = path.join(
+    DATA_DIR,
+    'sessions',
+    runtimeFolder,
+    '.claude',
+    'projects',
+    '-workspace-group',
+  );
+
+  if (command === 'sessions') {
+    if (!fs.existsSync(sessionsDir)) {
+      return { message: 'No sessions found for this channel.' };
+    }
+    const files = fs
+      .readdirSync(sessionsDir)
+      .filter((f) => f.endsWith('.jsonl'));
+    if (files.length === 0) {
+      return { message: 'No sessions found for this channel.' };
+    }
+
+    const currentSessionId = sessions[runtimeFolder];
+    const sessionInfos = files
+      .map((f) => {
+        const filePath = path.join(sessionsDir, f);
+        const stat = fs.statSync(filePath);
+        const sid = f.replace('.jsonl', '');
+        return { sessionId: sid, modifiedAt: stat.mtime, sizeBytes: stat.size };
+      })
+      .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
+
+    const lines = sessionInfos.map((s) => {
+      const current = s.sessionId === currentSessionId ? ' **(active)**' : '';
+      const sizeKb = Math.round(s.sizeBytes / 1024);
+      const age = formatAge(s.modifiedAt);
+      return `\`${s.sessionId}\` — ${sizeKb}KB, ${age}${current}`;
+    });
+
+    return {
+      message: `**Sessions for this channel** (${runtimeFolder}):\n${lines.join('\n')}`,
+    };
+  }
+
+  // command === 'resume'
+  if (!sessionId) {
+    // No session ID provided — show sessions instead
+    return handleSessionCommand('sessions', chatJid, group);
+  }
+
+  // Validate session file exists
+  const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+  if (!fs.existsSync(sessionFile)) {
+    return {
+      message: `Session \`${sessionId}\` not found. Use \`/sessions\` to list available sessions.`,
+    };
+  }
+
+  // Override the session and clear resumeAt so the SDK resumes at latest
+  sessions[runtimeFolder] = sessionId;
+  setSession(runtimeFolder, sessionId);
+  resumePositionStore.set(runtimeFolder, '');
+
+  return {
+    message: `Session switched to \`${sessionId}\`. The next message in this channel will resume from that session.`,
+  };
+}
+
+function formatAge(date: Date): string {
+  const ms = Date.now() - date.getTime();
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 function getSubscriptionsForChannelInMemory(
   channelJid: string,
 ): ChannelSubscription[] {
@@ -2886,6 +2974,8 @@ async function main(): Promise<void> {
                 multiBotMode: DISCORD_BOTS.length > 1,
                 onSyntheticMessage: (message) => storeAndBroadcast(message),
                 registeredGroups: () => registeredGroups,
+                onSessionCommand: (command, chatJid, group, sessionId) =>
+                  handleSessionCommand(command, chatJid, group, sessionId),
                 onReaction: async (chatJid, messageId, emoji, userName) => {
                   await handleReactionNotification(
                     chatJid,

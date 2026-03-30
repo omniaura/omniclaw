@@ -31,6 +31,7 @@ import {
   buildDiscordSlashCommandPayloads,
   getDiscordFlowDefinitionsForGroup,
   renderDiscordFlowPrompt,
+  SYSTEM_COMMAND_NAMES,
 } from '../discord-command-flows.js';
 import { logger } from '../logger.js';
 import {
@@ -183,6 +184,16 @@ function normalizeDiscordMentions(text: string): string {
   return normalized;
 }
 
+export interface SessionInfo {
+  sessionId: string;
+  modifiedAt: Date;
+  sizeBytes: number;
+}
+
+export interface SessionCommandResult {
+  message: string;
+}
+
 export interface DiscordChannelOpts {
   botId: string;
   token: string;
@@ -195,6 +206,12 @@ export interface DiscordChannelOpts {
     emoji: string,
     userName: string,
   ) => void;
+  onSessionCommand?: (
+    command: 'resume' | 'sessions',
+    chatJid: string,
+    group: RegisteredGroup,
+    sessionId?: string,
+  ) => SessionCommandResult;
 }
 
 export class DiscordChannel implements Channel {
@@ -1167,6 +1184,27 @@ export class DiscordChannel implements Channel {
         content: 'This channel is not registered to an OmniClaw agent yet.',
         ephemeral: true,
       });
+      return;
+    }
+
+    // Handle system commands (resume, sessions) directly on the host
+    if (SYSTEM_COMMAND_NAMES.has(interaction.commandName)) {
+      if (!this.opts.onSessionCommand) {
+        await interaction.reply({
+          content: 'Session commands are not configured.',
+          ephemeral: true,
+        });
+        return;
+      }
+      const sessionId =
+        interaction.options.getString('session_id') ?? undefined;
+      const result = this.opts.onSessionCommand(
+        interaction.commandName as 'resume' | 'sessions',
+        chatJid,
+        group,
+        sessionId,
+      );
+      await interaction.reply({ content: result.message, ephemeral: true });
       return;
     }
 
