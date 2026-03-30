@@ -290,7 +290,9 @@ export async function readGitHubWebhookBody(
   req: Request,
   maxBodyBytes: number,
 ): Promise<string> {
-  const contentLength = parseContentLengthHeader(req.headers.get('content-length'));
+  const contentLength = parseContentLengthHeader(
+    req.headers.get('content-length'),
+  );
   if (contentLength !== null && contentLength > maxBodyBytes) {
     throw new RequestBodyTooLargeError(maxBodyBytes);
   }
