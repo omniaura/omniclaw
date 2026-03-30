@@ -19,48 +19,13 @@ import {
 import fs from 'fs';
 import path from 'path';
 
-// ---------------------------------------------------------------------------
-// Types (duplicated from host — container can't import host source)
-// ---------------------------------------------------------------------------
-
-interface ChannelInfo {
-  id: string;
-  jid: string;
-  name: string;
-}
-
-type AgentRuntime = 'claude-agent-sdk' | 'opencode' | 'codex';
-
-interface ContainerInput {
-  prompt: string;
-  sessionId?: string;
-  resumeAt?: string;
-  groupFolder: string;
-  chatJid: string;
-  isMain: boolean;
-  isScheduledTask?: boolean;
-  discordGuildId?: string;
-  serverFolder?: string;
-  secrets?: Record<string, string>;
-  agentRuntime?: AgentRuntime;
-  channels?: ChannelInfo[];
-  agentName?: string;
-  discordBotId?: string;
-  agentTrigger?: string;
-  agentContextFolder?: string;
-  channelFolder?: string;
-  categoryFolder?: string;
-}
-
-interface ContainerOutput {
-  status: 'success' | 'error';
-  result: string | null;
-  newSessionId?: string;
-  resumeAt?: string;
-  error?: string;
-  intermediate?: boolean;
-  chatJid?: string;
-}
+// Shared protocol types — import type only (erased at runtime, no module needed in container).
+import type {
+  ContainerInput,
+  ContainerOutput,
+  IpcDrainResult,
+  IpcMessage,
+} from '@omniclaw/protocol';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -98,18 +63,8 @@ function resolveIpcInputDir(isScheduledTask?: boolean): string {
 // IPC helpers (same protocol as Claude SDK runtime)
 // ---------------------------------------------------------------------------
 
-interface IpcMessage {
-  text: string;
-  chatJid?: string;
-}
-
 let ipcInputDir = '/workspace/ipc/input';
 let currentChatJid = '';
-
-interface IpcDrainResult {
-  messages: IpcMessage[];
-  shutdown: boolean;
-}
 
 function setCurrentChat(chatJid: string): void {
   currentChatJid = chatJid;

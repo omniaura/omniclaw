@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@effect/schema": "^0.75.5",
+    "@omniclaw/protocol": "file:packages/protocol",
     "@slack/bolt": "^4.2.1",
     "@slack/web-api": "^7.14.1",
     "@starfederation/datastar-sdk": "^1.0.0-RC.3",

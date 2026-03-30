@@ -6,6 +6,7 @@
       "name": "nanoclaw",
       "dependencies": {
         "@effect/schema": "^0.75.5",
+        "@omniclaw/protocol": "file:packages/protocol",
         "@slack/bolt": "^4.2.1",
         "@slack/web-api": "^7.14.1",
         "@starfederation/datastar-sdk": "^1.0.0-RC.3",
@@ -165,6 +166,8 @@
     "@keyv/serialize": ["@keyv/serialize@1.1.1", "", {}, "sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA=="],
 
     "@leichtgewicht/ip-codec": ["@leichtgewicht/ip-codec@2.0.5", "", {}, "sha512-Vo+PSpZG2/fmgmiNzYK9qWRh8h/CHrwD0mo1h1DzL4yzHNSfWYujGTYsWGreD000gcgmZ7K4Ys6Tx9TxtsKdDw=="],
+
+    "@omniclaw/protocol": ["@omniclaw/protocol@file:packages/protocol", {}],
 
     "@pinojs/redact": ["@pinojs/redact@0.4.0", "", {}, "sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg=="],
 

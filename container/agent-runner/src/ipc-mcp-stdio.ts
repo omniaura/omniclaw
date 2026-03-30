@@ -22,14 +22,8 @@ const initialChatJid = process.env.OMNICLAW_CHAT_JID!;
 const groupFolder = process.env.OMNICLAW_GROUP_FOLDER!;
 const isMain = process.env.OMNICLAW_IS_MAIN === '1';
 
-// Multi-channel support: parse OMNICLAW_CHANNELS if set
-// Intentionally duplicated from src/backends/types.ts — this stdio MCP server runs in
-// an isolated container environment and cannot import from the host's source tree at runtime.
-interface ChannelInfo {
-  id: string;
-  jid: string;
-  name: string;
-}
+// Shared protocol types — import type only (erased at runtime, no module needed in container).
+import type { ChannelInfo } from '@omniclaw/protocol';
 const channelsEnv = process.env.OMNICLAW_CHANNELS;
 const channels: ChannelInfo[] = channelsEnv
   ? (() => {
