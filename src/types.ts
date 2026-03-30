@@ -49,8 +49,15 @@ export interface ContainerConfig {
 
 export type BackendType = 'apple-container' | 'docker';
 
-/** Which agent runtime runs inside the container. */
-export type AgentRuntime = 'claude-agent-sdk' | 'opencode' | 'codex';
+import type {
+  AgentRuntime as _AgentRuntime,
+  TaskOutcomeState as _TaskOutcomeState,
+  TaskOutcomeSignal as _TaskOutcomeSignal,
+} from '@omniclaw/protocol';
+
+export type AgentRuntime = _AgentRuntime;
+export type TaskOutcomeState = _TaskOutcomeState;
+export type TaskOutcomeSignal = _TaskOutcomeSignal;
 
 export interface RegisteredGroup {
   name: string;
@@ -163,17 +170,6 @@ export interface ScheduledTask {
   last_outcome_state?: TaskOutcomeState | null;
   /** Reason string from the most recent outcome signal. */
   last_outcome_reason?: string | null;
-}
-
-/** Explicit agent outcome signal for scheduled task runs. */
-export type TaskOutcomeState = 'done' | 'blocked' | 'abandoned';
-
-export interface TaskOutcomeSignal {
-  state: TaskOutcomeState;
-  /** Why the task ended in this state (e.g. "Rate limited", "Missing credentials"). */
-  reason?: string;
-  /** For blocked: what input is needed from the user? */
-  question?: string;
 }
 
 export interface TaskRunLog {

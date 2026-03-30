@@ -5,13 +5,19 @@
 
 import {
   Agent,
-  type AgentRuntime,
   type BackendType,
   ContainerProcess,
   RegisteredGroup,
 } from '../types.js';
+import type {
+  AgentRuntime,
+  ChannelInfo,
+  ContainerInput,
+  ContainerOutput,
+} from '@omniclaw/protocol';
 
 export type { AgentRuntime, BackendType };
+export type { ChannelInfo, ContainerInput, ContainerOutput };
 
 /**
  * Unified group-or-agent type for backwards compatibility.
@@ -56,67 +62,6 @@ export function getBackendType(entity: AgentOrGroup): BackendType {
 export function getAgentRuntime(entity: AgentOrGroup): AgentRuntime {
   if (isAgent(entity)) return entity.agentRuntime;
   return (entity as RegisteredGroup).agentRuntime || 'claude-agent-sdk';
-}
-
-export interface ChannelInfo {
-  id: string;
-  jid: string;
-  name: string;
-}
-
-export interface ContainerInput {
-  prompt: string;
-  sessionId?: string;
-  resumeAt?: string;
-  groupFolder: string;
-  /** Host-side runtime key for IPC/session isolation (defaults to groupFolder). */
-  runtimeFolder?: string;
-  chatJid: string;
-  isMain: boolean;
-  /** Effective container network policy after backend defaults/overrides are applied. */
-  networkMode?: 'full' | 'none';
-  isScheduledTask?: boolean;
-  discordGuildId?: string;
-  serverFolder?: string;
-  /** Which agent runtime to use inside the container. Default: claude-agent-sdk */
-  agentRuntime?: AgentRuntime;
-  /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
-  channels?: ChannelInfo[];
-  /** Agent's display name (e.g. "OCPeyton"). Injected into system prompt for self-awareness. */
-  agentName?: string;
-  /** Agent's Discord bot ID. Injected into system prompt so agent knows its own bot identity. */
-  discordBotId?: string;
-  /** Agent's trigger word/phrase (e.g. "@OCPeyton"). */
-  agentTrigger?: string;
-  /** Agent's identity + global notes folder, mounted read-write at /workspace/agent/ */
-  agentContextFolder?: string; // e.g., 'agents/peytonomi'
-  /** Human-readable name of the channel that triggered this invocation. */
-  currentChannelName?: string;
-  /** Channel workspace folder. If set, overrides groupFolder as /workspace/group/ mount. */
-  channelFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant/spec'
-  /** Category team workspace, mounted read-write at /workspace/category/ (shared across channels in same category) */
-  categoryFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant'
-  /** Pre-fetched GitHub context markdown (open PRs, issues, review comments) for injection into system prompt. */
-  githubContext?: string;
-  /** GitHub activity delta digest (events since last user message in this channel). */
-  githubActivityDelta?: string;
-  /** Auto-fetched context for GitHub PR/issue URLs detected in user messages. */
-  githubLinkedContext?: string;
-  /** Extra MCP servers to inject into the agent runtime alongside the built-in omniclaw server. */
-  mcpServers?: Record<string, Record<string, unknown>>;
-}
-
-export interface ContainerOutput {
-  status: 'success' | 'error';
-  result: string | null;
-  newSessionId?: string;
-  resumeAt?: string;
-  error?: string;
-  intermediate?: boolean;
-  /** The chat JID this output should be routed to (multi-channel agents). */
-  chatJid?: string;
-  /** Explicit agent outcome signal (done/blocked/abandoned). */
-  outcome?: import('../types.js').TaskOutcomeSignal;
 }
 
 export interface VolumeMount {

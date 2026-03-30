@@ -23,62 +23,14 @@ import {
   PreToolUseHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 
-// Intentionally duplicated from src/backends/types.ts — this container process runs in
-// an isolated environment and cannot import from the host's source tree at runtime.
-interface ChannelInfo {
-  id: string;
-  jid: string;
-  name: string;
-}
-
-type AgentRuntime = 'claude-agent-sdk' | 'opencode' | 'codex';
-
-interface ContainerInput {
-  prompt: string;
-  sessionId?: string;
-  resumeAt?: string;
-  groupFolder: string;
-  chatJid: string;
-  isMain: boolean;
-  networkMode?: 'full' | 'none';
-  isScheduledTask?: boolean;
-  discordGuildId?: string;
-  serverFolder?: string;
-  secrets?: Record<string, string>;
-  /** Which agent runtime to use. Default: claude-agent-sdk */
-  agentRuntime?: AgentRuntime;
-  /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
-  channels?: ChannelInfo[];
-  /** Agent's display name (e.g. "OCPeyton"). Injected into system prompt for self-awareness. */
-  agentName?: string;
-  /** Agent's Discord bot ID. Injected into system prompt so agent knows its own bot identity. */
-  discordBotId?: string;
-  /** Agent's trigger word/phrase (e.g. "@OCPeyton"). */
-  agentTrigger?: string;
-  agentContextFolder?: string;
-  /** Human-readable name of the channel that triggered this invocation. */
-  currentChannelName?: string;
-  channelFolder?: string;
-  categoryFolder?: string;
-  /** Pre-fetched GitHub context markdown (open PRs, issues, review comments). */
-  githubContext?: string;
-  /** GitHub activity delta digest (events since last user message in this channel). */
-  githubActivityDelta?: string;
-  /** Auto-fetched context for GitHub PR/issue URLs detected in user messages. */
-  githubLinkedContext?: string;
-  /** Extra MCP servers to inject alongside the built-in omniclaw server (SSE/HTTP). */
-  mcpServers?: Record<string, Record<string, unknown>>;
-}
-
-interface ContainerOutput {
-  status: 'success' | 'error';
-  result: string | null;
-  newSessionId?: string;
-  resumeAt?: string;
-  error?: string;
-  intermediate?: boolean;
-  chatJid?: string;
-}
+// Shared protocol types — import type only (erased at runtime, no module needed in container).
+import type {
+  AgentRuntime,
+  ChannelInfo,
+  ContainerInput,
+  ContainerOutput,
+  IpcMessage,
+} from '@omniclaw/protocol';
 
 type ExternalMcpServerConfig =
   | {
@@ -859,16 +811,6 @@ function formatTranscriptMarkdown(
   }
 
   return lines.join('\n');
-}
-
-interface IpcMessage {
-  text: string;
-  chatJid?: string;
-}
-
-interface IpcDrainResult {
-  messages: IpcMessage[];
-  shutdown: boolean;
 }
 
 // Track the current chat JID for multi-channel agents.

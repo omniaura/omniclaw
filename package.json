@@ -4,6 +4,7 @@
   "description": "OmniClaw - Personal Claude assistant from the Omni ecosystem.",
   "type": "module",
   "main": "src/index.ts",
+  "workspaces": ["packages/*"],
   "engines": {
     "node": ">=22.12.0"
   },
@@ -22,6 +23,7 @@
   },
   "dependencies": {
     "@effect/schema": "^0.75.5",
+    "@omniclaw/protocol": "workspace:*",
     "@slack/bolt": "^4.2.1",
     "@slack/web-api": "^7.14.1",
     "@starfederation/datastar-sdk": "^1.0.0-RC.3",

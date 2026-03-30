@@ -1,0 +1,12 @@
+{
+  "name": "@omniclaw/protocol",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Shared type definitions for the OmniClaw orchestrator ↔ agent-runner protocol",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.ts"
+    }
+  }
+}
