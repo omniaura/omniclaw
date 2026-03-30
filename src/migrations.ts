@@ -88,7 +88,7 @@ export function getSchemaVersion(database: Database): number {
   }
 }
 
-function setSchemaVersion(database: Database, version: number): void {
+function ensureVersionTable(database: Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
       id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -96,6 +96,9 @@ function setSchemaVersion(database: Database, version: number): void {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+}
+
+function setSchemaVersion(database: Database, version: number): void {
   database
     .prepare(
       `INSERT OR REPLACE INTO schema_version (id, version, updated_at)
@@ -105,30 +108,40 @@ function setSchemaVersion(database: Database, version: number): void {
 }
 
 /**
- * Apply all pending migrations. Each migration runs inside a transaction so
- * a crash mid-migration leaves the version at the last successfully applied
- * migration. Migration 1 is idempotent and handles both fresh and existing
- * databases (uses CREATE TABLE IF NOT EXISTS + addColumnIfNotExists).
+ * Apply all pending migrations inside a single exclusive transaction. The
+ * exclusive lock prevents concurrent processes from reading the same version
+ * and both attempting the same migration. If any migration fails, the entire
+ * batch is rolled back to the version before `runMigrations` was called.
  */
 export function runMigrations(
   database: Database,
   migrations: Migration[],
 ): void {
   const sorted = [...migrations].sort((a, b) => a.version - b.version);
-  const currentVersion = getSchemaVersion(database);
 
-  const pending = sorted.filter((m) => m.version > currentVersion);
-  if (pending.length === 0) return;
+  database.exec('BEGIN EXCLUSIVE');
+  try {
+    ensureVersionTable(database);
+    const currentVersion = getSchemaVersion(database);
 
-  for (const m of pending) {
-    logger.info(
-      { version: m.version, description: m.description },
-      'Applying database migration',
-    );
-    database.transaction(() => {
+    const pending = sorted.filter((m) => m.version > currentVersion);
+    if (pending.length === 0) {
+      database.exec('COMMIT');
+      return;
+    }
+
+    for (const m of pending) {
+      logger.info(
+        { version: m.version, description: m.description },
+        'Applying database migration',
+      );
       m.up(database);
       setSchemaVersion(database, m.version);
-    })();
+    }
+    database.exec('COMMIT');
+  } catch (e) {
+    database.exec('ROLLBACK');
+    throw e;
   }
 }
 
@@ -464,14 +477,21 @@ const migration1: Migration = {
       'TEXT',
     );
 
-    // Heartbeat feature removed — clear any lingering config
+    // Heartbeat feature removed — clear any lingering config.
+    // Split into separate try/catch blocks so an error on one table
+    // doesn't mask a real error on the other.
     try {
-      db.exec(`
-        UPDATE registered_groups SET heartbeat = NULL WHERE heartbeat IS NOT NULL;
-        UPDATE agents SET heartbeat = NULL WHERE heartbeat IS NOT NULL;
-      `);
+      db.exec(
+        `UPDATE registered_groups SET heartbeat = NULL WHERE heartbeat IS NOT NULL`,
+      );
     } catch {
-      // columns may not exist on very old DBs — harmless
+      // column may not exist on very old DBs
+    }
+    try {
+      db.exec(`UPDATE agents SET heartbeat = NULL WHERE heartbeat IS NOT NULL`);
+    } catch {
+      // agents table never had heartbeat in the inline CREATE TABLE —
+      // only pre-migration DBs have it, so this is expected on fresh DBs
     }
   },
 };

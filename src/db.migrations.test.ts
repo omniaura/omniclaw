@@ -812,6 +812,86 @@ describe('versioned migration framework', () => {
     db.close();
   });
 
+  it('applies migrations in version order regardless of input order', () => {
+    const db = new Database(':memory:');
+
+    let executionOrder: number[] = [];
+    const m1: Migration = {
+      version: 1,
+      description: 'First',
+      up: () => {
+        executionOrder.push(1);
+      },
+    };
+    const m2: Migration = {
+      version: 2,
+      description: 'Second',
+      up: (d) => {
+        executionOrder.push(2);
+        d.exec(
+          'CREATE TABLE IF NOT EXISTS test_order (id INTEGER PRIMARY KEY)',
+        );
+      },
+    };
+    const m3: Migration = {
+      version: 3,
+      description: 'Third',
+      up: () => {
+        executionOrder.push(3);
+      },
+    };
+
+    // Pass in reverse order — runner should sort them
+    runMigrations(db, [m3, m1, m2]);
+
+    expect(executionOrder).toEqual([1, 2, 3]);
+    expect(getSchemaVersion(db)).toBe(3);
+
+    db.close();
+  });
+
+  it('rolls back entire batch when a migration fails', () => {
+    const db = new Database(':memory:');
+
+    // First, apply baseline so we have tables to work with
+    runMigrations(db, allMigrations);
+    expect(getSchemaVersion(db)).toBe(BASELINE_VERSION);
+
+    const failingMigration: Migration = {
+      version: BASELINE_VERSION + 1,
+      description: 'Add good_col to chats',
+      up: (d) => {
+        d.exec('ALTER TABLE chats ADD COLUMN good_col TEXT');
+      },
+    };
+    const crashingMigration: Migration = {
+      version: BASELINE_VERSION + 2,
+      description: 'This one throws',
+      up: () => {
+        throw new Error('intentional test failure');
+      },
+    };
+
+    expect(() =>
+      runMigrations(db, [
+        ...allMigrations,
+        failingMigration,
+        crashingMigration,
+      ]),
+    ).toThrow('intentional test failure');
+
+    // Version should remain at baseline — the entire batch rolled back
+    expect(getSchemaVersion(db)).toBe(BASELINE_VERSION);
+
+    // good_col should NOT exist (rolled back)
+    const cols = db.query('PRAGMA table_info(chats)').all() as Array<{
+      name: string;
+    }>;
+    expect(cols.map((c) => c.name)).not.toContain('good_col');
+
+    db.close();
+  });
+
   it('skips already-applied migrations', () => {
     const db = new Database(':memory:');
 
