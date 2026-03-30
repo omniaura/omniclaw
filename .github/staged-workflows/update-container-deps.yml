@@ -1,0 +1,189 @@
+name: Update Container Deps
+
+on:
+  schedule:
+    # Run daily at 9am UTC (offset from opencode at 7am, claude-sdk at 8am)
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      tool:
+        description: 'Specific tool to update (leave empty for all)'
+        required: false
+        type: choice
+        options:
+          - all
+          - go
+          - just
+          - agent-browser
+          - graphite
+          - codex
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tool: go
+            arg: GO_VERSION
+            fetch_cmd: 'curl -fsSL ''https://go.dev/dl/?mode=json'' | jq -r ''.[0].version | ltrimstr("go")'''
+          - tool: just
+            arg: JUST_VERSION
+            fetch_cmd: "gh api repos/casey/just/releases/latest --jq '.tag_name'"
+          - tool: agent-browser
+            arg: AGENT_BROWSER_VERSION
+            fetch_cmd: "curl -fsSL https://registry.npmjs.org/agent-browser/latest | jq -r '.version'"
+          - tool: graphite
+            arg: GRAPHITE_VERSION
+            fetch_cmd: "curl -fsSL 'https://registry.npmjs.org/@withgraphite%2fgraphite-cli/latest' | jq -r '.version'"
+          - tool: codex
+            arg: CODEX_VERSION
+            fetch_cmd: "curl -fsSL 'https://registry.npmjs.org/@openai%2fcodex/latest' | jq -r '.version'"
+
+    steps:
+      - name: Skip if specific tool requested and not this one
+        id: filter
+        run: |
+          INPUT_TOOL="${{ github.event.inputs.tool || 'all' }}"
+          if [ "$INPUT_TOOL" != "all" ] && [ "$INPUT_TOOL" != "${{ matrix.tool }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check for GitHub App secrets
+        if: steps.filter.outputs.skip != 'true'
+        id: check-secrets
+        run: |
+          if [ -z "$APP_ID" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "GitHub App secrets not configured, using default token"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+
+      - name: Create GitHub App token
+        if: steps.filter.outputs.skip != 'true' && steps.check-secrets.outputs.skip != 'true'
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Checkout
+        if: steps.filter.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || github.token }}
+
+      - name: Get current version
+        if: steps.filter.outputs.skip != 'true'
+        id: current
+        run: |
+          VERSION=$(grep -oP 'ARG ${{ matrix.arg }}=\K[^\s]+' container/Dockerfile.base)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Current ${{ matrix.tool }}: $VERSION"
+
+      - name: Get latest version
+        if: steps.filter.outputs.skip != 'true'
+        id: latest
+        run: |
+          VERSION=$(${{ matrix.fetch_cmd }})
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Latest ${{ matrix.tool }}: $VERSION"
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || github.token }}
+
+      - name: Check if update needed
+        if: steps.filter.outputs.skip != 'true'
+        id: check
+        run: |
+          if [ "${{ steps.current.outputs.version }}" != "${{ steps.latest.outputs.version }}" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Update available: ${{ steps.current.outputs.version }} -> ${{ steps.latest.outputs.version }}"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "${{ matrix.tool }} is up to date"
+          fi
+
+      - name: Check for existing PR
+        if: steps.filter.outputs.skip != 'true' && steps.check.outputs.changed == 'true'
+        id: existing_pr
+        run: |
+          PR=$(gh pr list --repo omniaura/omniclaw --base main --head "update/${{ matrix.tool }}-${{ steps.latest.outputs.version }}" --json number --jq '.[0].number // ""')
+          echo "pr=$PR" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || github.token }}
+
+      - name: Apply update
+        if: steps.filter.outputs.skip != 'true' && steps.check.outputs.changed == 'true' && steps.existing_pr.outputs.pr == ''
+        run: |
+          sed -i "s/ARG ${{ matrix.arg }}=${{ steps.current.outputs.version }}/ARG ${{ matrix.arg }}=${{ steps.latest.outputs.version }}/" container/Dockerfile.base
+
+      - name: Commit and open PR
+        id: create_pr
+        if: steps.filter.outputs.skip != 'true' && steps.check.outputs.changed == 'true' && steps.existing_pr.outputs.pr == ''
+        run: |
+          BRANCH="update/${{ matrix.tool }}-${{ steps.latest.outputs.version }}"
+          TITLE="chore(container): bump ${{ matrix.tool }} to ${{ steps.latest.outputs.version }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add container/Dockerfile.base
+          git commit -m "$TITLE"
+          git push origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+          BODY_FILE=$(mktemp)
+          trap 'rm -f "$BODY_FILE"' EXIT
+          printf '## %s update\n\n' "${{ matrix.tool }}" > "$BODY_FILE"
+          printf -- '- **%s**: `%s` → `%s` (`container/Dockerfile.base` `%s`)\n' \
+            "${{ matrix.tool }}" \
+            "${{ steps.current.outputs.version }}" \
+            "${{ steps.latest.outputs.version }}" \
+            "${{ matrix.arg }}" >> "$BODY_FILE"
+          printf '\nMerging will not auto-rebuild the container — run `just update-container` after merge.\n' >> "$BODY_FILE"
+
+          gh pr create \
+            --repo omniaura/omniclaw \
+            --base main \
+            --head "$BRANCH" \
+            --title "$TITLE" \
+            --body-file "$BODY_FILE"
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || github.token }}
+
+      - name: Ensure CI is queued for update PR
+        if: steps.filter.outputs.skip != 'true' && steps.check.outputs.changed == 'true' && steps.existing_pr.outputs.pr == ''
+        run: |
+          BRANCH="${{ steps.create_pr.outputs.branch }}"
+          HEAD_SHA="${{ steps.create_pr.outputs.head_sha }}"
+          sleep 15
+
+          EXISTING_RUN=$(gh run list \
+            --repo omniaura/omniclaw \
+            --workflow ci.yml \
+            --branch "$BRANCH" \
+            --json headSha,event,status \
+            --jq 'map(select(.headSha == "'"$HEAD_SHA"'" and (.event == "pull_request" or .event == "workflow_dispatch" or .event == "pull_request_target"))) | length')
+
+          if [ "$EXISTING_RUN" -eq 0 ]; then
+            echo "No CI run detected for $BRANCH@$HEAD_SHA; dispatching workflow manually"
+            gh workflow run ci.yml \
+              --repo omniaura/omniclaw \
+              --ref "$BRANCH"
+          else
+            echo "CI already queued for $BRANCH@$HEAD_SHA"
+          fi
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || github.token }}
