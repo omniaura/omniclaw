@@ -959,7 +959,7 @@ async function handleProxyLogStream(
   try {
     const response = await result.client.streamLogs();
     const contentType = response.headers.get('content-type') || '';
-    if (!contentType.includes('text/event-stream') && !response.body) {
+    if (!contentType.includes('text/event-stream') || !response.body) {
       return sseError('Remote peer returned non-SSE response');
     }
     return new Response(response.body, {
