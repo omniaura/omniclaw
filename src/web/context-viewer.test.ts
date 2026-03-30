@@ -61,6 +61,7 @@ function makeState(options?: {
     getQueueDetails: () => [],
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
+    getTaskRunPhaseEvents: () => [],
     searchMessages: () => [],
     createTask: () => {},
     updateTask: () => {},

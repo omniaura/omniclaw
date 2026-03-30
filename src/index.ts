@@ -77,6 +77,7 @@ import {
   getSubscriptionsForAgent,
   getTaskById,
   getTaskRunLogs,
+  getTaskRunPhaseEvents,
   initDatabase,
   setAgent,
   setAgentHealth,
@@ -2543,6 +2544,8 @@ async function main(): Promise<void> {
     getQueueDetails: () => queue.getDetailedStats(),
     getIpcEvents: (count) => ipcEvents.recent(count),
     getTaskRunLogs: (taskId, limit) => getTaskRunLogs(taskId, limit),
+    getTaskRunPhaseEvents: (taskId, runAt) =>
+      getTaskRunPhaseEvents(taskId, runAt),
     searchMessages: (query, chatJid, limit) =>
       dbSearchMessages(query, chatJid, limit),
     createTask: (task) => dbCreateTask(task),

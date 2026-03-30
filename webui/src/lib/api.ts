@@ -82,6 +82,20 @@ export interface TaskRunLog {
   status: 'success' | 'error';
   result: string | null;
   error: string | null;
+  outcome_state?: 'done' | 'blocked' | 'abandoned';
+  outcome_reason?: string;
+  outcome_question?: string;
+}
+
+export interface TaskRunPhaseEvent {
+  task_id: string;
+  run_at: string;
+  sequence: number;
+  phase: string;
+  event_at: string;
+  status: 'ok' | 'error';
+  retryable: boolean;
+  error: string | null;
 }
 
 export interface ChatInfo {
@@ -318,6 +332,10 @@ export const api = {
   getTaskRuns: (id: string, limit?: number) =>
     get<TaskRunLog[]>(
       `/api/tasks/${encodeURIComponent(id)}/runs${limit ? `?limit=${limit}` : ''}`,
+    ),
+  getTaskRunPhases: (id: string, runAt: string) =>
+    get<TaskRunPhaseEvent[]>(
+      `/api/tasks/${encodeURIComponent(id)}/runs/${encodeURIComponent(runAt)}/phases`,
     ),
 
   // Chats & messages

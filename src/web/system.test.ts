@@ -84,6 +84,7 @@ function makeState(agents: Agent[] = [makeAgent()]): WebStateProvider {
     getQueueDetails: () => [],
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
+    getTaskRunPhaseEvents: () => [],
     searchMessages: () => [],
     createTask: () => {},
     updateTask: () => {},

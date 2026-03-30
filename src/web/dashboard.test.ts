@@ -84,6 +84,7 @@ function makeState(options?: {
     getQueueDetails: () => [],
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
+    getTaskRunPhaseEvents: () => [],
     searchMessages: () => [],
     createTask: () => {
       throw new Error('Unexpected createTask during render');

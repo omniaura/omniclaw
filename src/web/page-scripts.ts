@@ -1008,20 +1008,59 @@ function openRunHistory(taskId){
   .then(function(r){if(!r.ok)throw new Error("Failed");return r.json();})
   .then(function(runs){
     if(!runs.length){body.innerHTML='<div style="padding:12px;color:var(--text-dim);font-size:11px">No runs yet</div>';return;}
-    var html='<table style="width:100%;font-size:11px"><thead><tr><th>time</th><th>duration</th><th>status</th><th>detail</th></tr></thead><tbody>';
-    runs.forEach(function(r){
+    var html='<table style="width:100%;font-size:11px"><thead><tr><th>time</th><th>duration</th><th>status</th><th>outcome</th><th>detail</th></tr></thead><tbody>';
+    runs.forEach(function(r,idx){
       var d=new Date(r.run_at);var ts=d.toLocaleString();
       var dur=r.duration_ms<1000?r.duration_ms+"ms":(r.duration_ms/1000).toFixed(1)+"s";
       var cls=r.status==="success"?"color:var(--green)":"color:var(--red)";
       var detail=r.status==="success"?(r.result||"ok"):("Error: "+(r.error||"unknown"));
       if(detail.length>80)detail=detail.slice(0,77)+"\\u2026";
-      html+='<tr><td style="white-space:nowrap">'+window.__esc(ts)+'</td>';
+      var outcomeHtml="";
+      if(r.outcome_state){
+        var oClr=r.outcome_state==="done"?"var(--green)":r.outcome_state==="blocked"?"var(--yellow)":"var(--red)";
+        outcomeHtml='<span style="background:color-mix(in srgb,'+oClr+' 20%,transparent);color:'+oClr+';padding:1px 6px;border-radius:3px;font-size:10px">'+window.__esc(r.outcome_state)+'</span>';
+      }
+      html+='<tr style="cursor:pointer" data-run-idx="'+idx+'" data-run-at="'+window.__esc(r.run_at)+'" data-task-id="'+window.__esc(taskId)+'">';
+      html+='<td style="white-space:nowrap"><span style="color:var(--text-dim);margin-right:4px">\\u25B6</span>'+window.__esc(ts)+'</td>';
       html+='<td style="white-space:nowrap">'+window.__esc(dur)+'</td>';
       html+='<td style="'+cls+';font-weight:600">'+window.__esc(r.status)+'</td>';
+      html+='<td>'+outcomeHtml+'</td>';
       html+='<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+window.__esc(r.result||r.error||"")+'">'+window.__esc(detail)+'</td></tr>';
+      html+='<tr class="tm-phase-row" id="tm-phases-'+idx+'" style="display:none"><td colspan="5"></td></tr>';
     });
     html+='</tbody></table>';
     body.innerHTML=html;
+    body.querySelectorAll("tr[data-run-at]").forEach(function(row){
+      row.addEventListener("click",function(){
+        var phaseRow=document.getElementById("tm-phases-"+row.dataset.runIdx);
+        if(!phaseRow)return;
+        var cell=phaseRow.querySelector("td");
+        if(phaseRow.style.display!=="none"){phaseRow.style.display="none";row.querySelector("span").textContent="\\u25B6";return;}
+        row.querySelector("span").textContent="\\u25BC";
+        phaseRow.style.display="";
+        if(cell.dataset.loaded)return;
+        cell.innerHTML='<div style="padding:4px 12px;color:var(--text-dim);font-size:10px">Loading phases\\u2026</div>';
+        fetch("/api/tasks/"+encodeURIComponent(row.dataset.taskId)+"/runs/"+encodeURIComponent(row.dataset.runAt)+"/phases")
+        .then(function(r){return r.json();})
+        .then(function(phases){
+          cell.dataset.loaded="1";
+          if(!phases.length){cell.innerHTML='<div style="padding:4px 12px;color:var(--text-dim);font-size:10px">No phase data</div>';return;}
+          var ph='<div style="border-left:2px solid var(--border);margin-left:8px;padding-left:12px">';
+          var labels={lease_acquired:"Lease acquired",group_resolved:"Group resolved",dispatch_started:"Dispatch started",stream_result_received:"Result received",outbound_send_attempted:"Outbound send",run_finalized:"Finalized"};
+          phases.forEach(function(p){
+            var dot=p.status==="ok"?"var(--green)":"var(--red)";
+            ph+='<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:10px">';
+            ph+='<span style="width:6px;height:6px;border-radius:50%;background:'+dot+';flex-shrink:0"></span>';
+            ph+='<span style="color:var(--text-dim);width:100px;flex-shrink:0">'+(labels[p.phase]||window.__esc(p.phase))+'</span>';
+            if(p.status==="error"){ph+='<span style="color:var(--red)">'+window.__esc(p.error||"error")+'</span>';if(p.retryable)ph+=' <span style="background:color-mix(in srgb,var(--yellow) 20%,transparent);color:var(--yellow);padding:0 4px;border-radius:3px;font-size:9px">retryable</span>';}
+            ph+='</div>';
+          });
+          ph+='</div>';
+          cell.innerHTML=ph;
+        })
+        .catch(function(){cell.innerHTML='<div style="padding:4px 12px;color:var(--red);font-size:10px">Failed to load phases</div>';cell.dataset.loaded="1";});
+      });
+    });
   })
   .catch(function(){body.innerHTML='<div style="padding:12px;color:var(--red);font-size:11px">Failed to load runs</div>';});
 }

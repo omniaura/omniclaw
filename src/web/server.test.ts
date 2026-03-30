@@ -148,6 +148,7 @@ function makeState(
     getQueueDetails: () => [],
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
+    getTaskRunPhaseEvents: () => [],
     searchMessages: () => [],
     createTask: (task) => store.create(task),
     updateTask: (id, updates) => store.update(id, updates),
