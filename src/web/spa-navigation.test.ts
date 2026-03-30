@@ -240,10 +240,7 @@ describe('SPA page navigation via /api/page/*', () => {
 
   for (const page of spaPages) {
     it(`GET /api/page/${page.name} returns SSE patch with title, nav, and content`, async () => {
-      handle = startWebServer(
-        { port: 0, auth: testAuth },
-        makeState(),
-      );
+      handle = startWebServer({ port: 0, auth: testAuth }, makeState());
       const res = await authedFetch(`/api/page/${page.name}`);
 
       expect(res.status).toBe(200);
@@ -617,12 +614,7 @@ describe('Auth flow: login → session → logout', () => {
   it('all pages accessible without auth when not configured', async () => {
     handle = startWebServer({ port: 0 }, makeState());
 
-    const pages = [
-      '/',
-      '/tasks',
-      '/logs',
-      '/network',
-    ];
+    const pages = ['/', '/tasks', '/logs', '/network'];
 
     for (const page of pages) {
       const res = await fetch(baseUrl(page));
@@ -637,9 +629,7 @@ describe('Agent detail SPA navigation', () => {
   it('returns agent detail page via SPA nav with correct title', async () => {
     handle = startWebServer({ port: 0, auth: testAuth }, makeState());
 
-    const res = await authedFetch(
-      '/api/page/agent-detail?id=agent-spa',
-    );
+    const res = await authedFetch('/api/page/agent-detail?id=agent-spa');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/event-stream');
 
@@ -650,9 +640,7 @@ describe('Agent detail SPA navigation', () => {
   it('returns not found title for unknown agent', async () => {
     handle = startWebServer({ port: 0, auth: testAuth }, makeState());
 
-    const res = await authedFetch(
-      '/api/page/agent-detail?id=nonexistent',
-    );
+    const res = await authedFetch('/api/page/agent-detail?id=nonexistent');
     expect(res.status).toBe(200);
 
     const body = await res.text();
