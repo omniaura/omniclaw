@@ -2,6 +2,13 @@ import { describe, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
 
 import { createSchema } from './db.js';
+import {
+  allMigrations,
+  BASELINE_VERSION,
+  getSchemaVersion,
+  runMigrations,
+  type Migration,
+} from './migrations.js';
 
 /**
  * Legacy fixture modeled from the user's current local DB shape:
@@ -650,6 +657,179 @@ describe('db migrations (bun:sqlite)', () => {
       .query('SELECT COUNT(*) AS cnt FROM channel_subscriptions')
       .get() as { cnt: number };
     expect(count.cnt).toBe(4);
+
+    db.close();
+  });
+});
+
+describe('versioned migration framework', () => {
+  it('stamps schema_version on fresh database', () => {
+    const db = new Database(':memory:');
+    runMigrations(db, allMigrations);
+
+    const version = getSchemaVersion(db);
+    expect(version).toBe(BASELINE_VERSION);
+
+    // Verify the schema_version table has exactly one row
+    const row = db.prepare('SELECT * FROM schema_version').get() as {
+      id: number;
+      version: number;
+    };
+    expect(row.id).toBe(1);
+    expect(row.version).toBe(BASELINE_VERSION);
+
+    db.close();
+  });
+
+  it('handles existing DB with old schema — adds missing columns', () => {
+    const db = new Database(':memory:');
+
+    // Simulate existing DB with old schema (missing agent_runtime, etc.)
+    db.exec(`
+      CREATE TABLE router_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE chats (jid TEXT PRIMARY KEY, name TEXT, last_message_time TEXT);
+      CREATE TABLE agents (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT,
+        folder TEXT NOT NULL UNIQUE, backend TEXT NOT NULL DEFAULT 'apple-container',
+        container_config TEXT, is_admin INTEGER NOT NULL DEFAULT 0,
+        server_folder TEXT, created_at TEXT NOT NULL
+      );
+    `);
+
+    // Insert data to prove it survives
+    db.exec(
+      "INSERT INTO router_state (key, value) VALUES ('test_key', 'test_val')",
+    );
+    db.exec(
+      "INSERT INTO agents (id, name, folder, backend, is_admin, created_at) VALUES ('a1', 'Agent', 'a1', 'apple-container', 0, '2026-01-01')",
+    );
+
+    runMigrations(db, allMigrations);
+
+    // Should be at baseline version
+    expect(getSchemaVersion(db)).toBe(BASELINE_VERSION);
+
+    // Existing data should survive
+    const row = db
+      .prepare("SELECT value FROM router_state WHERE key = 'test_key'")
+      .get() as { value: string };
+    expect(row.value).toBe('test_val');
+
+    // Missing columns should have been added
+    const agentCols = db.query('PRAGMA table_info(agents)').all() as Array<{
+      name: string;
+    }>;
+    const colNames = agentCols.map((c) => c.name);
+    expect(colNames).toContain('agent_runtime');
+    expect(colNames).toContain('agent_context_folder');
+    expect(colNames).toContain('avatar_url');
+
+    // Chats should have discord_guild_id added
+    const chatCols = db.query('PRAGMA table_info(chats)').all() as Array<{
+      name: string;
+    }>;
+    expect(chatCols.map((c) => c.name)).toContain('discord_guild_id');
+
+    db.close();
+  });
+
+  it('runs only pending migrations on stamped DB', () => {
+    const db = new Database(':memory:');
+    runMigrations(db, allMigrations);
+    expect(getSchemaVersion(db)).toBe(BASELINE_VERSION);
+
+    // Define a new migration beyond baseline
+    const extraMigration: Migration = {
+      version: BASELINE_VERSION + 1,
+      description: 'Add test_column to chats',
+      up: (d) => {
+        d.exec('ALTER TABLE chats ADD COLUMN test_col TEXT');
+      },
+    };
+
+    runMigrations(db, [...allMigrations, extraMigration]);
+    expect(getSchemaVersion(db)).toBe(BASELINE_VERSION + 1);
+
+    // Verify column was added
+    const cols = db.query('PRAGMA table_info(chats)').all() as Array<{
+      name: string;
+    }>;
+    expect(cols.map((c) => c.name)).toContain('test_col');
+
+    db.close();
+  });
+
+  it('is idempotent — running twice is safe', () => {
+    const db = new Database(':memory:');
+    runMigrations(db, allMigrations);
+    const v1 = getSchemaVersion(db);
+
+    runMigrations(db, allMigrations);
+    const v2 = getSchemaVersion(db);
+
+    expect(v1).toBe(v2);
+    expect(v2).toBe(BASELINE_VERSION);
+
+    db.close();
+  });
+
+  it('creates all expected tables on fresh DB', () => {
+    const db = new Database(':memory:');
+    runMigrations(db, allMigrations);
+
+    const tables = db
+      .query(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name != 'sqlite_sequence' ORDER BY name",
+      )
+      .all() as Array<{ name: string }>;
+    const tableNames = tables.map((t) => t.name);
+
+    const expected = [
+      'agent_health',
+      'agents',
+      'channel_routes',
+      'channel_subscriptions',
+      'chats',
+      'discovery_peers',
+      'github_webhook_deliveries',
+      'guild_rosters',
+      'guilds',
+      'messages',
+      'pair_requests',
+      'registered_groups',
+      'router_state',
+      'scheduled_tasks',
+      'schema_version',
+      'sessions',
+      'task_run_logs',
+      'task_run_phase_events',
+    ];
+
+    for (const name of expected) {
+      expect(tableNames).toContain(name);
+    }
+
+    db.close();
+  });
+
+  it('skips already-applied migrations', () => {
+    const db = new Database(':memory:');
+
+    // Run baseline + extra migration
+    const extraMigration: Migration = {
+      version: BASELINE_VERSION + 1,
+      description: 'Add extra_col to chats',
+      up: (d) => {
+        d.exec('ALTER TABLE chats ADD COLUMN extra_col TEXT');
+      },
+    };
+    const allWithExtra = [...allMigrations, extraMigration];
+    runMigrations(db, allWithExtra);
+    expect(getSchemaVersion(db)).toBe(BASELINE_VERSION + 1);
+
+    // Running again should not fail (migration already applied)
+    runMigrations(db, allWithExtra);
+    expect(getSchemaVersion(db)).toBe(BASELINE_VERSION + 1);
 
     db.close();
   });
