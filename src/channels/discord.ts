@@ -184,12 +184,6 @@ function normalizeDiscordMentions(text: string): string {
   return normalized;
 }
 
-export interface SessionInfo {
-  sessionId: string;
-  modifiedAt: Date;
-  sizeBytes: number;
-}
-
 export interface SessionCommandResult {
   message: string;
 }
@@ -1189,6 +1183,16 @@ export class DiscordChannel implements Channel {
 
     // Handle system commands (resume, sessions) directly on the host
     if (SYSTEM_COMMAND_NAMES.has(interaction.commandName)) {
+      if (
+        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
+      ) {
+        await interaction.reply({
+          content:
+            'You need the **Manage Channels** permission to use session commands.',
+          ephemeral: true,
+        });
+        return;
+      }
       if (!this.opts.onSessionCommand) {
         await interaction.reply({
           content: 'Session commands are not configured.',

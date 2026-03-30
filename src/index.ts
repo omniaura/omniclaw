@@ -319,7 +319,17 @@ function handleSessionCommand(
   group: RegisteredGroup,
   sessionId?: string,
 ): { message: string } {
-  const runtimeFolder = getRuntimeGroupFolder(group.folder, chatJid);
+  // Compute the correct runtime folder, accounting for subscription-based
+  // multi-agent channels that use makeDispatchKey for session keying.
+  const subs = getSubscriptionsForChannelInMemory(chatJid);
+  const matchingSub = subs.find((s) => {
+    const agent = agents[s.agentId];
+    return agent?.folder === group.folder;
+  });
+  const processKey = matchingSub
+    ? makeDispatchKey(chatJid, matchingSub.agentId)
+    : chatJid;
+  const runtimeFolder = getRuntimeGroupFolder(group.folder, processKey);
   const sessionsDir = path.join(
     DATA_DIR,
     'sessions',
@@ -366,6 +376,13 @@ function handleSessionCommand(
   if (!sessionId) {
     // No session ID provided — show sessions instead
     return handleSessionCommand('sessions', chatJid, group);
+  }
+
+  // Guard against path traversal — session IDs are hex UUIDs
+  if (!/^[a-f0-9-]+$/i.test(sessionId)) {
+    return {
+      message: `Invalid session ID \`${sessionId}\`. Use \`/sessions\` to list available sessions.`,
+    };
   }
 
   // Validate session file exists
