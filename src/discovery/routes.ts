@@ -818,9 +818,7 @@ function getPeerClientResult(
       },
       ctx,
     );
-    return client
-      ? { client }
-      : { error: 'Failed to create peer client' };
+    return client ? { client } : { error: 'Failed to create peer client' };
   }
 
   return {
