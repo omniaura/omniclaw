@@ -783,25 +783,33 @@ function handleRevokePeer(
 
 // --- Proxy handlers ---
 
-function getPeerClient(
+type PeerClientResult =
+  | { client: PeerClientLike; error?: undefined }
+  | { client?: undefined; error: string };
+
+function getPeerClientResult(
   instanceId: string,
   ctx: DiscoveryRouteContext,
-): PeerClientLike | null {
-  if (ctx.runtime && !ctx.runtime.isRemoteAccessAllowed()) return null;
+): PeerClientResult {
+  if (ctx.runtime && !ctx.runtime.isRemoteAccessAllowed()) {
+    return { error: 'Remote access not allowed on this network' };
+  }
 
   const peer = ctx.trustStore.getPeer(instanceId);
-  if (!peer || peer.status !== 'trusted' || !peer.sharedSecret) return null;
+  if (!peer) return { error: 'Unknown peer' };
+  if (peer.status !== 'trusted') return { error: 'Peer is not trusted' };
+  if (!peer.sharedSecret) return { error: 'Peer has no shared secret' };
 
   // Prefer mDNS-discovered host (more current) over stored
   const discovered = ctx.discovery?.getPeers().get(instanceId);
   const host = discovered?.host ?? peer.host;
   const port = discovered?.port ?? peer.port;
 
-  if (!host || !port) return null;
+  if (!host || !port) return { error: 'Peer address unavailable' };
 
   ctx.trustStore.updatePeerLastSeen(instanceId);
   if (ctx.createPeerClient) {
-    return ctx.createPeerClient(
+    const client = ctx.createPeerClient(
       {
         instanceId,
         host,
@@ -810,9 +818,21 @@ function getPeerClient(
       },
       ctx,
     );
+    return client ? { client } : { error: 'Failed to create peer client' };
   }
 
-  return new PeerClient(host, port, ctx.instanceId, peer.sharedSecret);
+  return {
+    client: new PeerClient(host, port, ctx.instanceId, peer.sharedSecret),
+  };
+}
+
+/** @deprecated Use getPeerClientResult for better error context */
+function getPeerClient(
+  instanceId: string,
+  ctx: DiscoveryRouteContext,
+): PeerClientLike | null {
+  const result = getPeerClientResult(instanceId, ctx);
+  return result.client ?? null;
 }
 
 async function handleProxyAgents(
@@ -915,15 +935,33 @@ async function handleProxyStats(
   }
 }
 
+/** Build a single-event SSE response for error reporting to EventSource clients. */
+function sseError(message: string, status = 200): Response {
+  const payload = JSON.stringify({ error: message });
+  const body = `event: error\ndata: ${payload}\n\n`;
+  return new Response(body, {
+    status,
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
+
 async function handleProxyLogStream(
   instanceId: string,
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
-  const client = getPeerClient(instanceId, ctx);
-  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+  const result = getPeerClientResult(instanceId, ctx);
+  if (!result.client) return sseError(result.error);
 
   try {
-    const response = await client.streamLogs();
+    const response = await result.client.streamLogs();
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('text/event-stream') || !response.body) {
+      return sseError('Remote peer returned non-SSE response');
+    }
     return new Response(response.body, {
       headers: {
         'Content-Type': 'text/event-stream; charset=utf-8',
@@ -932,12 +970,8 @@ async function handleProxyLogStream(
       },
     });
   } catch (err) {
-    return json(
-      {
-        error: `Proxy error: ${err instanceof Error ? err.message : String(err)}`,
-      },
-      502,
-    );
+    const msg = err instanceof Error ? err.message : String(err);
+    return sseError(`Proxy error: ${msg}`);
   }
 }
 
@@ -946,20 +980,20 @@ async function handleProxyContextLayers(
   url: URL,
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
-  const client = getPeerClient(instanceId, ctx);
-  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+  const result = getPeerClientResult(instanceId, ctx);
+  if (!result.client) return json({ error: result.error }, 403);
 
   try {
     const params: Record<string, string> = {};
     for (const [key, value] of url.searchParams) {
       params[key] = value;
     }
-    const layers = await client.getContextLayers(params);
+    const layers = await result.client.getContextLayers(params);
     return json(layers);
   } catch (err) {
     return json(
       {
-        error: `Proxy error: ${err instanceof Error ? err.message : String(err)}`,
+        error: `Remote context unavailable: ${err instanceof Error ? err.message : String(err)}`,
       },
       502,
     );
@@ -971,8 +1005,8 @@ async function handleProxyContextWrite(
   req: Request,
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
-  const client = getPeerClient(instanceId, ctx);
-  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+  const result = getPeerClientResult(instanceId, ctx);
+  if (!result.client) return json({ error: result.error }, 403);
 
   let body: { path: string; content: string };
   try {
@@ -990,12 +1024,15 @@ async function handleProxyContextWrite(
   }
 
   try {
-    const result = await client.writeContextFile(body.path, body.content);
-    return json(result);
+    const writeResult = await result.client.writeContextFile(
+      body.path,
+      body.content,
+    );
+    return json(writeResult);
   } catch (err) {
     return json(
       {
-        error: `Proxy error: ${err instanceof Error ? err.message : String(err)}`,
+        error: `Remote write failed: ${err instanceof Error ? err.message : String(err)}`,
       },
       502,
     );

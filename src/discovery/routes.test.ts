@@ -466,6 +466,102 @@ describe('checkPeerAuth — body hash verification', () => {
     expect(body).toContain('remote log');
   });
 
+  it('returns SSE error event when peer is not trusted for log stream', async () => {
+    const req = new Request(
+      'http://localhost/api/discovery/peers/unknown-peer/logs',
+      { method: 'GET' },
+    );
+
+    const ctx = makeContext({
+      trustStore: {
+        getPeer: () => null,
+        updatePeerLastSeen: () => {},
+      } as any,
+    });
+
+    const res = await handleDiscoveryRequest(req, new URL(req.url), ctx);
+    expect(res).not.toBeNull();
+    const response = res as Response;
+    expect(response.headers.get('Content-Type')).toContain('text/event-stream');
+    const body = await response.text();
+    expect(body).toContain('event: error');
+    expect(body).toContain('Unknown peer');
+  });
+
+  it('returns SSE error event when remote access is not allowed for log stream', async () => {
+    const req = new Request(
+      'http://localhost/api/discovery/peers/peer-1/logs',
+      { method: 'GET' },
+    );
+
+    const ctx = makeContext({
+      trustStore: {
+        getPeer: () => ({
+          status: 'trusted',
+          sharedSecret: 'secret',
+          host: '127.0.0.1',
+          port: 6001,
+        }),
+        updatePeerLastSeen: () => {},
+      } as any,
+      runtime: { isRemoteAccessAllowed: () => false } as any,
+    });
+
+    const res = await handleDiscoveryRequest(req, new URL(req.url), ctx);
+    expect(res).not.toBeNull();
+    const response = res as Response;
+    expect(response.headers.get('Content-Type')).toContain('text/event-stream');
+    const body = await response.text();
+    expect(body).toContain('event: error');
+    expect(body).toContain('Remote access not allowed');
+  });
+
+  it('returns JSON error with reason for context layers when peer unavailable', async () => {
+    const req = new Request(
+      'http://localhost/api/discovery/peers/unknown-peer/context/layers?folder=test',
+      { method: 'GET' },
+    );
+
+    const ctx = makeContext({
+      trustStore: {
+        getPeer: () => null,
+        updatePeerLastSeen: () => {},
+      } as any,
+    });
+
+    const res = await handleDiscoveryRequest(req, new URL(req.url), ctx);
+    expect(res).not.toBeNull();
+    const response = res as Response;
+    expect(response.status).toBe(403);
+    const data = (await response.json()) as { error: string };
+    expect(data.error).toBe('Unknown peer');
+  });
+
+  it('returns JSON error with reason for context write when peer unavailable', async () => {
+    const req = new Request(
+      'http://localhost/api/discovery/peers/unknown-peer/context/file',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: 'test/CLAUDE.md', content: 'hello' }),
+      },
+    );
+
+    const ctx = makeContext({
+      trustStore: {
+        getPeer: () => null,
+        updatePeerLastSeen: () => {},
+      } as any,
+    });
+
+    const res = await handleDiscoveryRequest(req, new URL(req.url), ctx);
+    expect(res).not.toBeNull();
+    const response = res as Response;
+    expect(response.status).toBe(403);
+    const data = (await response.json()) as { error: string };
+    expect(data.error).toBe('Unknown peer');
+  });
+
   it('uses an injected peer client override when provided', async () => {
     const req = new Request(
       'http://localhost/api/discovery/peers/peer-1/agents',

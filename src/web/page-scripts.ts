@@ -1414,7 +1414,11 @@ function contextScript(): string {
     '    +"&channel_folder="+encodeURIComponent(el.getAttribute("data-channel-folder"))',
     '    +"&category_folder="+encodeURIComponent(el.getAttribute("data-category-folder"));',
     '  var loadUrl=(remoteInstanceId?"/api/discovery/peers/"+encodeURIComponent(remoteInstanceId)+"/context/layers?":"/api/context/layers?")+qs;',
-    '  fetch(loadUrl).then(function(r){return r.json();}).then(function(data){',
+    '  fetch(loadUrl).then(function(r){',
+    '    if(!r.ok)return r.json().then(function(d){throw new Error(d.error||"Failed to load context ("+r.status+")");});',
+    '    return r.json();',
+    '  }).then(function(data){',
+    '    if(data.error){throw new Error(data.error);}',
     '    layerData=data;',
     '    ["channel","agent","category","server"].forEach(function(l){',
     '      var dot=document.getElementById("dot-"+l);',
@@ -1425,7 +1429,10 @@ function contextScript(): string {
     '    });',
     '    loadLayerContent(currentLayer);',
     '    var sb=document.getElementById("save-bar");if(sb)sb.classList.add("visible");',
-    '  }).catch(function(err){console.error("Failed to load context:",err);});',
+    '  }).catch(function(err){',
+    '    console.error("Failed to load context:",err);',
+    '    if(window.__toast)window.__toast(err.message||"Failed to load remote context","error");',
+    '  });',
     '}',
     '',
     'var layerTabs=document.getElementById("layer-tabs");',
@@ -1489,7 +1496,7 @@ function contextScript(): string {
     '  var saveUrl=remoteInstanceId?"/api/discovery/peers/"+encodeURIComponent(remoteInstanceId)+"/context/file":"/api/context/file";',
     '  fetch(saveUrl,{method:"PUT",headers:{"Content-Type":"application/json"},',
     '    body:JSON.stringify({path:info.path,content:content})})',
-    '  .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})',
+    '  .then(function(r){if(!r.ok)return r.json().catch(function(){return{};}).then(function(d){throw new Error(d.error||"Save failed ("+r.status+")");});return r.json();})',
     '  .then(function(){',
     '    originalContent=content;dirty=false;info.content=content;info.exists=true;',
     '    var dot=document.getElementById("dot-"+currentLayer);if(dot)dot.className="dot exists";',
@@ -1852,8 +1859,17 @@ function startRemoteLogs(instanceId){
       appendRemoteLog({level:"info",source:instanceId,msg:event.data});
     }
   });
+  remoteLogsSource.addEventListener("error",function(event){
+    try {
+      var payload=JSON.parse(event.data);
+      setRemoteLogsStatus(payload.error||"Remote log stream error.",true);
+    } catch (_) {
+      setRemoteLogsStatus("Remote log stream error.",true);
+    }
+    stopRemoteLogs(true);
+  });
   remoteLogsSource.onerror=function(){
-    setRemoteLogsStatus("Remote log stream unavailable for "+instanceId+".",true);
+    setRemoteLogsStatus("Remote log stream disconnected for "+instanceId+".",true);
     stopRemoteLogs(true);
   };
 }
