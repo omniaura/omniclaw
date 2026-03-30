@@ -147,8 +147,7 @@ export function handleRequest(
       }
       if (!taskId || !runAt)
         return json({ error: 'Missing task ID or run timestamp' }, 400);
-      if (method === 'GET')
-        return handleGetTaskRunPhases(taskId, runAt, state);
+      if (method === 'GET') return handleGetTaskRunPhases(taskId, runAt, state);
       return json({ error: 'Method not allowed' }, 405);
     }
 

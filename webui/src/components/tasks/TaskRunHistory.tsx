@@ -57,7 +57,10 @@ function PhaseTimeline(props: { taskId: string; runAt: string }) {
               {PHASE_LABELS[phase.phase] ?? phase.phase}
             </span>
             <Show when={phase.status === 'error'}>
-              <span class="text-red truncate max-w-[200px]" title={phase.error ?? ''}>
+              <span
+                class="text-red truncate max-w-[200px]"
+                title={phase.error ?? ''}
+              >
                 {phase.error ?? 'error'}
               </span>
               <Show when={phase.retryable}>
