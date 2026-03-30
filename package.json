@@ -4,7 +4,9 @@
   "description": "OmniClaw - Personal Claude assistant from the Omni ecosystem.",
   "type": "module",
   "main": "src/index.ts",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "engines": {
     "node": ">=22.12.0"
   },
