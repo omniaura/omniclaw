@@ -29,6 +29,7 @@ import {
   DISCOVERY_TRUST_LAN_ADMIN,
   DISPATCH_RUNTIME_SEP,
   GITHUB_WEBHOOK_PATH,
+  GITHUB_WEBHOOK_MAX_BODY_BYTES,
   GITHUB_WEBHOOK_PORT,
   GITHUB_WEBHOOK_SECRET,
   GROUPS_DIR,
@@ -2794,6 +2795,7 @@ async function main(): Promise<void> {
       secret: GITHUB_WEBHOOK_SECRET,
       port: GITHUB_WEBHOOK_PORT,
       path: GITHUB_WEBHOOK_PATH,
+      maxBodyBytes: GITHUB_WEBHOOK_MAX_BODY_BYTES,
       onNotification: dispatchGitHubWebhook,
     });
   } else if (GITHUB_WEBHOOK_PORT > 0 && !GITHUB_WEBHOOK_SECRET) {

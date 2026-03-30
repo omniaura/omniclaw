@@ -14,6 +14,14 @@ import type { GitHubWatchesConfig } from './types.js';
 
 const DEFAULT_PATH = '/webhooks/github';
 const DELIVERY_TTL_MS = 10 * 60_000;
+const DEFAULT_MAX_BODY_BYTES = 256 * 1024;
+const textDecoder = new TextDecoder();
+
+class RequestBodyTooLargeError extends Error {
+  constructor(readonly limitBytes: number) {
+    super(`GitHub webhook body exceeded ${limitBytes} bytes`);
+  }
+}
 
 interface GitHubRepoRef {
   owner: { login: string };
@@ -267,13 +275,63 @@ export interface GitHubWebhookServerOptions {
   secret: string;
   port: number;
   path?: string;
+  maxBodyBytes?: number;
   onNotification: (notification: GitHubWebhookNotification) => Promise<void>;
+}
+
+function parseContentLengthHeader(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
+export async function readGitHubWebhookBody(
+  req: Request,
+  maxBodyBytes: number,
+): Promise<string> {
+  const contentLength = parseContentLengthHeader(
+    req.headers.get('content-length'),
+  );
+  if (contentLength !== null && contentLength > maxBodyBytes) {
+    throw new RequestBodyTooLargeError(maxBodyBytes);
+  }
+
+  if (!req.body) return '';
+
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+
+    totalBytes += value.byteLength;
+    if (totalBytes > maxBodyBytes) {
+      throw new RequestBodyTooLargeError(maxBodyBytes);
+    }
+
+    chunks.push(value);
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return textDecoder.decode(body);
 }
 
 export function startGitHubWebhookServer(options: GitHubWebhookServerOptions): {
   stop: () => void;
+  port: number;
 } {
   const pathname = options.path || DEFAULT_PATH;
+  const maxBodyBytes = options.maxBodyBytes || DEFAULT_MAX_BODY_BYTES;
   const server = Bun.serve({
     port: options.port,
     async fetch(req) {
@@ -286,7 +344,19 @@ export function startGitHubWebhookServer(options: GitHubWebhookServerOptions): {
         req.headers.get('x-github-delivery') || 'unknown-delivery';
       const event = req.headers.get('x-github-event') || '';
       const signature = req.headers.get('x-hub-signature-256');
-      const rawBody = await req.text();
+      let rawBody: string;
+      try {
+        rawBody = await readGitHubWebhookBody(req, maxBodyBytes);
+      } catch (err) {
+        if (err instanceof RequestBodyTooLargeError) {
+          logger.warn(
+            { deliveryId, event, maxBodyBytes },
+            'Rejected oversized GitHub webhook payload',
+          );
+          return new Response('Payload Too Large', { status: 413 });
+        }
+        throw err;
+      }
 
       if (!verifyGitHubWebhookSignature(rawBody, signature, options.secret)) {
         logger.warn({ deliveryId, event }, 'Invalid GitHub webhook signature');
@@ -358,7 +428,10 @@ export function startGitHubWebhookServer(options: GitHubWebhookServerOptions): {
     'GitHub webhook server started',
   );
 
+  const port = server.port ?? Number(new URL(server.url).port);
+
   return {
+    port,
     stop: () => server.stop(true),
   };
 }

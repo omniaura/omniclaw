@@ -2,16 +2,17 @@ import { afterAll, beforeEach, describe, expect, it } from 'bun:test';
 import { createHmac } from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { DATA_DIR } from './config.js';
 import {
   _resetGitHubWebhookReplayCacheForTest,
   buildGitHubWebhookNotification,
   isGitHubWebhookDeliveryProcessed,
   markGitHubWebhookDeliveryProcessed,
+  readGitHubWebhookBody,
   startGitHubWebhookServer,
   verifyGitHubWebhookSignature,
 } from './github-webhooks.js';
 import { _initTestDatabase, isGitHubWebhookDeliveryRecorded } from './db.js';
-import { DATA_DIR } from './config.js';
 import type { GitHubWatchesConfig } from './types.js';
 
 describe('github webhooks', () => {
@@ -28,6 +29,10 @@ describe('github webhooks', () => {
   beforeEach(() => {
     _initTestDatabase();
     _resetGitHubWebhookReplayCacheForTest();
+  });
+
+  afterAll(() => {
+    fs.rmSync(path.join(DATA_DIR, 'github-watches.json'), { force: true });
   });
 
   it('verifies valid webhook signature', () => {
@@ -60,6 +65,145 @@ describe('github webhooks', () => {
     expect(
       markGitHubWebhookDeliveryProcessed('delivery-replay', now + 1_000),
     ).toBe(false);
+  });
+
+  it('reads webhook bodies within the configured byte limit', async () => {
+    const body = JSON.stringify({ hello: 'world' });
+    const req = new Request('http://localhost/webhooks/github', {
+      method: 'POST',
+      body,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(Buffer.byteLength(body)),
+      },
+    });
+
+    await expect(readGitHubWebhookBody(req, 1024)).resolves.toBe(body);
+  });
+
+  it('rejects oversized webhook bodies from content-length before reading', async () => {
+    const body = JSON.stringify({ hello: 'world' });
+    const req = new Request('http://localhost/webhooks/github', {
+      method: 'POST',
+      body,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': '2048',
+      },
+    });
+
+    await expect(readGitHubWebhookBody(req, 1024)).rejects.toThrow(
+      'GitHub webhook body exceeded 1024 bytes',
+    );
+  });
+
+  it('rejects oversized streamed webhook bodies without content-length', async () => {
+    const req = new Request('http://localhost/webhooks/github', {
+      method: 'POST',
+      duplex: 'half',
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"hello":"'));
+          controller.enqueue(new TextEncoder().encode('world"}'));
+          controller.close();
+        },
+      }),
+      headers: {
+        'content-type': 'application/json',
+      },
+    });
+
+    await expect(readGitHubWebhookBody(req, 8)).rejects.toThrow(
+      'GitHub webhook body exceeded 8 bytes',
+    );
+  });
+
+  it('serves valid signed webhook requests within the byte limit', async () => {
+    const body = JSON.stringify({
+      action: 'opened',
+      repository: {
+        owner: { login: 'omniaura' },
+        name: 'omniclaw',
+        full_name: 'omniaura/omniclaw',
+      },
+      sender: { login: 'reviewer' },
+      issue: {
+        number: 1,
+        title: 'hello',
+        html_url: 'https://github.com/omniaura/omniclaw/issues/1',
+      },
+    });
+    const digest = createHmac('sha256', secret).update(body).digest('hex');
+    const deliveries: string[] = [];
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(DATA_DIR, 'github-watches.json'),
+      JSON.stringify(config),
+    );
+    const server = startGitHubWebhookServer({
+      secret,
+      port: 0,
+      maxBodyBytes: 1024,
+      onNotification: async (notification) => {
+        deliveries.push(notification.deliveryId);
+      },
+    });
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${server.port}/webhooks/github`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-github-delivery': 'delivery-ok',
+            'x-github-event': 'issues',
+            'x-hub-signature-256': `sha256=${digest}`,
+          },
+          body,
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(deliveries).toEqual(['delivery-ok']);
+    } finally {
+      server.stop();
+    }
+  });
+
+  it('rejects oversized webhook requests with 413 before signature verification', async () => {
+    const body = JSON.stringify({ hello: 'world' });
+    const deliveries: string[] = [];
+    const server = startGitHubWebhookServer({
+      secret,
+      port: 0,
+      maxBodyBytes: 8,
+      onNotification: async (notification) => {
+        deliveries.push(notification.deliveryId);
+      },
+    });
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${server.port}/webhooks/github`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'content-length': '2048',
+            'x-github-delivery': 'delivery-too-large',
+            'x-github-event': 'issues',
+            'x-hub-signature-256': 'sha256=deadbeef',
+          },
+          body,
+        },
+      );
+
+      expect(response.status).toBe(413);
+      expect(deliveries).toEqual([]);
+    } finally {
+      server.stop();
+    }
   });
 
   it('builds notification for watched PR review comment', () => {

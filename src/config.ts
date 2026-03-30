@@ -124,6 +124,10 @@ const configSchema = z
       z.number().int().nonnegative().default(0),
     ),
     GITHUB_WEBHOOK_PATH: z.string().default('/webhooks/github'),
+    GITHUB_WEBHOOK_MAX_BODY_BYTES: z.preprocess(
+      parseIntegerString,
+      z.number().int().positive().default(262144),
+    ),
     DISCOVERY_ENABLED: z.preprocess(
       parseBooleanString,
       z.boolean().default(false),
@@ -389,6 +393,8 @@ export const TIMEZONE =
 export const GITHUB_WEBHOOK_SECRET = CONFIG.GITHUB_WEBHOOK_SECRET;
 export const GITHUB_WEBHOOK_PORT = CONFIG.GITHUB_WEBHOOK_PORT;
 export const GITHUB_WEBHOOK_PATH = CONFIG.GITHUB_WEBHOOK_PATH;
+export const GITHUB_WEBHOOK_MAX_BODY_BYTES =
+  CONFIG.GITHUB_WEBHOOK_MAX_BODY_BYTES;
 
 // --- Network Discovery ---
 // Set DISCOVERY_ENABLED=true to advertise this instance on the LAN via mDNS.
