@@ -1333,6 +1333,7 @@ async function runQuery(
             status: 'success',
             result: parts.join('\n'),
             newSessionId,
+            resumeAt: lastAssistantUuid,
             intermediate: true,
           });
         }
@@ -1361,6 +1362,7 @@ async function runQuery(
               status: 'success',
               result: '```\n' + truncated + '\n```',
               newSessionId,
+              resumeAt: lastAssistantUuid,
               intermediate: true,
             });
           }
@@ -1445,6 +1447,7 @@ async function runQuery(
         status: 'success',
         result: effectiveResult,
         newSessionId,
+        resumeAt: lastAssistantUuid,
       });
       lastAssistantText = undefined;
 
