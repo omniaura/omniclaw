@@ -114,6 +114,7 @@ import {
 import { logger } from './logger.js';
 import { assertPathWithin } from './path-security.js';
 import { createResumePositionStore } from './resume-position-store.js';
+import { getDiscordChannelSeed, getServerSeed } from './seed-templates.js';
 import {
   findChannel,
   formatMessages,
@@ -892,29 +893,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   if (jid.startsWith('dc:')) {
     const claudeMdPath = path.join(groupDir, 'CLAUDE.md');
     if (!fs.existsSync(claudeMdPath)) {
-      fs.writeFileSync(
-        claudeMdPath,
-        `## Channel: Discord (Secondary)
-This group communicates via Discord, a secondary channel.
-You can freely answer questions and have conversations here.
-For significant actions (file changes, scheduled tasks, sending messages to other groups),
-confirm intent with the current user in this chat before proceeding.
-
-## Getting Context You Don't Have
-When you need project context, repo access, credentials, or information that hasn't been shared with you:
-- Ask in the current chat for anything missing.
-- Be specific: describe exactly what you need and why.
-- Check local docs and repo files first before asking.
-
-## Working with Repos
-You have \`git\` and \`GITHUB_TOKEN\` available in your environment.
-When the admin shares a repo URL, clone it yourself:
-\`\`\`bash
-git clone https://github.com/org/repo.git /workspace/group/repos/repo
-\`\`\`
-Then read the code directly — don't ask the admin to copy files for you.
-`,
-      );
+      fs.writeFileSync(claudeMdPath, getDiscordChannelSeed());
     }
   }
 
@@ -979,25 +958,7 @@ function ensureServerDirectory(serverFolder: string): void {
 
   const claudeMdPath = path.join(serverDir, 'CLAUDE.md');
   if (!fs.existsSync(claudeMdPath)) {
-    fs.writeFileSync(
-      claudeMdPath,
-      `# Server Shared Context
-
-This file is shared across all channels in this Discord server.
-Use it for team-level context: members, projects, repos, conventions.
-Channel-specific notes should go in the channel's own CLAUDE.md.
-
-## Getting Context You Don't Have
-If you need project info, repo URLs, or credentials not listed here, ask directly in the current chat.
-Be explicit about what you need and why.
-
-## Working with Repos
-You have \`git\` and \`GITHUB_TOKEN\` available. When given a repo URL, clone it:
-\`\`\`bash
-git clone https://github.com/org/repo.git /workspace/group/repos/repo
-\`\`\`
-`,
-    );
+    fs.writeFileSync(claudeMdPath, getServerSeed());
     logger.info({ serverFolder }, 'Seeded server-level CLAUDE.md');
   }
 }
