@@ -890,7 +890,7 @@ if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
         timestamp: new Date().toISOString(),
       });
 
-      const response = await waitForResponse(requestId);
+      const response = await waitForResponse(requestId, 8000);
       if (!response) {
         return {
           content: [
