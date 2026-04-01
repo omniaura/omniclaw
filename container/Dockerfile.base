@@ -68,7 +68,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Graphite CLI for stacked PRs workflow (pinned to stable version)
-ARG GRAPHITE_VERSION=1.7.16
+ARG GRAPHITE_VERSION=1.8.3
 RUN npm install -g @withgraphite/graphite-cli@${GRAPHITE_VERSION}
 
 # Install claude-code globally (default agent runtime)
