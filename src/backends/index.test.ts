@@ -1,16 +1,26 @@
-import { describe, it, expect } from 'bun:test';
-import { getBackend } from './index.js';
+import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
+
+import { logger } from '../logger.js';
+import {
+  getBackend,
+  initializeBackends,
+  shutdownBackends,
+} from './index.js';
 import { LocalBackend } from './local-backend.js';
 
 /**
  * Tests for backends/index.ts — the backend factory.
  *
- * Note: resolveBackend is not tested here because file-transfer.test.ts
- * uses mock.module to replace backends/index.js globally. resolveBackend
- * is a thin wrapper over getBackendType + getBackend, both tested separately.
+ * Note: resolveBackend is intentionally not tested here because
+ * file-transfer.test.ts uses mock.module to replace backends/index.js globally.
+ * resolveBackend is a thin wrapper over getBackendType + getBackend.
  */
 
 describe('backends/index', () => {
+  afterEach(() => {
+    mock.restore();
+  });
+
   describe('getBackend', () => {
     it('returns a LocalBackend for apple-container', () => {
       const backend = getBackend('apple-container');
@@ -49,6 +59,85 @@ describe('backends/index', () => {
       expect(typeof backend.writeFile).toBe('function');
       expect(typeof backend.initialize).toBe('function');
       expect(typeof backend.shutdown).toBe('function');
+    });
+  });
+
+  describe('initializeBackends', () => {
+    it('initializes only the default backend when no entities are provided', async () => {
+      const appleBackend = getBackend('apple-container');
+      const dockerBackend = getBackend('docker');
+      const appleInitSpy = spyOn(appleBackend, 'initialize').mockResolvedValue();
+      const dockerInitSpy = spyOn(dockerBackend, 'initialize').mockResolvedValue();
+
+      await initializeBackends({});
+
+      expect(appleInitSpy).toHaveBeenCalledTimes(1);
+      expect(dockerInitSpy).not.toHaveBeenCalled();
+    });
+
+    it('deduplicates backend initialization across entities', async () => {
+      const appleBackend = getBackend('apple-container');
+      const dockerBackend = getBackend('docker');
+      const appleInitSpy = spyOn(appleBackend, 'initialize').mockResolvedValue();
+      const dockerInitSpy = spyOn(dockerBackend, 'initialize').mockResolvedValue();
+
+      await initializeBackends({
+        alpha: {
+          name: 'Alpha',
+          folder: 'alpha',
+          trigger: '@Alpha',
+          added_at: new Date().toISOString(),
+        },
+        beta: {
+          name: 'Beta',
+          folder: 'beta',
+          trigger: '@Beta',
+          added_at: new Date().toISOString(),
+          backend: 'docker',
+        },
+        gamma: {
+          name: 'Gamma',
+          folder: 'gamma',
+          trigger: '@Gamma',
+          added_at: new Date().toISOString(),
+          backend: 'docker',
+        },
+      });
+
+      expect(appleInitSpy).toHaveBeenCalledTimes(1);
+      expect(dockerInitSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('shutdownBackends', () => {
+    it('attempts to shut down all initialized backends', async () => {
+      const appleBackend = getBackend('apple-container');
+      const dockerBackend = getBackend('docker');
+      const appleShutdownSpy = spyOn(appleBackend, 'shutdown').mockResolvedValue();
+      const dockerShutdownSpy = spyOn(dockerBackend, 'shutdown').mockResolvedValue();
+
+      await shutdownBackends();
+
+      expect(appleShutdownSpy).toHaveBeenCalledTimes(1);
+      expect(dockerShutdownSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('logs and continues when a backend shutdown fails', async () => {
+      const appleBackend = getBackend('apple-container');
+      const dockerBackend = getBackend('docker');
+      const failure = new Error('shutdown failed');
+      const warnSpy = spyOn(logger, 'warn').mockImplementation(() => {});
+
+      spyOn(appleBackend, 'shutdown').mockRejectedValue(failure);
+      const dockerShutdownSpy = spyOn(dockerBackend, 'shutdown').mockResolvedValue();
+
+      await shutdownBackends();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        { backend: 'apple-container', error: failure },
+        'Error shutting down backend',
+      );
+      expect(dockerShutdownSpy).toHaveBeenCalledTimes(1);
     });
   });
 });
