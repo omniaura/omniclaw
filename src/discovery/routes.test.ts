@@ -275,6 +275,45 @@ describe('handleDiscoveryRequest', () => {
       expect((res as Response).status).toBe(400);
     }
   });
+
+  it('rejects oversized pair requests before creating trust-store state', async () => {
+    let createPairRequestCalls = 0;
+    const req = withSocketAddress(
+      new Request('http://localhost/api/discovery/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instanceId: 'remote-instance',
+          name: 'Remote',
+          port: 6001,
+          callbackToken: 'x'.repeat(70 * 1024),
+          keyAgreementPublicKey: 'test-public-key',
+        }),
+      }),
+      '10.0.0.22',
+    );
+
+    const res = await handleDiscoveryRequest(
+      req,
+      new URL(req.url),
+      makeContext({
+        trustStore: {
+          isPeerTrusted: () => false,
+          createPairRequest: () => {
+            createPairRequestCalls += 1;
+            throw new Error('should not be called');
+          },
+        } as any,
+      }),
+    );
+
+    expect(res).not.toBeNull();
+    expect((res as Response).status).toBe(413);
+    expect((await (res as Response).json()) as { error: string }).toEqual({
+      error: 'Request body too large',
+    });
+    expect(createPairRequestCalls).toBe(0);
+  });
 });
 
 // ---- checkPeerAuth body hash verification ----
@@ -560,6 +599,54 @@ describe('checkPeerAuth — body hash verification', () => {
     expect(response.status).toBe(403);
     const data = (await response.json()) as { error: string };
     expect(data.error).toBe('Unknown peer');
+  });
+
+  it('rejects oversized proxied context writes before calling the peer client', async () => {
+    let writeCalls = 0;
+    const req = new Request(
+      'http://localhost/api/discovery/peers/peer-1/context/file',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: 'test/CLAUDE.md',
+          content: 'x'.repeat(1024 * 1024 + 64),
+        }),
+      },
+    );
+
+    const ctx = makeContext({
+      trustStore: {
+        getPeer: () => ({
+          instanceId: 'peer-1',
+          status: 'trusted',
+          sharedSecret: 'secret',
+          host: '127.0.0.1',
+          port: 6001,
+        }),
+        updatePeerLastSeen: () => {},
+      } as any,
+      createPeerClient: () => ({
+        getAgents: async () => [],
+        getStats: async () => ({}),
+        streamLogs: async () => new Response(''),
+        getContextLayers: async () => ({}),
+        listContextFiles: async () => [],
+        writeContextFile: async () => {
+          writeCalls += 1;
+          return { ok: true };
+        },
+      }),
+    });
+
+    const res = await handleDiscoveryRequest(req, new URL(req.url), ctx);
+    expect(res).not.toBeNull();
+    const response = res as Response;
+    expect(response.status).toBe(413);
+    expect((await response.json()) as { error: string }).toEqual({
+      error: 'Request body too large',
+    });
+    expect(writeCalls).toBe(0);
   });
 
   it('uses an injected peer client override when provided', async () => {

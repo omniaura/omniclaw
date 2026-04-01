@@ -39,10 +39,12 @@ import {
   renderAgentsContent,
 } from './agents-page.js';
 import { sanitizeTelegramAvatarUrl } from '../telegram-avatar.js';
+import { readJsonBody, RequestBodyTooLargeError } from '../request-body.js';
 
 /** Optional discovery context — set by the orchestrator when discovery is enabled. */
 let discoveryContext: DiscoveryRouteContext | null = null;
 let networkPageState: (() => NetworkPageState) | null = null;
+const MAX_WEB_JSON_BODY_BYTES = 1024 * 1024;
 
 /** Called by the orchestrator to wire up discovery routes. */
 export function setDiscoveryContext(
@@ -438,8 +440,14 @@ async function handleCreateTask(
 ): Promise<Response> {
   let body: Record<string, unknown>;
   try {
-    body = (await req.json()) as Record<string, unknown>;
-  } catch {
+    body = await readJsonBody<Record<string, unknown>>(
+      req,
+      MAX_WEB_JSON_BODY_BYTES,
+    );
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      return json({ error: 'Request body too large' }, 413);
+    }
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
@@ -549,8 +557,14 @@ async function handleUpdateTask(
 
   let body: Record<string, unknown>;
   try {
-    body = (await req.json()) as Record<string, unknown>;
-  } catch {
+    body = await readJsonBody<Record<string, unknown>>(
+      req,
+      MAX_WEB_JSON_BODY_BYTES,
+    );
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      return json({ error: 'Request body too large' }, 413);
+    }
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
@@ -786,8 +800,14 @@ async function handleWriteContextFile(
 ): Promise<Response> {
   let body: Record<string, unknown>;
   try {
-    body = (await req.json()) as Record<string, unknown>;
-  } catch {
+    body = await readJsonBody<Record<string, unknown>>(
+      req,
+      MAX_WEB_JSON_BODY_BYTES,
+    );
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      return json({ error: 'Request body too large' }, 413);
+    }
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
@@ -942,8 +962,14 @@ async function handleSetAgentAvatar(
 
   let body: Record<string, unknown>;
   try {
-    body = (await req.json()) as Record<string, unknown>;
-  } catch {
+    body = await readJsonBody<Record<string, unknown>>(
+      req,
+      MAX_WEB_JSON_BODY_BYTES,
+    );
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      return json({ error: 'Request body too large' }, 413);
+    }
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
@@ -1024,8 +1050,14 @@ async function handleSendMessage(
 
   let body: Record<string, unknown>;
   try {
-    body = (await req.json()) as Record<string, unknown>;
-  } catch {
+    body = await readJsonBody<Record<string, unknown>>(
+      req,
+      MAX_WEB_JSON_BODY_BYTES,
+    );
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      return json({ error: 'Request body too large' }, 413);
+    }
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
