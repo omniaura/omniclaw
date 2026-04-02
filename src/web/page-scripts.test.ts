@@ -82,3 +82,49 @@ describe('network page script', () => {
     );
   });
 });
+
+describe('conversations page script', () => {
+  it('loads marked library for markdown rendering', () => {
+    const script = allPageScripts().conversations;
+    expect(script).toContain('function loadMarked(){');
+    expect(script).toContain('function configureMarked(){');
+    expect(script).toContain('marked.setOptions({breaks:true,gfm:true})');
+    expect(script).toContain('loadMarked();');
+  });
+
+  it('renders messages with markdown via renderMd helper', () => {
+    const script = allPageScripts().conversations;
+    expect(script).toContain('function renderMd(text){');
+    expect(script).toContain('marked.parse(window.__esc(text))');
+    expect(script).toContain('msg-md');
+  });
+
+  it('subscribes to SSE for live message updates', () => {
+    const script = allPageScripts().conversations;
+    expect(script).toContain('function startLiveSse(){');
+    expect(script).toContain(
+      'new EventSource("/api/events?channels=messages")',
+    );
+    expect(script).toContain('function appendLiveMessage(msg){');
+    expect(script).toContain('startLiveSse();');
+  });
+
+  it('auto-scrolls only when user is near the bottom', () => {
+    const script = allPageScripts().conversations;
+    expect(script).toContain(
+      'container.scrollHeight-container.scrollTop-container.clientHeight<60',
+    );
+    expect(script).toContain('if(atBottom)container.scrollTop=container.scrollHeight');
+  });
+
+  it('reconnects SSE after errors with backoff', () => {
+    const script = allPageScripts().conversations;
+    expect(script).toContain('liveSse.onerror=function(){');
+    expect(script).toContain('setTimeout(startLiveSse,5000)');
+  });
+
+  it('updates chat list timestamp on live messages', () => {
+    const script = allPageScripts().conversations;
+    expect(script).toContain('function updateChatListTime(jid,timestamp){');
+  });
+});
