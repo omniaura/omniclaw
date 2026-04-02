@@ -663,6 +663,29 @@ describe('web routes unit tests', () => {
     expect(writes).toEqual([{ path: 'groups/main', content: '# updated' }]);
   });
 
+  it('rejects oversized context file writes before mutating state', async () => {
+    let writeCalls = 0;
+    const largeContent = 'x'.repeat(1024 * 1024 + 64);
+    const res = await handle(
+      new Request('http://localhost/api/context/file', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: 'groups/main', content: largeContent }),
+      }),
+      makeState({
+        writeContextFile: () => {
+          writeCalls += 1;
+        },
+      }),
+    );
+
+    expect(res.status).toBe(413);
+    expect((await jsonBody(res)) as { error: string }).toEqual({
+      error: 'Request body too large',
+    });
+    expect(writeCalls).toBe(0);
+  });
+
   it('rejects unsupported methods for context writes', async () => {
     const res = await handle(
       new Request('http://localhost/api/context/file', { method: 'GET' }),

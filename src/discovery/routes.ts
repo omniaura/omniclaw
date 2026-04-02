@@ -32,6 +32,7 @@ import type {
   RemotePeerAgents,
   StoredPeer,
 } from './types.js';
+import { readJsonBody, RequestBodyTooLargeError } from '../request-body.js';
 
 export interface DiscoveryRouteContext {
   instanceId: string;
@@ -61,6 +62,8 @@ const pairRateLimiter = new Map<string, { count: number; resetAt: number }>();
 const PAIR_RATE_LIMIT = 10;
 const PAIR_RATE_WINDOW_MS = 60_000;
 const RATE_LIMITER_MAX_ENTRIES = 10_000;
+const MAX_DISCOVERY_JSON_BODY_BYTES = 64 * 1024;
+const MAX_DISCOVERY_CONTEXT_WRITE_BODY_BYTES = 1024 * 1024;
 
 function checkRateLimit(
   ip: string,
@@ -389,8 +392,14 @@ async function handlePairRequest(
 
   let body: PairRequestBody;
   try {
-    body = (await req.json()) as PairRequestBody;
-  } catch {
+    body = await readJsonBody<PairRequestBody>(
+      req,
+      MAX_DISCOVERY_JSON_BODY_BYTES,
+    );
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      return json({ error: 'Request body too large' }, 413);
+    }
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
@@ -473,8 +482,11 @@ async function handleCompletePairing(
     };
   };
   try {
-    body = (await req.json()) as typeof body;
-  } catch {
+    body = await readJsonBody<typeof body>(req, MAX_DISCOVERY_JSON_BODY_BYTES);
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      return json({ error: 'Request body too large' }, 413);
+    }
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
@@ -538,8 +550,11 @@ async function handleUpdateDiscoveryState(
 
   let body: { enabled?: unknown };
   try {
-    body = (await req.json()) as typeof body;
-  } catch {
+    body = await readJsonBody<typeof body>(req, MAX_DISCOVERY_JSON_BODY_BYTES);
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      return json({ error: 'Request body too large' }, 413);
+    }
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
@@ -1010,8 +1025,14 @@ async function handleProxyContextWrite(
 
   let body: { path: string; content: string };
   try {
-    body = (await req.json()) as typeof body;
-  } catch {
+    body = await readJsonBody<typeof body>(
+      req,
+      MAX_DISCOVERY_CONTEXT_WRITE_BODY_BYTES,
+    );
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      return json({ error: 'Request body too large' }, 413);
+    }
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
@@ -1105,8 +1126,11 @@ async function handleContextPush(
 
   let body: { path: string };
   try {
-    body = (await req.json()) as typeof body;
-  } catch {
+    body = await readJsonBody<typeof body>(req, MAX_DISCOVERY_JSON_BODY_BYTES);
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      return json({ error: 'Request body too large' }, 413);
+    }
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
@@ -1149,8 +1173,11 @@ async function handleContextPull(
 
   let body: { path: string };
   try {
-    body = (await req.json()) as typeof body;
-  } catch {
+    body = await readJsonBody<typeof body>(req, MAX_DISCOVERY_JSON_BODY_BYTES);
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      return json({ error: 'Request body too large' }, 413);
+    }
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
