@@ -199,6 +199,7 @@ export function renderAgentDetailContent(
       : `<tr><td colspan="4" class="td-dim">No channels subscribed</td></tr>`;
 
   // --- Tasks table ---
+  const isLocal = !data.remoteInstanceId;
   const tasksHtml =
     data.tasks.length > 0
       ? data.tasks
@@ -216,17 +217,26 @@ export function renderAgentDetailContent(
               t.prompt.length > 80
                 ? t.prompt.slice(0, 80) + '\u2026'
                 : t.prompt;
+            const toggleTarget = t.status === 'active' ? 'paused' : 'active';
+            const toggleLabel = t.status === 'active' ? 'pause' : 'resume';
+            const actionCell =
+              isLocal && t.status !== 'completed'
+                ? `<td class="actions"><button class="btn btn-sm" data-task-toggle="${toggleTarget}" data-task-id="${esc(t.id)}">${toggleLabel}</button></td>`
+                : isLocal
+                  ? `<td></td>`
+                  : '';
             return (
               `<tr>` +
               `<td><span class="badge badge-sm ${statusClass}">${esc(t.status)}</span></td>` +
               `<td class="td-prompt" title="${esc(t.prompt)}">${esc(promptPreview)}</td>` +
               `<td class="td-dim">${esc(t.schedule_type)}: ${esc(t.schedule_value)}</td>` +
               `<td class="td-dim">${nextRun}</td>` +
+              actionCell +
               `</tr>`
             );
           })
           .join('')
-      : `<tr><td colspan="4" class="td-dim">No scheduled tasks</td></tr>`;
+      : `<tr><td colspan="${isLocal ? '5' : '4'}" class="td-dim">No scheduled tasks</td></tr>`;
 
   // --- Recent chats ---
   const chatsHtml =
@@ -252,7 +262,7 @@ export function renderAgentDetailContent(
     : '\u2014';
 
   return (
-    `<div data-init="window.__initPage && window.__initPage('agent-detail')">` +
+    `<div data-init="window.__initPage && window.__initPage('agent-detail')" data-agent-folder="${esc(data.folder)}">` +
     `<div class="agent-detail">` +
     // Back link
     `<div class="ad-back"><a href="/" data-nav data-page="dashboard" class="btn btn-sm">\u2190 dashboard</a></div>` +
@@ -262,7 +272,7 @@ export function renderAgentDetailContent(
       ? `<img class="ad-avatar" src="${avatarSrc}" alt="${esc(data.name)}" onerror="this.style.display='none'">`
       : `<div class="ad-avatar-placeholder">${esc(data.name.charAt(0).toUpperCase())}</div>`) +
     `<div class="ad-header-info">` +
-    `<h2 class="ad-name">${esc(data.name)}</h2>` +
+    `<h2 class="ad-name">${esc(data.name)} <span id="ad-exec-status" class="badge badge-sm exec-offline">offline</span></h2>` +
     `<div class="ad-meta">` +
     `<span class="badge ${backendBadge}">${esc(data.backend)}</span>` +
     `<span class="badge">${esc(data.agentRuntime)}</span>` +
@@ -302,7 +312,7 @@ export function renderAgentDetailContent(
     `<div class="ad-section">` +
     `<h3 class="ad-section-title">scheduled tasks <span class="ad-count">${data.tasks.length}</span></h3>` +
     `<div class="ad-table-wrap"><table>` +
-    `<thead><tr><th>status</th><th>prompt</th><th>schedule</th><th>next run</th></tr></thead>` +
+    `<thead><tr><th>status</th><th>prompt</th><th>schedule</th><th>next run</th>${isLocal ? '<th></th>' : ''}</tr></thead>` +
     `<tbody>${tasksHtml}</tbody>` +
     `</table></div></div>` +
     // Recent conversations section

@@ -345,6 +345,56 @@ describe('renderAgentDetailContent', () => {
     expect(html).toContain('data-page="dashboard"');
   });
 
+  it('includes data-agent-folder attribute for live status polling', () => {
+    const data = buildAgentDetailData('test-agent', makeState())!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('data-agent-folder="test-agent"');
+  });
+
+  it('includes execution status badge placeholder', () => {
+    const data = buildAgentDetailData('test-agent', makeState())!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('id="ad-exec-status"');
+    expect(html).toContain('exec-offline');
+  });
+
+  it('renders task toggle buttons for local agents', () => {
+    const data = buildAgentDetailData('test-agent', makeState())!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('data-task-toggle');
+    expect(html).toContain('data-task-id="task-001"');
+    expect(html).toContain('pause');
+  });
+
+  it('renders resume button for paused tasks', () => {
+    const state = makeState({
+      getTasks: () => [makeTask({ status: 'paused' })],
+    });
+    const data = buildAgentDetailData('test-agent', state)!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('data-task-toggle="active"');
+    expect(html).toContain('resume');
+  });
+
+  it('omits task toggle buttons for remote agents', () => {
+    const data = buildAgentDetailData(
+      'peer-1:remote:agent',
+      makeState(),
+      remotePeers,
+    )!;
+    const html = renderAgentDetailContent(data, 'peer-1:remote:agent');
+    expect(html).not.toContain('data-task-toggle');
+  });
+
+  it('omits task toggle buttons for completed tasks', () => {
+    const state = makeState({
+      getTasks: () => [makeTask({ status: 'completed' })],
+    });
+    const data = buildAgentDetailData('test-agent', state)!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).not.toContain('data-task-toggle');
+  });
+
   it('renders avatar when URL is present', () => {
     const state = makeState({
       getAgents: () => ({
