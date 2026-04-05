@@ -253,6 +253,50 @@ describe('processMessageIpc: react_to_message', () => {
     });
   });
 
+  it('writes an error response when addReaction is not supported', async () => {
+    deps.findChannel = () => ({}) as Channel;
+
+    const result = await processMsg({
+      type: 'react_to_message',
+      chatJid: 'other@g.us',
+      messageId: 'msg-334',
+      emoji: '👍',
+      requestId: 'req-334',
+    });
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(readResponse('main', 'req-334')).toEqual({
+      type: 'react_to_message_response',
+      requestId: 'req-334',
+      ok: false,
+      error: 'Channel does not support adding reactions.',
+    });
+  });
+
+  it('writes an error response when removeReaction is not supported', async () => {
+    deps.findChannel = () =>
+      ({
+        addReaction: async () => {},
+      }) as Partial<Channel> as Channel;
+
+    const result = await processMsg({
+      type: 'react_to_message',
+      chatJid: 'other@g.us',
+      messageId: 'msg-335',
+      emoji: '👍',
+      remove: true,
+      requestId: 'req-335',
+    });
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(readResponse('main', 'req-335')).toEqual({
+      type: 'react_to_message_response',
+      requestId: 'req-335',
+      ok: false,
+      error: 'Channel does not support removing reactions.',
+    });
+  });
+
   it('blocks when reaction requestId sanitizes to empty string', async () => {
     const result = await processMsg({
       type: 'react_to_message',
