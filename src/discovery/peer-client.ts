@@ -4,6 +4,7 @@
  */
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'crypto';
 
+import { readStreamWithByteLimit } from '../media.js';
 import type {
   ContextFileEntry,
   PairApprovalCallback,
@@ -14,6 +15,7 @@ import type {
 } from './types.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const MAX_PEER_PROXY_IMAGE_BYTES = 5 * 1024 * 1024;
 
 export interface PeerClientLike {
   getAgents(): Promise<RemoteAgentSummary[]>;
@@ -85,32 +87,38 @@ export class PeerClient implements PeerClientLike {
   async getAgentAvatarImage(
     agentId: string,
   ): Promise<{ data: ArrayBuffer; contentType: string } | null> {
-    try {
-      const res = await this.authenticatedFetch(
-        `/api/agents/${encodeURIComponent(agentId)}/avatar/image`,
-      );
-      const contentType = res.headers.get('content-type') || 'image/png';
-      const data = await res.arrayBuffer();
-      return { data, contentType };
-    } catch {
-      return null;
-    }
+    const res = await this.authenticatedFetch(
+      `/api/agents/${encodeURIComponent(agentId)}/avatar/image`,
+      undefined,
+      DEFAULT_TIMEOUT_MS,
+      [404],
+    );
+    if (res.status === 404) return null;
+    const contentType = res.headers.get('content-type') || 'image/png';
+    const data = await readBinaryResponseWithLimit(
+      res,
+      MAX_PEER_PROXY_IMAGE_BYTES,
+    );
+    return { data, contentType };
   }
 
   /** GET /api/chats/:jid/icon — requires auth, returns image bytes */
   async getChatIcon(
     jid: string,
   ): Promise<{ data: ArrayBuffer; contentType: string } | null> {
-    try {
-      const res = await this.authenticatedFetch(
-        `/api/chats/${encodeURIComponent(jid)}/icon`,
-      );
-      const contentType = res.headers.get('content-type') || 'image/png';
-      const data = await res.arrayBuffer();
-      return { data, contentType };
-    } catch {
-      return null;
-    }
+    const res = await this.authenticatedFetch(
+      `/api/chats/${encodeURIComponent(jid)}/icon`,
+      undefined,
+      DEFAULT_TIMEOUT_MS,
+      [404],
+    );
+    if (res.status === 404) return null;
+    const contentType = res.headers.get('content-type') || 'image/png';
+    const data = await readBinaryResponseWithLimit(
+      res,
+      MAX_PEER_PROXY_IMAGE_BYTES,
+    );
+    return { data, contentType };
   }
 
   /** GET /api/stats — requires auth */
@@ -154,6 +162,7 @@ export class PeerClient implements PeerClientLike {
     path: string,
     init?: RequestInit,
     timeoutMs: number | null = DEFAULT_TIMEOUT_MS,
+    allowedStatuses: number[] = [],
   ): Promise<Response> {
     if (!this.sharedSecret) {
       throw new Error('Cannot make authenticated request: not paired');
@@ -178,13 +187,19 @@ export class PeerClient implements PeerClientLike {
     headers.set('X-OmniClaw-Body-SHA256', bodyHash);
     headers.set('X-OmniClaw-Signature', signature);
 
-    return this.fetch(path, { ...init, method, headers }, timeoutMs);
+    return this.fetch(
+      path,
+      { ...init, method, headers },
+      timeoutMs,
+      allowedStatuses,
+    );
   }
 
   private async fetch(
     path: string,
     init?: RequestInit,
     timeoutMs: number | null = DEFAULT_TIMEOUT_MS,
+    allowedStatuses: number[] = [],
   ): Promise<Response> {
     const controller = new AbortController();
     const timeout =
@@ -198,7 +213,7 @@ export class PeerClient implements PeerClientLike {
         signal: controller.signal,
       });
 
-      if (!res.ok) {
+      if (!res.ok && !allowedStatuses.includes(res.status)) {
         const body = await res.text().catch(() => '');
         throw new Error(
           `Peer API error: ${res.status} ${res.statusText} - ${body}`,
@@ -216,6 +231,24 @@ function getBodyString(body: RequestInit['body']): string {
   if (!body) return '';
   if (typeof body === 'string') return body;
   throw new Error('PeerClient only supports string request bodies');
+}
+
+async function readBinaryResponseWithLimit(
+  response: Response,
+  maxBytes: number,
+): Promise<ArrayBuffer> {
+  const contentLength = Number.parseInt(
+    response.headers.get('content-length') || '',
+    10,
+  );
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new Error(`Peer image exceeded ${maxBytes} bytes`);
+  }
+
+  const bytes = await readStreamWithByteLimit(response.body, maxBytes);
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
 }
 
 function sha256Hex(value: string): string {

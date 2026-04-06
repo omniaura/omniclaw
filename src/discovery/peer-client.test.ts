@@ -132,6 +132,50 @@ describe('PeerClient', () => {
     expect(iconRequestHeaders!.get('X-OmniClaw-Instance')).toBe('image-1');
   });
 
+  it('rejects remote peer images that exceed the content-length cap', async () => {
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(new Uint8Array([1, 2, 3]), {
+          headers: {
+            'content-type': 'image/png',
+            'content-length': String(5 * 1024 * 1024 + 1),
+          },
+        }),
+      ),
+    ) as unknown as typeof globalThis.fetch;
+
+    const client = new PeerClient('peer.local', 3000, 'image-cap', 'secret');
+
+    await expect(client.getAgentAvatarImage('agent-big')).rejects.toThrow(
+      'Peer image exceeded 5242880 bytes',
+    );
+  });
+
+  it('rejects streamed remote peer images that exceed the byte cap', async () => {
+    const oversizedChunk = new Uint8Array(5 * 1024 * 1024 + 1);
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(oversizedChunk);
+              controller.close();
+            },
+          }),
+          {
+            headers: { 'content-type': 'image/png' },
+          },
+        ),
+      ),
+    ) as unknown as typeof globalThis.fetch;
+
+    const client = new PeerClient('peer.local', 3000, 'icon-cap', 'secret');
+
+    await expect(client.getChatIcon('chat/room')).rejects.toThrow(
+      'Download exceeded 5242880 bytes',
+    );
+  });
+
   it('rejects authenticated requests when the client is not paired', async () => {
     const client = new PeerClient('peer.local', 3000, 'unpaired');
 
