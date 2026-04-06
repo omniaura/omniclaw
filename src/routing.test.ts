@@ -92,4 +92,41 @@ describe('getAvailableGroups', () => {
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(0);
   });
+
+  it('includes Discord channels but excludes Discord DMs', () => {
+    storeChatMetadata('dc:channel-1', '2024-01-01T00:00:03.000Z', 'Build Room');
+    storeChatMetadata('dc:dm:user-1', '2024-01-01T00:00:04.000Z', 'Private DM');
+
+    const groups = getAvailableGroups();
+
+    expect(groups.map((group) => group.jid)).toEqual(['dc:channel-1']);
+  });
+
+  it('includes Telegram groups and resolves legacy registration for scoped chat ids', () => {
+    storeChatMetadata(
+      'tg:bot-123:-100987654321',
+      '2024-01-01T00:00:05.000Z',
+      'Ops Bridge',
+    );
+
+    _setRegisteredGroups({
+      'tg:-100987654321': {
+        name: 'Ops Bridge',
+        folder: 'ops-bridge',
+        trigger: '@Ops',
+        added_at: '2024-01-01T00:00:00.000Z',
+      },
+    });
+
+    const groups = getAvailableGroups();
+
+    expect(groups).toEqual([
+      {
+        jid: 'tg:bot-123:-100987654321',
+        name: 'Ops Bridge',
+        lastActivity: '2024-01-01T00:00:05.000Z',
+        isRegistered: true,
+      },
+    ]);
+  });
 });
