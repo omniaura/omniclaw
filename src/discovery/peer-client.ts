@@ -242,6 +242,7 @@ async function readBinaryResponseWithLimit(
     10,
   );
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    response.body?.cancel().catch(() => {});
     throw new Error(`Peer image exceeded ${maxBytes} bytes`);
   }
 

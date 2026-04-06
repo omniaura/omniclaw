@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { PeerClient, verifyPeerRequestSignature } from './peer-client.js';
 
 const originalFetch = globalThis.fetch;
+const MAX_PEER_PROXY_IMAGE_BYTES = 5 * 1024 * 1024;
 
 function sha256Hex(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -133,14 +134,25 @@ describe('PeerClient', () => {
   });
 
   it('rejects remote peer images that exceed the content-length cap', async () => {
+    let cancelled = false;
     globalThis.fetch = mock(() =>
       Promise.resolve(
-        new Response(new Uint8Array([1, 2, 3]), {
-          headers: {
-            'content-type': 'image/png',
-            'content-length': String(5 * 1024 * 1024 + 1),
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new Uint8Array([1, 2, 3]));
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          {
+            headers: {
+              'content-type': 'image/png',
+              'content-length': String(MAX_PEER_PROXY_IMAGE_BYTES + 1),
+            },
           },
-        }),
+        ),
       ),
     ) as unknown as typeof globalThis.fetch;
 
@@ -149,16 +161,72 @@ describe('PeerClient', () => {
     await expect(client.getAgentAvatarImage('agent-big')).rejects.toThrow(
       'Peer image exceeded 5242880 bytes',
     );
+    expect(cancelled).toBe(true);
   });
 
-  it('rejects streamed remote peer images that exceed the byte cap', async () => {
-    const oversizedChunk = new Uint8Array(5 * 1024 * 1024 + 1);
+  it('accepts remote peer images exactly at the content-length cap', async () => {
+    const imageBytes = new Uint8Array(MAX_PEER_PROXY_IMAGE_BYTES);
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(imageBytes, {
+          headers: {
+            'content-type': 'image/png',
+            'content-length': String(MAX_PEER_PROXY_IMAGE_BYTES),
+          },
+        }),
+      ),
+    ) as unknown as typeof globalThis.fetch;
+
+    const client = new PeerClient('peer.local', 3000, 'image-ok', 'secret');
+
+    const avatar = await client.getAgentAvatarImage('agent-limit');
+
+    expect(avatar).not.toBeNull();
+    expect(avatar?.contentType).toBe('image/png');
+    expect(avatar?.data.byteLength).toBe(MAX_PEER_PROXY_IMAGE_BYTES);
+  });
+
+  it('accepts streamed remote peer images exactly at the byte cap', async () => {
+    const firstChunk = new Uint8Array(3 * 1024 * 1024);
+    const secondChunk = new Uint8Array(
+      MAX_PEER_PROXY_IMAGE_BYTES - firstChunk.byteLength,
+    );
     globalThis.fetch = mock(() =>
       Promise.resolve(
         new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
-              controller.enqueue(oversizedChunk);
+              controller.enqueue(firstChunk);
+              controller.enqueue(secondChunk);
+              controller.close();
+            },
+          }),
+          {
+            headers: { 'content-type': 'image/png' },
+          },
+        ),
+      ),
+    ) as unknown as typeof globalThis.fetch;
+
+    const client = new PeerClient('peer.local', 3000, 'icon-ok', 'secret');
+
+    const icon = await client.getChatIcon('chat/room');
+
+    expect(icon).not.toBeNull();
+    expect(icon?.contentType).toBe('image/png');
+    expect(icon?.data.byteLength).toBe(MAX_PEER_PROXY_IMAGE_BYTES);
+  });
+
+  it('rejects streamed remote peer images that exceed the byte cap across chunks', async () => {
+    const firstChunk = new Uint8Array(3 * 1024 * 1024);
+    const secondChunk = new Uint8Array(3 * 1024 * 1024);
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(firstChunk);
+              controller.enqueue(secondChunk);
               controller.close();
             },
           }),
