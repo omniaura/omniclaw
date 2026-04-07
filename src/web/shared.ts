@@ -118,6 +118,7 @@ export function renderShell(
     `</div>` +
     `<button class="sidebar-reopen" id="btn-reopen-sidebar" title="Show logs">\u2261 logs</button>` +
     shortcutHelpModal() +
+    commandPaletteHtml() +
     `<scr` +
     `ipt>${shellScript(pageScripts)}</scr` +
     `ipt>` +
@@ -270,6 +271,30 @@ function shellCSS(): string {
     `.toast.success{border-color:var(--green);color:var(--green)}`,
     `.toast.error{border-color:var(--red);color:var(--red)}`,
     `@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}`,
+
+    // --- Command Palette ---
+    `.cmd-palette-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;align-items:flex-start;justify-content:center;padding-top:min(20vh,120px)}`,
+    `.cmd-palette-overlay.open{display:flex}`,
+    `.cmd-palette{background:var(--surface);border:1px solid var(--border-bright);border-radius:10px;width:520px;max-width:90vw;max-height:min(60vh,420px);display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.5);animation:cmdSlideIn .12s ease-out}`,
+    `@keyframes cmdSlideIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}`,
+    `.cmd-input-wrap{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);gap:8px}`,
+    `.cmd-input-wrap .cmd-icon{color:var(--text-dim);font-size:14px;flex-shrink:0}`,
+    `.cmd-input{flex:1;background:none;border:none;color:var(--text-bright);font-family:var(--mono);font-size:13px;outline:none}`,
+    `.cmd-input::placeholder{color:var(--text-dim)}`,
+    `.cmd-input-wrap kbd{font-family:var(--mono);font-size:10px;color:var(--text-dim);background:var(--bg);border:1px solid var(--border);border-radius:3px;padding:1px 5px;flex-shrink:0}`,
+    `.cmd-results{flex:1;overflow-y:auto;padding:4px}`,
+    `.cmd-group-label{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);padding:6px 12px 2px}`,
+    `.cmd-item{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;cursor:pointer;transition:background .08s;font-size:12px}`,
+    `.cmd-item:hover,.cmd-item.selected{background:var(--accent-dim)}`,
+    `.cmd-item.selected{outline:1px solid rgba(129,140,248,.3)}`,
+    `.cmd-item .cmd-item-icon{font-size:14px;width:20px;text-align:center;flex-shrink:0;color:var(--text-dim)}`,
+    `.cmd-item .cmd-item-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}`,
+    `.cmd-item.selected .cmd-item-label{color:var(--text-bright)}`,
+    `.cmd-item .cmd-item-hint{font-size:10px;color:var(--text-dim);flex-shrink:0}`,
+    `.cmd-item mark{background:none;color:var(--accent);font-weight:600}`,
+    `.cmd-empty{padding:24px;text-align:center;color:var(--text-dim);font-size:12px}`,
+    `.cmd-footer{display:flex;align-items:center;gap:12px;padding:6px 12px;border-top:1px solid var(--border);font-size:10px;color:var(--text-dim)}`,
+    `.cmd-footer kbd{font-family:var(--mono);font-size:9px;background:var(--bg);border:1px solid var(--border);border-radius:2px;padding:0 4px}`,
 
     // --- Modal ---
     `.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center}`,
@@ -653,6 +678,7 @@ function shortcutHelpModal(): string {
     `</div>` +
     `<div class="shortcut-section">` +
     `<div class="shortcut-section-title">actions</div>` +
+    shortcutRow('\u2318 K', 'Command palette') +
     shortcutRow('/', 'Focus search') +
     shortcutRow('Esc', 'Close modal / blur') +
     shortcutRow('?', 'Show this help') +
@@ -676,6 +702,25 @@ function shortcutRow(keys: string, description: string): string {
 }
 
 export { shortcutHelpModal };
+
+function commandPaletteHtml(): string {
+  return (
+    `<div class="cmd-palette-overlay" id="cmd-palette">` +
+    `<div class="cmd-palette">` +
+    `<div class="cmd-input-wrap">` +
+    `<span class="cmd-icon">\u2315</span>` +
+    `<input class="cmd-input" id="cmd-input" type="text" placeholder="Search pages, agents, tasks\u2026" autocomplete="off" spellcheck="false">` +
+    `<kbd>esc</kbd>` +
+    `</div>` +
+    `<div class="cmd-results" id="cmd-results"></div>` +
+    `<div class="cmd-footer">` +
+    `<span><kbd>\u2191</kbd><kbd>\u2193</kbd> navigate</span>` +
+    `<span><kbd>\u21b5</kbd> open</span>` +
+    `<span><kbd>esc</kbd> close</span>` +
+    `</div>` +
+    `</div></div>`
+  );
+}
 
 /** Client-side keyboard shortcut handler script. */
 function keyboardShortcutScript(): string {
@@ -722,9 +767,21 @@ function keyboardShortcutScript(): string {
     '}',
     '',
     'document.addEventListener("keydown",function(e){',
+    '  // Cmd+K / Ctrl+K -> command palette (works even in inputs)',
+    '  if(e.key==="k"&&(e.metaKey||e.ctrlKey)){',
+    '    e.preventDefault();',
+    '    if(window.__cmdPalette)window.__cmdPalette.toggle();',
+    '    return;',
+    '  }',
     '  // Skip when typing in inputs (unless Escape)',
     '  if(e.key==="Escape"){',
     '    __kbGPrefix=false;',
+    '    // Close command palette first',
+    '    var cmdPal=document.getElementById("cmd-palette");',
+    '    if(cmdPal&&cmdPal.classList.contains("open")){',
+    '      if(window.__cmdPalette)window.__cmdPalette.close();',
+    '      e.preventDefault();return;',
+    '    }',
     '    // Close any open modal',
     '    var openModal=document.querySelector(".modal-overlay.open");',
     '    if(openModal){openModal.classList.remove("open");e.preventDefault();return;}',
@@ -772,6 +829,194 @@ function keyboardShortcutScript(): string {
     'if(scOverlay)scOverlay.addEventListener("click",function(e){',
     '  if(e.target===scOverlay)__kbToggleHelp(false);',
     '});',
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Command Palette Script
+// ---------------------------------------------------------------------------
+
+function commandPaletteScript(): string {
+  return [
+    '// ---- Command Palette ----',
+    'window.__cmdPalette=(function(){',
+    '  var overlay=document.getElementById("cmd-palette");',
+    '  var input=document.getElementById("cmd-input");',
+    '  var resultsEl=document.getElementById("cmd-results");',
+    '  if(!overlay||!input||!resultsEl)return{open:function(){},close:function(){},toggle:function(){}};',
+    '',
+    '  var selectedIdx=-1;',
+    '  var items=[];',
+    '  var cachedAgents=null;',
+    '  var cachedTasks=null;',
+    '',
+    '  // Static page entries',
+    '  var pages=[',
+    '    {type:"page",icon:"\u25a3",label:"Dashboard",hint:"g d",href:"/",page:"dashboard"},',
+    '    {type:"page",icon:"\u25a3",label:"Agents",hint:"g a",href:"/agents-list",page:"agents"},',
+    '    {type:"page",icon:"\u25a3",label:"Tasks",hint:"g t",href:"/tasks",page:"tasks"},',
+    '    {type:"page",icon:"\u25a3",label:"Logs",hint:"g l",href:"/logs",page:"logs"},',
+    '    {type:"page",icon:"\u25a3",label:"Conversations",hint:"g c",href:"/conversations",page:"conversations"},',
+    '    {type:"page",icon:"\u25a3",label:"Context",hint:"g x",href:"/context",page:"context"},',
+    '    {type:"page",icon:"\u25a3",label:"IPC Inspector",hint:"g i",href:"/ipc",page:"ipc"},',
+    '    {type:"page",icon:"\u25a3",label:"Network",hint:"g n",href:"/network",page:"network"},',
+    '    {type:"page",icon:"\u25a3",label:"System",hint:"g y",href:"/system",page:"system"},',
+    '    {type:"page",icon:"\u25a3",label:"Settings",hint:"g e",href:"/settings",page:"settings"}',
+    '  ];',
+    '',
+    '  function fuzzyMatch(query,text){',
+    '    var q=query.toLowerCase();',
+    '    var t=text.toLowerCase();',
+    '    if(t.indexOf(q)!==-1)return{match:true,score:t.indexOf(q)===0?2:1,ranges:[]};',
+    '    var qi=0;var ranges=[];var start=-1;',
+    '    for(var ti=0;ti<t.length&&qi<q.length;ti++){',
+    '      if(t[ti]===q[qi]){',
+    '        if(start===-1)start=ti;',
+    '        qi++;',
+    '      }else if(start!==-1){',
+    '        ranges.push([start,ti]);start=-1;',
+    '      }',
+    '    }',
+    '    if(qi<q.length)return{match:false,score:0,ranges:[]};',
+    '    if(start!==-1)ranges.push([start,t.length]);',
+    '    return{match:true,score:0,ranges:ranges};',
+    '  }',
+    '',
+    '  function highlight(text,query){',
+    '    if(!query)return window.__esc(text);',
+    '    var q=query.toLowerCase();',
+    '    var t=text.toLowerCase();',
+    '    var idx=t.indexOf(q);',
+    '    if(idx!==-1){',
+    '      return window.__esc(text.slice(0,idx))+"<mark>"+window.__esc(text.slice(idx,idx+q.length))+"</mark>"+window.__esc(text.slice(idx+q.length));',
+    '    }',
+    '    return window.__esc(text);',
+    '  }',
+    '',
+    '  function buildItems(query){',
+    '    var all=[];',
+    '    // Pages',
+    '    pages.forEach(function(p){',
+    '      var m=query?fuzzyMatch(query,p.label):{match:true,score:2};',
+    '      if(m.match)all.push({type:p.type,icon:p.icon,label:p.label,hint:p.hint,href:p.href,page:p.page,score:m.score+10});',
+    '    });',
+    '    // Agents',
+    '    if(cachedAgents){',
+    '      cachedAgents.forEach(function(a){',
+    '        var m=query?fuzzyMatch(query,a.name):{match:true,score:1};',
+    '        if(m.match)all.push({type:"agent",icon:"\u2b22",label:a.name,hint:a.backend||"",href:"/agents?id="+encodeURIComponent(a.folder),page:"agent-detail",agentId:a.folder,score:m.score+5});',
+    '      });',
+    '    }',
+    '    // Tasks',
+    '    if(cachedTasks){',
+    '      cachedTasks.forEach(function(t){',
+    '        var promptShort=t.prompt.length>50?t.prompt.slice(0,47)+"\u2026":t.prompt;',
+    '        var m=query?fuzzyMatch(query,t.prompt)||fuzzyMatch(query,t.group_folder):{match:true,score:0};',
+    '        if(m&&m.match)all.push({type:"task",icon:"\u23f0",label:promptShort,hint:t.status,href:"/tasks",page:"tasks",score:m.score});',
+    '      });',
+    '    }',
+    '    // Sort by score descending, then alphabetically',
+    '    all.sort(function(a,b){return b.score-a.score||(a.label<b.label?-1:a.label>b.label?1:0);});',
+    '    return all.slice(0,20);',
+    '  }',
+    '',
+    '  function render(query){',
+    '    items=buildItems(query);',
+    '    if(items.length===0){',
+    '      resultsEl.innerHTML="<div class=\\"cmd-empty\\">No results found</div>";',
+    '      selectedIdx=-1;return;',
+    '    }',
+    '    selectedIdx=0;',
+    '    var groups={page:[],agent:[],task:[]};',
+    '    items.forEach(function(it){(groups[it.type]||(groups[it.type]=[])).push(it);});',
+    '    var html="";',
+    '    var idx=0;',
+    '    var labels={page:"Pages",agent:"Agents",task:"Tasks"};',
+    '    ["page","agent","task"].forEach(function(g){',
+    '      if(!groups[g]||!groups[g].length)return;',
+    '      html+="<div class=\\"cmd-group-label\\">"+labels[g]+"</div>";',
+    '      groups[g].forEach(function(it){',
+    '        var sel=idx===selectedIdx?" selected":"";',
+    '        html+="<div class=\\"cmd-item"+sel+"\\" data-cmd-idx=\\""+idx+"\\">"',
+    '          +"<span class=\\"cmd-item-icon\\">"+it.icon+"</span>"',
+    '          +"<span class=\\"cmd-item-label\\">"+highlight(it.label,query)+"</span>"',
+    '          +"<span class=\\"cmd-item-hint\\">"+window.__esc(it.hint)+"</span>"',
+    '          +"</div>";',
+    '        idx++;',
+    '      });',
+    '    });',
+    '    resultsEl.innerHTML=html;',
+    '  }',
+    '',
+    '  function selectItem(idx){',
+    '    var prev=resultsEl.querySelector(".cmd-item.selected");',
+    '    if(prev)prev.classList.remove("selected");',
+    '    selectedIdx=idx;',
+    '    var el=resultsEl.querySelector("[data-cmd-idx=\\""+idx+"\\"]");',
+    '    if(el){el.classList.add("selected");el.scrollIntoView({block:"nearest"});}',
+    '  }',
+    '',
+    '  function executeItem(idx){',
+    '    var item=items[idx];if(!item)return;',
+    '    closePalette();',
+    '    if(item.page&&item.href){',
+    '      history.pushState({page:item.page},"",item.href);',
+    '      var link=document.querySelector("nav a[data-page=\\""+item.page+"\\"]");',
+    '      if(link)link.click();',
+    '      else{var ev=new PopStateEvent("popstate",{state:{page:item.page}});window.dispatchEvent(ev);}',
+    '    }',
+    '  }',
+    '',
+    '  function openPalette(){',
+    '    cachedAgents=null;cachedTasks=null;',
+    '    // Fetch agents and tasks in parallel',
+    '    fetch("/api/agents").then(function(r){return r.json();}).then(function(d){cachedAgents=d;render(input.value);}).catch(function(){});',
+    '    fetch("/api/tasks").then(function(r){return r.json();}).then(function(d){cachedTasks=d;render(input.value);}).catch(function(){});',
+    '    overlay.classList.add("open");',
+    '    input.value="";',
+    '    render("");',
+    '    setTimeout(function(){input.focus();},10);',
+    '  }',
+    '',
+    '  function closePalette(){',
+    '    overlay.classList.remove("open");',
+    '    input.blur();',
+    '  }',
+    '',
+    '  function toggle(){',
+    '    if(overlay.classList.contains("open"))closePalette();else openPalette();',
+    '  }',
+    '',
+    '  // Input handler',
+    '  input.addEventListener("input",function(){render(input.value);});',
+    '',
+    '  // Keyboard navigation inside palette',
+    '  input.addEventListener("keydown",function(e){',
+    '    if(e.key==="ArrowDown"){',
+    '      e.preventDefault();',
+    '      if(selectedIdx<items.length-1)selectItem(selectedIdx+1);',
+    '    }else if(e.key==="ArrowUp"){',
+    '      e.preventDefault();',
+    '      if(selectedIdx>0)selectItem(selectedIdx-1);',
+    '    }else if(e.key==="Enter"){',
+    '      e.preventDefault();',
+    '      if(selectedIdx>=0)executeItem(selectedIdx);',
+    '    }',
+    '  });',
+    '',
+    '  // Click on results',
+    '  resultsEl.addEventListener("click",function(e){',
+    '    var el=e.target.closest("[data-cmd-idx]");',
+    '    if(el)executeItem(parseInt(el.getAttribute("data-cmd-idx"),10));',
+    '  });',
+    '',
+    '  // Click overlay to close',
+    '  overlay.addEventListener("click",function(e){',
+    '    if(e.target===overlay)closePalette();',
+    '  });',
+    '',
+    '  return{open:openPalette,close:closePalette,toggle:toggle};',
+    '})();',
   ].join('\n');
 }
 
@@ -1013,6 +1258,9 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('  el.textContent=msg;document.body.appendChild(el);');
   parts.push('  setTimeout(function(){el.remove();},3000);');
   parts.push('};');
+
+  // ---- Command Palette ----
+  parts.push(commandPaletteScript());
 
   // ---- Task actions (in persistent sidebar) ----
   parts.push(

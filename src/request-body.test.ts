@@ -101,7 +101,10 @@ describe('readRequestBody', () => {
 
   it('still surfaces the size error when cancel fails', async () => {
     const { req, cancel, releaseLock } = createChunkedRequest({
-      chunks: [new TextEncoder().encode('abcd'), new TextEncoder().encode('efgh')],
+      chunks: [
+        new TextEncoder().encode('abcd'),
+        new TextEncoder().encode('efgh'),
+      ],
       cancelImpl: async () => {
         throw new Error('cancel failed');
       },
@@ -119,10 +122,15 @@ describe('readJsonBody', () => {
   it('parses JSON bodies after reading the stream', async () => {
     const payload = JSON.stringify({ ok: true, count: 2 });
     const { req } = createChunkedRequest({
-      chunks: [new TextEncoder().encode(payload.slice(0, 5)), new TextEncoder().encode(payload.slice(5))],
+      chunks: [
+        new TextEncoder().encode(payload.slice(0, 5)),
+        new TextEncoder().encode(payload.slice(5)),
+      ],
     });
 
-    await expect(readJsonBody<{ ok: boolean; count: number }>(req, 64)).resolves.toEqual({
+    await expect(
+      readJsonBody<{ ok: boolean; count: number }>(req, 64),
+    ).resolves.toEqual({
       ok: true,
       count: 2,
     });
