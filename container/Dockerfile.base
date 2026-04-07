@@ -85,7 +85,7 @@ RUN bun install -g @anthropic-ai/claude-code
 # The JS wrapper at /usr/local/bin/agent-browser uses Node's existsSync() which returns
 # false for paths under /root/.bun/ due to EACCES on access() in the container sandbox,
 # so we symlink the native binary directly to /usr/local/bin/agent-browser.
-ARG AGENT_BROWSER_VERSION=0.24.1
+ARG AGENT_BROWSER_VERSION=0.25.3
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN echo 'trustedDependencies = ["agent-browser"]' >> /root/.bunfig.toml \
     && bun install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
