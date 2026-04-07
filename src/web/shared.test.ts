@@ -180,3 +180,88 @@ describe('renderShell keyboard shortcuts', () => {
     expect(html).toContain('.shortcut-keys kbd');
   });
 });
+
+describe('command palette', () => {
+  it('embeds the command palette overlay in the shell HTML', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('id="cmd-palette"');
+    expect(html).toContain('class="cmd-palette-overlay"');
+    expect(html).toContain('id="cmd-input"');
+    expect(html).toContain('id="cmd-results"');
+  });
+
+  it('includes the command palette CSS', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('.cmd-palette-overlay');
+    expect(html).toContain('.cmd-palette{');
+    expect(html).toContain('.cmd-input');
+    expect(html).toContain('.cmd-results');
+    expect(html).toContain('.cmd-item');
+    expect(html).toContain('.cmd-group-label');
+    expect(html).toContain('.cmd-footer');
+    expect(html).toContain('@keyframes cmdSlideIn');
+  });
+
+  it('embeds the command palette script with core functions', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('window.__cmdPalette');
+    expect(html).toContain('fuzzyMatch');
+    expect(html).toContain('openPalette');
+    expect(html).toContain('closePalette');
+  });
+
+  it('includes Cmd+K handler in keyboard shortcuts', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    // Should intercept Cmd+K / Ctrl+K
+    expect(html).toContain('e.key==="k"');
+    expect(html).toContain('e.metaKey||e.ctrlKey');
+    expect(html).toContain('window.__cmdPalette');
+  });
+
+  it('includes static page entries in the palette script', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('"Dashboard"');
+    expect(html).toContain('"Agents"');
+    expect(html).toContain('"Tasks"');
+    expect(html).toContain('"Logs"');
+    expect(html).toContain('"Conversations"');
+    expect(html).toContain('"Context"');
+    expect(html).toContain('"IPC Inspector"');
+    expect(html).toContain('"Network"');
+    expect(html).toContain('"System"');
+    expect(html).toContain('"Settings"');
+  });
+
+  it('fetches agents and tasks data on palette open', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('fetch("/api/agents")');
+    expect(html).toContain('fetch("/api/tasks")');
+  });
+
+  it('renders the input with placeholder text', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('placeholder="Search pages, agents, tasks\u2026"');
+  });
+
+  it('renders keyboard navigation hints in footer', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('class="cmd-footer"');
+    expect(html).toContain('navigate');
+    expect(html).toContain('open');
+    expect(html).toContain('close');
+  });
+
+  it('adds command palette to the shortcut help modal', () => {
+    const html = shortcutHelpModal();
+
+    expect(html).toContain('Command palette');
+  });
+});
