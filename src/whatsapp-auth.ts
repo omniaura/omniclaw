@@ -36,7 +36,10 @@ type AuthLogger = ReturnType<typeof createLogger>;
 type SocketLike = {
   requestPairingCode: (phoneNumber: string) => Promise<string>;
   ev: {
-    on: (event: string, handler: (...args: any[]) => void) => void;
+    on: (
+      event: 'connection.update' | 'creds.update',
+      handler: (...args: any[]) => void,
+    ) => void;
   };
 };
 
@@ -62,7 +65,7 @@ type AuthenticateDeps = {
 
 const defaultConnectSocketDeps: ConnectSocketDeps = {
   fs,
-  makeWASocket,
+  makeWASocket: (config) => makeWASocket(config) as unknown as SocketLike,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,

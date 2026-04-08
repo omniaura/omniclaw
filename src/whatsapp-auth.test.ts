@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
+import fs from 'fs';
+
 import { DisconnectReason } from '@whiskeysockets/baileys';
 
 import {
@@ -10,6 +12,7 @@ import {
 } from './whatsapp-auth.js';
 
 type Handler = (...args: any[]) => void;
+type ConnectSocketDeps = NonNullable<Parameters<typeof connectSocket>[3]>;
 
 function createSocketHarness(pairingCode = '123-456') {
   const handlers: Record<string, Handler> = {};
@@ -43,8 +46,13 @@ function createConnectDeps(overrides: Record<string, unknown> = {}) {
   const deps = {
     fs: { writeFileSync, unlinkSync },
     makeWASocket: mock((_config: unknown) => socketHarness.socket),
-    fetchLatestWaWebVersion: mock(async () => ({ version: [1, 2, 3] })),
-    makeCacheableSignalKeyStore: mock((_keys: unknown, _logger: unknown) => ({})),
+    fetchLatestWaWebVersion: mock(async () => ({
+      version: [1, 2, 3],
+      isLatest: true,
+    })),
+    makeCacheableSignalKeyStore: mock(
+      (_keys: unknown, _logger: unknown) => ({}),
+    ),
     useMultiFileAuthState: mock(async () => ({
       state: { creds: { registered: false }, keys: {} },
       saveCreds,
@@ -60,7 +68,7 @@ function createConnectDeps(overrides: Record<string, unknown> = {}) {
   };
 
   return {
-    deps: { ...deps, ...overrides } as Parameters<typeof connectSocket>[3],
+    deps: { ...deps, ...overrides } as unknown as ConnectSocketDeps,
     timers,
     socketHarness,
     writeFileSync,
@@ -76,7 +84,13 @@ function createConnectDeps(overrides: Record<string, unknown> = {}) {
 describe('getCliOptions', () => {
   it('parses pairing mode and phone number flags', () => {
     expect(
-      getCliOptions(['bun', 'src/whatsapp-auth.ts', '--pairing-code', '--phone', '14155551234']),
+      getCliOptions([
+        'bun',
+        'src/whatsapp-auth.ts',
+        '--pairing-code',
+        '--phone',
+        '14155551234',
+      ]),
     ).toEqual({
       usePairingCode: true,
       phoneArg: '14155551234',
@@ -110,7 +124,10 @@ describe('askQuestion', () => {
 
 describe('authenticate', () => {
   it('cleans stale files, prompts in pairing mode, and connects with the answer', async () => {
-    const mkdirSync = mock(() => {});
+    const mkdirSync = mock(
+      ((..._args: Parameters<typeof fs.mkdirSync>) =>
+        undefined) as typeof fs.mkdirSync,
+    );
     const unlinkSync = mock(() => {
       throw new Error('missing');
     });
@@ -163,11 +180,18 @@ describe('connectSocket', () => {
   it('requests a pairing code and records it after the delayed startup timer', async () => {
     const harness = createConnectDeps();
 
-    await connectSocket('14155551234', false, { usePairingCode: true }, harness.deps);
+    await connectSocket(
+      '14155551234',
+      false,
+      { usePairingCode: true },
+      harness.deps,
+    );
 
     expect(harness.timers).toHaveLength(1);
     await harness.timers[0]!();
-    expect(harness.socketHarness.requestPairingCode).toHaveBeenCalledWith('14155551234');
+    expect(harness.socketHarness.requestPairingCode).toHaveBeenCalledWith(
+      '14155551234',
+    );
     expect(harness.writeFileSync).toHaveBeenCalledWith(
       './store/auth-status.txt',
       'pairing_code:123-456',
@@ -261,7 +285,9 @@ describe('connectSocket', () => {
     const harness = createConnectDeps();
 
     await connectSocket(undefined, false, cliOptions, harness.deps);
-    harness.socketHarness.handlers['connection.update']({ connection: 'close' });
+    harness.socketHarness.handlers['connection.update']({
+      connection: 'close',
+    });
 
     expect(harness.writeFileSync).toHaveBeenCalledWith(
       './store/auth-status.txt',
