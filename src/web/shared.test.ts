@@ -65,6 +65,8 @@ describe('renderShell', () => {
     );
     expect(html).toContain('window.contextInit = true;');
     expect(html).toContain('window.tasksInit = true;');
+    expect(html).toContain('window.__sanitizeHtml=function(html){');
+    expect(html).toContain('window.__sanitizeUrl=function(url){');
     expect(html).toContain('class="nav-link active">Context</a>');
   });
 });

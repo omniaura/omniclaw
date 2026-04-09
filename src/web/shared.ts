@@ -1374,6 +1374,12 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push(
     'window.__esc=function(s){if(!s)return"";var d=document.createElement("div");d.textContent=String(s);return d.innerHTML;};',
   );
+  parts.push(
+    'window.__sanitizeUrl=function(url){if(!url)return"";var v=String(url).trim();if(!v)return"";if(v[0]==="#"||v[0]==="/")return v;try{var p=new URL(v,window.location.origin).protocol.toLowerCase();if(p==="http:"||p==="https:"||p==="mailto:"||p==="tel:")return v;}catch{}return"";};',
+  );
+  parts.push(
+    'window.__sanitizeHtml=function(html){if(!html)return"";var allowed={A:["href","title"],BLOCKQUOTE:[],BR:[],CODE:[],DEL:[],EM:[],H1:[],H2:[],H3:[],H4:[],H5:[],H6:[],HR:[],LI:[],OL:[],P:[],PRE:[],STRONG:[],TABLE:[],TBODY:[],TD:[],TH:[],THEAD:[],TR:[],UL:[]};var blocked={BUTTON:1,EMBED:1,FORM:1,IFRAME:1,IMG:1,INPUT:1,LINK:1,MATH:1,META:1,OBJECT:1,SCRIPT:1,SELECT:1,STYLE:1,SVG:1,TEXTAREA:1,VIDEO:1};var t=document.createElement("template");t.innerHTML=html;function walk(node){Array.from(node.childNodes).forEach(function(child){if(child.nodeType===Node.COMMENT_NODE){child.remove();return;}if(child.nodeType!==Node.ELEMENT_NODE)return;var tag=child.tagName.toUpperCase();if(blocked[tag]){child.remove();return;}if(!allowed[tag]){var frag=document.createDocumentFragment();while(child.firstChild)frag.appendChild(child.firstChild);walk(frag);child.replaceWith(frag);return;}Array.from(child.attributes).forEach(function(attr){var name=attr.name.toLowerCase();if(allowed[tag].indexOf(attr.name)===-1&&allowed[tag].indexOf(name)===-1)child.removeAttribute(attr.name);});if(tag==="A"){var href=window.__sanitizeUrl(child.getAttribute("href")||"");if(!href){child.removeAttribute("href");}else{child.setAttribute("href",href);child.setAttribute("rel","noopener noreferrer");child.setAttribute("target","_blank");}}walk(child);});}walk(t.content);return t.innerHTML;};',
+  );
 
   // ---- Keyboard shortcuts ----
   parts.push(keyboardShortcutScript());
