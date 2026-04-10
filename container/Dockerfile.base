@@ -83,16 +83,31 @@ RUN bun install -g @anthropic-ai/claude-code
 # `agent-browser install --with-deps` calls sudo internally which doesn't exist, so we
 # run `npx playwright install-deps` directly as root instead (no sudo needed).
 # The JS wrapper at /usr/local/bin/agent-browser uses Node's existsSync() which returns
-# false for paths under /root/.bun/ due to EACCES on access() in the container sandbox,
-# so we symlink the native binary directly to /usr/local/bin/agent-browser.
+# false for paths under /root/.bun/ due to EACCES on access() in the container sandbox.
+# Copy the native binary into /usr/local/bin and wrap it there instead of executing out of
+# /root/.bun directly. Linux ARM64 also cannot download Chrome for Testing, so those builds
+# must install system Chromium and force agent-browser to launch it explicitly.
 ARG AGENT_BROWSER_VERSION=0.24.1
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+COPY agent-browser-wrapper.sh /tmp/agent-browser-wrapper
 RUN echo 'trustedDependencies = ["agent-browser"]' >> /root/.bunfig.toml \
     && bun install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
-    && agent-browser install \
+    && AGENT_BROWSER_BIN="$(find /root/.bun -name 'agent-browser-linux-*' -type f | head -1)" \
+    && test -n "$AGENT_BROWSER_BIN" \
+    && install -m 755 "$AGENT_BROWSER_BIN" /usr/local/bin/agent-browser-real \
+    && install -m 755 /tmp/agent-browser-wrapper /usr/local/bin/agent-browser \
+    && ARCH="$(dpkg --print-architecture)" \
+    && if [ "$ARCH" = "arm64" ]; then \
+         apt-get update \
+         && apt-get install -y --no-install-recommends chromium \
+         && rm -rf /var/lib/apt/lists/*; \
+       else \
+         agent-browser install; \
+       fi \
     && npx playwright install-deps \
-    && chmod -R 755 $PLAYWRIGHT_BROWSERS_PATH \
-    && ln -sf $(find /root/.bun -name 'agent-browser-linux-*' -type f | head -1) /usr/local/bin/agent-browser
+    && mkdir -p "$PLAYWRIGHT_BROWSERS_PATH" \
+    && chmod -R 755 "$PLAYWRIGHT_BROWSERS_PATH" \
+    && rm -f /tmp/agent-browser-wrapper
 
 # Install OpenCode CLI (alternative agent runtime)
 # Download directly from GitHub releases to avoid DNS issues with opencode.ai.
