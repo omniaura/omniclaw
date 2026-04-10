@@ -114,7 +114,9 @@ describe('conversations page script', () => {
     expect(script).toContain(
       'container.scrollHeight-container.scrollTop-container.clientHeight<60',
     );
-    expect(script).toContain('if(atBottom)container.scrollTop=container.scrollHeight');
+    expect(script).toContain(
+      'if(atBottom)container.scrollTop=container.scrollHeight',
+    );
   });
 
   it('reconnects SSE after errors with backoff', () => {
