@@ -2,6 +2,7 @@ import {
   createSignal,
   createMemo,
   createEffect,
+  ErrorBoundary,
   For,
   Show,
   onCleanup,
@@ -12,6 +13,7 @@ import { logs, clearLogs } from '~/lib/stores/logs';
 import { agents } from '~/lib/stores/agents';
 import { useEventSource } from '~/lib/event-source';
 import { showToast } from '~/components/shared/Toast';
+import ErrorFallback from '~/components/shared/ErrorFallback';
 import LogLine, {
   LEVELS,
   toggleLevelSet,
@@ -118,133 +120,139 @@ export default function LogsPage() {
   return (
     <>
       <Title>OmniClaw — Logs</Title>
-      <div class="flex flex-col h-full">
-        <div class="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border shrink-0">
-          <h2 class="text-sm font-semibold text-text-bright mr-2">Logs</h2>
-          <span class="text-xs text-text-dim">
-            {filteredLogs().length}
-            <Show when={filterActive()}> / {logs.lines.length}</Show> lines
-          </span>
+      <ErrorBoundary
+        fallback={(err, reset) => (
+          <ErrorFallback error={err} reset={reset} context="Logs" />
+        )}
+      >
+        <div class="flex flex-col h-full">
+          <div class="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border shrink-0">
+            <h2 class="text-sm font-semibold text-text-bright mr-2">Logs</h2>
+            <span class="text-xs text-text-dim">
+              {filteredLogs().length}
+              <Show when={filterActive()}> / {logs.lines.length}</Show> lines
+            </span>
 
-          <div class="flex-1" />
+            <div class="flex-1" />
 
-          <div class="flex items-center gap-1">
-            <input
-              type="text"
-              placeholder="Search logs..."
-              spellcheck={false}
-              autocomplete="off"
-              class="bg-surface text-text text-xs px-2 py-1 rounded border border-border focus:border-accent focus:outline-none w-48"
-              onInput={(e) => handleSearchInput(e.currentTarget.value)}
-            />
-            <label class="flex items-center gap-1 text-xs text-text-dim cursor-pointer select-none">
+            <div class="flex items-center gap-1">
               <input
-                type="checkbox"
-                checked={useRegex()}
-                onChange={(e) => setUseRegex(e.currentTarget.checked)}
-                class="accent-accent"
+                type="text"
+                placeholder="Search logs..."
+                spellcheck={false}
+                autocomplete="off"
+                class="bg-surface text-text text-xs px-2 py-1 rounded border border-border focus:border-accent focus:outline-none w-48"
+                onInput={(e) => handleSearchInput(e.currentTarget.value)}
               />
-              regex
-            </label>
+              <label class="flex items-center gap-1 text-xs text-text-dim cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={useRegex()}
+                  onChange={(e) => setUseRegex(e.currentTarget.checked)}
+                  class="accent-accent"
+                />
+                regex
+              </label>
+            </div>
+
+            <div class="flex-1" />
+
+            <div class="flex items-center gap-1">
+              <For each={[...LEVELS]}>
+                {(level) => (
+                  <button
+                    class={`px-1.5 py-0.5 rounded text-xs transition-colors ${
+                      enabledLevels().has(level)
+                        ? 'bg-surface-2 text-text'
+                        : 'text-text-dim opacity-50'
+                    }`}
+                    onClick={() =>
+                      setEnabledLevels((prev) => toggleLevelSet(prev, level))
+                    }
+                  >
+                    {level}
+                  </button>
+                )}
+              </For>
+            </div>
+
+            <select
+              class="bg-surface text-text text-xs px-2 py-1 rounded border border-border"
+              value={sourceFilter()}
+              onChange={(e) => setSourceFilter(e.currentTarget.value)}
+            >
+              <option value="">all sources</option>
+              <For each={sourceOptions()}>
+                {(opt) => <option value={opt.id}>{opt.name}</option>}
+              </For>
+            </select>
+
+            <button
+              class={`px-1.5 py-0.5 rounded text-xs transition-colors ${
+                autoScroll()
+                  ? 'bg-surface-2 text-text'
+                  : 'text-text-dim opacity-50'
+              }`}
+              onClick={() => {
+                const wasOn = autoScroll();
+                setAutoScroll(!wasOn);
+                if (!wasOn && containerRef) {
+                  containerRef.scrollTop = containerRef.scrollHeight;
+                }
+              }}
+              title="Auto-scroll"
+            >
+              ↓ auto
+            </button>
+
+            <button
+              class="px-1.5 py-0.5 rounded text-xs text-text-dim hover:text-text hover:bg-surface-2 transition-colors"
+              onClick={exportLogs}
+              title="Export logs as text"
+            >
+              export
+            </button>
+
+            <button
+              class="px-1.5 py-0.5 rounded text-xs text-red hover:bg-red/10 transition-colors"
+              onClick={handleClear}
+              title="Clear all logs"
+            >
+              clear
+            </button>
           </div>
 
-          <div class="flex-1" />
-
-          <div class="flex items-center gap-1">
-            <For each={[...LEVELS]}>
-              {(level) => (
-                <button
-                  class={`px-1.5 py-0.5 rounded text-xs transition-colors ${
-                    enabledLevels().has(level)
-                      ? 'bg-surface-2 text-text'
-                      : 'text-text-dim opacity-50'
-                  }`}
-                  onClick={() =>
-                    setEnabledLevels((prev) => toggleLevelSet(prev, level))
-                  }
-                >
-                  {level}
-                </button>
+          <div
+            ref={containerRef}
+            class="flex-1 overflow-auto p-2 text-xs font-mono min-h-0"
+          >
+            <For each={filteredLogs()}>
+              {(line) => (
+                <LogLine
+                  line={line}
+                  class="hover:bg-surface-2/50"
+                  badgeWidth="w-12 text-center"
+                />
               )}
             </For>
           </div>
 
-          <select
-            class="bg-surface text-text text-xs px-2 py-1 rounded border border-border"
-            value={sourceFilter()}
-            onChange={(e) => setSourceFilter(e.currentTarget.value)}
-          >
-            <option value="">all sources</option>
-            <For each={sourceOptions()}>
-              {(opt) => <option value={opt.id}>{opt.name}</option>}
-            </For>
-          </select>
-
-          <button
-            class={`px-1.5 py-0.5 rounded text-xs transition-colors ${
-              autoScroll()
-                ? 'bg-surface-2 text-text'
-                : 'text-text-dim opacity-50'
-            }`}
-            onClick={() => {
-              const wasOn = autoScroll();
-              setAutoScroll(!wasOn);
-              if (!wasOn && containerRef) {
-                containerRef.scrollTop = containerRef.scrollHeight;
-              }
-            }}
-            title="Auto-scroll"
-          >
-            ↓ auto
-          </button>
-
-          <button
-            class="px-1.5 py-0.5 rounded text-xs text-text-dim hover:text-text hover:bg-surface-2 transition-colors"
-            onClick={exportLogs}
-            title="Export logs as text"
-          >
-            export
-          </button>
-
-          <button
-            class="px-1.5 py-0.5 rounded text-xs text-red hover:bg-red/10 transition-colors"
-            onClick={handleClear}
-            title="Clear all logs"
-          >
-            clear
-          </button>
-        </div>
-
-        <div
-          ref={containerRef}
-          class="flex-1 overflow-auto p-2 text-xs font-mono min-h-0"
-        >
-          <For each={filteredLogs()}>
-            {(line) => (
-              <LogLine
-                line={line}
-                class="hover:bg-surface-2/50"
-                badgeWidth="w-12 text-center"
-              />
-            )}
-          </For>
-        </div>
-
-        <div class="flex items-center justify-between px-3 py-1 border-t border-border text-xs text-text-dim shrink-0">
-          <span>
-            {status() === 'connected'
-              ? 'Connected'
-              : status() === 'connecting'
-                ? 'Connecting...'
-                : 'Disconnected'}
-          </span>
-          <Show when={filterActive()}>
+          <div class="flex items-center justify-between px-3 py-1 border-t border-border text-xs text-text-dim shrink-0">
             <span>
-              showing {filteredLogs().length} of {logs.lines.length}
+              {status() === 'connected'
+                ? 'Connected'
+                : status() === 'connecting'
+                  ? 'Connecting...'
+                  : 'Disconnected'}
             </span>
-          </Show>
+            <Show when={filterActive()}>
+              <span>
+                showing {filteredLogs().length} of {logs.lines.length}
+              </span>
+            </Show>
+          </div>
         </div>
-      </div>
+      </ErrorBoundary>
     </>
   );
 }

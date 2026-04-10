@@ -1,8 +1,16 @@
 import { Title } from '@solidjs/meta';
-import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import {
+  createSignal,
+  ErrorBoundary,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+} from 'solid-js';
 
 import { api, type IpcEvent, type QueueDetail } from '~/lib/api';
 import { stats } from '~/lib/stores/stats';
+import ErrorFallback from '~/components/shared/ErrorFallback';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -75,163 +83,171 @@ export default function Ipc() {
   return (
     <>
       <Title>OmniClaw — IPC</Title>
-      <div class="p-4 space-y-6">
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard
-            label="processing"
-            value={() =>
-              `${Math.max(0, stats.activeContainers - stats.idleContainers)}/${stats.maxActive}`
-            }
-          />
-          <StatCard
-            label="idle"
-            value={() => `${stats.idleContainers}/${stats.maxIdle}`}
-          />
-          <StatCard
-            label="groups tracked"
-            value={() => String(queue().length)}
-          />
-          <StatCard
-            label="recent events"
-            value={() => String(events().length)}
-          />
-        </div>
+      <ErrorBoundary
+        fallback={(err, reset) => (
+          <ErrorFallback error={err} reset={reset} context="IPC Inspector" />
+        )}
+      >
+        <div class="p-4 space-y-6">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard
+              label="processing"
+              value={() =>
+                `${Math.max(0, stats.activeContainers - stats.idleContainers)}/${stats.maxActive}`
+              }
+            />
+            <StatCard
+              label="idle"
+              value={() => `${stats.idleContainers}/${stats.maxIdle}`}
+            />
+            <StatCard
+              label="groups tracked"
+              value={() => String(queue().length)}
+            />
+            <StatCard
+              label="recent events"
+              value={() => String(events().length)}
+            />
+          </div>
 
-        <section>
-          <h2 class="text-text-bright text-sm font-semibold mb-3">
-            group queue state
-          </h2>
-          <Show
-            when={queue().length > 0}
-            fallback={
-              <div class="text-text-dim text-xs border border-dashed border-border rounded p-4">
-                No groups currently tracked.
-              </div>
-            }
-          >
-            <div class="overflow-x-auto rounded border border-border">
-              <table class="w-full text-xs">
-                <thead>
-                  <tr class="bg-surface-2 text-text-dim">
-                    <th class="text-left px-3 py-2 font-medium">group</th>
-                    <th class="text-left px-3 py-2 font-medium">messages</th>
-                    <th class="text-left px-3 py-2 font-medium">msg queue</th>
-                    <th class="text-left px-3 py-2 font-medium">tasks</th>
-                    <th class="text-left px-3 py-2 font-medium">task queue</th>
-                    <th class="text-left px-3 py-2 font-medium">
-                      running task
-                    </th>
-                    <th class="text-left px-3 py-2 font-medium">retries</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <For each={queue()}>
-                    {(group) => {
-                      const msgStatus = messageLaneStatus(group.messageLane);
-                      const tStatus = taskLaneStatus(group.taskLane);
-                      return (
-                        <tr class="border-t border-border hover:bg-surface-2/50">
-                          <td class="px-3 py-2 text-accent">
-                            {group.folderKey}
-                          </td>
-                          <td class="px-3 py-2">
-                            <LaneBadge status={msgStatus} />
-                          </td>
-                          <td class="px-3 py-2">
-                            {group.messageLane.pendingCount}
-                          </td>
-                          <td class="px-3 py-2">
-                            <LaneBadge status={tStatus} />
-                          </td>
-                          <td class="px-3 py-2">
-                            {group.taskLane.pendingCount}
-                          </td>
-                          <td class="px-3 py-2 text-text-dim">
-                            <Show
-                              when={group.taskLane.activeTask}
-                              fallback={<span>{'\u2014'}</span>}
-                            >
-                              {(task) => (
-                                <span>
-                                  {task().taskId}{' '}
-                                  <span class="text-text-dim">
-                                    ({formatDuration(task().runningMs)})
+          <section>
+            <h2 class="text-text-bright text-sm font-semibold mb-3">
+              group queue state
+            </h2>
+            <Show
+              when={queue().length > 0}
+              fallback={
+                <div class="text-text-dim text-xs border border-dashed border-border rounded p-4">
+                  No groups currently tracked.
+                </div>
+              }
+            >
+              <div class="overflow-x-auto rounded border border-border">
+                <table class="w-full text-xs">
+                  <thead>
+                    <tr class="bg-surface-2 text-text-dim">
+                      <th class="text-left px-3 py-2 font-medium">group</th>
+                      <th class="text-left px-3 py-2 font-medium">messages</th>
+                      <th class="text-left px-3 py-2 font-medium">msg queue</th>
+                      <th class="text-left px-3 py-2 font-medium">tasks</th>
+                      <th class="text-left px-3 py-2 font-medium">
+                        task queue
+                      </th>
+                      <th class="text-left px-3 py-2 font-medium">
+                        running task
+                      </th>
+                      <th class="text-left px-3 py-2 font-medium">retries</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For each={queue()}>
+                      {(group) => {
+                        const msgStatus = messageLaneStatus(group.messageLane);
+                        const tStatus = taskLaneStatus(group.taskLane);
+                        return (
+                          <tr class="border-t border-border hover:bg-surface-2/50">
+                            <td class="px-3 py-2 text-accent">
+                              {group.folderKey}
+                            </td>
+                            <td class="px-3 py-2">
+                              <LaneBadge status={msgStatus} />
+                            </td>
+                            <td class="px-3 py-2">
+                              {group.messageLane.pendingCount}
+                            </td>
+                            <td class="px-3 py-2">
+                              <LaneBadge status={tStatus} />
+                            </td>
+                            <td class="px-3 py-2">
+                              {group.taskLane.pendingCount}
+                            </td>
+                            <td class="px-3 py-2 text-text-dim">
+                              <Show
+                                when={group.taskLane.activeTask}
+                                fallback={<span>{'\u2014'}</span>}
+                              >
+                                {(task) => (
+                                  <span>
+                                    {task().taskId}{' '}
+                                    <span class="text-text-dim">
+                                      ({formatDuration(task().runningMs)})
+                                    </span>
                                   </span>
+                                )}
+                              </Show>
+                            </td>
+                            <td class="px-3 py-2">
+                              <Show
+                                when={group.retryCount > 0}
+                                fallback={<span>{'\u2014'}</span>}
+                              >
+                                <span class="text-yellow font-semibold">
+                                  {group.retryCount}
                                 </span>
-                              )}
-                            </Show>
+                              </Show>
+                            </td>
+                          </tr>
+                        );
+                      }}
+                    </For>
+                  </tbody>
+                </table>
+              </div>
+            </Show>
+          </section>
+
+          <section>
+            <h2 class="text-text-bright text-sm font-semibold mb-3">
+              ipc event timeline
+            </h2>
+            <Show
+              when={events().length > 0}
+              fallback={
+                <div class="text-text-dim text-xs border border-dashed border-border rounded p-4">
+                  No IPC events recorded yet.
+                </div>
+              }
+            >
+              <div class="overflow-x-auto rounded border border-border">
+                <table class="w-full text-xs">
+                  <thead>
+                    <tr class="bg-surface-2 text-text-dim">
+                      <th class="text-left px-3 py-2 font-medium">time</th>
+                      <th class="text-left px-3 py-2 font-medium">kind</th>
+                      <th class="text-left px-3 py-2 font-medium">source</th>
+                      <th class="text-left px-3 py-2 font-medium">summary</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For each={events()}>
+                      {(event) => (
+                        <tr
+                          class={`border-t border-border ${eventRowBg(event.kind)}`}
+                        >
+                          <td class="px-3 py-2 text-text-dim whitespace-nowrap">
+                            {formatTime(event.timestamp)}
                           </td>
                           <td class="px-3 py-2">
-                            <Show
-                              when={group.retryCount > 0}
-                              fallback={<span>{'\u2014'}</span>}
+                            <span
+                              class={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${eventKindClass(event.kind)} bg-surface-2`}
                             >
-                              <span class="text-yellow font-semibold">
-                                {group.retryCount}
-                              </span>
-                            </Show>
+                              {event.kind}
+                            </span>
                           </td>
+                          <td class="px-3 py-2 text-accent">
+                            {event.sourceGroup}
+                          </td>
+                          <td class="px-3 py-2">{event.summary}</td>
                         </tr>
-                      );
-                    }}
-                  </For>
-                </tbody>
-              </table>
-            </div>
-          </Show>
-        </section>
-
-        <section>
-          <h2 class="text-text-bright text-sm font-semibold mb-3">
-            ipc event timeline
-          </h2>
-          <Show
-            when={events().length > 0}
-            fallback={
-              <div class="text-text-dim text-xs border border-dashed border-border rounded p-4">
-                No IPC events recorded yet.
+                      )}
+                    </For>
+                  </tbody>
+                </table>
               </div>
-            }
-          >
-            <div class="overflow-x-auto rounded border border-border">
-              <table class="w-full text-xs">
-                <thead>
-                  <tr class="bg-surface-2 text-text-dim">
-                    <th class="text-left px-3 py-2 font-medium">time</th>
-                    <th class="text-left px-3 py-2 font-medium">kind</th>
-                    <th class="text-left px-3 py-2 font-medium">source</th>
-                    <th class="text-left px-3 py-2 font-medium">summary</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <For each={events()}>
-                    {(event) => (
-                      <tr
-                        class={`border-t border-border ${eventRowBg(event.kind)}`}
-                      >
-                        <td class="px-3 py-2 text-text-dim whitespace-nowrap">
-                          {formatTime(event.timestamp)}
-                        </td>
-                        <td class="px-3 py-2">
-                          <span
-                            class={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${eventKindClass(event.kind)} bg-surface-2`}
-                          >
-                            {event.kind}
-                          </span>
-                        </td>
-                        <td class="px-3 py-2 text-accent">
-                          {event.sourceGroup}
-                        </td>
-                        <td class="px-3 py-2">{event.summary}</td>
-                      </tr>
-                    )}
-                  </For>
-                </tbody>
-              </table>
-            </div>
-          </Show>
-        </section>
-      </div>
+            </Show>
+          </section>
+        </div>
+      </ErrorBoundary>
     </>
   );
 }
