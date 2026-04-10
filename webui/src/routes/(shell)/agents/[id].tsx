@@ -1,11 +1,19 @@
 import { Title } from '@solidjs/meta';
 import { useParams, A, useNavigate } from '@solidjs/router';
-import { createSignal, createResource, Show, For, Suspense } from 'solid-js';
+import {
+  createSignal,
+  createResource,
+  Show,
+  For,
+  Suspense,
+  onCleanup,
+} from 'solid-js';
 import { isServer } from 'solid-js/web';
 import { api } from '~/lib/api';
-import type { AgentDetailData } from '~/lib/api';
+import type { AgentDetailData, QueueDetail } from '~/lib/api';
 import Badge from '~/components/shared/Badge';
 import AvatarUpload from '~/components/agents/AvatarUpload';
+import ExecStatusBadge from '~/components/agents/ExecStatusBadge';
 
 type Tab = 'overview' | 'channels' | 'tasks' | 'chats';
 
@@ -40,10 +48,26 @@ export default function AgentDetail() {
   const [activeTab, setActiveTab] = createSignal<Tab>('overview');
   const [avatarKey, setAvatarKey] = createSignal(0);
 
-  const [agent] = createResource(
+  const [agent, { refetch }] = createResource(
     () => (isServer ? undefined : params.id),
     (id) => api.getAgentDetail(id),
   );
+
+  // Poll queue details for live execution status
+  const [queueDetails, setQueueDetails] = createSignal<
+    QueueDetail[] | undefined
+  >(undefined);
+  if (!isServer) {
+    const pollQueue = () => {
+      api
+        .getQueueDetails()
+        .then(setQueueDetails)
+        .catch(() => {});
+    };
+    pollQueue();
+    const timer = setInterval(pollQueue, 5000);
+    onCleanup(() => clearInterval(timer));
+  }
 
   const avatarImageUrl = () => api.getAgentAvatarImageUrl(params.id);
 
@@ -102,10 +126,16 @@ export default function AgentDetail() {
                     />
                   </Show>
 
-                  <div class="min-w-0">
-                    <h2 class="text-xl text-text-bright font-semibold mb-1">
-                      {data().name}
-                    </h2>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-3 mb-1">
+                      <h2 class="text-xl text-text-bright font-semibold">
+                        {data().name}
+                      </h2>
+                      <ExecStatusBadge
+                        folder={data().folder}
+                        queueDetails={queueDetails}
+                      />
+                    </div>
                     <div class="flex flex-wrap gap-1.5 mb-1">
                       <Badge variant={backendVariant(data().backend)}>
                         {data().backend}
@@ -275,51 +305,11 @@ export default function AgentDetail() {
                 </Show>
 
                 <Show when={activeTab() === 'tasks'}>
-                  <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
-                      <thead>
-                        <tr class="text-left text-text-dim border-b border-border">
-                          <th class="pb-2 pr-4 font-medium">status</th>
-                          <th class="pb-2 pr-4 font-medium">prompt</th>
-                          <th class="pb-2 pr-4 font-medium">schedule</th>
-                          <th class="pb-2 font-medium">next run</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <Show
-                          when={data().tasks.length > 0}
-                          fallback={
-                            <tr>
-                              <td colspan="4" class="py-3 text-text-dim">
-                                No scheduled tasks
-                              </td>
-                            </tr>
-                          }
-                        >
-                          <For each={data().tasks}>
-                            {(task) => (
-                              <tr class="border-b border-border/50 hover:bg-surface-2/50">
-                                <td class="py-2 pr-4">
-                                  <Badge variant={statusVariant(task.status)}>
-                                    {task.status}
-                                  </Badge>
-                                </td>
-                                <td class="py-2 pr-4" title={task.prompt}>
-                                  {truncate(task.prompt, 80)}
-                                </td>
-                                <td class="py-2 pr-4 text-text-dim">
-                                  {task.schedule_type}: {task.schedule_value}
-                                </td>
-                                <td class="py-2 text-text-dim">
-                                  {formatDate(task.next_run)}
-                                </td>
-                              </tr>
-                            )}
-                          </For>
-                        </Show>
-                      </tbody>
-                    </table>
-                  </div>
+                  <TasksTab
+                    tasks={data().tasks}
+                    isRemote={!!data().remoteInstanceId}
+                    onRefresh={refetch}
+                  />
                 </Show>
 
                 <Show when={activeTab() === 'chats'}>
@@ -384,6 +374,124 @@ function InfoItem(props: { label: string; value: string }) {
     <div class="bg-surface rounded px-3 py-2 border border-border">
       <div class="text-text-dim text-xs mb-0.5">{props.label}</div>
       <div class="text-text break-all">{props.value}</div>
+    </div>
+  );
+}
+
+function TasksTab(props: {
+  tasks: AgentDetailData['tasks'];
+  isRemote: boolean;
+  onRefresh: () => void;
+}) {
+  const [togglingId, setTogglingId] = createSignal<string | null>(null);
+  const [toast, setToast] = createSignal<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
+
+  async function toggleTask(
+    taskId: string,
+    newStatus: 'active' | 'paused',
+  ): Promise<void> {
+    setTogglingId(taskId);
+    setToast(null);
+    try {
+      await api.updateTask(taskId, { status: newStatus });
+      setToast({
+        ok: true,
+        text: `Task ${newStatus === 'paused' ? 'paused' : 'resumed'}`,
+      });
+      props.onRefresh();
+    } catch (err: any) {
+      setToast({ ok: false, text: err.message || 'Failed to update task' });
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  return (
+    <div>
+      <Show when={toast()}>
+        {(t) => (
+          <div class={`text-xs mb-3 ${t().ok ? 'text-green' : 'text-red'}`}>
+            {t().text}
+          </div>
+        )}
+      </Show>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-text-dim border-b border-border">
+              <th class="pb-2 pr-4 font-medium">status</th>
+              <th class="pb-2 pr-4 font-medium">prompt</th>
+              <th class="pb-2 pr-4 font-medium">schedule</th>
+              <th class="pb-2 pr-4 font-medium">next run</th>
+              <Show when={!props.isRemote}>
+                <th class="pb-2 font-medium"></th>
+              </Show>
+            </tr>
+          </thead>
+          <tbody>
+            <Show
+              when={props.tasks.length > 0}
+              fallback={
+                <tr>
+                  <td
+                    colspan={props.isRemote ? '4' : '5'}
+                    class="py-3 text-text-dim"
+                  >
+                    No scheduled tasks
+                  </td>
+                </tr>
+              }
+            >
+              <For each={props.tasks}>
+                {(task) => {
+                  const isToggling = () => togglingId() === task.id;
+                  const toggleTarget = (): 'active' | 'paused' =>
+                    task.status === 'active' ? 'paused' : 'active';
+                  const toggleLabel = () =>
+                    task.status === 'active' ? 'pause' : 'resume';
+
+                  return (
+                    <tr class="border-b border-border/50 hover:bg-surface-2/50">
+                      <td class="py-2 pr-4">
+                        <Badge variant={statusVariant(task.status)}>
+                          {task.status}
+                        </Badge>
+                      </td>
+                      <td class="py-2 pr-4" title={task.prompt}>
+                        {truncate(task.prompt, 80)}
+                      </td>
+                      <td class="py-2 pr-4 text-text-dim">
+                        {task.schedule_type}: {task.schedule_value}
+                      </td>
+                      <td class="py-2 pr-4 text-text-dim">
+                        {formatDate(task.next_run)}
+                      </td>
+                      <Show when={!props.isRemote}>
+                        <td class="py-2">
+                          <Show when={task.status !== 'completed'}>
+                            <button
+                              class="px-2 py-0.5 text-xs rounded bg-surface-2 text-text-dim hover:text-text-bright border border-border hover:border-border-bright disabled:opacity-50"
+                              disabled={isToggling()}
+                              onClick={() =>
+                                toggleTask(task.id, toggleTarget())
+                              }
+                            >
+                              {isToggling() ? '...' : toggleLabel()}
+                            </button>
+                          </Show>
+                        </td>
+                      </Show>
+                    </tr>
+                  );
+                }}
+              </For>
+            </Show>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -474,9 +582,7 @@ function MessageCompose(props: {
           <span class="text-xs text-text-dim">Ctrl+Enter to send</span>
           <Show when={result()}>
             {(r) => (
-              <span
-                class={`text-xs ${r().ok ? 'text-green-400' : 'text-red-400'}`}
-              >
+              <span class={`text-xs ${r().ok ? 'text-green' : 'text-red'}`}>
                 {r().text}
               </span>
             )}
