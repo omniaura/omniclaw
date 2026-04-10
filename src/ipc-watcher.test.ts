@@ -94,7 +94,12 @@ describe('startIpcWatcher', () => {
       }),
     );
     fs.writeFileSync(
-      path.join(IPC_BASE_DIR, malformedRuntimeFolder, 'messages', 'message.json'),
+      path.join(
+        IPC_BASE_DIR,
+        malformedRuntimeFolder,
+        'messages',
+        'message.json',
+      ),
       JSON.stringify({
         type: 'message',
         chatJid: 'main@g.us',
