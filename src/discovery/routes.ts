@@ -448,7 +448,10 @@ async function handlePairRequest(
   } catch (err) {
     if (err instanceof PairRequestHostMismatchError) {
       return json(
-        { error: 'A pending request for this instance is bound to a different host' },
+        {
+          error:
+            'A pending request for this instance is bound to a different host',
+        },
         409,
       );
     }
