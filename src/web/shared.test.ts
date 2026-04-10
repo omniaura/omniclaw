@@ -181,6 +181,16 @@ describe('renderShell keyboard shortcuts', () => {
     expect(html).toContain('.shortcut-row');
     expect(html).toContain('.shortcut-keys kbd');
   });
+
+  it('includes markdown message styles', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('.msg-md');
+    expect(html).toContain('.msg-md code');
+    expect(html).toContain('.msg-md pre');
+    expect(html).toContain('.msg-md blockquote');
+    expect(html).toContain('.msg-md table');
+  });
 });
 
 describe('command palette', () => {
