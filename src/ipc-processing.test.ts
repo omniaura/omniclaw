@@ -58,6 +58,13 @@ let sentMessages: Array<{ jid: string; text: string }>;
 let notifiedGroups: Array<{ jid: string; text: string }>;
 let syncCalled: boolean;
 let taskSnapshots: Array<{ groupFolder: string; isMain: boolean }>;
+let groupSnapshots: Array<{
+  groupFolder: string;
+  isMain: boolean;
+  availableCount: number;
+  registeredJids: string[];
+}>;
+let subscriptionChangedCalls: number;
 let deps: IpcDeps;
 
 beforeEach(() => {
@@ -73,6 +80,8 @@ beforeEach(() => {
   notifiedGroups = [];
   syncCalled = false;
   taskSnapshots = [];
+  groupSnapshots = [];
+  subscriptionChangedCalls = 0;
 
   setRegisteredGroup('main@g.us', MAIN_GROUP);
   setRegisteredGroup('other@g.us', OTHER_GROUP);
@@ -99,9 +108,24 @@ beforeEach(() => {
       syncCalled = true;
     },
     getAvailableGroups: () => [],
-    writeGroupsSnapshot: () => {},
+    writeGroupsSnapshot: (
+      groupFolder,
+      isMain,
+      availableGroups,
+      registeredJids,
+    ) => {
+      groupSnapshots.push({
+        groupFolder,
+        isMain,
+        availableCount: availableGroups.length,
+        registeredJids: Array.from(registeredJids).sort(),
+      });
+    },
     writeTasksSnapshot: (groupFolder, isMain) => {
       taskSnapshots.push({ groupFolder, isMain });
+    },
+    onSubscriptionChanged: () => {
+      subscriptionChangedCalls += 1;
     },
   };
 });
@@ -137,6 +161,14 @@ describe('processTaskIpc: refresh_groups', () => {
     await processTaskIpc({ type: 'refresh_groups' }, 'main', true, deps);
 
     expect(syncCalled).toBe(true);
+    expect(groupSnapshots).toEqual([
+      {
+        groupFolder: 'main',
+        isMain: true,
+        availableCount: 0,
+        registeredJids: ['main@g.us', 'other@g.us', 'third@g.us'],
+      },
+    ]);
   });
 
   it('non-main group cannot trigger refresh', async () => {
@@ -148,6 +180,27 @@ describe('processTaskIpc: refresh_groups', () => {
     );
 
     expect(syncCalled).toBe(false);
+    expect(groupSnapshots).toHaveLength(0);
+  });
+});
+
+describe('processTaskIpc: schedule_task invalid config', () => {
+  it('rejects invalid schedule values that cannot compute next_run', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'Broken schedule',
+        schedule_type: 'interval',
+        schedule_value: 'not-a-number',
+        targetJid: 'main@g.us',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    expect(getAllTasks()).toHaveLength(0);
+    expect(taskSnapshots).toHaveLength(0);
   });
 });
 
@@ -270,6 +323,28 @@ describe('processTaskIpc: register_group with discord', () => {
 });
 
 describe('processTaskIpc: channel subscriptions', () => {
+  it('subscribe_channel uses target defaults and notifies subscription observers', async () => {
+    await processTaskIpc(
+      {
+        type: 'subscribe_channel',
+        channel_jid: 'dc:555',
+        target_agent: 'third-group',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    const subs = getSubscriptionsForChannel('dc:555');
+    expect(subs).toHaveLength(1);
+    expect(subs[0]).toMatchObject({
+      agentId: 'third-group',
+      trigger: '@Andy',
+      requiresTrigger: true,
+    });
+    expect(subscriptionChangedCalls).toBe(1);
+  });
+
   it('subscribe_channel adds a second agent to same channel', async () => {
     setChannelSubscription({
       channelJid: 'dc:777',
@@ -295,6 +370,91 @@ describe('processTaskIpc: channel subscriptions', () => {
       'other-group',
       'third-group',
     ]);
+    expect(subscriptionChangedCalls).toBe(1);
+  });
+
+  it('subscribe_channel preserves primary metadata on upsert', async () => {
+    setChannelSubscription({
+      channelJid: 'dc:778',
+      agentId: 'third-group',
+      trigger: '@Legacy',
+      requiresTrigger: false,
+      priority: 100,
+      isPrimary: true,
+      createdAt: '2024-02-02T00:00:00.000Z',
+    });
+
+    await processTaskIpc(
+      {
+        type: 'subscribe_channel',
+        channel_jid: 'dc:778',
+        target_agent: 'third-group',
+        trigger: '@NewThird',
+        discord_bot_id: 'OPENCODE',
+        discord_guild_id: '123456789012345678',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    const [sub] = getSubscriptionsForChannel('dc:778');
+    expect(sub).toMatchObject({
+      agentId: 'third-group',
+      trigger: '@NewThird',
+      requiresTrigger: true,
+      isPrimary: true,
+      discordBotId: 'OPENCODE',
+      discordGuildId: '123456789012345678',
+      createdAt: '2024-02-02T00:00:00.000Z',
+    });
+  });
+
+  it('non-main group cannot subscribe channels', async () => {
+    await processTaskIpc(
+      {
+        type: 'subscribe_channel',
+        channel_jid: 'dc:779',
+        target_agent: 'third-group',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(getSubscriptionsForChannel('dc:779')).toHaveLength(0);
+    expect(subscriptionChangedCalls).toBe(0);
+  });
+
+  it('subscribe_channel ignores missing required fields', async () => {
+    await processTaskIpc(
+      {
+        type: 'subscribe_channel',
+        channel_jid: 'dc:780',
+      } as any,
+      'main',
+      true,
+      deps,
+    );
+
+    expect(getSubscriptionsForChannel('dc:780')).toHaveLength(0);
+    expect(subscriptionChangedCalls).toBe(0);
+  });
+
+  it('subscribe_channel ignores unknown target agents', async () => {
+    await processTaskIpc(
+      {
+        type: 'subscribe_channel',
+        channel_jid: 'dc:781',
+        target_agent: 'missing-agent',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    expect(getSubscriptionsForChannel('dc:781')).toHaveLength(0);
+    expect(subscriptionChangedCalls).toBe(0);
   });
 
   it('unsubscribe_channel removes targeted subscription', async () => {
@@ -329,6 +489,58 @@ describe('processTaskIpc: channel subscriptions', () => {
     const subs = getSubscriptionsForChannel('dc:888');
     expect(subs).toHaveLength(1);
     expect(subs[0].agentId).toBe('other-group');
+    expect(subscriptionChangedCalls).toBe(1);
+  });
+
+  it('non-main group cannot unsubscribe channels', async () => {
+    setChannelSubscription({
+      channelJid: 'dc:889',
+      agentId: 'third-group',
+      trigger: '@Third',
+      requiresTrigger: true,
+      priority: 100,
+      isPrimary: false,
+      createdAt: '2024-01-01T00:00:00.000Z',
+    });
+
+    await processTaskIpc(
+      {
+        type: 'unsubscribe_channel',
+        channel_jid: 'dc:889',
+        target_agent: 'third-group',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(getSubscriptionsForChannel('dc:889')).toHaveLength(1);
+    expect(subscriptionChangedCalls).toBe(0);
+  });
+
+  it('unsubscribe_channel ignores missing required fields', async () => {
+    setChannelSubscription({
+      channelJid: 'dc:890',
+      agentId: 'third-group',
+      trigger: '@Third',
+      requiresTrigger: true,
+      priority: 100,
+      isPrimary: false,
+      createdAt: '2024-01-01T00:00:00.000Z',
+    });
+
+    await processTaskIpc(
+      {
+        type: 'unsubscribe_channel',
+        channel_jid: 'dc:890',
+      } as any,
+      'main',
+      true,
+      deps,
+    );
+
+    expect(getSubscriptionsForChannel('dc:890')).toHaveLength(1);
+    expect(subscriptionChangedCalls).toBe(0);
   });
 });
 

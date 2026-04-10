@@ -17,6 +17,8 @@ const MAIN_GROUP: RegisteredGroup = {
 
 const flushMicrotasks = async () => {
   await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 };
 
 describe('startIpcWatcher', () => {
@@ -51,6 +53,9 @@ describe('startIpcWatcher', () => {
       'errors',
       malformedRuntimeFolder,
     );
+    const malformedMessageFile = `malformed-${id}.json`;
+    const malformedTaskFile = `malformed-task-${id}.json`;
+    const failingTaskFile = `failing-task-${id}.json`;
 
     fs.rmSync(path.join(IPC_BASE_DIR, staleRuntimeFolder), {
       recursive: true,
@@ -74,6 +79,12 @@ describe('startIpcWatcher', () => {
       recursive: true,
     });
     fs.mkdirSync(path.join(IPC_BASE_DIR, malformedRuntimeFolder, 'messages'), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(IPC_BASE_DIR, 'main', 'messages'), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(IPC_BASE_DIR, 'main', 'tasks'), {
       recursive: true,
     });
 
@@ -105,6 +116,18 @@ describe('startIpcWatcher', () => {
         chatJid: 'main@g.us',
         text: 'malformed runtime should never be processed',
       }),
+    );
+    fs.writeFileSync(
+      path.join(IPC_BASE_DIR, 'main', 'messages', malformedMessageFile),
+      '{"type":',
+    );
+    fs.writeFileSync(
+      path.join(IPC_BASE_DIR, 'main', 'tasks', malformedTaskFile),
+      '{"type":',
+    );
+    fs.writeFileSync(
+      path.join(IPC_BASE_DIR, 'main', 'tasks', failingTaskFile),
+      JSON.stringify({ type: 'refresh_groups' }),
     );
 
     const otherGroup: RegisteredGroup = {
@@ -152,7 +175,9 @@ describe('startIpcWatcher', () => {
       registeredGroups: () => groups,
       registerGroup: () => {},
       updateGroup: () => {},
-      syncGroupMetadata: async () => {},
+      syncGroupMetadata: async () => {
+        throw new Error('sync exploded');
+      },
       getAvailableGroups: () => [],
       writeGroupsSnapshot: () => {},
       activeRuntimeFolders: () => new Set<string>(),
@@ -186,9 +211,47 @@ describe('startIpcWatcher', () => {
     );
     expect(fs.existsSync(rogueErrorDir)).toBe(true);
     expect(fs.existsSync(malformedRuntimeErrorDir)).toBe(true);
+    expect(fs.existsSync(path.join(IPC_BASE_DIR, rogueFolder))).toBe(false);
+    const quarantinedFiles = fs.readdirSync(path.join(IPC_BASE_DIR, 'errors'));
+    expect(
+      quarantinedFiles.some(
+        (file) => file.includes(`main-`) && file.endsWith(malformedMessageFile),
+      ),
+    ).toBe(true);
+    expect(
+      quarantinedFiles.some(
+        (file) => file.includes(`main-`) && file.endsWith(malformedTaskFile),
+      ),
+    ).toBe(true);
+    expect(
+      quarantinedFiles.some(
+        (file) => file.includes(`main-`) && file.endsWith(failingTaskFile),
+      ),
+    ).toBe(true);
     expect(scheduledDelays).toEqual([IPC_POLL_INTERVAL]);
 
     startIpcWatcher(deps);
     expect(scheduledDelays).toEqual([IPC_POLL_INTERVAL]);
+    fs.rmSync(
+      path.join(IPC_BASE_DIR, 'main', 'messages', malformedMessageFile),
+      {
+        force: true,
+      },
+    );
+    fs.rmSync(path.join(IPC_BASE_DIR, 'main', 'tasks', malformedTaskFile), {
+      force: true,
+    });
+    fs.rmSync(path.join(IPC_BASE_DIR, 'main', 'tasks', failingTaskFile), {
+      force: true,
+    });
+    for (const file of quarantinedFiles) {
+      if (
+        file.endsWith(malformedMessageFile) ||
+        file.endsWith(malformedTaskFile) ||
+        file.endsWith(failingTaskFile)
+      ) {
+        fs.rmSync(path.join(IPC_BASE_DIR, 'errors', file), { force: true });
+      }
+    }
   });
 });
