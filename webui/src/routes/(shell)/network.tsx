@@ -2,6 +2,7 @@ import { Title } from '@solidjs/meta';
 import {
   createSignal,
   createResource,
+  ErrorBoundary,
   onCleanup,
   For,
   Show,
@@ -12,6 +13,7 @@ import {
 
 import Badge from '~/components/shared/Badge';
 import { showToast } from '~/components/shared/Toast';
+import ErrorFallback from '~/components/shared/ErrorFallback';
 import type { ContextFileEntry } from '~/lib/api';
 
 interface NetworkIdentity {
@@ -856,175 +858,183 @@ export default function Network() {
   return (
     <>
       <Title>OmniClaw — Network</Title>
-      <div class="p-4 space-y-6">
-        <div class="grid grid-cols-4 gap-4">
-          <StatCard label="instance">
-            <Show when={runtime()} fallback="...">
-              <span class="text-sm">
-                {runtime()!.currentNetwork?.label ?? 'unknown'}
-              </span>
-            </Show>
-          </StatCard>
-          <StatCard label="discovery">
-            <Show when={runtime()} fallback="...">
-              <Show
-                when={runtime()!.active}
-                fallback={<span class="text-text-dim">disabled</span>}
-              >
-                <span class="text-green">active</span>
+      <ErrorBoundary
+        fallback={(err, reset) => (
+          <ErrorFallback error={err} reset={reset} context="Network" />
+        )}
+      >
+        <div class="p-4 space-y-6">
+          <div class="grid grid-cols-4 gap-4">
+            <StatCard label="instance">
+              <Show when={runtime()} fallback="...">
+                <span class="text-sm">
+                  {runtime()!.currentNetwork?.label ?? 'unknown'}
+                </span>
               </Show>
-            </Show>
-          </StatCard>
-          <StatCard label="peers online">{onlineCount()}</StatCard>
-          <StatCard label="trusted">{trustedCount()}</StatCard>
-        </div>
+            </StatCard>
+            <StatCard label="discovery">
+              <Show when={runtime()} fallback="...">
+                <Show
+                  when={runtime()!.active}
+                  fallback={<span class="text-text-dim">disabled</span>}
+                >
+                  <span class="text-green">active</span>
+                </Show>
+              </Show>
+            </StatCard>
+            <StatCard label="peers online">{onlineCount()}</StatCard>
+            <StatCard label="trusted">{trustedCount()}</StatCard>
+          </div>
 
-        <div class="bg-surface rounded-lg border border-border p-4">
-          <h2 class="text-sm font-semibold text-text mb-4">
-            discovery controls
-          </h2>
-          <div class="flex flex-wrap gap-3 items-center mb-4">
-            <Show when={runtime()}>
-              <button
-                class={
-                  runtime()!.enabled
-                    ? `${BTN} bg-red/20 text-red hover:bg-red/30`
-                    : `${BTN} bg-accent/20 text-accent hover:bg-accent/30`
-                }
-                onClick={() => toggleDiscovery(!runtime()!.enabled)}
-              >
-                {runtime()!.enabled
-                  ? 'Turn discovery off'
-                  : 'Turn discovery on'}
+          <div class="bg-surface rounded-lg border border-border p-4">
+            <h2 class="text-sm font-semibold text-text mb-4">
+              discovery controls
+            </h2>
+            <div class="flex flex-wrap gap-3 items-center mb-4">
+              <Show when={runtime()}>
+                <button
+                  class={
+                    runtime()!.enabled
+                      ? `${BTN} bg-red/20 text-red hover:bg-red/30`
+                      : `${BTN} bg-accent/20 text-accent hover:bg-accent/30`
+                  }
+                  onClick={() => toggleDiscovery(!runtime()!.enabled)}
+                >
+                  {runtime()!.enabled
+                    ? 'Turn discovery off'
+                    : 'Turn discovery on'}
+                </button>
+              </Show>
+              <button class={BTN_DEFAULT} onClick={trustCurrentNetwork}>
+                Trust Wi-Fi
               </button>
-            </Show>
-            <button class={BTN_DEFAULT} onClick={trustCurrentNetwork}>
-              Trust Wi-Fi
-            </button>
-            <span class="text-text-dim text-sm">
-              <Show
-                when={runtime()?.currentNetwork}
-                fallback="No Wi-Fi network detected"
-              >
-                Current Wi-Fi:{' '}
-                <strong class="text-text">
-                  {runtime()!.currentNetwork!.label}
-                </strong>
-              </Show>
-            </span>
-          </div>
-          <div class="text-xs text-text-dim mb-3">
-            Trusted networks gate discovery when present. Leave the list empty
-            to allow discovery anywhere the toggle is on.
-          </div>
-          <TrustedNetworksList
-            networks={runtime()?.trustedNetworks ?? []}
-            onUntrust={untrustNetwork}
-          />
-        </div>
-
-        <div class="grid grid-cols-[1fr_320px] gap-6 items-start">
-          <div class="bg-surface rounded-lg border border-border">
-            <div class="px-4 py-3 border-b border-border">
-              <h2 class="text-sm font-semibold text-text">discovered peers</h2>
+              <span class="text-text-dim text-sm">
+                <Show
+                  when={runtime()?.currentNetwork}
+                  fallback="No Wi-Fi network detected"
+                >
+                  Current Wi-Fi:{' '}
+                  <strong class="text-text">
+                    {runtime()!.currentNetwork!.label}
+                  </strong>
+                </Show>
+              </span>
             </div>
-            <Show
-              when={(peers() ?? []).length > 0}
-              fallback={
-                <div class="p-8 text-center text-text-dim">
-                  No peers discovered yet. Ensure DISCOVERY_ENABLED=true on all
-                  instances.
-                </div>
-              }
-            >
-              <div class="overflow-x-auto">
-                <table class="w-full text-sm">
-                  <thead>
-                    <tr class="border-b border-border text-text-dim text-xs">
-                      <th class="text-left px-4 py-2">name</th>
-                      <th class="text-left px-4 py-2">address</th>
-                      <th class="text-left px-4 py-2">trust</th>
-                      <th class="text-left px-4 py-2">online</th>
-                      <th class="text-left px-4 py-2">actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <For each={peers() ?? []}>
-                      {(peer) => (
-                        <tr class="border-b border-border">
-                          <td class="px-4 py-2 font-semibold text-text">
-                            {peer.name}
-                          </td>
-                          <td class="px-4 py-2">
-                            <code class="text-xs text-text-dim">
-                              {peer.host}:{peer.port}
-                            </code>
-                          </td>
-                          <td class="px-4 py-2">
-                            <StatusBadge status={peer.status} />
-                          </td>
-                          <td class="px-4 py-2">
-                            <Show
-                              when={peer.online}
-                              fallback={
-                                <span class="text-text-dim">&#9675;</span>
-                              }
-                            >
-                              <span class="text-green">&#9679;</span>
-                            </Show>
-                          </td>
-                          <td class="px-4 py-2">
-                            <PeerActions
-                              peer={peer}
-                              onBrowse={browseRemoteAgents}
-                              onLogs={startRemoteLogs}
-                              onSync={openSyncPanel}
-                              onRevoke={revokePeer}
-                              onRequest={requestAccess}
-                            />
-                          </td>
-                        </tr>
-                      )}
-                    </For>
-                  </tbody>
-                </table>
-              </div>
-            </Show>
+            <div class="text-xs text-text-dim mb-3">
+              Trusted networks gate discovery when present. Leave the list empty
+              to allow discovery anywhere the toggle is on.
+            </div>
+            <TrustedNetworksList
+              networks={runtime()?.trustedNetworks ?? []}
+              onUntrust={untrustNetwork}
+            />
           </div>
 
-          <PendingRequestsPanel
-            requests={requests() ?? []}
-            onApprove={approveRequest}
-            onReject={rejectRequest}
+          <div class="grid grid-cols-[1fr_320px] gap-6 items-start">
+            <div class="bg-surface rounded-lg border border-border">
+              <div class="px-4 py-3 border-b border-border">
+                <h2 class="text-sm font-semibold text-text">
+                  discovered peers
+                </h2>
+              </div>
+              <Show
+                when={(peers() ?? []).length > 0}
+                fallback={
+                  <div class="p-8 text-center text-text-dim">
+                    No peers discovered yet. Ensure DISCOVERY_ENABLED=true on
+                    all instances.
+                  </div>
+                }
+              >
+                <div class="overflow-x-auto">
+                  <table class="w-full text-sm">
+                    <thead>
+                      <tr class="border-b border-border text-text-dim text-xs">
+                        <th class="text-left px-4 py-2">name</th>
+                        <th class="text-left px-4 py-2">address</th>
+                        <th class="text-left px-4 py-2">trust</th>
+                        <th class="text-left px-4 py-2">online</th>
+                        <th class="text-left px-4 py-2">actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <For each={peers() ?? []}>
+                        {(peer) => (
+                          <tr class="border-b border-border">
+                            <td class="px-4 py-2 font-semibold text-text">
+                              {peer.name}
+                            </td>
+                            <td class="px-4 py-2">
+                              <code class="text-xs text-text-dim">
+                                {peer.host}:{peer.port}
+                              </code>
+                            </td>
+                            <td class="px-4 py-2">
+                              <StatusBadge status={peer.status} />
+                            </td>
+                            <td class="px-4 py-2">
+                              <Show
+                                when={peer.online}
+                                fallback={
+                                  <span class="text-text-dim">&#9675;</span>
+                                }
+                              >
+                                <span class="text-green">&#9679;</span>
+                              </Show>
+                            </td>
+                            <td class="px-4 py-2">
+                              <PeerActions
+                                peer={peer}
+                                onBrowse={browseRemoteAgents}
+                                onLogs={startRemoteLogs}
+                                onSync={openSyncPanel}
+                                onRevoke={revokePeer}
+                                onRequest={requestAccess}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                      </For>
+                    </tbody>
+                  </table>
+                </div>
+              </Show>
+            </div>
+
+            <PendingRequestsPanel
+              requests={requests() ?? []}
+              onApprove={approveRequest}
+              onReject={rejectRequest}
+            />
+          </div>
+
+          <Show when={remoteAgents() !== null}>
+            <RemoteAgentsPanel agents={remoteAgents()!} />
+          </Show>
+
+          <RemoteLogsPanel
+            status={logStatus()}
+            statusIsError={logStatusIsError()}
+            lines={logLines()}
+            scrollRef={(el) => {
+              logOutputEl = el;
+            }}
           />
+
+          <Show when={syncPeerId() && syncComparison()}>
+            <SyncPanel
+              instanceId={syncPeerId()!}
+              comparison={syncComparison()!}
+              onClose={closeSyncPanel}
+              onRefresh={() => openSyncPanel(syncPeerId()!)}
+              onPush={(id, path) => syncFile('push', id, path)}
+              onPull={(id, path) => syncFile('pull', id, path)}
+              onBulkPush={(id) => bulkSync('push', id)}
+              onBulkPull={(id) => bulkSync('pull', id)}
+            />
+          </Show>
         </div>
-
-        <Show when={remoteAgents() !== null}>
-          <RemoteAgentsPanel agents={remoteAgents()!} />
-        </Show>
-
-        <RemoteLogsPanel
-          status={logStatus()}
-          statusIsError={logStatusIsError()}
-          lines={logLines()}
-          scrollRef={(el) => {
-            logOutputEl = el;
-          }}
-        />
-
-        <Show when={syncPeerId() && syncComparison()}>
-          <SyncPanel
-            instanceId={syncPeerId()!}
-            comparison={syncComparison()!}
-            onClose={closeSyncPanel}
-            onRefresh={() => openSyncPanel(syncPeerId()!)}
-            onPush={(id, path) => syncFile('push', id, path)}
-            onPull={(id, path) => syncFile('pull', id, path)}
-            onBulkPush={(id) => bulkSync('push', id)}
-            onBulkPull={(id) => bulkSync('pull', id)}
-          />
-        </Show>
-      </div>
+      </ErrorBoundary>
     </>
   );
 }

@@ -3,6 +3,7 @@ import {
   createSignal,
   createMemo,
   createResource,
+  ErrorBoundary,
   Show,
   For,
   Suspense,
@@ -11,6 +12,8 @@ import { isServer } from 'solid-js/web';
 
 import { api } from '~/lib/api';
 import AgentCard from '~/components/agents/AgentCard';
+import ErrorFallback from '~/components/shared/ErrorFallback';
+import PageLoading from '~/components/shared/PageLoading';
 
 export default function Agents() {
   // Skip fetch during SSR — relative URLs have no origin on the server
@@ -102,46 +105,50 @@ export default function Agents() {
           </select>
         </div>
 
-        <Suspense
-          fallback={<div class="text-text-dim text-sm">Loading agents...</div>}
+        <ErrorBoundary
+          fallback={(err, reset) => (
+            <ErrorFallback error={err} reset={reset} context="Agents" />
+          )}
         >
-          <div class="overflow-x-auto rounded border border-border">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="border-b border-border bg-surface text-text-dim text-left">
-                  <th class="px-3 py-2 font-medium">Agent</th>
-                  <th class="px-3 py-2 font-medium">Backend</th>
-                  <th class="px-3 py-2 font-medium">Runtime</th>
-                  <th class="px-3 py-2 font-medium text-center">Channels</th>
-                  <th class="px-3 py-2 font-medium text-center">Tasks</th>
-                  <th class="px-3 py-2 font-medium">Flags</th>
-                </tr>
-              </thead>
-              <tbody>
-                <For
-                  each={filtered()}
-                  fallback={
-                    <tr>
-                      <td
-                        colspan="6"
-                        class="px-3 py-8 text-center text-text-dim"
-                      >
-                        <Show
-                          when={list().length > 0}
-                          fallback="No agents registered."
+          <Suspense fallback={<PageLoading label="Loading agents..." />}>
+            <div class="overflow-x-auto rounded border border-border">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="border-b border-border bg-surface text-text-dim text-left">
+                    <th class="px-3 py-2 font-medium">Agent</th>
+                    <th class="px-3 py-2 font-medium">Backend</th>
+                    <th class="px-3 py-2 font-medium">Runtime</th>
+                    <th class="px-3 py-2 font-medium text-center">Channels</th>
+                    <th class="px-3 py-2 font-medium text-center">Tasks</th>
+                    <th class="px-3 py-2 font-medium">Flags</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <For
+                    each={filtered()}
+                    fallback={
+                      <tr>
+                        <td
+                          colspan="6"
+                          class="px-3 py-8 text-center text-text-dim"
                         >
-                          No agents match the current filters.
-                        </Show>
-                      </td>
-                    </tr>
-                  }
-                >
-                  {(agent) => <AgentCard agent={agent} taskCount={0} />}
-                </For>
-              </tbody>
-            </table>
-          </div>
-        </Suspense>
+                          <Show
+                            when={list().length > 0}
+                            fallback="No agents registered."
+                          >
+                            No agents match the current filters.
+                          </Show>
+                        </td>
+                      </tr>
+                    }
+                  >
+                    {(agent) => <AgentCard agent={agent} taskCount={0} />}
+                  </For>
+                </tbody>
+              </table>
+            </div>
+          </Suspense>
+        </ErrorBoundary>
       </div>
     </>
   );

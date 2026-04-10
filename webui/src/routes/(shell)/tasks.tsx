@@ -1,5 +1,12 @@
 import { Title } from '@solidjs/meta';
-import { createSignal, createResource, For, Show, createMemo } from 'solid-js';
+import {
+  createSignal,
+  createResource,
+  ErrorBoundary,
+  For,
+  Show,
+  createMemo,
+} from 'solid-js';
 import { createStore } from 'solid-js/store';
 
 import Modal from '~/components/shared/Modal';
@@ -7,6 +14,7 @@ import { showToast } from '~/components/shared/Toast';
 import TaskCard from '~/components/tasks/TaskCard';
 import TaskRunHistory from '~/components/tasks/TaskRunHistory';
 import { api, type AgentChannelData } from '~/lib/api';
+import ErrorFallback from '~/components/shared/ErrorFallback';
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'completed';
 
@@ -269,165 +277,171 @@ export default function Tasks() {
   return (
     <>
       <Title>OmniClaw — Tasks</Title>
-      <div class="p-4">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-text-bright font-semibold text-sm">Task Manager</h2>
-          <button
-            class="px-3 py-1 text-xs rounded bg-accent text-bg font-semibold hover:bg-accent-hover"
-            onClick={() => {
-              setCreateForm({ ...EMPTY_FORM });
-              setFormError('');
-              setCreateOpen(true);
-            }}
-          >
-            + Create Task
-          </button>
-        </div>
+      <ErrorBoundary
+        fallback={(err, reset) => (
+          <ErrorFallback error={err} reset={reset} context="Tasks" />
+        )}
+      >
+        <div class="p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-text-bright font-semibold text-sm">Task Manager</h2>
+            <button
+              class="px-3 py-1 text-xs rounded bg-accent text-bg font-semibold hover:bg-accent-hover"
+              onClick={() => {
+                setCreateForm({ ...EMPTY_FORM });
+                setFormError('');
+                setCreateOpen(true);
+              }}
+            >
+              + Create Task
+            </button>
+          </div>
 
-        <div class="flex gap-3 mb-3 text-xs">
-          <span class="text-text-dim">{stats().total} total</span>
-          <span class="text-green">{stats().active} active</span>
-          <span class="text-yellow">{stats().paused} paused</span>
-          <span class="text-text-dim">{stats().completed} completed</span>
-        </div>
+          <div class="flex gap-3 mb-3 text-xs">
+            <span class="text-text-dim">{stats().total} total</span>
+            <span class="text-green">{stats().active} active</span>
+            <span class="text-yellow">{stats().paused} paused</span>
+            <span class="text-text-dim">{stats().completed} completed</span>
+          </div>
 
-        <div class="flex gap-1 mb-4">
-          <For each={FILTERS}>
-            {(f) => (
-              <button
-                class={`px-2 py-1 rounded text-xs transition-colors ${
-                  filter() === f.value
-                    ? 'bg-accent/20 text-accent'
-                    : 'text-text-dim hover:text-text hover:bg-surface-2'
-                }`}
-                onClick={() => setFilter(f.value)}
-              >
-                {f.label}
-              </button>
+          <div class="flex gap-1 mb-4">
+            <For each={FILTERS}>
+              {(f) => (
+                <button
+                  class={`px-2 py-1 rounded text-xs transition-colors ${
+                    filter() === f.value
+                      ? 'bg-accent/20 text-accent'
+                      : 'text-text-dim hover:text-text hover:bg-surface-2'
+                  }`}
+                  onClick={() => setFilter(f.value)}
+                >
+                  {f.label}
+                </button>
+              )}
+            </For>
+          </div>
+
+          <div class="border border-border rounded-lg overflow-auto">
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="border-b border-border text-text-dim text-left">
+                  <th class="px-3 py-2">status</th>
+                  <th class="px-3 py-2">agent</th>
+                  <th class="px-3 py-2">prompt</th>
+                  <th class="px-3 py-2">schedule</th>
+                  <th class="px-3 py-2">next run</th>
+                  <th class="px-3 py-2">last run</th>
+                  <th class="px-3 py-2">context</th>
+                  <th class="px-3 py-2">actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <For each={filteredTasks()}>
+                  {(task) => (
+                    <TaskCard
+                      task={task}
+                      onToggle={handleToggle}
+                      onEdit={openEdit}
+                      onDelete={openDelete}
+                      onViewRuns={(id) => setRunHistoryId(id)}
+                    />
+                  )}
+                </For>
+              </tbody>
+            </table>
+            <Show when={filteredTasks().length === 0}>
+              <div class="text-text-dim text-xs p-4 text-center">
+                <Show
+                  when={(tasks() ?? []).length === 0}
+                  fallback="No tasks match the current filter."
+                >
+                  No scheduled tasks yet. Create one to get started.
+                </Show>
+              </div>
+            </Show>
+          </div>
+
+          <Show when={runHistoryId()}>
+            {(id) => (
+              <TaskRunHistory
+                taskId={id()}
+                onClose={() => setRunHistoryId(null)}
+              />
             )}
-          </For>
-        </div>
-
-        <div class="border border-border rounded-lg overflow-auto">
-          <table class="w-full text-xs">
-            <thead>
-              <tr class="border-b border-border text-text-dim text-left">
-                <th class="px-3 py-2">status</th>
-                <th class="px-3 py-2">agent</th>
-                <th class="px-3 py-2">prompt</th>
-                <th class="px-3 py-2">schedule</th>
-                <th class="px-3 py-2">next run</th>
-                <th class="px-3 py-2">last run</th>
-                <th class="px-3 py-2">context</th>
-                <th class="px-3 py-2">actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <For each={filteredTasks()}>
-                {(task) => (
-                  <TaskCard
-                    task={task}
-                    onToggle={handleToggle}
-                    onEdit={openEdit}
-                    onDelete={openDelete}
-                    onViewRuns={(id) => setRunHistoryId(id)}
-                  />
-                )}
-              </For>
-            </tbody>
-          </table>
-          <Show when={filteredTasks().length === 0}>
-            <div class="text-text-dim text-xs p-4 text-center">
-              <Show
-                when={(tasks() ?? []).length === 0}
-                fallback="No tasks match the current filter."
-              >
-                No scheduled tasks yet. Create one to get started.
-              </Show>
-            </div>
           </Show>
-        </div>
 
-        <Show when={runHistoryId()}>
-          {(id) => (
-            <TaskRunHistory
-              taskId={id()}
-              onClose={() => setRunHistoryId(null)}
+          <Modal
+            open={createOpen()}
+            onClose={() => setCreateOpen(false)}
+            title="Create Scheduled Task"
+          >
+            <TaskForm
+              form={createForm}
+              setForm={setCreateForm}
+              agentOptions={agentOptions()}
+              error={formError()}
+              submitting={submitting()}
+              submitLabel="Create"
+              onSubmit={handleCreate}
+              onCancel={() => setCreateOpen(false)}
             />
-          )}
-        </Show>
+          </Modal>
 
-        <Modal
-          open={createOpen()}
-          onClose={() => setCreateOpen(false)}
-          title="Create Scheduled Task"
-        >
-          <TaskForm
-            form={createForm}
-            setForm={setCreateForm}
-            agentOptions={agentOptions()}
-            error={formError()}
-            submitting={submitting()}
-            submitLabel="Create"
-            onSubmit={handleCreate}
-            onCancel={() => setCreateOpen(false)}
-          />
-        </Modal>
-
-        <Modal
-          open={editOpen()}
-          onClose={() => {
-            setEditOpen(false);
-            setEditingTaskId(null);
-          }}
-          title="Edit Task"
-        >
-          <TaskForm
-            form={editForm}
-            setForm={setEditForm}
-            agentOptions={agentOptions()}
-            error={formError()}
-            submitting={submitting()}
-            submitLabel="Save Changes"
-            onSubmit={handleEdit}
-            onCancel={() => {
+          <Modal
+            open={editOpen()}
+            onClose={() => {
               setEditOpen(false);
               setEditingTaskId(null);
             }}
-          />
-        </Modal>
-
-        <Modal
-          open={deleteOpen()}
-          onClose={() => {
-            setDeleteOpen(false);
-            setDeletingTaskId(null);
-          }}
-          title="Delete Task"
-        >
-          <p class="text-text text-xs mb-4">
-            Delete task {deletingTaskId()?.slice(0, 20)}...?
-          </p>
-          <div class="flex justify-end gap-2">
-            <button
-              class="px-3 py-1 text-xs rounded bg-surface-2 text-text-dim hover:text-text-bright border border-border"
-              onClick={() => {
-                setDeleteOpen(false);
-                setDeletingTaskId(null);
+            title="Edit Task"
+          >
+            <TaskForm
+              form={editForm}
+              setForm={setEditForm}
+              agentOptions={agentOptions()}
+              error={formError()}
+              submitting={submitting()}
+              submitLabel="Save Changes"
+              onSubmit={handleEdit}
+              onCancel={() => {
+                setEditOpen(false);
+                setEditingTaskId(null);
               }}
-            >
-              Cancel
-            </button>
-            <button
-              class="px-3 py-1 text-xs rounded bg-red/10 text-red hover:bg-red/20 border border-red/20"
-              disabled={submitting()}
-              onClick={handleDelete}
-            >
-              Delete
-            </button>
-          </div>
-        </Modal>
-      </div>
+            />
+          </Modal>
+
+          <Modal
+            open={deleteOpen()}
+            onClose={() => {
+              setDeleteOpen(false);
+              setDeletingTaskId(null);
+            }}
+            title="Delete Task"
+          >
+            <p class="text-text text-xs mb-4">
+              Delete task {deletingTaskId()?.slice(0, 20)}...?
+            </p>
+            <div class="flex justify-end gap-2">
+              <button
+                class="px-3 py-1 text-xs rounded bg-surface-2 text-text-dim hover:text-text-bright border border-border"
+                onClick={() => {
+                  setDeleteOpen(false);
+                  setDeletingTaskId(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                class="px-3 py-1 text-xs rounded bg-red/10 text-red hover:bg-red/20 border border-red/20"
+                disabled={submitting()}
+                onClick={handleDelete}
+              >
+                Delete
+              </button>
+            </div>
+          </Modal>
+        </div>
+      </ErrorBoundary>
     </>
   );
 }

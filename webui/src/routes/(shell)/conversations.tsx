@@ -1,4 +1,9 @@
-import { createSignal, createResource, createMemo } from 'solid-js';
+import {
+  createSignal,
+  createResource,
+  createMemo,
+  ErrorBoundary,
+} from 'solid-js';
 import { Title } from '@solidjs/meta';
 import { useSearchParams } from '@solidjs/router';
 
@@ -6,6 +11,7 @@ import { api, type MessageInfo } from '~/lib/api';
 import { liveMessages } from '~/lib/stores/messages';
 import ChatList from '~/components/conversations/ChatList';
 import MessageList from '~/components/conversations/MessageList';
+import ErrorFallback from '~/components/shared/ErrorFallback';
 
 const PAGE_SIZE = 100;
 const LOAD_MORE_LIMIT = 500;
@@ -77,28 +83,34 @@ export default function Conversations() {
   return (
     <>
       <Title>OmniClaw — Conversations</Title>
-      <div class="flex flex-1 min-h-0 overflow-hidden">
-        <ChatList
-          chats={chats() ?? []}
-          selectedJid={selectedJid()}
-          initialSearchQuery={initQuery}
-          onSelect={handleSelectChat}
-          onSearch={handleSearch}
-          onSearchQueryChange={handleSearchQueryChange}
-        />
-        <MessageList
-          chatJid={selectedJid()}
-          chatName={selectedChatName()}
-          messages={messages() ?? []}
-          liveMessages={chatLiveMessages()}
-          loading={messages.loading}
-          hasMore={
-            messageLimit() === PAGE_SIZE &&
-            (messages()?.length ?? 0) >= PAGE_SIZE
-          }
-          onLoadMore={handleLoadMore}
-        />
-      </div>
+      <ErrorBoundary
+        fallback={(err, reset) => (
+          <ErrorFallback error={err} reset={reset} context="Conversations" />
+        )}
+      >
+        <div class="flex flex-1 min-h-0 overflow-hidden">
+          <ChatList
+            chats={chats() ?? []}
+            selectedJid={selectedJid()}
+            initialSearchQuery={initQuery}
+            onSelect={handleSelectChat}
+            onSearch={handleSearch}
+            onSearchQueryChange={handleSearchQueryChange}
+          />
+          <MessageList
+            chatJid={selectedJid()}
+            chatName={selectedChatName()}
+            messages={messages() ?? []}
+            liveMessages={chatLiveMessages()}
+            loading={messages.loading}
+            hasMore={
+              messageLimit() === PAGE_SIZE &&
+              (messages()?.length ?? 0) >= PAGE_SIZE
+            }
+            onLoadMore={handleLoadMore}
+          />
+        </div>
+      </ErrorBoundary>
     </>
   );
 }

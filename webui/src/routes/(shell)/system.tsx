@@ -1,10 +1,12 @@
 import { Title } from '@solidjs/meta';
 import { query, createAsync, revalidate } from '@solidjs/router';
-import { For, Show, onCleanup } from 'solid-js';
+import { ErrorBoundary, For, Show, onCleanup } from 'solid-js';
 
 import Badge from '~/components/shared/Badge';
 import { MetricCard, MetricRow } from '~/components/shared/MetricCard';
 import { api } from '~/lib/api';
+import ErrorFallback from '~/components/shared/ErrorFallback';
+import PageLoading from '~/components/shared/PageLoading';
 
 const fetchHealth = query(() => api.getHealth(), 'health');
 
@@ -53,81 +55,87 @@ export default function System() {
           </Show>
         </div>
 
-        <Show
-          when={health()}
-          fallback={<div class="text-text-dim">Loading...</div>}
-        >
-          {(h) => (
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <MetricCard title="server">
-                <MetricRow label="version" value={h().version} />
-                <MetricRow
-                  label="uptime"
-                  value={formatUptime(h().uptime_seconds)}
-                />
-                <MetricRow
-                  label="started"
-                  value={new Date(h().started_at).toLocaleString()}
-                />
-                <MetricRow
-                  label="sse clients"
-                  value={String(h().sse_clients)}
-                />
-              </MetricCard>
-
-              <MetricCard title="runtime">
-                <MetricRow label="bun" value={h().runtime.bun} />
-                <MetricRow label="platform" value={h().runtime.platform} />
-                <MetricRow label="arch" value={h().runtime.arch} />
-              </MetricCard>
-
-              <MetricCard title="memory">
-                <MetricRow label="rss" value={`${h().memory.rss_mb} MB`} />
-                <MetricRow
-                  label="heap used"
-                  value={`${h().memory.heap_used_mb} MB`}
-                />
-                <MetricRow
-                  label="heap total"
-                  value={`${h().memory.heap_total_mb} MB`}
-                />
-              </MetricCard>
-
-              <MetricCard title="containers">
-                <MetricRow
-                  label="active"
-                  value={`${h().containers.active}/${h().containers.max_active}`}
-                />
-                <MetricRow
-                  label="idle"
-                  value={`${h().containers.idle}/${h().containers.max_idle}`}
-                />
-              </MetricCard>
-
-              <MetricCard title="agents">
-                <MetricRow label="total" value={String(h().agents.total)} />
-                <div class="text-text-dim text-[10px] uppercase tracking-wider mt-2 mb-1">
-                  by backend
-                </div>
-                <BreakdownList items={h().agents.by_backend} />
-                <div class="text-text-dim text-[10px] uppercase tracking-wider mt-2 mb-1">
-                  by runtime
-                </div>
-                <BreakdownList items={h().agents.by_runtime} />
-              </MetricCard>
-
-              <MetricCard title="tasks">
-                <MetricRow label="active" value={String(h().tasks.active)} />
-                <MetricRow label="paused" value={String(h().tasks.paused)} />
-                <MetricRow
-                  label="completed"
-                  value={String(h().tasks.completed)}
-                />
-                <MetricRow label="total" value={String(h().tasks.total)} />
-              </MetricCard>
-            </div>
+        <ErrorBoundary
+          fallback={(err, reset) => (
+            <ErrorFallback error={err} reset={reset} context="System Health" />
           )}
-        </Show>
+        >
+          <Show
+            when={health()}
+            fallback={<PageLoading label="Loading system health..." />}
+          >
+            {(h) => (
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <MetricCard title="server">
+                  <MetricRow label="version" value={h().version} />
+                  <MetricRow
+                    label="uptime"
+                    value={formatUptime(h().uptime_seconds)}
+                  />
+                  <MetricRow
+                    label="started"
+                    value={new Date(h().started_at).toLocaleString()}
+                  />
+                  <MetricRow
+                    label="sse clients"
+                    value={String(h().sse_clients)}
+                  />
+                </MetricCard>
+
+                <MetricCard title="runtime">
+                  <MetricRow label="bun" value={h().runtime.bun} />
+                  <MetricRow label="platform" value={h().runtime.platform} />
+                  <MetricRow label="arch" value={h().runtime.arch} />
+                </MetricCard>
+
+                <MetricCard title="memory">
+                  <MetricRow label="rss" value={`${h().memory.rss_mb} MB`} />
+                  <MetricRow
+                    label="heap used"
+                    value={`${h().memory.heap_used_mb} MB`}
+                  />
+                  <MetricRow
+                    label="heap total"
+                    value={`${h().memory.heap_total_mb} MB`}
+                  />
+                </MetricCard>
+
+                <MetricCard title="containers">
+                  <MetricRow
+                    label="active"
+                    value={`${h().containers.active}/${h().containers.max_active}`}
+                  />
+                  <MetricRow
+                    label="idle"
+                    value={`${h().containers.idle}/${h().containers.max_idle}`}
+                  />
+                </MetricCard>
+
+                <MetricCard title="agents">
+                  <MetricRow label="total" value={String(h().agents.total)} />
+                  <div class="text-text-dim text-[10px] uppercase tracking-wider mt-2 mb-1">
+                    by backend
+                  </div>
+                  <BreakdownList items={h().agents.by_backend} />
+                  <div class="text-text-dim text-[10px] uppercase tracking-wider mt-2 mb-1">
+                    by runtime
+                  </div>
+                  <BreakdownList items={h().agents.by_runtime} />
+                </MetricCard>
+
+                <MetricCard title="tasks">
+                  <MetricRow label="active" value={String(h().tasks.active)} />
+                  <MetricRow label="paused" value={String(h().tasks.paused)} />
+                  <MetricRow
+                    label="completed"
+                    value={String(h().tasks.completed)}
+                  />
+                  <MetricRow label="total" value={String(h().tasks.total)} />
+                </MetricCard>
+              </div>
+            )}
+          </Show>
+        </ErrorBoundary>
       </div>
     </>
   );
