@@ -19,7 +19,10 @@ import {
   encryptPairingSecret,
   generatePairingKeyPair,
 } from './pairing-crypto.js';
-import type { TrustStore } from './trust-store.js';
+import {
+  type TrustStore,
+  PairRequestHostMismatchError,
+} from './trust-store.js';
 import type { DiscoveryRuntimeController } from './runtime.js';
 import type {
   ContextFileEntry,
@@ -431,15 +434,29 @@ async function handlePairRequest(
     return json({ status: 'already_trusted' });
   }
 
-  // Create or update pair request
-  const request = ctx.trustStore.createPairRequest(
-    body.instanceId,
-    body.name,
-    ip,
-    body.port,
-    body.callbackToken,
-    body.keyAgreementPublicKey,
-  );
+  // Create or update pair request (host-bound to prevent hijack — #489)
+  let request;
+  try {
+    request = ctx.trustStore.createPairRequest(
+      body.instanceId,
+      body.name,
+      ip,
+      body.port,
+      body.callbackToken,
+      body.keyAgreementPublicKey,
+    );
+  } catch (err) {
+    if (err instanceof PairRequestHostMismatchError) {
+      return json(
+        {
+          error:
+            'A pending request for this instance is bound to a different host',
+        },
+        409,
+      );
+    }
+    throw err;
+  }
 
   // Broadcast SSE event for the web UI
   ctx.broadcast?.({

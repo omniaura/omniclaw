@@ -6,6 +6,7 @@ import {
   handleDiscoveryRequest,
   type DiscoveryRouteContext,
 } from './routes.js';
+import { PairRequestHostMismatchError } from './trust-store.js';
 
 const realFetch = globalThis.fetch;
 
@@ -274,6 +275,43 @@ describe('handleDiscoveryRequest', () => {
       });
       expect((res as Response).status).toBe(400);
     }
+  });
+
+  it('returns 409 when pair request is bound to a different host (#489)', async () => {
+    const req = withSocketAddress(
+      new Request('http://localhost/api/discovery/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instanceId: 'victim-instance',
+          name: 'Attacker',
+          host: '10.0.0.99',
+          port: 9999,
+          callbackToken: 'attacker-callback',
+          keyAgreementPublicKey: 'attacker-pub',
+        }),
+      }),
+      '10.0.0.99',
+    );
+
+    const ctx = makeContext({
+      trustStore: {
+        isPeerTrusted: () => false,
+        createPairRequest: () => {
+          throw new PairRequestHostMismatchError(
+            'victim-instance',
+            '10.0.0.30',
+            '10.0.0.99',
+          );
+        },
+      } as any,
+    });
+
+    const res = await handleDiscoveryRequest(req, new URL(req.url), ctx);
+    expect(res).not.toBeNull();
+    expect((res as Response).status).toBe(409);
+    const body = (await (res as Response).json()) as { error: string };
+    expect(body.error).toContain('bound to a different host');
   });
 
   it('rejects oversized pair requests before creating trust-store state', async () => {

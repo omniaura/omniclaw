@@ -70,6 +70,20 @@ function mapRowToPairRequest(row: PairRequestRow): PairRequest {
   };
 }
 
+/** Thrown when a pair request update is rejected due to host mismatch. */
+export class PairRequestHostMismatchError extends Error {
+  constructor(
+    public readonly fromInstanceId: string,
+    public readonly existingHost: string,
+    public readonly newHost: string,
+  ) {
+    super(
+      `Pair request from ${newHost} rejected: pending request for instance ${fromInstanceId} is bound to ${existingHost}`,
+    );
+    this.name = 'PairRequestHostMismatchError';
+  }
+}
+
 export class TrustStore {
   constructor(private db: Database) {}
 
@@ -218,14 +232,32 @@ export class TrustStore {
       .get(fromInstanceId) as PairRequestRow | null;
 
     if (existing) {
-      // Update existing request
+      // Bind pending requests to their original source host to prevent
+      // a LAN attacker from overwriting a legitimate request with
+      // attacker-controlled callback details (see issue #489).
+      if (existing.from_host !== fromHost) {
+        logger.warn(
+          {
+            fromInstanceId,
+            existingHost: existing.from_host,
+            newHost: fromHost,
+          },
+          'Rejected pair request update from different host',
+        );
+        throw new PairRequestHostMismatchError(
+          fromInstanceId,
+          existing.from_host,
+          fromHost,
+        );
+      }
+
+      // Same host — allow refresh (e.g. new keypair after restart)
       this.db
         .prepare(
-          'UPDATE pair_requests SET from_name = ?, from_host = ?, from_port = ?, callback_token = ?, key_agreement_public_key = ?, created_at = ? WHERE id = ?',
+          'UPDATE pair_requests SET from_name = ?, from_port = ?, callback_token = ?, key_agreement_public_key = ?, created_at = ? WHERE id = ?',
         )
         .run(
           fromName,
-          fromHost,
           fromPort,
           callbackToken,
           keyAgreementPublicKey ?? null,

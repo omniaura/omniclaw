@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
 
 import { createSchema } from '../db.js';
-import { TrustStore } from './trust-store.js';
+import { TrustStore, PairRequestHostMismatchError } from './trust-store.js';
 
 function makeTrustStore() {
   const db = new Database(':memory:');
@@ -104,7 +104,7 @@ describe('TrustStore', () => {
     });
   });
 
-  it('reuses an existing pending request for the same peer', () => {
+  it('reuses an existing pending request for the same peer from the same host', () => {
     const { trustStore } = makeTrustStore();
 
     const first = trustStore.createPairRequest(
@@ -115,10 +115,11 @@ describe('TrustStore', () => {
       'callback-a',
       'pub-a',
     );
+    // Same host — allowed (e.g. key rotation after restart)
     const second = trustStore.createPairRequest(
       'peer-3',
       'Peer Three Updated',
-      '10.0.0.31',
+      '10.0.0.30',
       7005,
       'callback-b',
       'pub-b',
@@ -129,12 +130,79 @@ describe('TrustStore', () => {
     expect(trustStore.getRequestById(first.id)).toMatchObject({
       id: first.id,
       fromName: 'Peer Three Updated',
-      fromHost: '10.0.0.31',
+      fromHost: '10.0.0.30',
       fromPort: 7005,
       callbackToken: 'callback-b',
       keyAgreementPublicKey: 'pub-b',
       status: 'pending',
     });
+  });
+
+  it('rejects pair request update from a different host (#489)', () => {
+    const { trustStore } = makeTrustStore();
+
+    // Legitimate request from 10.0.0.30
+    trustStore.createPairRequest(
+      'peer-hijack',
+      'Legit Peer',
+      '10.0.0.30',
+      7004,
+      'legit-callback',
+      'legit-pub',
+    );
+
+    // Attacker on 10.0.0.99 tries to overwrite with their callback
+    expect(() =>
+      trustStore.createPairRequest(
+        'peer-hijack',
+        'Attacker',
+        '10.0.0.99',
+        9999,
+        'attacker-callback',
+        'attacker-pub',
+      ),
+    ).toThrow(PairRequestHostMismatchError);
+
+    // Original request remains untouched
+    const pending = trustStore.getPendingRequests();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      fromInstanceId: 'peer-hijack',
+      fromName: 'Legit Peer',
+      fromHost: '10.0.0.30',
+      callbackToken: 'legit-callback',
+      keyAgreementPublicKey: 'legit-pub',
+    });
+  });
+
+  it('allows new request after previous one is resolved (#489)', () => {
+    const { trustStore } = makeTrustStore();
+
+    const first = trustStore.createPairRequest(
+      'peer-resolved',
+      'First Host',
+      '10.0.0.30',
+      7004,
+      'callback-1',
+      'pub-1',
+    );
+
+    // Admin rejects the first request
+    trustStore.rejectPairRequest(first.id);
+
+    // Now a request from a different host for the same instanceId is fine
+    const second = trustStore.createPairRequest(
+      'peer-resolved',
+      'Second Host',
+      '10.0.0.99',
+      8080,
+      'callback-2',
+      'pub-2',
+    );
+
+    expect(second.id).not.toBe(first.id);
+    expect(second.fromHost).toBe('10.0.0.99');
+    expect(trustStore.getPendingRequests()).toHaveLength(1);
   });
 
   it('approves and rejects pair requests with strict pending-state checks', () => {
