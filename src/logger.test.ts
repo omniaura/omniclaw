@@ -1,14 +1,6 @@
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  mock,
-  spyOn,
-} from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 
-import { createLogger, type Logger } from './logger.js';
+import { createLogger } from './logger.js';
 
 describe('logger', () => {
   let stderrOutput: string[];
@@ -177,6 +169,25 @@ describe('logger', () => {
       const parsed = JSON.parse(stderrOutput[0]);
       expect(parsed.container).toBe('test-container');
     });
+
+    it('includes error stacks when LOG_LEVEL is debug', () => {
+      const originalLevel = process.env.LOG_LEVEL;
+      process.env.LOG_LEVEL = 'debug';
+
+      const logger = createLogger({}, 'error');
+      logger.error({ err: new Error('with stack') }, 'boom');
+
+      const parsed = JSON.parse(stderrOutput[0]);
+      expect(parsed.err).toBe('with stack');
+      expect(typeof parsed.errStack).toBe('string');
+      expect(parsed.errStack).toContain('with stack');
+
+      if (originalLevel === undefined) {
+        delete process.env.LOG_LEVEL;
+      } else {
+        process.env.LOG_LEVEL = originalLevel;
+      }
+    });
   });
 
   describe('child loggers', () => {
@@ -333,6 +344,119 @@ describe('logger', () => {
       const parsed = JSON.parse(stderrOutput[0]);
       expect(parsed.msg).toBe('items processed');
       expect(parsed.count).toBe(5);
+    });
+  });
+
+  describe('pretty output (TTY)', () => {
+    let origTTY: boolean | undefined;
+
+    beforeEach(() => {
+      origTTY = process.stderr.isTTY;
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: true,
+        configurable: true,
+      });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: origTTY,
+        configurable: true,
+      });
+    });
+
+    it('renders inline metric suffixes in pretty mode', () => {
+      const logger = createLogger({ group: 'main-group' }, 'info');
+      logger.info(
+        {
+          durationMs: 42,
+          messageCount: 3,
+          turns: 2,
+          costUsd: 0.12,
+          exitCode: 7,
+          err: 'network',
+        },
+        'Processed task',
+      );
+
+      expect(stderrOutput).toHaveLength(1);
+      expect(stderrOutput[0]).toContain('Processed task');
+      expect(stderrOutput[0]).toContain('(42ms)');
+      expect(stderrOutput[0]).toContain('[3 msgs]');
+      expect(stderrOutput[0]).toContain('turns=2');
+      expect(stderrOutput[0]).toContain('$0.12');
+      expect(stderrOutput[0]).toContain('exit=7');
+      expect(stderrOutput[0]).toContain('ERR: network');
+    });
+
+    it('truncates long tags to 16 characters in pretty mode', () => {
+      const logger = createLogger({ group: '1234567890abcdefghijk' }, 'info');
+      logger.info('hello');
+
+      expect(stderrOutput).toHaveLength(1);
+      expect(stderrOutput[0]).toContain('1234567890abcdef');
+      expect(stderrOutput[0]).not.toContain('1234567890abcdefghijk');
+    });
+  });
+
+  describe('subscribers', () => {
+    let origTTY: boolean | undefined;
+
+    beforeEach(() => {
+      origTTY = process.stderr.isTTY;
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: false,
+        configurable: true,
+      });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stderr, 'isTTY', {
+        value: origTTY,
+        configurable: true,
+      });
+    });
+
+    it('notifies subscribers with the emitted record', () => {
+      const logger = createLogger({ group: 'main' }, 'info');
+      const subscriber = mock((record: Record<string, unknown>) => record);
+      logger.subscribe(subscriber);
+
+      logger.info({ op: 'startup' }, 'started');
+
+      expect(subscriber).toHaveBeenCalledTimes(1);
+      expect(subscriber.mock.calls[0]?.[0]).toMatchObject({
+        group: 'main',
+        op: 'startup',
+        msg: 'started',
+        level: 'info',
+      });
+    });
+
+    it('stops notifying a subscriber after unsubscribe', () => {
+      const logger = createLogger({}, 'info');
+      const subscriber = mock(() => {});
+      const unsubscribe = logger.subscribe(subscriber);
+
+      unsubscribe();
+      logger.info('after unsubscribe');
+
+      expect(subscriber).not.toHaveBeenCalled();
+    });
+
+    it('swallows subscriber errors and continues notifying others', () => {
+      const logger = createLogger({}, 'info');
+      const badSubscriber = mock(() => {
+        throw new Error('subscriber failed');
+      });
+      const goodSubscriber = mock(() => {});
+
+      logger.subscribe(badSubscriber);
+      logger.subscribe(goodSubscriber);
+
+      expect(() => logger.info('fan out')).not.toThrow();
+      expect(badSubscriber).toHaveBeenCalledTimes(1);
+      expect(goodSubscriber).toHaveBeenCalledTimes(1);
     });
   });
 });
