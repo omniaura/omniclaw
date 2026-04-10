@@ -11,6 +11,7 @@ function sha256Hex(value: string): string {
 }
 
 afterEach(() => {
+  mock.restore();
   globalThis.fetch = originalFetch;
 });
 
@@ -242,6 +243,68 @@ describe('PeerClient', () => {
     await expect(client.getChatIcon('chat/room')).rejects.toThrow(
       'Download exceeded 5242880 bytes',
     );
+  });
+
+  it('rejects oversized error bodies from content-length without buffering them', async () => {
+    let cancelled = false;
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          {
+            status: 502,
+            statusText: 'Bad Gateway',
+            headers: {
+              'content-length': '9000',
+            },
+          },
+        ),
+      ),
+    ) as unknown as typeof globalThis.fetch;
+
+    const client = new PeerClient('peer.local', 3000, 'peer-1');
+
+    await expect(client.getInfo()).rejects.toThrow(
+      'Peer API error: 502 Bad Gateway - [response body omitted: exceeds 8192 byte limit]',
+    );
+    expect(cancelled).toBe(true);
+  });
+
+  it('truncates streamed error bodies that exceed the byte cap', async () => {
+    const chunk = 'x'.repeat(4096);
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(chunk));
+              controller.enqueue(new TextEncoder().encode(chunk));
+              controller.enqueue(new TextEncoder().encode('tail'));
+              controller.close();
+            },
+          }),
+          {
+            status: 500,
+            statusText: 'Internal Server Error',
+          },
+        ),
+      ),
+    ) as unknown as typeof globalThis.fetch;
+
+    const client = new PeerClient('peer.local', 3000, 'peer-1');
+
+    try {
+      await client.getInfo();
+      throw new Error('expected getInfo to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain('... [truncated]');
+      expect((error as Error).message).not.toContain('tail');
+    }
   });
 
   it('rejects authenticated requests when the client is not paired', async () => {

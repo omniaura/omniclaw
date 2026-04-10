@@ -16,6 +16,7 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_PEER_PROXY_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_PEER_ERROR_BODY_BYTES = 8 * 1024;
 
 export interface PeerClientLike {
   getAgents(): Promise<RemoteAgentSummary[]>;
@@ -214,7 +215,10 @@ export class PeerClient implements PeerClientLike {
       });
 
       if (!res.ok && !allowedStatuses.includes(res.status)) {
-        const body = await res.text().catch(() => '');
+        const body = await readErrorResponseWithLimit(
+          res,
+          MAX_PEER_ERROR_BODY_BYTES,
+        );
         throw new Error(
           `Peer API error: ${res.status} ${res.statusText} - ${body}`,
         );
@@ -250,6 +254,63 @@ async function readBinaryResponseWithLimit(
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   return copy.buffer;
+}
+
+async function readErrorResponseWithLimit(
+  response: Response,
+  maxBytes: number,
+): Promise<string> {
+  const contentLength = Number.parseInt(
+    response.headers.get('content-length') || '',
+    10,
+  );
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    response.body?.cancel().catch(() => {});
+    return `[response body omitted: exceeds ${maxBytes} byte limit]`;
+  }
+
+  if (!response.body) {
+    return response.text().catch(() => '');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let text = '';
+  let truncated = false;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      const remainingBytes = maxBytes - totalBytes;
+      if (remainingBytes <= 0) {
+        truncated = true;
+        await reader.cancel('Error body exceeded byte limit');
+        break;
+      }
+
+      const chunk =
+        value.byteLength > remainingBytes
+          ? value.subarray(0, remainingBytes)
+          : value;
+      text += decoder.decode(chunk, { stream: true });
+      totalBytes += chunk.byteLength;
+
+      if (chunk.byteLength !== value.byteLength) {
+        truncated = true;
+        await reader.cancel('Error body exceeded byte limit');
+        break;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  text += decoder.decode();
+  return truncated ? `${text}... [truncated]` : text;
 }
 
 function sha256Hex(value: string): string {
