@@ -219,32 +219,24 @@ function findClaudeMdFiles(groupsDir: string): ClaudeMdEntry[] {
     if (dirName === 'servers' || dirPath.includes('/servers/')) {
       // Scan subdirectories of servers/
       for (const serverDir of fs.readdirSync(dirPath)) {
+        const serverPath = path.join(dirPath, serverDir);
+        if (!fs.statSync(serverPath).isDirectory()) continue;
         const serverClaudeMd = path.join(dirPath, serverDir, 'CLAUDE.md');
-        if (
-          fs.existsSync(serverClaudeMd) &&
-          fs.statSync(path.join(dirPath, serverDir)).isDirectory()
-        ) {
+        if (fs.existsSync(serverClaudeMd)) {
           entries.push({ filePath: serverClaudeMd, templateKey: 'server' });
         }
       }
       continue;
     }
 
-    // For other directories, check if the file has a seed marker to determine type
+    // For channel/group directories, reconcile any CLAUDE.md and let the
+    // caller decide whether it is current, stale, or unversioned.
     const claudeMdPath = path.join(dirPath, 'CLAUDE.md');
     if (!fs.existsSync(claudeMdPath)) continue;
-    try {
-      const content = fs.readFileSync(claudeMdPath, 'utf-8');
-      if (extractSeedVersion(content) !== null) {
-        // Has a version marker — infer template type
-        entries.push({
-          filePath: claudeMdPath,
-          templateKey: inferTemplateKey(claudeMdPath, false),
-        });
-      }
-    } catch {
-      // Unreadable — skip
-    }
+    entries.push({
+      filePath: claudeMdPath,
+      templateKey: inferTemplateKey(claudeMdPath, false),
+    });
   }
 
   return entries;

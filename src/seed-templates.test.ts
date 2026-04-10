@@ -189,16 +189,14 @@ describe('reconcileSeededFiles', () => {
   });
 
   it('detects unversioned files (pre-versioning seeded files)', () => {
-    // Write a CLAUDE.md with a seed version marker so it's detected as seeded
-    // but with a stale version
     writeFile(
       'my-group/CLAUDE.md',
       '## Old channel content\nNo version marker',
     );
-    // Since no version marker, it won't be picked up in the scan
-    // (only versioned files or server dirs are scanned)
+
     const result = reconcileSeededFiles(tmpDir);
-    expect(result.unversioned).toHaveLength(0); // Not detected without marker
+    expect(result.unversioned).toHaveLength(1);
+    expect(result.unversioned[0]).toContain('my-group/CLAUDE.md');
   });
 
   it('detects stale versioned files in dry-run mode', () => {
@@ -252,7 +250,6 @@ describe('reconcileSeededFiles', () => {
   });
 
   it('handles server-level files in servers/ subdirectory', () => {
-    const serverTemplate = SEED_TEMPLATES.get('server')!;
     writeFile(
       'servers/my-guild/CLAUDE.md',
       '## Old server\n\n<!-- omniclaw-seed:v1 -->',
@@ -261,6 +258,18 @@ describe('reconcileSeededFiles', () => {
     const result = reconcileSeededFiles(tmpDir, true);
     expect(result.updated).toHaveLength(1);
     expect(result.updated[0]).toContain('servers/my-guild/CLAUDE.md');
+  });
+
+  it('ignores non-directory entries inside servers/', () => {
+    writeFile('servers/README.md', 'not a server folder');
+    writeFile(
+      'servers/real-server/CLAUDE.md',
+      '## Old server\n\n<!-- omniclaw-seed:v1 -->',
+    );
+
+    const result = reconcileSeededFiles(tmpDir, true);
+    expect(result.updated).toHaveLength(1);
+    expect(result.updated[0]).toContain('servers/real-server/CLAUDE.md');
   });
 
   it('reports current server files that match latest version', () => {
