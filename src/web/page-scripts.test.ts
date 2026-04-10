@@ -64,6 +64,17 @@ describe('tasks page script', () => {
   });
 });
 
+describe('context page script', () => {
+  it('sanitizes rendered markdown before injecting preview HTML', () => {
+    const script = allPageScripts().context;
+
+    expect(script).toContain('var rendered=marked.parse(content);');
+    expect(script).toContain(
+      'el.innerHTML=window.__sanitizeHtml?window.__sanitizeHtml(rendered):rendered;',
+    );
+  });
+});
+
 describe('network page script', () => {
   it('keeps remote log controls wired after peer refreshes', () => {
     const script = allPageScripts().network;
