@@ -7,7 +7,6 @@
  * Usage: npx tsx src/whatsapp-auth.ts
  */
 import fs from 'fs';
-import path from 'path';
 import qrcode from 'qrcode-terminal';
 import readline from 'readline';
 
@@ -25,18 +24,81 @@ const AUTH_DIR = './store/auth';
 const QR_FILE = './store/qr-data.txt';
 const STATUS_FILE = './store/auth-status.txt';
 
-// Quiet logger for Baileys — suppress info/debug noise during auth
 const logger = createLogger({}, 'warn');
 
-// Check for --pairing-code flag and phone number
-const usePairingCode = process.argv.includes('--pairing-code');
-const phoneArg = process.argv.find((_, i, arr) => arr[i - 1] === '--phone');
+type CliOptions = {
+  usePairingCode: boolean;
+  phoneArg?: string;
+};
 
-function askQuestion(prompt: string): Promise<string> {
-  const rl = readline.createInterface({
+type AuthLogger = ReturnType<typeof createLogger>;
+
+type SocketLike = {
+  requestPairingCode: (phoneNumber: string) => Promise<string>;
+  ev: {
+    on: (
+      event: 'connection.update' | 'creds.update',
+      handler: (...args: any[]) => void,
+    ) => void;
+  };
+};
+
+type ConnectSocketDeps = {
+  fs: Pick<typeof fs, 'writeFileSync' | 'unlinkSync'>;
+  makeWASocket: (config: Parameters<typeof makeWASocket>[0]) => SocketLike;
+  fetchLatestWaWebVersion: typeof fetchLatestWaWebVersion;
+  makeCacheableSignalKeyStore: typeof makeCacheableSignalKeyStore;
+  useMultiFileAuthState: typeof useMultiFileAuthState;
+  qrcodeGenerate: (qr: string, options: { small: boolean }) => void;
+  exit: (code: number) => void;
+  setTimeout: typeof setTimeout;
+  console: Pick<typeof console, 'log' | 'error'>;
+  logger: AuthLogger;
+};
+
+type AuthenticateDeps = {
+  fs: Pick<typeof fs, 'mkdirSync' | 'unlinkSync'>;
+  askQuestion: (prompt: string) => Promise<string>;
+  connectSocket: (phoneNumber?: string) => Promise<void>;
+  console: Pick<typeof console, 'log'>;
+};
+
+const defaultConnectSocketDeps: ConnectSocketDeps = {
+  fs,
+  makeWASocket: (config) => makeWASocket(config) as unknown as SocketLike,
+  fetchLatestWaWebVersion,
+  makeCacheableSignalKeyStore,
+  useMultiFileAuthState,
+  qrcodeGenerate: qrcode.generate,
+  exit: (code) => process.exit(code),
+  setTimeout,
+  console,
+  logger,
+};
+
+const defaultAuthenticateDeps: AuthenticateDeps = {
+  fs,
+  askQuestion: (prompt) => askQuestion(prompt),
+  connectSocket: (phoneNumber) => connectSocket(phoneNumber),
+  console,
+};
+
+export function getCliOptions(argv = process.argv): CliOptions {
+  return {
+    usePairingCode: argv.includes('--pairing-code'),
+    phoneArg: argv.find((_, i, values) => values[i - 1] === '--phone'),
+  };
+}
+
+export function askQuestion(
+  prompt: string,
+  createInterface: typeof readline.createInterface = readline.createInterface,
+): Promise<string> {
+  const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
   });
+
   return new Promise((resolve) => {
     rl.question(prompt, (answer) => {
       rl.close();
@@ -45,48 +107,49 @@ function askQuestion(prompt: string): Promise<string> {
   });
 }
 
-async function connectSocket(
+export async function connectSocket(
   phoneNumber?: string,
   isReconnect = false,
+  cliOptions = getCliOptions(),
+  deps: ConnectSocketDeps = defaultConnectSocketDeps,
 ): Promise<void> {
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+  const { state, saveCreds } = await deps.useMultiFileAuthState(AUTH_DIR);
 
   if (state.creds.registered && !isReconnect) {
-    fs.writeFileSync(STATUS_FILE, 'already_authenticated');
-    console.log('✓ Already authenticated with WhatsApp');
-    console.log(
+    deps.fs.writeFileSync(STATUS_FILE, 'already_authenticated');
+    deps.console.log('✓ Already authenticated with WhatsApp');
+    deps.console.log(
       '  To re-authenticate, delete the store/auth folder and run again.',
     );
-    process.exit(0);
+    deps.exit(0);
+    return;
   }
 
-  const { version } = await fetchLatestWaWebVersion({});
-  const sock = makeWASocket({
+  const { version } = await deps.fetchLatestWaWebVersion({});
+  const sock = deps.makeWASocket({
     version,
     auth: {
       creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
+      keys: deps.makeCacheableSignalKeyStore(state.keys, deps.logger),
     },
     printQRInTerminal: false,
-    logger,
+    logger: deps.logger,
     browser: Browsers.macOS('Chrome'),
   });
 
-  if (usePairingCode && phoneNumber && !state.creds.me) {
-    // Request pairing code after a short delay for connection to initialize
-    // Only on first connect (not reconnect after 515)
-    setTimeout(async () => {
+  if (cliOptions.usePairingCode && phoneNumber && !state.creds.me) {
+    deps.setTimeout(async () => {
       try {
-        const code = await sock.requestPairingCode(phoneNumber!);
-        console.log(`\n🔗 Your pairing code: ${code}\n`);
-        console.log('  1. Open WhatsApp on your phone');
-        console.log('  2. Tap Settings → Linked Devices → Link a Device');
-        console.log('  3. Tap "Link with phone number instead"');
-        console.log(`  4. Enter this code: ${code}\n`);
-        fs.writeFileSync(STATUS_FILE, `pairing_code:${code}`);
+        const code = await sock.requestPairingCode(phoneNumber);
+        deps.console.log(`\n🔗 Your pairing code: ${code}\n`);
+        deps.console.log('  1. Open WhatsApp on your phone');
+        deps.console.log('  2. Tap Settings → Linked Devices → Link a Device');
+        deps.console.log('  3. Tap "Link with phone number instead"');
+        deps.console.log(`  4. Enter this code: ${code}\n`);
+        deps.fs.writeFileSync(STATUS_FILE, `pairing_code:${code}`);
       } catch (err: any) {
-        console.error('Failed to request pairing code:', err.message);
-        process.exit(1);
+        deps.console.error('Failed to request pairing code:', err.message);
+        deps.exit(1);
       }
     }, 3000);
   }
@@ -95,13 +158,12 @@ async function connectSocket(
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      // Write raw QR data to file so the setup skill can render it
-      fs.writeFileSync(QR_FILE, qr);
-      console.log('Scan this QR code with WhatsApp:\n');
-      console.log('  1. Open WhatsApp on your phone');
-      console.log('  2. Tap Settings → Linked Devices → Link a Device');
-      console.log('  3. Point your camera at the QR code below\n');
-      qrcode.generate(qr, { small: true });
+      deps.fs.writeFileSync(QR_FILE, qr);
+      deps.console.log('Scan this QR code with WhatsApp:\n');
+      deps.console.log('  1. Open WhatsApp on your phone');
+      deps.console.log('  2. Tap Settings → Linked Devices → Link a Device');
+      deps.console.log('  3. Point your camera at the QR code below\n');
+      deps.qrcodeGenerate(qr, { small: true });
     }
 
     if (connection === 'close') {
@@ -110,70 +172,71 @@ async function connectSocket(
       )?.output?.statusCode;
 
       if (reason === DisconnectReason.loggedOut) {
-        fs.writeFileSync(STATUS_FILE, 'failed:logged_out');
-        console.log('\n✗ Logged out. Delete store/auth and try again.');
-        process.exit(1);
+        deps.fs.writeFileSync(STATUS_FILE, 'failed:logged_out');
+        deps.console.log('\n✗ Logged out. Delete store/auth and try again.');
+        deps.exit(1);
       } else if (reason === DisconnectReason.timedOut) {
-        fs.writeFileSync(STATUS_FILE, 'failed:qr_timeout');
-        console.log('\n✗ QR code timed out. Please try again.');
-        process.exit(1);
+        deps.fs.writeFileSync(STATUS_FILE, 'failed:qr_timeout');
+        deps.console.log('\n✗ QR code timed out. Please try again.');
+        deps.exit(1);
       } else if (reason === 515) {
-        // 515 = stream error, often happens after pairing succeeds but before
-        // registration completes. Reconnect to finish the handshake.
-        logger.warn(
+        deps.logger.warn(
           { statusCode: 515 },
           'Stream error after pairing — reconnecting',
         );
-        connectSocket(phoneNumber, true);
+        void connectSocket(phoneNumber, true, cliOptions, deps);
       } else {
-        fs.writeFileSync(STATUS_FILE, `failed:${reason || 'unknown'}`);
-        console.log('\n✗ Connection failed. Please try again.');
-        process.exit(1);
+        deps.fs.writeFileSync(STATUS_FILE, `failed:${reason || 'unknown'}`);
+        deps.console.log('\n✗ Connection failed. Please try again.');
+        deps.exit(1);
       }
     }
 
     if (connection === 'open') {
-      fs.writeFileSync(STATUS_FILE, 'authenticated');
-      // Clean up QR file now that we're connected
-      try {
-        fs.unlinkSync(QR_FILE);
-      } catch {}
-      console.log('\n✓ Successfully authenticated with WhatsApp!');
-      console.log('  Credentials saved to store/auth/');
-      console.log('  You can now start the OmniClaw service.\n');
+      deps.fs.writeFileSync(STATUS_FILE, 'authenticated');
 
-      // Give it a moment to save credentials, then exit
-      setTimeout(() => process.exit(0), 1000);
+      try {
+        deps.fs.unlinkSync(QR_FILE);
+      } catch {}
+
+      deps.console.log('\n✓ Successfully authenticated with WhatsApp!');
+      deps.console.log('  Credentials saved to store/auth/');
+      deps.console.log('  You can now start the OmniClaw service.\n');
+      deps.setTimeout(() => deps.exit(0), 1000);
     }
   });
 
   sock.ev.on('creds.update', saveCreds);
 }
 
-async function authenticate(): Promise<void> {
-  fs.mkdirSync(AUTH_DIR, { recursive: true });
+export async function authenticate(
+  cliOptions = getCliOptions(),
+  deps: AuthenticateDeps = defaultAuthenticateDeps,
+): Promise<void> {
+  deps.fs.mkdirSync(AUTH_DIR, { recursive: true });
 
-  // Clean up any stale QR/status files from previous runs
   try {
-    fs.unlinkSync(QR_FILE);
-  } catch {}
-  try {
-    fs.unlinkSync(STATUS_FILE);
+    deps.fs.unlinkSync(QR_FILE);
   } catch {}
 
-  let phoneNumber = phoneArg;
-  if (usePairingCode && !phoneNumber) {
-    phoneNumber = await askQuestion(
+  try {
+    deps.fs.unlinkSync(STATUS_FILE);
+  } catch {}
+
+  let phoneNumber = cliOptions.phoneArg;
+  if (cliOptions.usePairingCode && !phoneNumber) {
+    phoneNumber = await deps.askQuestion(
       'Enter your phone number (with country code, no + or spaces, e.g. 14155551234): ',
     );
   }
 
-  console.log('Starting WhatsApp authentication...\n');
-
-  await connectSocket(phoneNumber);
+  deps.console.log('Starting WhatsApp authentication...\n');
+  await deps.connectSocket(phoneNumber);
 }
 
-authenticate().catch((err) => {
-  console.error('Authentication failed:', err.message);
-  process.exit(1);
-});
+if (import.meta.main) {
+  authenticate().catch((err) => {
+    console.error('Authentication failed:', err.message);
+    process.exit(1);
+  });
+}
