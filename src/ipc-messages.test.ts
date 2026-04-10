@@ -44,6 +44,10 @@ let reactions: Array<{
 let deps: IpcDeps;
 let tmpDir: string;
 
+const flushMicrotasks = async () => {
+  await Promise.resolve();
+};
+
 beforeEach(() => {
   groups = {
     'main@g.us': MAIN_GROUP,
@@ -181,6 +185,24 @@ describe('processMessageIpc: react_to_message', () => {
     expect(readResponse('main', 'req-111')).toEqual({
       type: 'react_to_message_response',
       requestId: 'req-111',
+      ok: true,
+      result: 'Reaction added.',
+    });
+  });
+
+  it('sanitizes requestId before writing the response file', async () => {
+    const result = await processMsg({
+      type: 'react_to_message',
+      chatJid: 'other@g.us',
+      messageId: 'msg-112',
+      emoji: '👍',
+      requestId: 'req/../112!?',
+    });
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(readResponse('main', 'req112')).toEqual({
+      type: 'react_to_message_response',
+      requestId: 'req112',
       ok: true,
       result: 'Reaction added.',
     });
@@ -552,6 +574,141 @@ describe('processMessageIpc: ssh_pubkey', () => {
 // =============================================================================
 
 describe('processMessageIpc: message', () => {
+  it('emits a message_sent IPC event asynchronously', async () => {
+    const events: Array<{
+      kind: string;
+      sourceGroup: string;
+      summary: string;
+      details?: Record<string, unknown>;
+    }> = [];
+    deps.onIpcEvent = (kind, sourceGroup, summary, details) => {
+      events.push({ kind, sourceGroup, summary, details });
+    };
+
+    const result = await processMsg(
+      {
+        type: 'message',
+        chatJid: 'third@g.us',
+        text: 'Cross-group hello',
+      },
+      'other-group',
+      false,
+    );
+
+    expect(result).toEqual({ action: 'handled' });
+
+    await flushMicrotasks();
+
+    expect(events).toEqual([
+      {
+        kind: 'message_sent',
+        sourceGroup: 'other-group',
+        summary: 'Message sent to third@g.us',
+        details: { chatJid: 'third@g.us' },
+      },
+    ]);
+  });
+
+  it('emits a message_blocked IPC event for unauthorized targets', async () => {
+    const events: Array<{
+      kind: string;
+      sourceGroup: string;
+      summary: string;
+      details?: Record<string, unknown>;
+    }> = [];
+    deps.onIpcEvent = (kind, sourceGroup, summary, details) => {
+      events.push({ kind, sourceGroup, summary, details });
+    };
+
+    const result = await processMsg(
+      {
+        type: 'message',
+        chatJid: 'unknown@g.us',
+        text: 'Should be blocked',
+      },
+      'other-group',
+      false,
+    );
+
+    expect(result).toEqual({
+      action: 'blocked',
+      reason: 'target not registered',
+    });
+
+    await flushMicrotasks();
+
+    expect(events).toEqual([
+      {
+        kind: 'message_blocked',
+        sourceGroup: 'other-group',
+        summary: 'Blocked: target unknown@g.us not registered',
+        details: { chatJid: 'unknown@g.us' },
+      },
+    ]);
+  });
+
+  it('emits a message_suppressed IPC event for internal-only content', async () => {
+    const events: Array<{
+      kind: string;
+      sourceGroup: string;
+      summary: string;
+      details?: Record<string, unknown>;
+    }> = [];
+    deps.onIpcEvent = (kind, sourceGroup, summary, details) => {
+      events.push({ kind, sourceGroup, summary, details });
+    };
+
+    const result = await processMsg(
+      {
+        type: 'message',
+        chatJid: 'other@g.us',
+        text: '<internal>All internal reasoning</internal>',
+      },
+      'main',
+      true,
+    );
+
+    expect(result).toEqual({ action: 'suppressed', reason: 'internal-only' });
+
+    await flushMicrotasks();
+
+    expect(events).toEqual([
+      {
+        kind: 'message_suppressed',
+        sourceGroup: 'main',
+        summary: 'Message suppressed (internal-only)',
+        details: { chatJid: 'other@g.us' },
+      },
+    ]);
+  });
+
+  it('swallows IPC event observer failures without affecting message delivery', async () => {
+    let observerCalls = 0;
+    deps.onIpcEvent = () => {
+      observerCalls += 1;
+      throw new Error('observer failed');
+    };
+
+    const result = await processMsg(
+      {
+        type: 'message',
+        chatJid: 'third@g.us',
+        text: 'Still delivered',
+      },
+      'other-group',
+      false,
+    );
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(sentMessages).toEqual([
+      { jid: 'third@g.us', text: 'Still delivered' },
+    ]);
+
+    await flushMicrotasks();
+
+    expect(observerCalls).toBe(1);
+  });
+
   it('passes discord_bot_id to sendMessage for multi-bot routing', async () => {
     deps.sendMessage = async (jid, text, discordBotId) => {
       sendCalls.push({ jid, text, discordBotId });
