@@ -232,7 +232,6 @@ describe('startIpcWatcher', () => {
 
     startIpcWatcher(deps);
     expect(scheduledDelays).toEqual([IPC_POLL_INTERVAL]);
-
     fs.rmSync(
       path.join(IPC_BASE_DIR, 'main', 'messages', malformedMessageFile),
       {
