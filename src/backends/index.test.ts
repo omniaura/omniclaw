@@ -1,11 +1,7 @@
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
 import { logger } from '../logger.js';
-import {
-  getBackend,
-  initializeBackends,
-  shutdownBackends,
-} from './index.js';
+import { getBackend, initializeBackends, shutdownBackends } from './index.js';
 import { LocalBackend } from './local-backend.js';
 
 /**
@@ -66,8 +62,14 @@ describe('backends/index', () => {
     it('initializes only the default backend when no entities are provided', async () => {
       const appleBackend = getBackend('apple-container');
       const dockerBackend = getBackend('docker');
-      const appleInitSpy = spyOn(appleBackend, 'initialize').mockResolvedValue();
-      const dockerInitSpy = spyOn(dockerBackend, 'initialize').mockResolvedValue();
+      const appleInitSpy = spyOn(
+        appleBackend,
+        'initialize',
+      ).mockResolvedValue();
+      const dockerInitSpy = spyOn(
+        dockerBackend,
+        'initialize',
+      ).mockResolvedValue();
 
       await initializeBackends({});
 
@@ -78,8 +80,14 @@ describe('backends/index', () => {
     it('deduplicates backend initialization across entities', async () => {
       const appleBackend = getBackend('apple-container');
       const dockerBackend = getBackend('docker');
-      const appleInitSpy = spyOn(appleBackend, 'initialize').mockResolvedValue();
-      const dockerInitSpy = spyOn(dockerBackend, 'initialize').mockResolvedValue();
+      const appleInitSpy = spyOn(
+        appleBackend,
+        'initialize',
+      ).mockResolvedValue();
+      const dockerInitSpy = spyOn(
+        dockerBackend,
+        'initialize',
+      ).mockResolvedValue();
 
       await initializeBackends({
         alpha: {
@@ -113,8 +121,14 @@ describe('backends/index', () => {
     it('attempts to shut down all initialized backends', async () => {
       const appleBackend = getBackend('apple-container');
       const dockerBackend = getBackend('docker');
-      const appleShutdownSpy = spyOn(appleBackend, 'shutdown').mockResolvedValue();
-      const dockerShutdownSpy = spyOn(dockerBackend, 'shutdown').mockResolvedValue();
+      const appleShutdownSpy = spyOn(
+        appleBackend,
+        'shutdown',
+      ).mockResolvedValue();
+      const dockerShutdownSpy = spyOn(
+        dockerBackend,
+        'shutdown',
+      ).mockResolvedValue();
 
       await shutdownBackends();
 
@@ -129,7 +143,10 @@ describe('backends/index', () => {
       const warnSpy = spyOn(logger, 'warn').mockImplementation(() => {});
 
       spyOn(appleBackend, 'shutdown').mockRejectedValue(failure);
-      const dockerShutdownSpy = spyOn(dockerBackend, 'shutdown').mockResolvedValue();
+      const dockerShutdownSpy = spyOn(
+        dockerBackend,
+        'shutdown',
+      ).mockResolvedValue();
 
       await shutdownBackends();
 

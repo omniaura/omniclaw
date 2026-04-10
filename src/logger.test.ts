@@ -390,10 +390,7 @@ describe('logger', () => {
     });
 
     it('truncates long tags to 16 characters in pretty mode', () => {
-      const logger = createLogger(
-        { group: '1234567890abcdefghijk' },
-        'info',
-      );
+      const logger = createLogger({ group: '1234567890abcdefghijk' }, 'info');
       logger.info('hello');
 
       expect(stderrOutput).toHaveLength(1);
