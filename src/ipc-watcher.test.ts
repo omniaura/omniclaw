@@ -44,7 +44,13 @@ describe('startIpcWatcher', () => {
     const ownerFolder = `runtime-owner-${id}`;
     staleRuntimeFolder = `${ownerFolder}${DISPATCH_RUNTIME_SEP}0123456789abcdef`;
     const rogueFolder = `rogue-source-${id}`;
+    const malformedRuntimeFolder = `${ownerFolder}${DISPATCH_RUNTIME_SEP}not-a-digest`;
     rogueErrorDir = path.join(IPC_BASE_DIR, 'errors', rogueFolder);
+    const malformedRuntimeErrorDir = path.join(
+      IPC_BASE_DIR,
+      'errors',
+      malformedRuntimeFolder,
+    );
 
     fs.rmSync(path.join(IPC_BASE_DIR, staleRuntimeFolder), {
       recursive: true,
@@ -54,12 +60,20 @@ describe('startIpcWatcher', () => {
       recursive: true,
       force: true,
     });
+    fs.rmSync(path.join(IPC_BASE_DIR, malformedRuntimeFolder), {
+      recursive: true,
+      force: true,
+    });
     fs.rmSync(rogueErrorDir, { recursive: true, force: true });
+    fs.rmSync(malformedRuntimeErrorDir, { recursive: true, force: true });
 
     fs.mkdirSync(path.join(IPC_BASE_DIR, staleRuntimeFolder, 'messages'), {
       recursive: true,
     });
     fs.mkdirSync(path.join(IPC_BASE_DIR, rogueFolder, 'messages'), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(IPC_BASE_DIR, malformedRuntimeFolder, 'messages'), {
       recursive: true,
     });
 
@@ -77,6 +91,19 @@ describe('startIpcWatcher', () => {
         type: 'message',
         chatJid: 'main@g.us',
         text: 'should never be processed',
+      }),
+    );
+    fs.writeFileSync(
+      path.join(
+        IPC_BASE_DIR,
+        malformedRuntimeFolder,
+        'messages',
+        'message.json',
+      ),
+      JSON.stringify({
+        type: 'message',
+        chatJid: 'main@g.us',
+        text: 'malformed runtime should never be processed',
       }),
     );
 
@@ -158,6 +185,10 @@ describe('startIpcWatcher', () => {
       false,
     );
     expect(fs.existsSync(rogueErrorDir)).toBe(true);
+    expect(fs.existsSync(malformedRuntimeErrorDir)).toBe(true);
+    expect(scheduledDelays).toEqual([IPC_POLL_INTERVAL]);
+
+    startIpcWatcher(deps);
     expect(scheduledDelays).toEqual([IPC_POLL_INTERVAL]);
   });
 });
