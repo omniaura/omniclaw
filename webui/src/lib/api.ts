@@ -403,6 +403,10 @@ export const api = {
       { channel, content, sender_name: senderName },
     ),
 
+  // Export
+  getExportUrl: (chatJid: string, format: 'json' | 'text' = 'json') =>
+    `/api/messages/${encodeURIComponent(chatJid)}/export?format=${format}`,
+
   // Icons
   getChatIconUrl: (chatJid: string) =>
     `/api/chats/${encodeURIComponent(chatJid)}/icon`,

@@ -1210,3 +1210,151 @@ describe('POST /api/agents/{id}/message', () => {
     expect(body.error).toContain('DB write failed');
   });
 });
+
+describe('conversation export', () => {
+  const sampleMessages = [
+    {
+      id: 'msg-1',
+      chat_jid: 'dc:123',
+      sender: 'user',
+      sender_name: 'Alice',
+      content: 'Hello there',
+      timestamp: '2026-03-01T10:00:00.000Z',
+    },
+    {
+      id: 'msg-2',
+      chat_jid: 'dc:123',
+      sender: 'bot',
+      sender_name: 'Agent',
+      content: 'Hi! How can I help?',
+      timestamp: '2026-03-01T10:00:05.000Z',
+    },
+  ];
+
+  const sampleChats = [
+    {
+      jid: 'dc:123',
+      name: 'Test Chat',
+      last_message_time: '2026-03-01T10:00:05.000Z',
+    },
+  ];
+
+  it('returns JSON export with Content-Disposition header', async () => {
+    const state = makeState({
+      getMessages: () => sampleMessages,
+      getChats: () => sampleChats,
+    });
+    const res = await handle(
+      new Request('http://localhost/api/messages/dc%3A123/export?format=json'),
+      state,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    expect(res.headers.get('content-disposition')).toContain('attachment');
+    expect(res.headers.get('content-disposition')).toContain(
+      'Test_Chat-export.json',
+    );
+
+    const body = JSON.parse(await res.text());
+    expect(body.chat_jid).toBe('dc:123');
+    expect(body.chat_name).toBe('Test Chat');
+    expect(body.message_count).toBe(2);
+    expect(body.messages).toHaveLength(2);
+    expect(body.messages[0].sender_name).toBe('Alice');
+    expect(body.exported_at).toBeTruthy();
+  });
+
+  it('returns text export with proper formatting', async () => {
+    const state = makeState({
+      getMessages: () => sampleMessages,
+      getChats: () => sampleChats,
+    });
+    const res = await handle(
+      new Request('http://localhost/api/messages/dc%3A123/export?format=text'),
+      state,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/plain');
+    expect(res.headers.get('content-disposition')).toContain(
+      'Test_Chat-export.txt',
+    );
+
+    const text = await res.text();
+    expect(text).toContain('# Conversation: Test Chat');
+    expect(text).toContain('# JID: dc:123');
+    expect(text).toContain('# Messages: 2');
+    expect(text).toContain('Alice:');
+    expect(text).toContain('Hello there');
+    expect(text).toContain('Agent:');
+    expect(text).toContain('Hi! How can I help?');
+  });
+
+  it('defaults to JSON format when no format specified', async () => {
+    const state = makeState({
+      getMessages: () => sampleMessages,
+      getChats: () => sampleChats,
+    });
+    const res = await handle(
+      new Request('http://localhost/api/messages/dc%3A123/export'),
+      state,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('application/json');
+  });
+
+  it('rejects invalid format parameter', async () => {
+    const state = makeState();
+    const res = await handle(
+      new Request('http://localhost/api/messages/dc%3A123/export?format=csv'),
+      state,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.error).toContain('Invalid format');
+  });
+
+  it('handles empty messages gracefully', async () => {
+    const state = makeState({
+      getMessages: () => [],
+      getChats: () => sampleChats,
+    });
+    const res = await handle(
+      new Request('http://localhost/api/messages/dc%3A123/export?format=json'),
+      state,
+    );
+    expect(res.status).toBe(200);
+    const body = JSON.parse(await res.text());
+    expect(body.message_count).toBe(0);
+    expect(body.messages).toHaveLength(0);
+  });
+
+  it('falls back to JID when chat name not found', async () => {
+    const state = makeState({
+      getMessages: () => sampleMessages,
+      getChats: () => [],
+    });
+    const res = await handle(
+      new Request('http://localhost/api/messages/dc%3A123/export?format=json'),
+      state,
+    );
+    expect(res.status).toBe(200);
+    const body = JSON.parse(await res.text());
+    expect(body.chat_name).toBe('dc:123');
+  });
+
+  it('sanitizes chat name in filename', async () => {
+    const state = makeState({
+      getMessages: () => [],
+      getChats: () => [
+        { jid: 'dc:123', name: 'My Chat / Special!', last_message_time: '' },
+      ],
+    });
+    const res = await handle(
+      new Request('http://localhost/api/messages/dc%3A123/export?format=json'),
+      state,
+    );
+    const disposition = res.headers.get('content-disposition') || '';
+    expect(disposition).toContain('My_Chat___Special_-export.json');
+    expect(disposition).not.toContain('/');
+  });
+});

@@ -192,6 +192,8 @@ export function handleRequest(
   if (pathname === '/api/chats') return handleGetChats(state);
   if (pathname === '/api/messages/search')
     return handleSearchMessages(url, state);
+  if (pathname.endsWith('/export') && pathname.startsWith('/api/messages/'))
+    return handleExportMessages(url, state);
   if (pathname.startsWith('/api/messages/'))
     return handleGetMessages(url, state);
   if (pathname === '/api/stats') return handleGetStats(state);
@@ -721,6 +723,80 @@ function handleGetMessages(url: URL, state: WebStateProvider): Response {
   );
   const messages = state.getMessages(chatJid, since, limit);
   return json(messages);
+}
+
+const MAX_EXPORT_LIMIT = 5000;
+
+function handleExportMessages(url: URL, state: WebStateProvider): Response {
+  // /api/messages/{chatJid}/export?format=json|text&limit=5000
+  const pathWithoutExport = url.pathname.slice(
+    '/api/messages/'.length,
+    -'/export'.length,
+  );
+  let chatJid: string;
+  try {
+    chatJid = decodeURIComponent(pathWithoutExport);
+  } catch {
+    return json({ error: 'Invalid chatJid encoding' }, 400);
+  }
+  if (!chatJid) return json({ error: 'Missing chatJid' }, 400);
+
+  const format = url.searchParams.get('format') || 'json';
+  if (format !== 'json' && format !== 'text')
+    return json({ error: 'Invalid format. Use "json" or "text".' }, 400);
+
+  const limit = Math.min(
+    Math.max(1, parseInt(url.searchParams.get('limit') || '5000', 10) || 5000),
+    MAX_EXPORT_LIMIT,
+  );
+  const messages = state.getMessages(
+    chatJid,
+    '1970-01-01T00:00:00.000Z',
+    limit,
+  );
+
+  const chats = state.getChats();
+  const chatName = chats.find((c) => c.jid === chatJid)?.name || chatJid;
+  const safeName = chatName.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  if (format === 'text') {
+    const lines: string[] = [];
+    lines.push(`# Conversation: ${chatName}`);
+    lines.push(`# JID: ${chatJid}`);
+    lines.push(`# Exported: ${new Date().toISOString()}`);
+    lines.push(`# Messages: ${messages.length}`);
+    lines.push('');
+
+    for (const msg of messages) {
+      const time = new Date(msg.timestamp).toLocaleString();
+      const sender = msg.sender_name || msg.sender || 'Unknown';
+      lines.push(`[${time}] ${sender}:`);
+      lines.push(msg.content || '');
+      lines.push('');
+    }
+
+    return new Response(lines.join('\n'), {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${safeName}-export.txt"`,
+      },
+    });
+  }
+
+  // JSON format
+  const payload = {
+    chat_jid: chatJid,
+    chat_name: chatName,
+    exported_at: new Date().toISOString(),
+    message_count: messages.length,
+    messages,
+  };
+  return new Response(JSON.stringify(payload, null, 2), {
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${safeName}-export.json"`,
+    },
+  });
 }
 
 function handleGetStats(state: WebStateProvider): Response {

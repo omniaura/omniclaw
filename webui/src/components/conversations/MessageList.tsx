@@ -1,5 +1,12 @@
-import { createEffect, createMemo, For, on, Show } from 'solid-js';
-import type { MessageInfo } from '~/lib/api';
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  on,
+  Show,
+} from 'solid-js';
+import { api, type MessageInfo } from '~/lib/api';
 import type { LiveMessage } from '~/lib/stores/messages';
 
 const MAX_TEXT_LENGTH = 2000;
@@ -83,6 +90,9 @@ export default function MessageList(props: {
               </span>
             </Show>
           </span>
+          <Show when={allMessages().length > 0}>
+            <ExportDropdown chatJid={props.chatJid!} />
+          </Show>
         </div>
 
         <Show when={props.hasMore}>
@@ -165,5 +175,49 @@ export default function MessageList(props: {
         </Show>
       </Show>
     </main>
+  );
+}
+
+function ExportDropdown(props: { chatJid: string }) {
+  const [open, setOpen] = createSignal(false);
+
+  function download(format: 'json' | 'text') {
+    const url = api.getExportUrl(props.chatJid, format);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setOpen(false);
+  }
+
+  return (
+    <div class="relative">
+      <button
+        class="px-2 py-0.5 text-[10px] rounded bg-surface-2 border border-border text-text-dim hover:text-text hover:border-accent/40 transition-colors"
+        title="Export conversation"
+        onClick={() => setOpen(!open())}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      >
+        Export
+      </button>
+      <Show when={open()}>
+        <div class="absolute right-0 top-full mt-1 bg-surface border border-border rounded shadow-lg z-10 min-w-[120px]">
+          <button
+            class="w-full text-left px-3 py-1.5 text-[11px] text-text hover:bg-surface-2 transition-colors"
+            onMouseDown={() => download('json')}
+          >
+            JSON
+          </button>
+          <button
+            class="w-full text-left px-3 py-1.5 text-[11px] text-text hover:bg-surface-2 transition-colors border-t border-border"
+            onMouseDown={() => download('text')}
+          >
+            Plain text
+          </button>
+        </div>
+      </Show>
+    </div>
   );
 }
