@@ -300,7 +300,7 @@ describe('PeerClient', () => {
 
     await expect(
       client.getContextLayers({ folder: 'groups/main' }),
-    ).rejects.toThrow('Download exceeded 1048576 bytes');
+    ).rejects.toThrow('Peer JSON response exceeded 1048576 bytes');
   });
 
   it('rejects oversized error bodies from content-length without buffering them', async () => {
