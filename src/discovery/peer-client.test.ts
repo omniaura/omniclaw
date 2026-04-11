@@ -5,6 +5,7 @@ import { PeerClient, verifyPeerRequestSignature } from './peer-client.js';
 
 const originalFetch = globalThis.fetch;
 const MAX_PEER_PROXY_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_PEER_JSON_RESPONSE_BYTES = 1024 * 1024;
 
 function sha256Hex(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -243,6 +244,63 @@ describe('PeerClient', () => {
     await expect(client.getChatIcon('chat/room')).rejects.toThrow(
       'Download exceeded 5242880 bytes',
     );
+  });
+
+  it('rejects authenticated JSON responses that exceed the content-length cap', async () => {
+    let cancelled = false;
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          {
+            headers: {
+              'content-length': String(MAX_PEER_JSON_RESPONSE_BYTES + 1),
+              'content-type': 'application/json',
+            },
+          },
+        ),
+      ),
+    ) as unknown as typeof globalThis.fetch;
+
+    const client = new PeerClient('peer.local', 3000, 'stats-cap', 'secret');
+
+    await expect(client.getStats()).rejects.toThrow(
+      'Peer JSON response exceeded 1048576 bytes',
+    );
+    expect(cancelled).toBe(true);
+  });
+
+  it('rejects streamed authenticated JSON responses that exceed the byte cap', async () => {
+    const firstChunk = new Uint8Array(768 * 1024);
+    const secondChunk = new Uint8Array(512 * 1024);
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(firstChunk);
+              controller.enqueue(secondChunk);
+              controller.close();
+            },
+          }),
+          {
+            headers: {
+              'content-type': 'application/json',
+            },
+          },
+        ),
+      ),
+    ) as unknown as typeof globalThis.fetch;
+
+    const client = new PeerClient('peer.local', 3000, 'layers-cap', 'secret');
+
+    await expect(
+      client.getContextLayers({ folder: 'groups/main' }),
+    ).rejects.toThrow('Download exceeded 1048576 bytes');
   });
 
   it('rejects oversized error bodies from content-length without buffering them', async () => {

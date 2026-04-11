@@ -17,6 +17,8 @@ import type {
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_PEER_PROXY_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_PEER_ERROR_BODY_BYTES = 8 * 1024;
+const MAX_PEER_JSON_RESPONSE_BYTES = 1024 * 1024;
+const textDecoder = new TextDecoder();
 
 export interface PeerClientLike {
   getAgents(): Promise<RemoteAgentSummary[]>;
@@ -56,7 +58,11 @@ export class PeerClient implements PeerClientLike {
   /** GET /api/discovery/info — no auth required */
   async getInfo(): Promise<PeerInfoResponse> {
     const res = await this.fetch('/api/discovery/info');
-    return res.json() as Promise<PeerInfoResponse>;
+    return readJsonResponseWithLimit<PeerInfoResponse>(
+      res,
+      MAX_PEER_JSON_RESPONSE_BYTES,
+      'Peer JSON response',
+    );
   }
 
   /** POST /api/discovery/pair — no auth required */
@@ -66,7 +72,11 @@ export class PeerClient implements PeerClientLike {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    return res.json() as Promise<PairResponse>;
+    return readJsonResponseWithLimit<PairResponse>(
+      res,
+      MAX_PEER_JSON_RESPONSE_BYTES,
+      'Peer JSON response',
+    );
   }
 
   /** POST /api/discovery/complete-pairing — sends approval callback */
@@ -81,7 +91,11 @@ export class PeerClient implements PeerClientLike {
   /** GET /api/agents — requires auth */
   async getAgents(): Promise<RemoteAgentSummary[]> {
     const res = await this.authenticatedFetch('/api/agents');
-    return res.json() as Promise<RemoteAgentSummary[]>;
+    return readJsonResponseWithLimit<RemoteAgentSummary[]>(
+      res,
+      MAX_PEER_JSON_RESPONSE_BYTES,
+      'Peer JSON response',
+    );
   }
 
   /** GET /api/agents/:id/avatar/image — requires auth, returns image bytes */
@@ -125,7 +139,11 @@ export class PeerClient implements PeerClientLike {
   /** GET /api/stats — requires auth */
   async getStats(): Promise<unknown> {
     const res = await this.authenticatedFetch('/api/stats');
-    return res.json();
+    return readJsonResponseWithLimit(
+      res,
+      MAX_PEER_JSON_RESPONSE_BYTES,
+      'Peer JSON response',
+    );
   }
 
   /** GET /api/logs/stream — requires auth */
@@ -137,13 +155,21 @@ export class PeerClient implements PeerClientLike {
   async getContextLayers(params: Record<string, string>): Promise<unknown> {
     const query = new URLSearchParams(params).toString();
     const res = await this.authenticatedFetch(`/api/context/layers?${query}`);
-    return res.json();
+    return readJsonResponseWithLimit(
+      res,
+      MAX_PEER_JSON_RESPONSE_BYTES,
+      'Peer JSON response',
+    );
   }
 
   /** GET /api/context/files — requires auth */
   async listContextFiles(): Promise<ContextFileEntry[]> {
     const res = await this.authenticatedFetch('/api/context/files');
-    return res.json() as Promise<ContextFileEntry[]>;
+    return readJsonResponseWithLimit<ContextFileEntry[]>(
+      res,
+      MAX_PEER_JSON_RESPONSE_BYTES,
+      'Peer JSON response',
+    );
   }
 
   /** PUT /api/context/file — requires auth */
@@ -156,7 +182,11 @@ export class PeerClient implements PeerClientLike {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: layerPath, content }),
     });
-    return res.json() as Promise<{ ok: boolean }>;
+    return readJsonResponseWithLimit<{ ok: boolean }>(
+      res,
+      MAX_PEER_JSON_RESPONSE_BYTES,
+      'Peer JSON response',
+    );
   }
 
   private async authenticatedFetch(
@@ -311,6 +341,24 @@ async function readErrorResponseWithLimit(
 
   text += decoder.decode();
   return truncated ? `${text}... [truncated]` : text;
+}
+
+async function readJsonResponseWithLimit<T>(
+  response: Response,
+  maxBytes: number,
+  label: string,
+): Promise<T> {
+  const contentLength = Number.parseInt(
+    response.headers.get('content-length') || '',
+    10,
+  );
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    response.body?.cancel().catch(() => {});
+    throw new Error(`${label} exceeded ${maxBytes} bytes`);
+  }
+
+  const bytes = await readStreamWithByteLimit(response.body, maxBytes);
+  return JSON.parse(textDecoder.decode(bytes)) as T;
 }
 
 function sha256Hex(value: string): string {
