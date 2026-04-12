@@ -12,6 +12,16 @@ import type { ScheduledTask } from '../types.js';
 import { escapeHtml, renderPagePatch } from './shared.js';
 import type { WebServerConfig, WebStateProvider, WsEvent } from './types.js';
 import {
+  createSessionStore,
+  parseSessionCookie,
+  makeSessionCookie,
+  makeClearSessionCookie,
+  verifyPassword,
+  isAuthExemptPath,
+  renderLoginPage,
+  type SessionStore,
+} from './session-auth.js';
+import {
   renderAgentDetailContent,
   buildAgentDetailData,
 } from './agent-detail.js';
@@ -159,7 +169,8 @@ export function startWebServer(
   state: WebStateProvider,
   trustStore?: TrustStore,
 ): WebServerHandle {
-  const { port, auth, hostname, corsOrigin, trustLanDiscoveryAdmin } = config;
+  const { port, auth, sessionPassword, hostname, corsOrigin, trustLanDiscoveryAdmin } = config;
+  const sessionStore = sessionPassword ? createSessionStore() : null;
   const bindHostname = hostname || '127.0.0.1';
   const sseClients = new Set<SseClient>();
   const recentLogs: string[] = [];
@@ -209,7 +220,66 @@ export function startWebServer(
           headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
         });
       }
-      // Peer is authenticated — skip Basic Auth, fall through to routing
+      // Peer is authenticated — skip auth, fall through to routing
+    } else if (sessionStore && sessionPassword) {
+      // --- Session-based auth (WEB_PASSWORD) ---
+      // Handle login/logout before checking session
+      if (url.pathname === '/login') {
+        if (req.method === 'GET') {
+          return new Response(renderLoginPage(), {
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          });
+        }
+        if (req.method === 'POST') {
+          const formData = await req.formData().catch(() => null);
+          const password = formData?.get('password');
+          if (
+            typeof password === 'string' &&
+            verifyPassword(password, sessionPassword)
+          ) {
+            const token = sessionStore.create();
+            return new Response(null, {
+              status: 302,
+              headers: {
+                Location: '/',
+                'Set-Cookie': makeSessionCookie(token),
+              },
+            });
+          }
+          return new Response(renderLoginPage('Invalid password'), {
+            status: 401,
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          });
+        }
+      }
+      if (url.pathname === '/logout') {
+        const sessionToken = parseSessionCookie(
+          req.headers.get('Cookie'),
+        );
+        if (sessionToken) sessionStore.revoke(sessionToken);
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: '/login',
+            'Set-Cookie': makeClearSessionCookie(),
+          },
+        });
+      }
+      // Check session cookie for all other routes
+      const sessionToken = parseSessionCookie(req.headers.get('Cookie'));
+      if (!sessionToken || !sessionStore.validate(sessionToken)) {
+        // API routes return 401 JSON; page routes redirect to login
+        if (url.pathname.startsWith('/api/')) {
+          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(null, {
+          status: 302,
+          headers: { Location: '/login' },
+        });
+      }
     } else if (auth && !checkBasicAuth(req, auth)) {
       // --- Basic auth for HTTP ---
       return new Response('Unauthorized', {
@@ -218,6 +288,7 @@ export function startWebServer(
       });
     } else if (
       !auth &&
+      !sessionPassword &&
       url.pathname.startsWith('/api/discovery/') &&
       !isUnauthDiscoveryRoute(url.pathname) &&
       !isTrustedLanDiscoveryAdminRequest(
@@ -234,7 +305,7 @@ export function startWebServer(
       return new Response(
         JSON.stringify({
           error:
-            'Discovery admin routes require authentication (set WEB_UI_USER/WEB_UI_PASS or access from a private network)',
+            'Discovery admin routes require authentication (set WEB_PASSWORD or WEB_UI_USER/WEB_UI_PASS or access from a private network)',
         }),
         {
           status: 403,

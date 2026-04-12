@@ -134,6 +134,8 @@ export interface WebServerConfig {
   port: number;
   /** Basic auth credentials. If unset, HTTP auth is disabled. */
   auth?: { username: string; password: string };
+  /** Session-based password. When set, serves a login page and uses cookie sessions. Takes precedence over Basic Auth. */
+  sessionPassword?: string;
   /** Bind hostname. Defaults to '127.0.0.1' (loopback only). */
   hostname?: string;
   /** Allowed CORS origin. If unset, no CORS headers are sent. */
