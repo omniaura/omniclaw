@@ -189,12 +189,31 @@ function renderTaskModal(
     `<div class="form-group"><label for="${prefix}-schedule-type">Schedule Type</label>` +
     `<select id="${prefix}-schedule-type" required>` +
     `<option value="cron">Cron</option>` +
-    `<option value="interval">Interval (ms)</option>` +
-    `<option value="once">Once (ISO timestamp)</option>` +
+    `<option value="interval">Interval</option>` +
+    `<option value="once">Once</option>` +
     `</select></div>` +
-    `<div class="form-group"><label for="${prefix}-schedule-value">Schedule Value</label>` +
+    // Cron input (shown by default)
+    `<div class="form-group schedule-input" id="${prefix}-cron-group">` +
+    `<label for="${prefix}-schedule-value">Cron Expression</label>` +
     `<input id="${prefix}-schedule-value" type="text" placeholder="0 9 * * *" required>` +
     `<div class="schedule-preview" id="${prefix}-schedule-preview"></div></div>` +
+    // Interval input with unit selector
+    `<div class="form-group schedule-input" id="${prefix}-interval-group" style="display:none">` +
+    `<label>Repeat Every</label>` +
+    `<div class="interval-row">` +
+    `<input id="${prefix}-interval-num" type="number" min="1" step="1" value="60" class="interval-num">` +
+    `<select id="${prefix}-interval-unit" class="interval-unit">` +
+    `<option value="1000">seconds</option>` +
+    `<option value="60000" selected>minutes</option>` +
+    `<option value="3600000">hours</option>` +
+    `</select>` +
+    `</div>` +
+    `<div class="schedule-preview" id="${prefix}-interval-preview"></div></div>` +
+    // One-shot datetime picker
+    `<div class="form-group schedule-input" id="${prefix}-once-group" style="display:none">` +
+    `<label for="${prefix}-once-datetime">Run At</label>` +
+    `<input id="${prefix}-once-datetime" type="datetime-local" class="datetime-input">` +
+    `<div class="schedule-preview" id="${prefix}-once-preview"></div></div>` +
     `<div class="form-group"><label for="${prefix}-context-mode">Context Mode</label>` +
     `<select id="${prefix}-context-mode">` +
     `<option value="isolated">Isolated</option>` +

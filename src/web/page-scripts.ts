@@ -831,27 +831,119 @@ function cronPreview(expr){
   return"";
 }
 
-function updateSchedulePreview(prefixId){
-  var typeEl=document.getElementById(prefixId+"-schedule-type");
-  var valEl=document.getElementById(prefixId+"-schedule-value");
-  var prevEl=document.getElementById(prefixId+"-schedule-preview");
-  if(!typeEl||!valEl||!prevEl)return;
-  var type=typeEl.value,val=valEl.value.trim();
-  if(!val){prevEl.textContent="";return;}
+// ---- Schedule input group switching ----
+function showScheduleGroup(prefix,type){
+  var cronG=document.getElementById(prefix+"-cron-group");
+  var intG=document.getElementById(prefix+"-interval-group");
+  var onceG=document.getElementById(prefix+"-once-group");
+  if(cronG)cronG.style.display=type==="cron"?"":"none";
+  if(intG)intG.style.display=type==="interval"?"":"none";
+  if(onceG)onceG.style.display=type==="once"?"":"none";
+}
+
+// ---- Get schedule value from the active input group ----
+function getScheduleValue(prefix){
+  var type=document.getElementById(prefix+"-schedule-type").value;
   if(type==="cron"){
+    return document.getElementById(prefix+"-schedule-value").value.trim();
+  }else if(type==="interval"){
+    var num=parseFloat(document.getElementById(prefix+"-interval-num").value);
+    var unit=parseInt(document.getElementById(prefix+"-interval-unit").value,10);
+    if(isNaN(num)||num<=0)return"";
+    return String(Math.round(num*unit));
+  }else if(type==="once"){
+    var dtVal=document.getElementById(prefix+"-once-datetime").value;
+    if(!dtVal)return"";
+    return new Date(dtVal).toISOString().replace(/Z$/,"").replace(/\\.\\d{3}$/,"");
+  }
+  return"";
+}
+
+// ---- Populate schedule inputs from raw value (for edit modal) ----
+function setScheduleInputs(prefix,type,rawValue){
+  showScheduleGroup(prefix,type);
+  if(type==="cron"){
+    document.getElementById(prefix+"-schedule-value").value=rawValue;
+  }else if(type==="interval"){
+    var ms=parseInt(rawValue,10);
+    if(isNaN(ms))ms=60000;
+    var numEl=document.getElementById(prefix+"-interval-num");
+    var unitEl=document.getElementById(prefix+"-interval-unit");
+    if(ms>=3600000&&ms%3600000===0){unitEl.value="3600000";numEl.value=String(ms/3600000);}
+    else if(ms>=60000&&ms%60000===0){unitEl.value="60000";numEl.value=String(ms/60000);}
+    else{unitEl.value="1000";numEl.value=String(ms/1000);}
+  }else if(type==="once"){
+    var dtEl=document.getElementById(prefix+"-once-datetime");
+    try{
+      var d=new Date(rawValue);
+      var iso=d.toISOString().slice(0,16);
+      dtEl.value=iso;
+    }catch(e){dtEl.value="";}
+  }
+  updateSchedulePreview(prefix);
+}
+
+// ---- Validate schedule and return error message or "" ----
+function validateSchedule(prefix){
+  var type=document.getElementById(prefix+"-schedule-type").value;
+  if(type==="interval"){
+    var num=parseFloat(document.getElementById(prefix+"-interval-num").value);
+    var unit=parseInt(document.getElementById(prefix+"-interval-unit").value,10);
+    if(isNaN(num)||num<=0)return"Interval must be a positive number";
+    var ms=num*unit;
+    if(ms<60000)return"Warning: interval is less than 1 minute ("+Math.round(ms/1000)+"s). This may cause high load.";
+  }else if(type==="once"){
+    var dtVal=document.getElementById(prefix+"-once-datetime").value;
+    if(!dtVal)return"Select a date and time";
+    var chosen=new Date(dtVal);
+    if(chosen.getTime()<=Date.now())return"Cannot schedule in the past";
+  }else if(type==="cron"){
+    var val=document.getElementById(prefix+"-schedule-value").value.trim();
+    if(!val)return"Enter a cron expression";
+    var parts=val.split(/\\s+/);
+    if(parts.length<5)return"Cron expression needs at least 5 fields (min hour dom mon dow)";
+  }
+  return"";
+}
+
+function updateSchedulePreview(prefix){
+  var type=document.getElementById(prefix+"-schedule-type").value;
+  if(type==="cron"){
+    var valEl=document.getElementById(prefix+"-schedule-value");
+    var prevEl=document.getElementById(prefix+"-schedule-preview");
+    if(!valEl||!prevEl)return;
+    var val=valEl.value.trim();
+    if(!val){prevEl.textContent="";prevEl.className="schedule-preview";return;}
     var p=cronPreview(val);
     prevEl.textContent=p||"";
+    prevEl.className="schedule-preview";
   }else if(type==="interval"){
-    var ms=parseInt(val,10);
-    if(isNaN(ms)){prevEl.textContent="";return;}
-    if(ms<1000)prevEl.textContent="Every "+ms+"ms";
-    else if(ms<60000)prevEl.textContent="Every "+(ms/1000).toFixed(0)+"s";
-    else if(ms<3600000)prevEl.textContent="Every "+(ms/60000).toFixed(0)+"m";
-    else prevEl.textContent="Every "+(ms/3600000).toFixed(1)+"h";
+    var numEl=document.getElementById(prefix+"-interval-num");
+    var unitEl=document.getElementById(prefix+"-interval-unit");
+    var prevEl2=document.getElementById(prefix+"-interval-preview");
+    if(!numEl||!unitEl||!prevEl2)return;
+    var num=parseFloat(numEl.value);
+    var unit=parseInt(unitEl.value,10);
+    if(isNaN(num)||num<=0){prevEl2.textContent="";prevEl2.className="schedule-preview";return;}
+    var ms=num*unit;
+    var label;
+    if(ms<1000)label="Every "+Math.round(ms)+"ms";
+    else if(ms<60000)label="Every "+(ms/1000).toFixed(0)+"s";
+    else if(ms<3600000)label="Every "+(ms/60000).toFixed(0)+" minute"+(Math.round(ms/60000)===1?"":"s");
+    else label="Every "+(ms/3600000).toFixed(1)+" hour"+(ms/3600000===1?"":"s");
+    prevEl2.textContent=label;
+    prevEl2.className=ms<60000?"schedule-preview warning":"schedule-preview";
   }else if(type==="once"){
-    try{prevEl.textContent="At: "+new Date(val).toLocaleString();}
-    catch(e){prevEl.textContent="";}
-  }else{prevEl.textContent="";}
+    var dtEl=document.getElementById(prefix+"-once-datetime");
+    var prevEl3=document.getElementById(prefix+"-once-preview");
+    if(!dtEl||!prevEl3)return;
+    var dtVal=dtEl.value;
+    if(!dtVal){prevEl3.textContent="";prevEl3.className="schedule-preview";return;}
+    var chosen=new Date(dtVal);
+    var isPast=chosen.getTime()<=Date.now();
+    prevEl3.textContent=isPast?"In the past":"At: "+chosen.toLocaleString();
+    prevEl3.className=isPast?"schedule-preview warning":"schedule-preview";
+  }
 }
 
 // ---- Filter tabs ----
@@ -896,16 +988,31 @@ tbody.addEventListener("click",function(e){
 document.getElementById("tm-btn-create").addEventListener("click",function(){
   createModal.classList.add("open");
   document.getElementById("tmc-error").textContent="";
+  showScheduleGroup("tmc","cron");
 });
 createModal.addEventListener("click",function(e){if(e.target===createModal)createModal.classList.remove("open");});
 document.getElementById("tmc-cancel").addEventListener("click",function(){createModal.classList.remove("open");});
 
-// Schedule preview for create modal
-["tmc-schedule-type","tmc-schedule-value"].forEach(function(id){
-  var el=document.getElementById(id);
-  if(el)el.addEventListener("input",function(){updateSchedulePreview("tmc");});
-  if(el)el.addEventListener("change",function(){updateSchedulePreview("tmc");});
+// Schedule type switching for create modal
+document.getElementById("tmc-schedule-type").addEventListener("change",function(){
+  showScheduleGroup("tmc",this.value);
+  updateSchedulePreview("tmc");
 });
+
+// Schedule preview listeners for create modal
+["tmc-schedule-value"].forEach(function(id){
+  var el=document.getElementById(id);
+  if(el){el.addEventListener("input",function(){updateSchedulePreview("tmc");});
+  el.addEventListener("change",function(){updateSchedulePreview("tmc");});}
+});
+["tmc-interval-num","tmc-interval-unit"].forEach(function(id){
+  var el=document.getElementById(id);
+  if(el){el.addEventListener("input",function(){updateSchedulePreview("tmc");});
+  el.addEventListener("change",function(){updateSchedulePreview("tmc");});}
+});
+var tmcDt=document.getElementById("tmc-once-datetime");
+if(tmcDt){tmcDt.addEventListener("input",function(){updateSchedulePreview("tmc");});
+tmcDt.addEventListener("change",function(){updateSchedulePreview("tmc");});}
 
 document.getElementById("tmc-form").addEventListener("submit",function(e){
   e.preventDefault();
@@ -913,11 +1020,15 @@ document.getElementById("tmc-form").addEventListener("submit",function(e){
   var sb=document.getElementById("tmc-submit");sb.disabled=true;
   var av=document.getElementById("tmc-agent").value;
   if(!av){errorEl.textContent="Select an agent";sb.disabled=false;return;}
+  var schedVal=getScheduleValue("tmc");
+  if(!schedVal){errorEl.textContent="Please fill in the schedule";sb.disabled=false;return;}
+  var vErr=validateSchedule("tmc");
+  if(vErr&&vErr.indexOf("Warning")===-1&&vErr.indexOf("warning")===-1){errorEl.textContent=vErr;sb.disabled=false;return;}
   var parts=av.split("|");
   var payload={group_folder:parts[0],chat_jid:parts[1],
     prompt:document.getElementById("tmc-prompt").value,
     schedule_type:document.getElementById("tmc-schedule-type").value,
-    schedule_value:document.getElementById("tmc-schedule-value").value,
+    schedule_value:schedVal,
     context_mode:document.getElementById("tmc-context-mode").value};
   fetch("/api/tasks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
   .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})
@@ -925,6 +1036,7 @@ document.getElementById("tmc-form").addEventListener("submit",function(e){
     window.__toast("Task created: "+t.id.slice(0,12));
     createModal.classList.remove("open");
     document.getElementById("tmc-form").reset();
+    showScheduleGroup("tmc","cron");
     document.getElementById("tmc-schedule-preview").textContent="";
     refreshTasks();
   })
@@ -941,9 +1053,8 @@ function openEditModal(taskId){
     document.getElementById("tme-agent").value=t.group_folder+"|"+t.chat_jid;
     document.getElementById("tme-prompt").value=t.prompt;
     document.getElementById("tme-schedule-type").value=t.schedule_type;
-    document.getElementById("tme-schedule-value").value=t.schedule_value;
     document.getElementById("tme-context-mode").value=t.context_mode;
-    updateSchedulePreview("tme");
+    setScheduleInputs("tme",t.schedule_type,t.schedule_value);
     editModal.classList.add("open");
   })
   .catch(function(err){window.__toast("Failed to load task: "+err.message,"error");});
@@ -951,20 +1062,39 @@ function openEditModal(taskId){
 editModal.addEventListener("click",function(e){if(e.target===editModal)editModal.classList.remove("open");});
 document.getElementById("tme-cancel").addEventListener("click",function(){editModal.classList.remove("open");editingTaskId=null;});
 
-["tme-schedule-type","tme-schedule-value"].forEach(function(id){
-  var el=document.getElementById(id);
-  if(el)el.addEventListener("input",function(){updateSchedulePreview("tme");});
-  if(el)el.addEventListener("change",function(){updateSchedulePreview("tme");});
+// Schedule type switching for edit modal
+document.getElementById("tme-schedule-type").addEventListener("change",function(){
+  showScheduleGroup("tme",this.value);
+  updateSchedulePreview("tme");
 });
+
+// Schedule preview listeners for edit modal
+["tme-schedule-value"].forEach(function(id){
+  var el=document.getElementById(id);
+  if(el){el.addEventListener("input",function(){updateSchedulePreview("tme");});
+  el.addEventListener("change",function(){updateSchedulePreview("tme");});}
+});
+["tme-interval-num","tme-interval-unit"].forEach(function(id){
+  var el=document.getElementById(id);
+  if(el){el.addEventListener("input",function(){updateSchedulePreview("tme");});
+  el.addEventListener("change",function(){updateSchedulePreview("tme");});}
+});
+var tmeDt=document.getElementById("tme-once-datetime");
+if(tmeDt){tmeDt.addEventListener("input",function(){updateSchedulePreview("tme");});
+tmeDt.addEventListener("change",function(){updateSchedulePreview("tme");});}
 
 document.getElementById("tme-form").addEventListener("submit",function(e){
   e.preventDefault();if(!editingTaskId)return;
   var errorEl=document.getElementById("tme-error");errorEl.textContent="";
   var sb=document.getElementById("tme-submit");sb.disabled=true;
+  var schedVal=getScheduleValue("tme");
+  if(!schedVal){errorEl.textContent="Please fill in the schedule";sb.disabled=false;return;}
+  var vErr=validateSchedule("tme");
+  if(vErr&&vErr.indexOf("Warning")===-1&&vErr.indexOf("warning")===-1){errorEl.textContent=vErr;sb.disabled=false;return;}
   var payload={
     prompt:document.getElementById("tme-prompt").value,
     schedule_type:document.getElementById("tme-schedule-type").value,
-    schedule_value:document.getElementById("tme-schedule-value").value};
+    schedule_value:schedVal};
   fetch("/api/tasks/"+encodeURIComponent(editingTaskId),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
   .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})
   .then(function(t){
