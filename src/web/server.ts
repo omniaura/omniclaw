@@ -236,8 +236,7 @@ export function startWebServer(
       // --- Session-based auth (WEB_PASSWORD) ---
       // Handle login/logout before checking session
       if (url.pathname === '/login') {
-        const clientIp =
-          bunServer.requestIP(req)?.address ?? 'unknown';
+        const clientIp = bunServer.requestIP(req)?.address ?? 'unknown';
 
         if (req.method === 'GET') {
           const blocked = loginRateLimiter?.isBlocked(clientIp);
@@ -267,7 +266,9 @@ export function startWebServer(
           if (loginRateLimiter?.isBlocked(clientIp)) {
             const retryAfter = loginRateLimiter.retryAfter(clientIp);
             return new Response(
-              renderLoginPage('Too many failed attempts. Please try again later.'),
+              renderLoginPage(
+                'Too many failed attempts. Please try again later.',
+              ),
               {
                 status: 429,
                 headers: {
