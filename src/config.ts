@@ -143,6 +143,7 @@ const configSchema = z
     ),
     WEB_UI_USER: z.preprocess(optionalTrimmedString, z.string().optional()),
     WEB_UI_PASS: z.preprocess(optionalTrimmedString, z.string().optional()),
+    WEB_PASSWORD: z.preprocess(optionalTrimmedString, z.string().optional()),
     WEB_UI_HOST: z.string().default('127.0.0.1'),
     WEB_UI_CORS_ORIGIN: z.preprocess(
       optionalTrimmedString,
@@ -408,6 +409,8 @@ export const DISCOVERY_TRUST_LAN_ADMIN = CONFIG.DISCOVERY_TRUST_LAN_ADMIN;
 export const WEB_UI_PORT = CONFIG.WEB_UI_PORT;
 export const WEB_UI_USER = CONFIG.WEB_UI_USER;
 export const WEB_UI_PASS = CONFIG.WEB_UI_PASS;
+// Session-based password auth: when set, the web UI shows a login page instead of Basic Auth.
+export const WEB_PASSWORD = CONFIG.WEB_PASSWORD;
 // Bind hostname: defaults to loopback (127.0.0.1) for security.
 // Set WEB_UI_HOST=0.0.0.0 to expose on all interfaces (e.g. behind a reverse proxy).
 export const WEB_UI_HOST = CONFIG.WEB_UI_HOST;

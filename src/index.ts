@@ -45,6 +45,7 @@ import {
   TELEGRAM_BOT_TOKENS,
   WEB_UI_CORS_ORIGIN,
   WEB_UI_HOST,
+  WEB_PASSWORD,
   WEB_UI_PASS,
   WEB_UI_PORT,
   WEB_UI_USER,
@@ -2582,23 +2583,17 @@ async function main(): Promise<void> {
     const isPublic = WEB_UI_HOST !== '127.0.0.1' && WEB_UI_HOST !== 'localhost';
     const allowUnauthedPublicWebUiForTrustedLan =
       isPublic && DISCOVERY_TRUST_LAN_ADMIN;
-    if (
-      isPublic &&
-      !allowUnauthedPublicWebUiForTrustedLan &&
-      (!WEB_UI_USER || !WEB_UI_PASS)
-    ) {
+    const hasAuth = (WEB_UI_USER && WEB_UI_PASS) || WEB_PASSWORD;
+    if (isPublic && !allowUnauthedPublicWebUiForTrustedLan && !hasAuth) {
       logger.error(
-        'WEB_UI_HOST is set to a public interface but WEB_UI_USER and/or WEB_UI_PASS are missing. ' +
-          'Refusing to start unauthenticated Web UI. Set both credentials or unset WEB_UI_PORT.',
+        'WEB_UI_HOST is set to a public interface but no auth is configured. ' +
+          'Set WEB_PASSWORD, or both WEB_UI_USER and WEB_UI_PASS, or unset WEB_UI_PORT.',
       );
       process.exit(1);
     }
-    if (
-      allowUnauthedPublicWebUiForTrustedLan &&
-      (!WEB_UI_USER || !WEB_UI_PASS)
-    ) {
+    if (allowUnauthedPublicWebUiForTrustedLan && !hasAuth) {
       logger.warn(
-        'Starting Web UI on a non-loopback interface without WEB_UI_USER/WEB_UI_PASS because DISCOVERY_TRUST_LAN_ADMIN=true. Only do this on a trusted private LAN.',
+        'Starting Web UI on a non-loopback interface without auth because DISCOVERY_TRUST_LAN_ADMIN=true. Only do this on a trusted private LAN.',
       );
     }
     const webAuth =
@@ -2610,6 +2605,7 @@ async function main(): Promise<void> {
       {
         port: WEB_UI_PORT,
         auth: webAuth,
+        sessionPassword: WEB_PASSWORD,
         hostname: WEB_UI_HOST,
         corsOrigin: WEB_UI_CORS_ORIGIN,
         trustLanDiscoveryAdmin: DISCOVERY_TRUST_LAN_ADMIN,
