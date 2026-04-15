@@ -1310,6 +1310,22 @@ async function runQuery(
           }
         }
       }
+    } else if (
+      message.type === 'system' &&
+      (message as { subtype?: string }).subtype === 'task_progress'
+    ) {
+      const tp = message as {
+        description?: string;
+        last_tool_name?: string;
+        usage?: { total_tokens?: number; tool_uses?: number; duration_ms?: number };
+      };
+      const desc = tp.description || '';
+      const tool = tp.last_tool_name ? ` [${tp.last_tool_name}]` : '';
+      const tokens = tp.usage?.total_tokens ?? 0;
+      const toolUses = tp.usage?.tool_uses ?? 0;
+      log(
+        `[msg #${messageCount}] type=${msgType}${tool} tokens=${tokens} tools=${toolUses} :: ${desc}`,
+      );
     } else {
       log(`[msg #${messageCount}] type=${msgType}`);
     }
