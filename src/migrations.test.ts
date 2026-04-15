@@ -5,6 +5,7 @@ import { logger } from './logger.js';
 import {
   addColumnIfNotExists,
   allMigrations,
+  BASELINE_VERSION,
   dropColumnIfExists,
   getSchemaVersion,
   runMigrations,
@@ -133,6 +134,10 @@ describe('migration versioning', () => {
     `);
 
     runMigrations(db, allMigrations);
+    expect(getSchemaVersion(db)).toBe(BASELINE_VERSION);
+
+    runMigrations(db, allMigrations);
+    expect(getSchemaVersion(db)).toBe(BASELINE_VERSION);
 
     const groupRow = db
       .query('SELECT heartbeat FROM registered_groups WHERE jid = ?')
