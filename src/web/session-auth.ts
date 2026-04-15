@@ -51,10 +51,7 @@ export function createSessionStore(): SessionStore {
         const oldest = [...sessions.entries()].sort(
           ([, a], [, b]) => a.createdAt - b.createdAt,
         );
-        const toRemove = oldest.slice(
-          0,
-          sessions.size - MAX_SESSIONS + 1,
-        );
+        const toRemove = oldest.slice(0, sessions.size - MAX_SESSIONS + 1);
         for (const [token] of toRemove) {
           sessions.delete(token);
         }
@@ -137,10 +134,7 @@ export function verifyPassword(input: string, expected: string): boolean {
  * Check if a request path should bypass session auth.
  */
 export function isAuthExemptPath(pathname: string): boolean {
-  return (
-    pathname === '/login' ||
-    pathname === '/logout'
-  );
+  return pathname === '/login' || pathname === '/logout';
 }
 
 /**
@@ -160,9 +154,7 @@ export function renderLoginPage(error?: string): string {
     `<div class="login-card">` +
     `<div class="login-brand">omniclaw</div>` +
     `<p class="login-subtitle">Agent Management Console</p>` +
-    (error
-      ? `<div class="login-error">${escapeHtml(error)}</div>`
-      : '') +
+    (error ? `<div class="login-error">${escapeHtml(error)}</div>` : '') +
     `<form method="POST" action="/login" class="login-form">` +
     `<label for="password" class="login-label">Password</label>` +
     `<input type="password" id="password" name="password" class="login-input" placeholder="Enter password" autofocus required>` +

@@ -169,7 +169,14 @@ export function startWebServer(
   state: WebStateProvider,
   trustStore?: TrustStore,
 ): WebServerHandle {
-  const { port, auth, sessionPassword, hostname, corsOrigin, trustLanDiscoveryAdmin } = config;
+  const {
+    port,
+    auth,
+    sessionPassword,
+    hostname,
+    corsOrigin,
+    trustLanDiscoveryAdmin,
+  } = config;
   const sessionStore = sessionPassword ? createSessionStore() : null;
   const bindHostname = hostname || '127.0.0.1';
   const sseClients = new Set<SseClient>();
@@ -253,9 +260,7 @@ export function startWebServer(
         }
       }
       if (url.pathname === '/logout') {
-        const sessionToken = parseSessionCookie(
-          req.headers.get('Cookie'),
-        );
+        const sessionToken = parseSessionCookie(req.headers.get('Cookie'));
         if (sessionToken) sessionStore.revoke(sessionToken);
         return new Response(null, {
           status: 302,

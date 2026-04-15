@@ -2584,21 +2584,14 @@ async function main(): Promise<void> {
     const allowUnauthedPublicWebUiForTrustedLan =
       isPublic && DISCOVERY_TRUST_LAN_ADMIN;
     const hasAuth = (WEB_UI_USER && WEB_UI_PASS) || WEB_PASSWORD;
-    if (
-      isPublic &&
-      !allowUnauthedPublicWebUiForTrustedLan &&
-      !hasAuth
-    ) {
+    if (isPublic && !allowUnauthedPublicWebUiForTrustedLan && !hasAuth) {
       logger.error(
         'WEB_UI_HOST is set to a public interface but no auth is configured. ' +
           'Set WEB_PASSWORD, or both WEB_UI_USER and WEB_UI_PASS, or unset WEB_UI_PORT.',
       );
       process.exit(1);
     }
-    if (
-      allowUnauthedPublicWebUiForTrustedLan &&
-      !hasAuth
-    ) {
+    if (allowUnauthedPublicWebUiForTrustedLan && !hasAuth) {
       logger.warn(
         'Starting Web UI on a non-loopback interface without auth because DISCOVERY_TRUST_LAN_ADMIN=true. Only do this on a trusted private LAN.',
       );
