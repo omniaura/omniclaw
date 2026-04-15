@@ -1317,7 +1317,11 @@ async function runQuery(
       const tp = message as {
         description?: string;
         last_tool_name?: string;
-        usage?: { total_tokens?: number; tool_uses?: number; duration_ms?: number };
+        usage?: {
+          total_tokens?: number;
+          tool_uses?: number;
+          duration_ms?: number;
+        };
       };
       const desc = tp.description || '';
       const tool = tp.last_tool_name ? ` [${tp.last_tool_name}]` : '';
