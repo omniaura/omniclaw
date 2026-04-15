@@ -22,6 +22,7 @@ import {
   renderLoginPage,
   type SessionStore,
 } from './session-auth.js';
+import { createRateLimiter, type RateLimiter } from './rate-limit.js';
 import {
   renderAgentDetailContent,
   buildAgentDetailData,
@@ -180,6 +181,7 @@ export function startWebServer(
     trustLanDiscoveryAdmin,
   } = config;
   const sessionStore = sessionPassword ? createSessionStore() : null;
+  const loginRateLimiter = sessionPassword ? createRateLimiter() : null;
   const bindHostname = hostname || '127.0.0.1';
   const sseClients = new Set<SseClient>();
   const recentLogs: string[] = [];
@@ -196,7 +198,7 @@ export function startWebServer(
   // Store the promise so the first proxied request can await it.
   const solidReady = solidMode ? initSolidHandler(state) : null;
 
-  const fetchHandler = async (req: Request) => {
+  const fetchHandler = async (req: Request, bunServer: Bun.Server<unknown>) => {
     const url = new URL(req.url);
     const resolveRemotePeers = createRemotePeerResolver(getRemotePeers);
     if (url.pathname === '/ws') {
@@ -234,12 +236,48 @@ export function startWebServer(
       // --- Session-based auth (WEB_PASSWORD) ---
       // Handle login/logout before checking session
       if (url.pathname === '/login') {
+        const clientIp =
+          bunServer.requestIP(req)?.address ?? 'unknown';
+
         if (req.method === 'GET') {
-          return new Response(renderLoginPage(), {
-            headers: { 'Content-Type': 'text/html; charset=utf-8' },
-          });
+          const blocked = loginRateLimiter?.isBlocked(clientIp);
+          return new Response(
+            renderLoginPage(
+              blocked
+                ? 'Too many failed attempts. Please try again later.'
+                : undefined,
+            ),
+            {
+              status: blocked ? 429 : 200,
+              headers: {
+                'Content-Type': 'text/html; charset=utf-8',
+                ...(blocked
+                  ? {
+                      'Retry-After': String(
+                        loginRateLimiter!.retryAfter(clientIp),
+                      ),
+                    }
+                  : {}),
+              },
+            },
+          );
         }
         if (req.method === 'POST') {
+          // Reject if rate-limited before doing any password work.
+          if (loginRateLimiter?.isBlocked(clientIp)) {
+            const retryAfter = loginRateLimiter.retryAfter(clientIp);
+            return new Response(
+              renderLoginPage('Too many failed attempts. Please try again later.'),
+              {
+                status: 429,
+                headers: {
+                  'Content-Type': 'text/html; charset=utf-8',
+                  'Retry-After': String(retryAfter),
+                },
+              },
+            );
+          }
+
           let rawBody: string;
           try {
             rawBody = await readRequestBody(req, MAX_LOGIN_BODY_BYTES);
@@ -262,6 +300,8 @@ export function startWebServer(
             typeof password === 'string' &&
             verifyPassword(password, sessionPassword)
           ) {
+            // Successful login — clear any failure history for this IP.
+            loginRateLimiter?.reset(clientIp);
             const token = sessionStore.create();
             return new Response(null, {
               status: 302,
@@ -271,6 +311,9 @@ export function startWebServer(
               },
             });
           }
+
+          // Failed login — record the attempt.
+          loginRateLimiter?.recordFailure(clientIp);
           return new Response(renderLoginPage('Invalid password'), {
             status: 401,
             headers: { 'Content-Type': 'text/html; charset=utf-8' },
@@ -872,6 +915,7 @@ export function startWebServer(
     },
     async stop() {
       clearInterval(snapshotTicker);
+      loginRateLimiter?.dispose();
       for (const client of sseClients) {
         client.close();
       }
