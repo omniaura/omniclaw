@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'bun:test';
+import { Effect, Either } from 'effect';
 import path from 'path';
-import { rejectTraversalSegments, assertPathWithin } from './path-security.js';
+import {
+  rejectTraversalSegments,
+  rejectTraversalSegmentsEffect,
+  assertPathWithin,
+  assertPathWithinEffect,
+  PathTraversalError,
+} from './path-security.js';
 
 describe('rejectTraversalSegments', () => {
   // --- Valid paths that should pass ---
@@ -161,5 +168,66 @@ describe('assertPathWithin', () => {
     expect(() => assertPathWithin(resolved, parent, 'writeFile')).toThrow(
       /writeFile/,
     );
+  });
+});
+
+describe('path security Effect API', () => {
+  it('returns Right for safe relative paths', () => {
+    const result = Effect.runSync(
+      rejectTraversalSegmentsEffect('nested/file.txt', 'readFile').pipe(
+        Effect.either,
+      ),
+    );
+
+    expect(Either.isRight(result)).toBe(true);
+  });
+
+  it('returns a typed PathTraversalError for unsafe relative paths', () => {
+    const result = Effect.runSync(
+      rejectTraversalSegmentsEffect('../secret.txt', 'readFile').pipe(
+        Effect.either,
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(PathTraversalError);
+      expect(result.left._tag).toBe('PathTraversalError');
+      expect(result.left.path).toBe('../secret.txt');
+      expect(result.left.label).toBe('readFile');
+      expect(result.left.reason).toContain("contains '..' segments");
+    }
+  });
+
+  it('returns Right when the resolved path stays within the parent', () => {
+    const parent = '/workspace/groups/my-group';
+    const result = Effect.runSync(
+      assertPathWithinEffect(
+        path.join(parent, 'safe/file.txt'),
+        parent,
+        'writeFile',
+      ).pipe(Effect.either),
+    );
+
+    expect(Either.isRight(result)).toBe(true);
+  });
+
+  it('returns a typed PathTraversalError when the resolved path escapes the parent', () => {
+    const parent = '/workspace/groups/my-group';
+    const escaped = '/workspace/groups/other-group/secret.txt';
+    const result = Effect.runSync(
+      assertPathWithinEffect(escaped, parent, 'writeFile').pipe(
+        Effect.either,
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(PathTraversalError);
+      expect(result.left.path).toBe(escaped);
+      expect(result.left.label).toBe('writeFile');
+      expect(result.left.reason).toContain('escapes');
+      expect(result.left.reason).toContain(parent);
+    }
   });
 });
