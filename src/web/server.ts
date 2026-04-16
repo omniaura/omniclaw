@@ -4,6 +4,10 @@ import { ServerSentEventGenerator } from '@starfederation/datastar-sdk/web';
 
 import { logger } from '../logger.js';
 import {
+  readRequestBody,
+  RequestBodyTooLargeError,
+} from '../request-body.js';
+import {
   handleRequest,
   getRemotePeers,
   createRemotePeerResolver,
@@ -61,6 +65,7 @@ const PORT_ZERO_RETRY_ATTEMPTS = 10;
 const PORT_ZERO_FALLBACK_START = 40000;
 const PORT_ZERO_FALLBACK_SPAN = 20000;
 const MAX_PEER_AUTH_BODY_BYTES = 1024 * 1024;
+const MAX_LOGIN_BODY_BYTES = 1024 * 1024;
 
 interface RequestBodyHashResult {
   hash: string;
@@ -238,8 +243,23 @@ export function startWebServer(
           });
         }
         if (req.method === 'POST') {
-          const formData = await req.formData().catch(() => null);
-          const password = formData?.get('password');
+          let rawBody: string;
+          try {
+            rawBody = await readRequestBody(req, MAX_LOGIN_BODY_BYTES);
+          } catch (err) {
+            if (err instanceof RequestBodyTooLargeError) {
+              return new Response('Request body too large', {
+                status: 413,
+                headers: { 'Content-Type': 'text/plain' },
+              });
+            }
+            return new Response(renderLoginPage('Invalid request'), {
+              status: 400,
+              headers: { 'Content-Type': 'text/html; charset=utf-8' },
+            });
+          }
+          const params = new URLSearchParams(rawBody);
+          const password = params.get('password');
           if (
             typeof password === 'string' &&
             verifyPassword(password, sessionPassword)

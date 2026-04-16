@@ -276,7 +276,7 @@ describe('session auth middleware', () => {
       { port: 0, sessionPassword: TEST_PASSWORD },
       makeState(),
     );
-    const form = new FormData();
+    const form = new URLSearchParams();
     form.set('password', 'wrong-password');
     const res = await fetch(serverUrl('/login'), {
       method: 'POST',
@@ -293,7 +293,7 @@ describe('session auth middleware', () => {
       { port: 0, sessionPassword: TEST_PASSWORD },
       makeState(),
     );
-    const form = new FormData();
+    const form = new URLSearchParams();
     form.set('password', TEST_PASSWORD);
     const res = await fetch(serverUrl('/login'), {
       method: 'POST',
@@ -314,7 +314,7 @@ describe('session auth middleware', () => {
     );
 
     // Login to get a session cookie
-    const form = new FormData();
+    const form = new URLSearchParams();
     form.set('password', TEST_PASSWORD);
     const loginRes = await fetch(serverUrl('/login'), {
       method: 'POST',
@@ -340,7 +340,7 @@ describe('session auth middleware', () => {
     );
 
     // Login first
-    const form = new FormData();
+    const form = new URLSearchParams();
     form.set('password', TEST_PASSWORD);
     const loginRes = await fetch(serverUrl('/login'), {
       method: 'POST',
@@ -393,7 +393,7 @@ describe('session auth middleware', () => {
     expect(basicRes.headers.get('Location')).toBe('/login');
 
     // Session auth should work
-    const form = new FormData();
+    const form = new URLSearchParams();
     form.set('password', TEST_PASSWORD);
     const loginRes = await fetch(serverUrl('/login'), {
       method: 'POST',
@@ -411,7 +411,7 @@ describe('session auth middleware', () => {
     );
 
     // Login
-    const form = new FormData();
+    const form = new URLSearchParams();
     form.set('password', TEST_PASSWORD);
     const loginRes = await fetch(serverUrl('/login'), {
       method: 'POST',
@@ -428,5 +428,94 @@ describe('session auth middleware', () => {
     const html = await res.text();
     expect(html).toContain('omniclaw');
     expect(html).toContain('Dashboard');
+  });
+});
+
+// ---- Login body cap tests (#548) ----
+
+describe('login body size cap', () => {
+  it('rejects oversized Content-Length with 413', async () => {
+    handle = startWebServer(
+      { port: 0, sessionPassword: TEST_PASSWORD },
+      makeState(),
+    );
+
+    const oversized = 'password=' + 'A'.repeat(1024 * 1024 + 64);
+    const res = await fetch(serverUrl('/login'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': String(oversized.length),
+      },
+      body: oversized,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(413);
+  });
+
+  it('accepts normal-sized login bodies', async () => {
+    handle = startWebServer(
+      { port: 0, sessionPassword: TEST_PASSWORD },
+      makeState(),
+    );
+
+    const body = `password=${encodeURIComponent(TEST_PASSWORD)}`;
+    const res = await fetch(serverUrl('/login'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/');
+  });
+
+  it('returns 401 for wrong password via urlencoded body', async () => {
+    handle = startWebServer(
+      { port: 0, sessionPassword: TEST_PASSWORD },
+      makeState(),
+    );
+
+    const body = 'password=wrong-password';
+    const res = await fetch(serverUrl('/login'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(401);
+    const html = await res.text();
+    expect(html).toContain('Invalid password');
+  });
+
+  it('handles missing password field gracefully', async () => {
+    handle = startWebServer(
+      { port: 0, sessionPassword: TEST_PASSWORD },
+      makeState(),
+    );
+
+    const body = 'username=admin';
+    const res = await fetch(serverUrl('/login'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('handles empty body gracefully', async () => {
+    handle = startWebServer(
+      { port: 0, sessionPassword: TEST_PASSWORD },
+      makeState(),
+    );
+
+    const res = await fetch(serverUrl('/login'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: '',
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(401);
   });
 });
