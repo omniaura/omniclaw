@@ -3,10 +3,7 @@ import { createHash } from 'crypto';
 import { ServerSentEventGenerator } from '@starfederation/datastar-sdk/web';
 
 import { logger } from '../logger.js';
-import {
-  readRequestBody,
-  RequestBodyTooLargeError,
-} from '../request-body.js';
+import { readRequestBody, RequestBodyTooLargeError } from '../request-body.js';
 import {
   handleRequest,
   getRemotePeers,
