@@ -216,9 +216,7 @@ describe('path security Effect API', () => {
     const parent = '/workspace/groups/my-group';
     const escaped = '/workspace/groups/other-group/secret.txt';
     const result = Effect.runSync(
-      assertPathWithinEffect(escaped, parent, 'writeFile').pipe(
-        Effect.either,
-      ),
+      assertPathWithinEffect(escaped, parent, 'writeFile').pipe(Effect.either),
     );
 
     expect(Either.isLeft(result)).toBe(true);
