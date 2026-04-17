@@ -199,6 +199,23 @@ describe('path security Effect API', () => {
     }
   });
 
+  it('returns a typed PathTraversalError for absolute relative-path inputs', () => {
+    const absolutePath = '/tmp/secret.txt';
+    const result = Effect.runSync(
+      rejectTraversalSegmentsEffect(absolutePath, 'readFile').pipe(
+        Effect.either,
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(PathTraversalError);
+      expect(result.left.path).toBe(absolutePath);
+      expect(result.left.label).toBe('readFile');
+      expect(result.left.reason).toContain('Absolute path rejected');
+    }
+  });
+
   it('returns Right when the resolved path stays within the parent', () => {
     const parent = '/workspace/groups/my-group';
     const result = Effect.runSync(
@@ -207,6 +224,15 @@ describe('path security Effect API', () => {
         parent,
         'writeFile',
       ).pipe(Effect.either),
+    );
+
+    expect(Either.isRight(result)).toBe(true);
+  });
+
+  it('returns Right when the resolved path exactly matches the parent', () => {
+    const parent = '/workspace/groups/my-group';
+    const result = Effect.runSync(
+      assertPathWithinEffect(parent, parent, 'writeFile').pipe(Effect.either),
     );
 
     expect(Either.isRight(result)).toBe(true);

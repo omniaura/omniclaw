@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 
 import { _initTestDatabase, storeChatMetadata } from './db.js';
-import { getAvailableGroups, _setRegisteredGroups } from './index.js';
-import type { RegisteredGroup } from './types.js';
+import {
+  _setChannelSubscriptions,
+  _setRegisteredGroups,
+  getAvailableGroups,
+} from './index.js';
+import type { ChannelSubscription, RegisteredGroup } from './types.js';
 
 const BASE_GROUP: RegisteredGroup = {
   name: 'Test Group',
@@ -11,10 +15,21 @@ const BASE_GROUP: RegisteredGroup = {
   added_at: '2024-01-01T00:00:00.000Z',
 };
 
+const BASE_SUBSCRIPTION: ChannelSubscription = {
+  channelJid: 'team@g.us',
+  agentId: 'team-agent',
+  trigger: '@Omni',
+  requiresTrigger: true,
+  priority: 0,
+  isPrimary: true,
+  createdAt: '2024-01-01T00:00:00.000Z',
+};
+
 describe('getAvailableGroups', () => {
   beforeEach(() => {
     _initTestDatabase();
     _setRegisteredGroups({});
+    _setChannelSubscriptions({});
   });
 
   it('returns supported group chats ordered by most recent activity', () => {
@@ -54,6 +69,23 @@ describe('getAvailableGroups', () => {
   it('marks exact registered chats as registered', () => {
     _setRegisteredGroups({
       'team@g.us': { ...BASE_GROUP, name: 'Team', folder: 'team' },
+    });
+
+    storeChatMetadata('team@g.us', '2026-03-25T12:00:00.000Z', 'Team');
+
+    expect(getAvailableGroups()).toEqual([
+      {
+        jid: 'team@g.us',
+        name: 'Team',
+        lastActivity: '2026-03-25T12:00:00.000Z',
+        isRegistered: true,
+      },
+    ]);
+  });
+
+  it('marks chats with channel subscriptions as registered', () => {
+    _setChannelSubscriptions({
+      'team@g.us': [{ ...BASE_SUBSCRIPTION }],
     });
 
     storeChatMetadata('team@g.us', '2026-03-25T12:00:00.000Z', 'Team');

@@ -1251,6 +1251,13 @@ export function _setRegisteredGroups(
   registeredGroups = groups;
 }
 
+/** @internal - exported for testing */
+export function _setChannelSubscriptions(
+  subscriptions: Record<string, ChannelSubscription[]>,
+): void {
+  channelSubscriptions = subscriptions;
+}
+
 /**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.

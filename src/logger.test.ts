@@ -507,12 +507,12 @@ describe('logger', () => {
       const subscriber = mock(() => {});
       const unsubscribe = subscribeToLogs(subscriber);
 
-      logger.info('default logger event');
+      logger.error('default logger event');
 
       expect(subscriber).toHaveBeenCalledTimes(1);
       expect(subscriber.mock.calls[0]?.[0]).toMatchObject({
         msg: 'default logger event',
-        level: 'info',
+        level: 'error',
       });
 
       unsubscribe();
