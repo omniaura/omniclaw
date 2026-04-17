@@ -22,7 +22,11 @@ describe('getAvailableGroups', () => {
     storeChatMetadata('user@s.whatsapp.net', '2026-03-25T12:03:00.000Z', 'DM');
     storeChatMetadata('dc:dm:123', '2026-03-25T12:02:00.000Z', 'Discord DM');
     storeChatMetadata('team@g.us', '2026-03-25T12:00:00.000Z', 'WhatsApp');
-    storeChatMetadata('dc:server-1:channel-1', '2026-03-25T12:01:00.000Z', 'Discord');
+    storeChatMetadata(
+      'dc:server-1:channel-1',
+      '2026-03-25T12:01:00.000Z',
+      'Discord',
+    );
     storeChatMetadata('tg:-100123', '2026-03-25T12:05:00.000Z', 'Telegram');
 
     expect(getAvailableGroups()).toEqual([
@@ -66,7 +70,11 @@ describe('getAvailableGroups', () => {
 
   it('treats scoped Telegram chats as registered when a legacy JID exists', () => {
     _setRegisteredGroups({
-      'tg:-100123': { ...BASE_GROUP, name: 'Telegram Group', folder: 'telegram' },
+      'tg:-100123': {
+        ...BASE_GROUP,
+        name: 'Telegram Group',
+        folder: 'telegram',
+      },
     });
 
     storeChatMetadata(
