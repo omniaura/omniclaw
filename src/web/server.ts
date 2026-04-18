@@ -53,6 +53,7 @@ import {
   getSolidHandler,
   isMainProcessRoute,
 } from './solid-handler.js';
+import { readFormDataBody, RequestBodyTooLargeError } from '../request-body.js';
 
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
@@ -61,6 +62,7 @@ const PORT_ZERO_RETRY_ATTEMPTS = 10;
 const PORT_ZERO_FALLBACK_START = 40000;
 const PORT_ZERO_FALLBACK_SPAN = 20000;
 const MAX_PEER_AUTH_BODY_BYTES = 1024 * 1024;
+const MAX_LOGIN_FORM_BODY_BYTES = 1024 * 1024;
 
 interface RequestBodyHashResult {
   hash: string;
@@ -238,7 +240,18 @@ export function startWebServer(
           });
         }
         if (req.method === 'POST') {
-          const formData = await req.formData().catch(() => null);
+          const formData = await readFormDataBody(
+            req,
+            MAX_LOGIN_FORM_BODY_BYTES,
+          ).catch((err: unknown) => {
+            if (err instanceof RequestBodyTooLargeError) {
+              return err;
+            }
+            return null;
+          });
+          if (formData instanceof RequestBodyTooLargeError) {
+            return new Response('Request body too large', { status: 413 });
+          }
           const password = formData?.get('password');
           if (
             typeof password === 'string' &&

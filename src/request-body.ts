@@ -68,3 +68,19 @@ export async function readJsonBody<T>(
 ): Promise<T> {
   return JSON.parse(await readRequestBody(req, maxBodyBytes)) as T;
 }
+
+export async function readFormDataBody(
+  req: Request,
+  maxBodyBytes: number,
+): Promise<Awaited<ReturnType<Request['formData']>>> {
+  const body = await readRequestBody(req, maxBodyBytes);
+  const contentType =
+    req.headers.get('content-type') ??
+    'application/x-www-form-urlencoded;charset=UTF-8';
+
+  return new Request(req.url, {
+    method: req.method,
+    headers: { 'content-type': contentType },
+    body,
+  }).formData();
+}

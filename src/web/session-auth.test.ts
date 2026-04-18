@@ -307,6 +307,54 @@ describe('session auth middleware', () => {
     expect(setCookie).toContain('HttpOnly');
   });
 
+  it('rejects oversized login bodies with 413', async () => {
+    handle = startWebServer(
+      { port: 0, sessionPassword: TEST_PASSWORD },
+      makeState(),
+    );
+
+    const oversizedBody = `password=${'x'.repeat(1024 * 1024 + 64)}`;
+    const res = await fetch(serverUrl('/login'), {
+      method: 'POST',
+      body: oversizedBody,
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+      },
+      redirect: 'manual',
+    });
+
+    expect(res.status).toBe(413);
+    expect(await res.text()).toBe('Request body too large');
+  });
+
+  it('rejects oversized streamed login bodies without content-length', async () => {
+    handle = startWebServer(
+      { port: 0, sessionPassword: TEST_PASSWORD },
+      makeState(),
+    );
+
+    const res = await fetch(serverUrl('/login'), {
+      method: 'POST',
+      duplex: 'half',
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('password='));
+          controller.enqueue(
+            new TextEncoder().encode('x'.repeat(1024 * 1024 + 64)),
+          );
+          controller.close();
+        },
+      }),
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+      },
+      redirect: 'manual',
+    });
+
+    expect(res.status).toBe(413);
+    expect(await res.text()).toBe('Request body too large');
+  });
+
   it('allows authenticated requests with session cookie', async () => {
     handle = startWebServer(
       { port: 0, sessionPassword: TEST_PASSWORD },
