@@ -245,7 +245,9 @@ describe('network identity detection', () => {
       }
 
       if (cmd[0] === 'networksetup' && cmd.includes('-getairportnetwork')) {
-        return createProcess({ stdout: 'Current Wi-Fi Network: Fallback WiFi\n' });
+        return createProcess({
+          stdout: 'Current Wi-Fi Network: Fallback WiFi\n',
+        });
       }
 
       throw new Error(`Unexpected command: ${cmd.join(' ')}`);
@@ -253,9 +255,14 @@ describe('network identity detection', () => {
 
     const result = await detectCurrentNetwork();
 
-    expect(result).toEqual({ id: 'wifi:Fallback WiFi', label: 'Fallback WiFi' });
+    expect(result).toEqual({
+      id: 'wifi:Fallback WiFi',
+      label: 'Fallback WiFi',
+    });
     expect(
-      spawnSpy.mock.calls.some((call: unknown[]) => call[0]?.[0] === 'networksetup'),
+      spawnSpy.mock.calls.some(
+        (call: unknown[]) => call[0]?.[0] === 'networksetup',
+      ),
     ).toBe(true);
   });
 
