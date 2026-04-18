@@ -276,7 +276,7 @@ describe('session auth middleware', () => {
       { port: 0, sessionPassword: TEST_PASSWORD },
       makeState(),
     );
-    const form = new FormData();
+    const form = new URLSearchParams();
     form.set('password', 'wrong-password');
     const res = await fetch(serverUrl('/login'), {
       method: 'POST',
@@ -293,7 +293,7 @@ describe('session auth middleware', () => {
       { port: 0, sessionPassword: TEST_PASSWORD },
       makeState(),
     );
-    const form = new FormData();
+    const form = new URLSearchParams();
     form.set('password', TEST_PASSWORD);
     const res = await fetch(serverUrl('/login'), {
       method: 'POST',
@@ -362,7 +362,7 @@ describe('session auth middleware', () => {
     );
 
     // Login to get a session cookie
-    const form = new FormData();
+    const form = new URLSearchParams();
     form.set('password', TEST_PASSWORD);
     const loginRes = await fetch(serverUrl('/login'), {
       method: 'POST',
@@ -388,7 +388,7 @@ describe('session auth middleware', () => {
     );
 
     // Login first
-    const form = new FormData();
+    const form = new URLSearchParams();
     form.set('password', TEST_PASSWORD);
     const loginRes = await fetch(serverUrl('/login'), {
       method: 'POST',
@@ -441,7 +441,7 @@ describe('session auth middleware', () => {
     expect(basicRes.headers.get('Location')).toBe('/login');
 
     // Session auth should work
-    const form = new FormData();
+    const form = new URLSearchParams();
     form.set('password', TEST_PASSWORD);
     const loginRes = await fetch(serverUrl('/login'), {
       method: 'POST',
@@ -459,7 +459,7 @@ describe('session auth middleware', () => {
     );
 
     // Login
-    const form = new FormData();
+    const form = new URLSearchParams();
     form.set('password', TEST_PASSWORD);
     const loginRes = await fetch(serverUrl('/login'), {
       method: 'POST',

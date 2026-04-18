@@ -1,7 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import {
-  readFormDataBody,
   readJsonBody,
   readRequestBody,
   RequestBodyTooLargeError,
@@ -139,64 +138,5 @@ describe('readJsonBody', () => {
       ok: true,
       count: 2,
     });
-  });
-});
-
-describe('readFormDataBody', () => {
-  it('parses urlencoded form bodies after reading the stream', async () => {
-    const body = 'password=hunter2&note=hello+world';
-    const { req } = createChunkedRequest({
-      chunks: [
-        new TextEncoder().encode(body.slice(0, 12)),
-        new TextEncoder().encode(body.slice(12)),
-      ],
-      method: 'POST',
-      url: 'http://localhost/login',
-    });
-    req.headers.set(
-      'content-type',
-      'application/x-www-form-urlencoded;charset=UTF-8',
-    );
-
-    const formData = await readFormDataBody(req, 128);
-
-    expect(formData.get('password')).toBe('hunter2');
-    expect(formData.get('note')).toBe('hello world');
-  });
-
-  it('rejects oversized form bodies from content-length before parsing', async () => {
-    const { req } = createChunkedRequest({
-      chunks: [new TextEncoder().encode('password=small')],
-      contentLength: '2048',
-      method: 'POST',
-      url: 'http://localhost/login',
-    });
-    req.headers.set(
-      'content-type',
-      'application/x-www-form-urlencoded;charset=UTF-8',
-    );
-
-    await expect(readFormDataBody(req, 1024)).rejects.toBeInstanceOf(
-      RequestBodyTooLargeError,
-    );
-  });
-
-  it('rejects oversized streamed form bodies before parsing completes', async () => {
-    const { req } = createChunkedRequest({
-      chunks: [
-        new TextEncoder().encode('password='),
-        new TextEncoder().encode('x'.repeat(12)),
-      ],
-      method: 'POST',
-      url: 'http://localhost/login',
-    });
-    req.headers.set(
-      'content-type',
-      'application/x-www-form-urlencoded;charset=UTF-8',
-    );
-
-    await expect(readFormDataBody(req, 16)).rejects.toBeInstanceOf(
-      RequestBodyTooLargeError,
-    );
   });
 });

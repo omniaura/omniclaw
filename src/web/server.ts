@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { ServerSentEventGenerator } from '@starfederation/datastar-sdk/web';
 
 import { logger } from '../logger.js';
+import { readRequestBody, RequestBodyTooLargeError } from '../request-body.js';
 import {
   handleRequest,
   getRemotePeers,
@@ -53,7 +54,6 @@ import {
   getSolidHandler,
   isMainProcessRoute,
 } from './solid-handler.js';
-import { readFormDataBody, RequestBodyTooLargeError } from '../request-body.js';
 
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
@@ -62,7 +62,7 @@ const PORT_ZERO_RETRY_ATTEMPTS = 10;
 const PORT_ZERO_FALLBACK_START = 40000;
 const PORT_ZERO_FALLBACK_SPAN = 20000;
 const MAX_PEER_AUTH_BODY_BYTES = 1024 * 1024;
-const MAX_LOGIN_FORM_BODY_BYTES = 1024 * 1024;
+const MAX_LOGIN_BODY_BYTES = 1024 * 1024;
 
 interface RequestBodyHashResult {
   hash: string;
@@ -240,19 +240,24 @@ export function startWebServer(
           });
         }
         if (req.method === 'POST') {
-          const formData = await readFormDataBody(
-            req,
-            MAX_LOGIN_FORM_BODY_BYTES,
-          ).catch((err: unknown) => {
+          let rawBody: string;
+          try {
+            rawBody = await readRequestBody(req, MAX_LOGIN_BODY_BYTES);
+          } catch (err) {
             if (err instanceof RequestBodyTooLargeError) {
-              return err;
+              return new Response('Request body too large', {
+                status: 413,
+                headers: { 'Content-Type': 'text/plain' },
+              });
             }
-            return null;
-          });
-          if (formData instanceof RequestBodyTooLargeError) {
-            return new Response('Request body too large', { status: 413 });
+
+            return new Response('Bad request', {
+              status: 400,
+              headers: { 'Content-Type': 'text/plain' },
+            });
           }
-          const password = formData?.get('password');
+
+          const password = new URLSearchParams(rawBody).get('password');
           if (
             typeof password === 'string' &&
             verifyPassword(password, sessionPassword)
