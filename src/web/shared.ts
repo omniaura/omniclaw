@@ -78,7 +78,9 @@ export function renderShell(
     `ipt>` +
     `</head><body>` +
     // Inline theme init to prevent FOUC (data-theme-init prevents test regex match)
-    `<scr` + `ipt data-theme-init>(function(){var t=localStorage.getItem("omniclaw_theme");if(!t){t=matchMedia("(prefers-color-scheme:light)").matches?"light":"dark";}if(t==="light")document.documentElement.setAttribute("data-theme","light");})()</scr` + `ipt>` +
+    `<scr` +
+    `ipt data-theme-init>(function(){var t=localStorage.getItem("omniclaw_theme");if(!t){t=matchMedia("(prefers-color-scheme:light)").matches?"light":"dark";}if(t==="light")document.documentElement.setAttribute("data-theme","light");})()</scr` +
+    `ipt>` +
     // Persistent SSE connector (outside #content so it survives navigation)
     `<div id="sse-init" style="display:none" data-init="@get('/api/events?channels=logs,stats,agents,tasks')"></div>` +
     renderNav(activePath) +
@@ -1311,18 +1313,34 @@ function shellScript(pageScripts: Record<string, string>): string {
   // ---- Theme toggle ----
   parts.push('(function(){');
   parts.push('  var themeBtn=document.getElementById("btn-theme-toggle");');
-  parts.push('  function getTheme(){return document.documentElement.getAttribute("data-theme")||"dark";}');
+  parts.push(
+    '  function getTheme(){return document.documentElement.getAttribute("data-theme")||"dark";}',
+  );
   parts.push('  function setTheme(t){');
-  parts.push('    if(t==="light"){document.documentElement.setAttribute("data-theme","light");}');
-  parts.push('    else{document.documentElement.removeAttribute("data-theme");}');
+  parts.push(
+    '    if(t==="light"){document.documentElement.setAttribute("data-theme","light");}',
+  );
+  parts.push(
+    '    else{document.documentElement.removeAttribute("data-theme");}',
+  );
   parts.push('    localStorage.setItem("omniclaw_theme",t);');
   parts.push('    themeBtn.textContent=t==="light"?"\\u2600":"\\u263E";');
-  parts.push('    themeBtn.title=t==="light"?"Switch to dark mode":"Switch to light mode";');
+  parts.push(
+    '    themeBtn.title=t==="light"?"Switch to dark mode":"Switch to light mode";',
+  );
   parts.push('  }');
-  parts.push('  themeBtn.textContent=getTheme()==="light"?"\\u2600":"\\u263E";');
-  parts.push('  themeBtn.title=getTheme()==="light"?"Switch to dark mode":"Switch to light mode";');
-  parts.push('  themeBtn.addEventListener("click",function(){setTheme(getTheme()==="dark"?"light":"dark");});');
-  parts.push('  window.__toggleTheme=function(){setTheme(getTheme()==="dark"?"light":"dark");};');
+  parts.push(
+    '  themeBtn.textContent=getTheme()==="light"?"\\u2600":"\\u263E";',
+  );
+  parts.push(
+    '  themeBtn.title=getTheme()==="light"?"Switch to dark mode":"Switch to light mode";',
+  );
+  parts.push(
+    '  themeBtn.addEventListener("click",function(){setTheme(getTheme()==="dark"?"light":"dark");});',
+  );
+  parts.push(
+    '  window.__toggleTheme=function(){setTheme(getTheme()==="dark"?"light":"dark");};',
+  );
   parts.push('})();');
 
   // ---- Toast helper (used by multiple pages) ----
