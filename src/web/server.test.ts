@@ -551,6 +551,26 @@ describe('isTrustedLanDiscoveryAdminRequest', () => {
     ).toBe(true);
   });
 
+  it('rejects public peers even when the listener is bound to a private LAN IP', () => {
+    const req = Object.assign(
+      new Request('http://evil.example/api/discovery/requests', {
+        headers: { Host: 'evil.example' },
+      }),
+      {
+        socket: { remoteAddress: '8.8.8.8' },
+      },
+    ) as Request;
+
+    expect(
+      isTrustedLanDiscoveryAdminRequest(
+        req,
+        '/api/discovery/requests',
+        '192.168.1.10',
+        true,
+      ),
+    ).toBe(false);
+  });
+
   it('allows loopback-bound servers when the socket address is unavailable', () => {
     const req = new Request('http://evil.example/api/discovery/requests', {
       headers: { Host: 'evil.example' },
