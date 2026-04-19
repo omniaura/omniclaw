@@ -9,6 +9,8 @@ import {
 function createChunkedRequest(options: {
   chunks?: Uint8Array[];
   contentLength?: string;
+  method?: string;
+  url?: string;
   cancelImpl?: (reason?: unknown) => Promise<void>;
 }) {
   const reads = [...(options.chunks ?? [])];
@@ -22,6 +24,8 @@ function createChunkedRequest(options: {
   });
 
   const req = {
+    method: options.method ?? 'POST',
+    url: options.url ?? 'http://localhost/test',
     headers: new Headers(
       options.contentLength
         ? { 'content-length': options.contentLength }
