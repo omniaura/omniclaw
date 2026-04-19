@@ -46,6 +46,7 @@ export function renderNav(
     `<div class="brand">omniclaw</div>` +
     `<nav id="nav-links">${renderNavLinks(activePath)}</nav>` +
     `<div class="header-right">` +
+    `<button id="btn-theme-toggle" class="theme-toggle" title="Toggle theme">\u263E</button>` +
     `<span id="ws-status" class="status-badge disconnected">disconnected</span>` +
     `</div>` +
     `</header>`
@@ -76,6 +77,8 @@ export function renderShell(
     `<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"></scr` +
     `ipt>` +
     `</head><body>` +
+    // Inline theme init to prevent FOUC (data-theme-init prevents test regex match)
+    `<scr` + `ipt data-theme-init>(function(){var t=localStorage.getItem("omniclaw_theme");if(!t){t=matchMedia("(prefers-color-scheme:light)").matches?"light":"dark";}if(t==="light")document.documentElement.setAttribute("data-theme","light");})()</scr` + `ipt>` +
     // Persistent SSE connector (outside #content so it survives navigation)
     `<div id="sse-init" style="display:none" data-init="@get('/api/events?channels=logs,stats,agents,tasks')"></div>` +
     renderNav(activePath) +
@@ -153,6 +156,13 @@ function shellCSS(): string {
     `--green:#34d399;--yellow:#fbbf24;--red:#f87171;--blue:#60a5fa;--cyan:#22d3ee;`,
     `--mono:'JetBrains Mono','SF Mono','Cascadia Code','Fira Code','Menlo',monospace;`,
     `--sidebar-w:380px}`,
+    // --- Light theme overrides ---
+    `[data-theme="light"]{`,
+    `--bg:#f5f5f7;--surface:#ffffff;--surface-2:#ebedf0;`,
+    `--border:#d1d5db;--border-bright:#b0b6c3;`,
+    `--text:#1f2937;--text-dim:#6b7280;--text-bright:#111827;`,
+    `--accent:#6366f1;--accent-hover:#4f46e5;--accent-dim:rgba(99,102,241,.1);`,
+    `--green:#059669;--yellow:#d97706;--red:#dc2626;--blue:#2563eb;--cyan:#0891b2}`,
     `*{margin:0;padding:0;box-sizing:border-box}`,
     `html,body{height:100%;overflow:hidden}`,
     `body{font-family:var(--mono);background:var(--bg);color:var(--text);font-size:13px;line-height:1.5}`,
@@ -658,6 +668,27 @@ function shellCSS(): string {
     `@keyframes exec-pulse{0%,100%{opacity:1}50%{opacity:.6}}`,
     `.ap-empty{padding:2rem;text-align:center;color:var(--text-dim);font-size:12px}`,
 
+    // --- Light theme tweaks for hardcoded rgba/colors ---
+    `[data-theme="light"] .msg-md code{background:rgba(0,0,0,.06)}`,
+    `[data-theme="light"] .msg-md pre{background:rgba(0,0,0,.04);border-color:var(--border)}`,
+    `[data-theme="light"] .msg-md th{background:rgba(0,0,0,.03)}`,
+    `[data-theme="light"] .msg-row.from-me .msg-bubble{background:rgba(99,102,241,.08);border-color:rgba(99,102,241,.2)}`,
+    `[data-theme="light"] .status-badge.connected{background:rgba(5,150,105,.08)}`,
+    `[data-theme="light"] .status-badge.disconnected{background:rgba(220,38,38,.08)}`,
+    `[data-theme="light"] .badge-apple-container{background:rgba(37,99,235,.08)}`,
+    `[data-theme="light"] .badge-docker{background:rgba(5,150,105,.08)}`,
+    `[data-theme="light"] .badge-admin{background:rgba(124,58,237,.08);color:#7c3aed}`,
+    `[data-theme="light"] .exec-executing{background:rgba(5,150,105,.1)}`,
+    `[data-theme="light"] .exec-task{background:rgba(37,99,235,.1)}`,
+    `[data-theme="light"] .exec-idle{background:rgba(217,119,6,.08)}`,
+    `[data-theme="light"] .exec-queued{background:rgba(8,145,178,.08)}`,
+    `[data-theme="light"] .cmd-palette{box-shadow:0 16px 48px rgba(0,0,0,.15)}`,
+    `[data-theme="light"] .cmd-palette-overlay{background:rgba(0,0,0,.25)}`,
+    `[data-theme="light"] .modal-overlay{background:rgba(0,0,0,.3)}`,
+    `[data-theme="light"] .topo-tooltip{box-shadow:0 4px 12px rgba(0,0,0,.12)}`,
+    `.theme-toggle{background:none;border:1px solid transparent;color:var(--text-dim);cursor:pointer;font-size:14px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:4px;transition:all .12s}`,
+    `.theme-toggle:hover{color:var(--text);background:var(--surface-2);border-color:var(--border)}`,
+
     // --- Responsive ---
     `@media(max-width:900px){.stats-grid{grid-template-columns:repeat(2,1fr)}.tables-grid{grid-template-columns:1fr}.system-grid{grid-template-columns:1fr}}`,
     `@media(max-width:600px){.stats-grid{grid-template-columns:1fr}}`,
@@ -697,6 +728,7 @@ function shortcutHelpModal(): string {
     shortcutRow('/', 'Focus search') +
     shortcutRow('Esc', 'Close modal / blur') +
     shortcutRow('?', 'Show this help') +
+    shortcutRow('t', 'Toggle theme') +
     `</div>` +
     `</div>` +
     `</div></div>`
@@ -820,6 +852,11 @@ function keyboardShortcutScript(): string {
     '    return;',
     '  }',
     '',
+    '  // t -> toggle theme',
+    '  if(e.key==="t"&&!__kbGPrefix){',
+    '    e.preventDefault();if(window.__toggleTheme)window.__toggleTheme();return;',
+    '  }',
+    '',
     '  // g prefix for navigation',
     '  if(e.key==="g"&&!__kbGPrefix){',
     '    __kbGPrefix=true;',
@@ -930,6 +967,12 @@ function commandPaletteScript(): string {
     '        if(m&&m.match)all.push({type:"task",icon:"\u23f0",label:promptShort,hint:t.status,href:"/tasks",page:"tasks",score:m.score});',
     '      });',
     '    }',
+    '    // Actions',
+    '    var actions=[{type:"action",icon:"\u263E",label:"Toggle theme",hint:"t",action:"theme"}];',
+    '    actions.forEach(function(a){',
+    '      var m=query?fuzzyMatch(query,a.label):{match:true,score:1};',
+    '      if(m.match)all.push({type:a.type,icon:a.icon,label:a.label,hint:a.hint,action:a.action,score:m.score+3});',
+    '    });',
     '    // Sort by score descending, then alphabetically',
     '    all.sort(function(a,b){return b.score-a.score||(a.label<b.label?-1:a.label>b.label?1:0);});',
     '    return all.slice(0,20);',
@@ -942,12 +985,12 @@ function commandPaletteScript(): string {
     '      selectedIdx=-1;return;',
     '    }',
     '    selectedIdx=0;',
-    '    var groups={page:[],agent:[],task:[]};',
+    '    var groups={page:[],agent:[],task:[],action:[]};',
     '    items.forEach(function(it){(groups[it.type]||(groups[it.type]=[])).push(it);});',
     '    var html="";',
     '    var idx=0;',
-    '    var labels={page:"Pages",agent:"Agents",task:"Tasks"};',
-    '    ["page","agent","task"].forEach(function(g){',
+    '    var labels={page:"Pages",agent:"Agents",task:"Tasks",action:"Actions"};',
+    '    ["page","agent","task","action"].forEach(function(g){',
     '      if(!groups[g]||!groups[g].length)return;',
     '      html+="<div class=\\"cmd-group-label\\">"+labels[g]+"</div>";',
     '      groups[g].forEach(function(it){',
@@ -974,6 +1017,7 @@ function commandPaletteScript(): string {
     '  function executeItem(idx){',
     '    var item=items[idx];if(!item)return;',
     '    closePalette();',
+    '    if(item.action==="theme"&&window.__toggleTheme){window.__toggleTheme();return;}',
     '    if(item.page&&item.href){',
     '      history.pushState({page:item.page},"",item.href);',
     '      var link=document.querySelector("nav a[data-page=\\""+item.page+"\\"]");',
@@ -1263,6 +1307,23 @@ function shellScript(pageScripts: Record<string, string>): string {
   );
   parts.push('  if(window.__pageInits[name])window.__pageInits[name]();');
   parts.push('};');
+
+  // ---- Theme toggle ----
+  parts.push('(function(){');
+  parts.push('  var themeBtn=document.getElementById("btn-theme-toggle");');
+  parts.push('  function getTheme(){return document.documentElement.getAttribute("data-theme")||"dark";}');
+  parts.push('  function setTheme(t){');
+  parts.push('    if(t==="light"){document.documentElement.setAttribute("data-theme","light");}');
+  parts.push('    else{document.documentElement.removeAttribute("data-theme");}');
+  parts.push('    localStorage.setItem("omniclaw_theme",t);');
+  parts.push('    themeBtn.textContent=t==="light"?"\\u2600":"\\u263E";');
+  parts.push('    themeBtn.title=t==="light"?"Switch to dark mode":"Switch to light mode";');
+  parts.push('  }');
+  parts.push('  themeBtn.textContent=getTheme()==="light"?"\\u2600":"\\u263E";');
+  parts.push('  themeBtn.title=getTheme()==="light"?"Switch to dark mode":"Switch to light mode";');
+  parts.push('  themeBtn.addEventListener("click",function(){setTheme(getTheme()==="dark"?"light":"dark");});');
+  parts.push('  window.__toggleTheme=function(){setTheme(getTheme()==="dark"?"light":"dark");};');
+  parts.push('})();');
 
   // ---- Toast helper (used by multiple pages) ----
   parts.push('window.__toast=function(msg,type){');

@@ -276,4 +276,91 @@ describe('command palette', () => {
 
     expect(html).toContain('Command palette');
   });
+
+  it('includes toggle theme action in command palette', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('"Toggle theme"');
+    expect(html).toContain('action:"theme"');
+    expect(html).toContain('__toggleTheme');
+  });
+});
+
+describe('dark mode / theme toggle', () => {
+  it('includes the theme toggle button in the header', () => {
+    const html = renderNav('/');
+
+    expect(html).toContain('id="btn-theme-toggle"');
+    expect(html).toContain('class="theme-toggle"');
+  });
+
+  it('includes light theme CSS variables', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('[data-theme="light"]');
+    expect(html).toContain('--bg:#f5f5f7');
+    expect(html).toContain('--surface:#ffffff');
+    expect(html).toContain('--text:#1f2937');
+  });
+
+  it('includes theme toggle CSS class', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('.theme-toggle{');
+    expect(html).toContain('.theme-toggle:hover{');
+  });
+
+  it('includes light theme overrides for rgba colors', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('[data-theme="light"] .msg-md code');
+    expect(html).toContain('[data-theme="light"] .cmd-palette{');
+    expect(html).toContain('[data-theme="light"] .modal-overlay');
+  });
+
+  it('includes FOUC prevention script before body content', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    // Script with data-theme-init attribute should appear before SSE init
+    expect(html).toContain('data-theme-init');
+    expect(html).toContain('omniclaw_theme');
+    expect(html).toContain('prefers-color-scheme:light');
+
+    // FOUC script should come before the SSE connector
+    const fouc = html.indexOf('data-theme-init');
+    const sse = html.indexOf('sse-init');
+    expect(fouc).toBeLessThan(sse);
+  });
+
+  it('includes theme toggle script with localStorage persistence', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('btn-theme-toggle');
+    expect(html).toContain('omniclaw_theme');
+    expect(html).toContain('window.__toggleTheme');
+  });
+
+  it('adds theme toggle to shortcut help modal', () => {
+    const html = shortcutHelpModal();
+
+    expect(html).toContain('Toggle theme');
+    expect(html).toContain('<kbd>t</kbd>');
+  });
+
+  it('includes t key handler in keyboard shortcuts', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    // t key should trigger theme toggle
+    expect(html).toContain('e.key==="t"');
+    expect(html).toContain('window.__toggleTheme');
+  });
+
+  it('keeps dark theme as default (no data-theme attribute)', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    // The html element should NOT have data-theme set by default
+    // (FOUC script only sets it if localStorage or prefers-color-scheme says light)
+    expect(html).toContain('<html lang="en">');
+    expect(html).not.toContain('<html lang="en" data-theme');
+  });
 });
