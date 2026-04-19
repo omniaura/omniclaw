@@ -153,26 +153,28 @@ describe('DiscoveryRuntimeController', () => {
     });
     const warnSpy = spyOn(logger, 'warn').mockImplementation(() => {});
 
-    await controller.refresh();
-    controller.trustCurrentNetwork();
+    try {
+      await controller.refresh();
+      controller.trustCurrentNetwork();
 
-    detector.mockImplementation(async () => {
-      throw new Error('wifi scan failed');
-    });
+      detector.mockImplementation(async () => {
+        throw new Error('wifi scan failed');
+      });
 
-    const snapshot = await controller.refresh();
+      const snapshot = await controller.refresh();
 
-    expect(snapshot.currentNetwork).toBeNull();
-    expect(snapshot.active).toBe(false);
-    expect(controller.isRemoteAccessAllowed()).toBe(false);
-    expect(
-      warnSpy.mock.calls.some(
-        ([fields, message]) =>
-          message === 'Failed to detect current network' &&
-          fields instanceof Object,
-      ),
-    ).toBe(true);
-    warnSpy.mockRestore();
+      expect(snapshot.currentNetwork).toBeNull();
+      expect(snapshot.active).toBe(false);
+      expect(controller.isRemoteAccessAllowed()).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          err: expect.any(Error),
+        }),
+        'Failed to detect current network',
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('notifies only when the active state changes', async () => {
@@ -220,16 +222,18 @@ describe('DiscoveryRuntimeController', () => {
       pollIntervalMs: 4321,
     });
 
-    controller.start();
-    controller.start();
-    controller.stop();
-    controller.stop();
+    try {
+      controller.start();
+      controller.start();
+      controller.stop();
+      controller.stop();
 
-    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
-    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 4321);
-    expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
-
-    setIntervalSpy.mockRestore();
-    clearIntervalSpy.mockRestore();
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+      expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 4321);
+      expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      setIntervalSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
+    }
   });
 });
