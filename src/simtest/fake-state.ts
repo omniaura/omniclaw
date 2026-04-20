@@ -522,6 +522,7 @@ export class FakeState implements WebStateProvider {
     query: string,
     chatJid?: string,
     limit?: number,
+    filters?: { fromDate?: string; toDate?: string; sender?: string },
   ): Array<{
     id: string;
     chat_jid: string;
@@ -537,6 +538,16 @@ export class FakeState implements WebStateProvider {
       m.content.toLowerCase().includes(q),
     );
     if (chatJid) results = results.filter((m) => m.chat_jid === chatJid);
+    if (filters?.fromDate)
+      results = results.filter((m) => m.timestamp >= filters.fromDate!);
+    if (filters?.toDate)
+      results = results.filter((m) => m.timestamp <= filters.toDate!);
+    if (filters?.sender) {
+      const s = filters.sender.toLowerCase();
+      results = results.filter(
+        (m) => m.sender_name?.toLowerCase().includes(s),
+      );
+    }
     results = results.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     return results.slice(0, clampedLimit);
   }

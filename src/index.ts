@@ -2508,8 +2508,13 @@ async function main(): Promise<void> {
     getTaskRunLogs: (taskId, limit) => getTaskRunLogs(taskId, limit),
     getTaskRunPhaseEvents: (taskId, runAt) =>
       getTaskRunPhaseEvents(taskId, runAt),
-    searchMessages: (query, chatJid, limit) =>
-      dbSearchMessages(query, chatJid, limit),
+    searchMessages: (query, chatJid, limit, filters) =>
+      dbSearchMessages({
+        query,
+        chatJid,
+        limit,
+        ...filters,
+      }),
     createTask: (task) => dbCreateTask(task),
     updateTask: (id, updates) => dbUpdateTask(id, updates),
     deleteTask: (id) => dbDeleteTask(id),

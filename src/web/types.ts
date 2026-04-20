@@ -45,11 +45,12 @@ export interface WebStateProvider {
   getTaskRunLogs(taskId: string, limit?: number): TaskRunLog[];
   /** Phase events for a specific task run (identified by taskId + run_at timestamp). */
   getTaskRunPhaseEvents(taskId: string, runAt: string): TaskRunPhaseEvent[];
-  /** Search messages by content, optionally within a specific chat. */
+  /** Search messages by content with optional filters. */
   searchMessages(
     query: string,
     chatJid?: string,
     limit?: number,
+    filters?: { fromDate?: string; toDate?: string; sender?: string },
   ): Array<{
     id: string;
     chat_jid: string;

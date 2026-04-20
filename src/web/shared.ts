@@ -436,6 +436,12 @@ function shellCSS(): string {
     `.search-result-text mark{background:var(--accent-dim);color:var(--accent);border-radius:2px;padding:0 2px}`,
     `.search-result-meta{font-size:9px;color:var(--text-dim);margin-top:2px}`,
     `.search-count{font-size:10px;color:var(--text-dim);padding:6px 10px;border-bottom:1px solid var(--border)}`,
+    `.search-filters{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}`,
+    `.search-filter-select,.search-filter-input{font-family:var(--mono);font-size:10px;padding:3px 6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;width:100%}`,
+    `.search-filter-select:focus,.search-filter-input:focus,.search-filter-date:focus{outline:none;border-color:var(--accent)}`,
+    `.search-date-row{display:flex;align-items:center;gap:4px;width:100%}`,
+    `.search-filter-date{font-family:var(--mono);font-size:10px;padding:3px 6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;flex:1;min-width:0}`,
+    `.search-date-sep{color:var(--text-dim);font-size:10px;flex-shrink:0}`,
     `.loading{text-align:center;padding:2rem;color:var(--text-dim);font-size:12px}`,
 
     // --- Page: Context Viewer ---

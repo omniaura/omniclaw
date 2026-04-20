@@ -117,12 +117,22 @@ function makeState(
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
     getTaskRunPhaseEvents: () => [],
-    searchMessages: (query, chatJid, limit) => {
+    searchMessages: (query, chatJid, limit, filters) => {
       const q = query.toLowerCase();
       let results = testMessages.filter((m) =>
         m.content.toLowerCase().includes(q),
       );
       if (chatJid) results = results.filter((m) => m.chat_jid === chatJid);
+      if (filters?.fromDate)
+        results = results.filter((m) => m.timestamp >= filters.fromDate!);
+      if (filters?.toDate)
+        results = results.filter((m) => m.timestamp <= filters.toDate!);
+      if (filters?.sender) {
+        const s = filters.sender.toLowerCase();
+        results = results.filter((m) =>
+          m.sender_name.toLowerCase().includes(s),
+        );
+      }
       return limit ? results.slice(0, limit) : results;
     },
     createTask: () => {},
@@ -251,6 +261,20 @@ describe('conversations page', () => {
     expect(html).toContain('tab-search');
     expect(html).toContain('msg-search');
     expect(html).toContain('search-results');
+  });
+
+  it('renders search filter controls', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/conversations');
+    const html = await res.text();
+    expect(html).toContain('search-chat-filter');
+    expect(html).toContain('search-sender');
+    expect(html).toContain('search-from');
+    expect(html).toContain('search-to');
+    // Chat dropdown contains chat names as options
+    expect(html).toContain('all chats');
+    expect(html).toContain('general');
+    expect(html).toContain('dev-chat');
   });
 });
 
@@ -384,6 +408,56 @@ describe('message search API', () => {
     const results = (await res.json()) as Array<{ sender_name: string }>;
     expect(results).toHaveLength(1);
     expect(results[0].sender_name).toBe('Bob');
+  });
+
+  it('filters search by sender name', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch(
+      '/api/messages/search?q=Hello&sender=Alice',
+    );
+    expect(res.status).toBe(200);
+    const results = (await res.json()) as Array<{ sender_name: string }>;
+    expect(results).toHaveLength(1);
+    expect(results[0].sender_name).toBe('Alice');
+  });
+
+  it('filters search by date range', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    // Only messages from after 12:01 — should exclude Alice's message
+    const res = await authedFetch(
+      '/api/messages/search?q=Hello&from=2026-03-01T12:00:30.000Z',
+    );
+    expect(res.status).toBe(200);
+    const results = (await res.json()) as Array<{ sender_name: string }>;
+    expect(results).toHaveLength(1);
+    expect(results[0].sender_name).toBe('OmniClaw');
+  });
+
+  it('filters search by to date', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    // Only messages before 12:00:30 — should exclude bot message
+    const res = await authedFetch(
+      '/api/messages/search?q=Hello&to=2026-03-01T12:00:30.000Z',
+    );
+    expect(res.status).toBe(200);
+    const results = (await res.json()) as Array<{ sender_name: string }>;
+    expect(results).toHaveLength(1);
+    expect(results[0].sender_name).toBe('Alice');
+  });
+
+  it('combines multiple search filters', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch(
+      '/api/messages/search?q=Hello&chatJid=dc:123&sender=Alice&from=2026-03-01T00:00:00.000Z&to=2026-03-01T23:59:59.999Z',
+    );
+    expect(res.status).toBe(200);
+    const results = (await res.json()) as Array<{
+      sender_name: string;
+      chat_jid: string;
+    }>;
+    expect(results).toHaveLength(1);
+    expect(results[0].sender_name).toBe('Alice');
+    expect(results[0].chat_jid).toBe('dc:123');
   });
 
   it('treats percent and underscore literally in search queries', async () => {
