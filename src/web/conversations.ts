@@ -3,9 +3,7 @@ import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 
 /** Build chat filter <option> list for the search panel dropdown. */
-function chatOptions(
-  chats: Array<{ jid: string; name: string }>,
-): string {
+function chatOptions(chats: Array<{ jid: string; name: string }>): string {
   return (
     '<option value="">all chats</option>' +
     chats

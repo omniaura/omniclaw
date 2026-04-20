@@ -759,9 +759,7 @@ export function searchMessages(
   const pattern = `%${escapedQuery}%`;
   const clampedLimit = Math.min(Math.max(1, opts.limit ?? 50), 200);
 
-  const conditions: string[] = [
-    "content LIKE ? ESCAPE '\\' COLLATE NOCASE",
-  ];
+  const conditions: string[] = ["content LIKE ? ESCAPE '\\' COLLATE NOCASE"];
   const params: (string | number)[] = [pattern];
 
   if (opts.chatJid) {

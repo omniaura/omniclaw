@@ -544,9 +544,7 @@ export class FakeState implements WebStateProvider {
       results = results.filter((m) => m.timestamp <= filters.toDate!);
     if (filters?.sender) {
       const s = filters.sender.toLowerCase();
-      results = results.filter(
-        (m) => m.sender_name?.toLowerCase().includes(s),
-      );
+      results = results.filter((m) => m.sender_name?.toLowerCase().includes(s));
     }
     results = results.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     return results.slice(0, clampedLimit);

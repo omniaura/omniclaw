@@ -412,9 +412,7 @@ describe('message search API', () => {
 
   it('filters search by sender name', async () => {
     handle = startWebServer(testConfig(), makeState());
-    const res = await authedFetch(
-      '/api/messages/search?q=Hello&sender=Alice',
-    );
+    const res = await authedFetch('/api/messages/search?q=Hello&sender=Alice');
     expect(res.status).toBe(200);
     const results = (await res.json()) as Array<{ sender_name: string }>;
     expect(results).toHaveLength(1);
