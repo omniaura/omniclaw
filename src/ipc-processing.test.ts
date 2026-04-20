@@ -617,6 +617,140 @@ describe('processTaskIpc: task snapshot refresh', () => {
   });
 });
 
+describe('processTaskIpc: task mutation behavior', () => {
+  it('allows a non-main group to schedule a task for itself and falls back invalid context_mode to isolated', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'Self scheduled task',
+        schedule_type: 'interval',
+        schedule_value: '60000',
+        targetJid: 'other@g.us',
+        context_mode: 'invalid' as 'group',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    const tasks = getAllTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({
+      group_folder: 'other-group',
+      chat_jid: 'other@g.us',
+      prompt: 'Self scheduled task',
+      schedule_type: 'interval',
+      schedule_value: '60000',
+      context_mode: 'isolated',
+      status: 'active',
+    });
+    expect(tasks[0].next_run).not.toBeNull();
+    expect(taskSnapshots).toEqual([
+      {
+        groupFolder: 'other-group',
+        isMain: false,
+      },
+    ]);
+  });
+
+  it('blocks a non-main group from scheduling tasks for another group', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'Cross-group task',
+        schedule_type: 'once',
+        schedule_value: '2025-06-01T00:00:00.000Z',
+        targetJid: 'third@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(getAllTasks()).toHaveLength(0);
+    expect(taskSnapshots).toHaveLength(0);
+  });
+
+  it('leaves another group\'s task untouched when cancel is unauthorized', async () => {
+    createTask({
+      id: 'task-owned-by-third',
+      group_folder: 'third-group',
+      chat_jid: 'third@g.us',
+      prompt: 'protected',
+      schedule_type: 'once',
+      schedule_value: '2025-06-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: '2025-06-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    await processTaskIpc(
+      { type: 'cancel_task', taskId: 'task-owned-by-third' },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(getTaskById('task-owned-by-third')).toBeDefined();
+    expect(taskSnapshots).toHaveLength(0);
+  });
+
+  it('recalculates next_run when resuming a paused recurring task', async () => {
+    createTask({
+      id: 'task-resume-interval',
+      group_folder: 'main',
+      chat_jid: 'main@g.us',
+      prompt: 'resume interval',
+      schedule_type: 'interval',
+      schedule_value: '60000',
+      context_mode: 'isolated',
+      next_run: '2000-01-01T00:00:00.000Z',
+      status: 'paused',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    await processTaskIpc(
+      { type: 'edit_task', taskId: 'task-resume-interval', status: 'active' },
+      'main',
+      true,
+      deps,
+    );
+
+    const updated = getTaskById('task-resume-interval');
+    expect(updated?.status).toBe('active');
+    expect(updated?.next_run).not.toBe('2000-01-01T00:00:00.000Z');
+    expect(updated?.next_run).not.toBeNull();
+  });
+
+  it('keeps next_run unchanged when resuming a paused once task without a schedule change', async () => {
+    createTask({
+      id: 'task-resume-once',
+      group_folder: 'main',
+      chat_jid: 'main@g.us',
+      prompt: 'resume once',
+      schedule_type: 'once',
+      schedule_value: '2025-06-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: '2025-06-01T00:00:00.000Z',
+      status: 'paused',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    await processTaskIpc(
+      { type: 'edit_task', taskId: 'task-resume-once', status: 'active' },
+      'main',
+      true,
+      deps,
+    );
+
+    expect(getTaskById('task-resume-once')).toMatchObject({
+      status: 'active',
+      next_run: '2025-06-01T00:00:00.000Z',
+    });
+  });
+});
+
 // =============================================================================
 // Database: expireStaleSessions
 // =============================================================================
