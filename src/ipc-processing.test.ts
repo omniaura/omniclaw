@@ -671,7 +671,7 @@ describe('processTaskIpc: task mutation behavior', () => {
     expect(taskSnapshots).toHaveLength(0);
   });
 
-  it('leaves another group\'s task untouched when cancel is unauthorized', async () => {
+  it("leaves another group's task untouched when cancel is unauthorized", async () => {
     createTask({
       id: 'task-owned-by-third',
       group_folder: 'third-group',
