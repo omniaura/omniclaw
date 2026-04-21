@@ -200,9 +200,11 @@ describe('connectSocket', () => {
 
   it('fails the flow when requesting a pairing code throws', async () => {
     const harness = createConnectDeps();
-    harness.socketHarness.requestPairingCode.mockImplementationOnce(async () => {
-      throw new Error('phone offline');
-    });
+    harness.socketHarness.requestPairingCode.mockImplementationOnce(
+      async () => {
+        throw new Error('phone offline');
+      },
+    );
 
     await connectSocket(
       '14155551234',
