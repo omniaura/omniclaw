@@ -999,11 +999,26 @@ export function isTrustedLanDiscoveryAdminRequest(
     req as unknown as { socket?: { remoteAddress?: string } }
   ).socket?.remoteAddress;
 
-  // Only trust the actual socket peer or the configured listener host. URL/Host
-  // are attacker-controlled and must not influence auth decisions.
+  // Auth bypass must key off the actual peer address. The listener hostname is
+  // the server's own bind target, not a property of the client request.
+  if (remoteAddress) {
+    return isLoopbackOrPrivateAddress(remoteAddress);
+  }
+
+  // Bun may not always expose a socket address in tests or some deployments.
+  // Preserve the loopback-only fallback for local-only listeners.
+  return isLoopbackAddress(listenerHostname);
+}
+
+function isLoopbackAddress(address?: string): boolean {
+  if (!address) return false;
+  const normalized = address.toLowerCase();
+
   return (
-    isLoopbackOrPrivateAddress(remoteAddress) ||
-    isLoopbackOrPrivateAddress(listenerHostname)
+    normalized === '::1' ||
+    normalized === '::ffff:127.0.0.1' ||
+    normalized === 'localhost' ||
+    normalized.startsWith('127.')
   );
 }
 
@@ -1011,9 +1026,7 @@ function isLoopbackOrPrivateAddress(address?: string): boolean {
   if (!address) return false;
   const normalized = address.toLowerCase();
 
-  if (normalized === '::1' || normalized === '::ffff:127.0.0.1') return true;
-  if (normalized === 'localhost') return true;
-  if (normalized.startsWith('127.')) return true;
+  if (isLoopbackAddress(normalized)) return true;
 
   const ipv4 = normalized.startsWith('::ffff:')
     ? normalized.slice('::ffff:'.length)
