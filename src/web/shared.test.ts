@@ -279,8 +279,7 @@ describe('command palette', () => {
 });
 
 describe('toast notification system', () => {
-  const shell = () =>
-    renderShell('/', 'Dashboard', '<div>content</div>', {});
+  const shell = () => renderShell('/', 'Dashboard', '<div>content</div>', {});
 
   it('renders the toast container in the shell with aria-live', () => {
     const html = shell();

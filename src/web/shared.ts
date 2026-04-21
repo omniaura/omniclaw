@@ -1277,7 +1277,9 @@ function shellScript(pageScripts: Record<string, string>): string {
 
   // ---- Toast helper (used by multiple pages) ----
   parts.push('(function(){');
-  parts.push('var TOAST_ICONS={success:"\\u2713",error:"\\u2717",warning:"\\u26a0",info:"\\u2139"};');
+  parts.push(
+    'var TOAST_ICONS={success:"\\u2713",error:"\\u2717",warning:"\\u26a0",info:"\\u2139"};',
+  );
   parts.push('var TOAST_MAX=5;');
   parts.push('var container=document.getElementById("toast-container");');
   parts.push('window.__toast=function(msg,type,durationMs){');
@@ -1287,21 +1289,37 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('  var el=document.createElement("div");');
   parts.push('  el.className="toast "+type;');
   parts.push('  el.setAttribute("role","alert");');
-  parts.push('  var icon=document.createElement("span");icon.className="toast-icon";icon.textContent=TOAST_ICONS[type]||TOAST_ICONS.info;');
-  parts.push('  var msgEl=document.createElement("span");msgEl.className="toast-msg";msgEl.textContent=msg;');
-  parts.push('  var close=document.createElement("button");close.className="toast-close";close.textContent="\\u2715";close.setAttribute("aria-label","Dismiss");');
-  parts.push('  el.appendChild(icon);el.appendChild(msgEl);el.appendChild(close);');
+  parts.push(
+    '  var icon=document.createElement("span");icon.className="toast-icon";icon.textContent=TOAST_ICONS[type]||TOAST_ICONS.info;',
+  );
+  parts.push(
+    '  var msgEl=document.createElement("span");msgEl.className="toast-msg";msgEl.textContent=msg;',
+  );
+  parts.push(
+    '  var close=document.createElement("button");close.className="toast-close";close.textContent="\\u2715";close.setAttribute("aria-label","Dismiss");',
+  );
+  parts.push(
+    '  el.appendChild(icon);el.appendChild(msgEl);el.appendChild(close);',
+  );
   parts.push('  container.appendChild(el);');
   parts.push('  function dismiss(){');
   parts.push('    if(el.classList.contains("removing"))return;');
   parts.push('    el.classList.add("removing");');
-  parts.push('    el.addEventListener("animationend",function(){el.remove();});');
+  parts.push(
+    '    el.addEventListener("animationend",function(){el.remove();});',
+  );
   parts.push('  }');
   parts.push('  close.addEventListener("click",dismiss);');
   parts.push('  var timer=setTimeout(dismiss,durationMs);');
-  parts.push('  el.addEventListener("mouseenter",function(){clearTimeout(timer);});');
-  parts.push('  el.addEventListener("mouseleave",function(){timer=setTimeout(dismiss,2000);});');
-  parts.push('  while(container.children.length>TOAST_MAX){container.firstElementChild.remove();}');
+  parts.push(
+    '  el.addEventListener("mouseenter",function(){clearTimeout(timer);});',
+  );
+  parts.push(
+    '  el.addEventListener("mouseleave",function(){timer=setTimeout(dismiss,2000);});',
+  );
+  parts.push(
+    '  while(container.children.length>TOAST_MAX){container.firstElementChild.remove();}',
+  );
   parts.push('};');
   parts.push('})();');
 
