@@ -198,6 +198,29 @@ describe('connectSocket', () => {
     );
   });
 
+  it('fails the flow when requesting a pairing code throws', async () => {
+    const harness = createConnectDeps();
+    harness.socketHarness.requestPairingCode.mockImplementationOnce(async () => {
+      throw new Error('phone offline');
+    });
+
+    await connectSocket(
+      '14155551234',
+      false,
+      { usePairingCode: true },
+      harness.deps,
+    );
+
+    expect(harness.timers).toHaveLength(1);
+    await harness.timers[0]!();
+
+    expect(harness.error).toHaveBeenCalledWith(
+      'Failed to request pairing code:',
+      'phone offline',
+    );
+    expect(harness.exit).toHaveBeenCalledWith(1);
+  });
+
   it('writes QR payloads and renders them in the terminal', async () => {
     const harness = createConnectDeps();
 

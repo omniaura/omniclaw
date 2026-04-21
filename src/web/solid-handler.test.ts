@@ -77,6 +77,17 @@ describe('solid-handler', () => {
     expect(isMainProcessRoute('/dashboard')).toBe(false);
   });
 
+  it('falls back to the Datastar UI when the SolidStart bundle is unavailable', async () => {
+    fs.rmSync(path.join(process.cwd(), 'webui', '.output'), {
+      recursive: true,
+      force: true,
+    });
+
+    const handler = await initSolidHandler(makeState());
+
+    expect(handler).toBeNull();
+  });
+
   it('initializes the proxy handler and forwards requests to the internal SolidStart server', async () => {
     fs.mkdirSync(solidOutputDir, { recursive: true });
     fs.writeFileSync(
