@@ -117,6 +117,7 @@ export function renderShell(
     `</aside>` +
     `</div>` +
     `<button class="sidebar-reopen" id="btn-reopen-sidebar" title="Show logs">\u2261 logs</button>` +
+    `<div class="toast-container" id="toast-container" aria-live="polite"></div>` +
     shortcutHelpModal() +
     commandPaletteHtml() +
     `<scr` +
@@ -267,10 +268,20 @@ function shellCSS(): string {
     `td.actions{white-space:nowrap}`,
 
     // --- Toast ---
-    `.toast{position:fixed;bottom:1rem;right:1rem;padding:8px 14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:12px;z-index:200;animation:fadeIn .2s}`,
+    `.toast-container{position:fixed;bottom:1rem;right:1rem;z-index:200;display:flex;flex-direction:column-reverse;gap:8px;pointer-events:none}`,
+    `.toast{pointer-events:auto;display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:12px;animation:toastIn .2s ease-out;max-width:400px;box-shadow:0 4px 12px rgba(0,0,0,.3)}`,
+    `.toast[role="alert"]{outline:none}`,
+    `.toast.removing{animation:toastOut .15s ease-in forwards}`,
+    `.toast-icon{flex-shrink:0;font-size:14px;line-height:1}`,
+    `.toast-msg{flex:1;line-height:1.4}`,
+    `.toast-close{flex-shrink:0;background:none;border:none;color:inherit;opacity:.5;cursor:pointer;font-size:14px;padding:0 2px;line-height:1;transition:opacity .12s}`,
+    `.toast-close:hover{opacity:1}`,
     `.toast.success{border-color:var(--green);color:var(--green)}`,
     `.toast.error{border-color:var(--red);color:var(--red)}`,
-    `@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}`,
+    `.toast.warning{border-color:var(--yellow);color:var(--yellow)}`,
+    `.toast.info{border-color:var(--blue);color:var(--blue)}`,
+    `@keyframes toastIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}`,
+    `@keyframes toastOut{to{opacity:0;transform:translateX(16px)}}`,
 
     // --- Command Palette ---
     `.cmd-palette-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;align-items:flex-start;justify-content:center;padding-top:min(20vh,120px)}`,
@@ -1265,14 +1276,34 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('};');
 
   // ---- Toast helper (used by multiple pages) ----
-  parts.push('window.__toast=function(msg,type){');
-  parts.push('  var ex=document.querySelector(".toast");if(ex)ex.remove();');
-  parts.push(
-    '  var el=document.createElement("div");el.className="toast "+(type||"success");',
-  );
-  parts.push('  el.textContent=msg;document.body.appendChild(el);');
-  parts.push('  setTimeout(function(){el.remove();},3000);');
+  parts.push('(function(){');
+  parts.push('var TOAST_ICONS={success:"\\u2713",error:"\\u2717",warning:"\\u26a0",info:"\\u2139"};');
+  parts.push('var TOAST_MAX=5;');
+  parts.push('var container=document.getElementById("toast-container");');
+  parts.push('window.__toast=function(msg,type,durationMs){');
+  parts.push('  if(!container)return;');
+  parts.push('  type=type||"success";');
+  parts.push('  durationMs=durationMs||5000;');
+  parts.push('  var el=document.createElement("div");');
+  parts.push('  el.className="toast "+type;');
+  parts.push('  el.setAttribute("role","alert");');
+  parts.push('  var icon=document.createElement("span");icon.className="toast-icon";icon.textContent=TOAST_ICONS[type]||TOAST_ICONS.info;');
+  parts.push('  var msgEl=document.createElement("span");msgEl.className="toast-msg";msgEl.textContent=msg;');
+  parts.push('  var close=document.createElement("button");close.className="toast-close";close.textContent="\\u2715";close.setAttribute("aria-label","Dismiss");');
+  parts.push('  el.appendChild(icon);el.appendChild(msgEl);el.appendChild(close);');
+  parts.push('  container.appendChild(el);');
+  parts.push('  function dismiss(){');
+  parts.push('    if(el.classList.contains("removing"))return;');
+  parts.push('    el.classList.add("removing");');
+  parts.push('    el.addEventListener("animationend",function(){el.remove();});');
+  parts.push('  }');
+  parts.push('  close.addEventListener("click",dismiss);');
+  parts.push('  var timer=setTimeout(dismiss,durationMs);');
+  parts.push('  el.addEventListener("mouseenter",function(){clearTimeout(timer);});');
+  parts.push('  el.addEventListener("mouseleave",function(){timer=setTimeout(dismiss,2000);});');
+  parts.push('  while(container.children.length>TOAST_MAX){container.firstElementChild.remove();}');
   parts.push('};');
+  parts.push('})();');
 
   // ---- Command Palette ----
   parts.push(commandPaletteScript());
