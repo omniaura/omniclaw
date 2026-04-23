@@ -277,3 +277,94 @@ describe('command palette', () => {
     expect(html).toContain('Command palette');
   });
 });
+
+describe('toast notification system', () => {
+  const shell = () => renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+  it('renders the toast container in the shell with aria-live', () => {
+    const html = shell();
+
+    expect(html).toContain('id="toast-container"');
+    expect(html).toContain('class="toast-container"');
+    expect(html).toContain('aria-live="polite"');
+  });
+
+  it('includes toast CSS for all four variants', () => {
+    const html = shell();
+
+    expect(html).toContain('.toast.success');
+    expect(html).toContain('.toast.error');
+    expect(html).toContain('.toast.warning');
+    expect(html).toContain('.toast.info');
+  });
+
+  it('includes toast container CSS for stacking', () => {
+    const html = shell();
+
+    expect(html).toContain('.toast-container{');
+    expect(html).toContain('flex-direction:column-reverse');
+  });
+
+  it('includes toast component structure CSS', () => {
+    const html = shell();
+
+    expect(html).toContain('.toast-icon');
+    expect(html).toContain('.toast-msg');
+    expect(html).toContain('.toast-close');
+  });
+
+  it('includes toast animation keyframes', () => {
+    const html = shell();
+
+    expect(html).toContain('@keyframes toastIn');
+    expect(html).toContain('@keyframes toastOut');
+  });
+
+  it('includes removing animation class', () => {
+    const html = shell();
+
+    expect(html).toContain('.toast.removing');
+  });
+
+  it('embeds the toast script with icon map', () => {
+    const html = shell();
+
+    expect(html).toContain('TOAST_ICONS');
+    expect(html).toContain('success');
+    expect(html).toContain('error');
+    expect(html).toContain('warning');
+    expect(html).toContain('info');
+  });
+
+  it('sets role="alert" on toast elements for accessibility', () => {
+    const html = shell();
+
+    expect(html).toContain('el.setAttribute("role","alert")');
+  });
+
+  it('includes dismiss button with aria-label', () => {
+    const html = shell();
+
+    expect(html).toContain('close.setAttribute("aria-label","Dismiss")');
+  });
+
+  it('supports configurable duration with default', () => {
+    const html = shell();
+
+    expect(html).toContain('durationMs=durationMs||5000');
+  });
+
+  it('caps maximum visible toasts', () => {
+    const html = shell();
+
+    expect(html).toContain('TOAST_MAX=5');
+  });
+
+  it('pauses dismiss timer on hover', () => {
+    const html = shell();
+
+    expect(html).toContain('mouseenter');
+    expect(html).toContain('clearTimeout(timer)');
+    expect(html).toContain('mouseleave');
+  });
+});
