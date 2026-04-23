@@ -131,7 +131,10 @@ export async function resolveAndValidateRemoteImageUrl(
   }
 
   if (parsed.username || parsed.password) {
-    return { error: 'embedded credentials are not allowed', resolvedAddresses: [] };
+    return {
+      error: 'embedded credentials are not allowed',
+      resolvedAddresses: [],
+    };
   }
 
   const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
@@ -151,11 +154,17 @@ export async function resolveAndValidateRemoteImageUrl(
   try {
     const addresses = await resolveHostAddresses(hostname);
     if (addresses.some((address) => isBlockedPrivateAddress(address))) {
-      return { error: 'resolved private address is not allowed', resolvedAddresses: [] };
+      return {
+        error: 'resolved private address is not allowed',
+        resolvedAddresses: [],
+      };
     }
     return { error: null, resolvedAddresses: addresses };
   } catch {
-    return { error: 'dns lookup failed - cannot verify host safety', resolvedAddresses: [] };
+    return {
+      error: 'dns lookup failed - cannot verify host safety',
+      resolvedAddresses: [],
+    };
   }
 }
 
@@ -301,11 +310,7 @@ export async function fetchWithPinnedDns(
         // Pin DNS: always return the pre-validated address.
         // Bun's http client calls lookup with { all: true } and expects
         // an array result; Node.js uses the simple (err, address, family) form.
-        lookup: (
-          _hostname: string,
-          _opts: unknown,
-          cb?: Function,
-        ) => {
+        lookup: (_hostname: string, _opts: unknown, cb?: Function) => {
           const callback = typeof _opts === 'function' ? _opts : cb!;
           const opts =
             typeof _opts === 'object' && _opts !== null

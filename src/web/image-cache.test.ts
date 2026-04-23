@@ -410,7 +410,12 @@ describe('resolveAndValidateRemoteImageUrl', () => {
   it('returns resolved addresses for hostname-based urls', async () => {
     const result = await resolveAndValidateRemoteImageUrl(
       'https://cdn.example.com/avatar.png',
-      { lookupHostAddresses: async () => ['93.184.216.34', '2606:2800:220:1:248:1893:25c8:1946'] },
+      {
+        lookupHostAddresses: async () => [
+          '93.184.216.34',
+          '2606:2800:220:1:248:1893:25c8:1946',
+        ],
+      },
     );
     expect(result.error).toBeNull();
     expect(result.resolvedAddresses).toEqual([
@@ -456,7 +461,9 @@ describe('fetchWithPinnedDns', () => {
       res.end(body);
     });
 
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
     const port = (server.address() as { port: number }).port;
 
     try {
@@ -484,7 +491,9 @@ describe('fetchWithPinnedDns', () => {
       // intentionally hang
     });
 
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
     const port = (server.address() as { port: number }).port;
 
     try {
@@ -520,7 +529,9 @@ describe('serveCachedRemoteImage DNS rebinding prevention', () => {
       res.end(body);
     });
 
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
     const port = (server.address() as { port: number }).port;
 
     try {
@@ -572,7 +583,11 @@ describe('serveCachedRemoteImage DNS rebinding prevention', () => {
       );
 
       expect(response).toBeNull();
-      expect(records.some((r) => r.blockReason === 'resolved private address is not allowed')).toBe(true);
+      expect(
+        records.some(
+          (r) => r.blockReason === 'resolved private address is not allowed',
+        ),
+      ).toBe(true);
     } finally {
       clearTestImageCache(testImageCacheDir);
       logger.warn = originalWarn;
