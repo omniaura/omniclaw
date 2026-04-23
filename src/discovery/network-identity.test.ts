@@ -254,16 +254,15 @@ describe('network identity detection', () => {
     }) as typeof Bun.spawn);
 
     const result = await detectCurrentNetwork();
+    const spawnCalls = spawnSpy.mock.calls as unknown as Array<[string[]]>;
 
     expect(result).toEqual({
       id: 'wifi:Fallback WiFi',
       label: 'Fallback WiFi',
     });
-    expect(
-      spawnSpy.mock.calls.some(
-        (call: unknown[]) => call[0]?.[0] === 'networksetup',
-      ),
-    ).toBe(true);
+    expect(spawnCalls.some((call) => call[0]?.[0] === 'networksetup')).toBe(
+      true,
+    );
   });
 
   it('uses nmcli on linux when iwgetid is empty', async () => {
