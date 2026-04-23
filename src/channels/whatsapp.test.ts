@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { Readable } from 'stream';
 import {
   afterEach,
   describe,
@@ -12,6 +13,7 @@ import {
 
 import { GROUPS_DIR } from '../config.js';
 import {
+  MAX_BINARY_DOWNLOAD_BYTES,
   formatImageMarker,
   formatPlaceholder,
   formatTextFileMarker,
@@ -941,6 +943,83 @@ describe('WhatsAppChannel.downloadWhatsAppMedia', () => {
       message: { imageMessage: {} },
     });
     expect(result).toBeNull();
+  });
+
+  it('downloads streamed media under the byte limit', async () => {
+    const channel = makeChannel();
+    const mediaDownloader = mock(async (_msg: any, type: string, opts: any) => {
+      expect(type).toBe('stream');
+      expect(opts?.options?.signal).toBeInstanceOf(AbortSignal);
+      return Readable.from([Buffer.from('hello')]);
+    });
+
+    setPrivate(channel, 'sock', { updateMediaMessage: mock() });
+    setPrivate(channel, 'mediaDownloader', mediaDownloader);
+
+    const result = await (channel as any).downloadWhatsAppMedia({
+      message: { imageMessage: {} },
+    });
+
+    expect(result?.toString()).toBe('hello');
+    expect(mediaDownloader).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null when streamed media exceeds the byte limit', async () => {
+    const channel = makeChannel();
+    const stream = Readable.from([Buffer.alloc(MAX_BINARY_DOWNLOAD_BYTES + 1)]);
+    const destroySpy = spyOn(stream, 'destroy');
+
+    setPrivate(channel, 'sock', { updateMediaMessage: mock() });
+    setPrivate(
+      channel,
+      'mediaDownloader',
+      mock(async () => stream),
+    );
+
+    const result = await (channel as any).downloadWhatsAppMedia({
+      message: { imageMessage: {} },
+    });
+
+    expect(result).toBeNull();
+    expect(destroySpy).toHaveBeenCalled();
+  });
+
+  it('returns null when the media download times out', async () => {
+    const channel = makeChannel();
+    const originalTimeout = (globalThis as any).AbortSignal.timeout;
+
+    (globalThis as any).AbortSignal.timeout = (ms: number) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new Error(`timeout:${ms}`)), 0);
+      return controller.signal;
+    };
+
+    setPrivate(channel, 'sock', { updateMediaMessage: mock() });
+    setPrivate(
+      channel,
+      'mediaDownloader',
+      mock(
+        async (_msg: any, _type: string, opts: any) =>
+          await new Promise((_, reject) => {
+            const signal = opts?.options?.signal as AbortSignal | undefined;
+            signal?.addEventListener(
+              'abort',
+              () => reject(signal.reason ?? new Error('aborted')),
+              { once: true },
+            );
+          }),
+      ),
+    );
+
+    try {
+      const result = await (channel as any).downloadWhatsAppMedia({
+        message: { imageMessage: {} },
+      });
+
+      expect(result).toBeNull();
+    } finally {
+      (globalThis as any).AbortSignal.timeout = originalTimeout;
+    }
   });
 });
 

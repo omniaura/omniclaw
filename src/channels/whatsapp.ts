@@ -34,6 +34,39 @@ import {
 } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const WHATSAPP_MEDIA_DOWNLOAD_TIMEOUT_MS = 15_000;
+
+type WhatsAppMediaStream = AsyncIterable<Buffer | Uint8Array> & {
+  destroy?: (error?: Error) => void;
+};
+
+async function readWhatsAppMediaStream(
+  stream: WhatsAppMediaStream,
+  maxBytes: number,
+): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+
+  try {
+    for await (const chunk of stream) {
+      const bytes = Buffer.from(chunk);
+      totalBytes += bytes.length;
+
+      if (totalBytes > maxBytes) {
+        const error = new Error(`Download exceeded ${maxBytes} bytes`);
+        stream.destroy?.(error);
+        throw error;
+      }
+
+      chunks.push(bytes);
+    }
+  } catch (error) {
+    stream.destroy?.(error instanceof Error ? error : undefined);
+    throw error;
+  }
+
+  return Buffer.concat(chunks);
+}
 
 // Circuit breaker: force process restart if too many reconnects in a short window.
 // Fixes 408 timeout loops after Mac sleep or network drops where reconnect →
@@ -54,6 +87,7 @@ export class WhatsAppChannel implements Channel {
   prefixAssistantName = true;
 
   private sock!: WASocket;
+  private mediaDownloader = downloadMediaMessage;
   private connected = false;
   private lidToPhoneMap: Record<string, string> = {};
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
@@ -668,26 +702,36 @@ export class WhatsAppChannel implements Channel {
    */
   private async downloadWhatsAppMedia(msg: any): Promise<Buffer | null> {
     try {
-      const buffer = (await downloadMediaMessage(
+      const stream = (await this.mediaDownloader(
         msg,
-        'buffer',
-        {},
+        'stream',
+        {
+          options: {
+            signal: AbortSignal.timeout(WHATSAPP_MEDIA_DOWNLOAD_TIMEOUT_MS),
+          },
+        },
         {
           logger: { ...console, child: () => console } as any,
           reuploadRequest: this.sock.updateMediaMessage,
         },
-      )) as Buffer;
+      )) as WhatsAppMediaStream;
+
+      const buffer = await readWhatsAppMediaStream(
+        stream,
+        MAX_BINARY_DOWNLOAD_BYTES,
+      );
+
       if (!buffer || buffer.length === 0) return null;
-      if (buffer.length > MAX_BINARY_DOWNLOAD_BYTES) {
-        logger.warn(
-          { bytes: buffer.length, max: MAX_BINARY_DOWNLOAD_BYTES },
-          'WhatsApp media exceeds size limit — discarding',
-        );
-        return null;
-      }
       return buffer;
     } catch (err) {
-      logger.warn({ err }, 'Failed to download WhatsApp media');
+      logger.warn(
+        {
+          err,
+          maxBytes: MAX_BINARY_DOWNLOAD_BYTES,
+          timeoutMs: WHATSAPP_MEDIA_DOWNLOAD_TIMEOUT_MS,
+        },
+        'Failed to download WhatsApp media',
+      );
       return null;
     }
   }
