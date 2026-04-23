@@ -230,6 +230,100 @@ describe('network identity detection', () => {
       ),
     ).toBe(true);
   });
+
+  it('retries networksetup via PATH when the absolute macOS binary is unavailable', async () => {
+    spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
+      if (cmd[0] === '/usr/sbin/networksetup') {
+        throw new Error('Executable not found in $PATH');
+      }
+
+      if (cmd[0] === 'networksetup' && cmd.includes('-listallhardwareports')) {
+        return createProcess({
+          stdout:
+            'Hardware Port: Wi-Fi\nDevice: en0\nEthernet Address: aa:bb:cc:dd:ee:ff\n',
+        });
+      }
+
+      if (cmd[0] === 'networksetup' && cmd.includes('-getairportnetwork')) {
+        return createProcess({
+          stdout: 'Current Wi-Fi Network: Fallback WiFi\n',
+        });
+      }
+
+      throw new Error(`Unexpected command: ${cmd.join(' ')}`);
+    }) as typeof Bun.spawn);
+
+    const result = await detectCurrentNetwork();
+    const spawnCalls = spawnSpy.mock.calls as unknown as Array<[string[]]>;
+
+    expect(result).toEqual({
+      id: 'wifi:Fallback WiFi',
+      label: 'Fallback WiFi',
+    });
+    expect(spawnCalls.some((call) => call[0]?.[0] === 'networksetup')).toBe(
+      true,
+    );
+  });
+
+  it('uses nmcli on linux when iwgetid is empty', async () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'linux',
+      configurable: true,
+    });
+
+    spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
+      if (cmd[0] === 'iwgetid') {
+        return createProcess({ stdout: '\n' });
+      }
+
+      if (cmd[0] === 'nmcli') {
+        return createProcess({ stdout: 'no:Guest\nyes:Office Linux\n' });
+      }
+
+      throw new Error(`Unexpected command: ${cmd.join(' ')}`);
+    }) as typeof Bun.spawn);
+
+    const result = await detectCurrentNetwork();
+
+    expect(result).toEqual({ id: 'wifi:Office Linux', label: 'Office Linux' });
+  });
+
+  it('returns null on linux when nmcli reports no active SSID', async () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'linux',
+      configurable: true,
+    });
+
+    spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
+      if (cmd[0] === 'iwgetid') {
+        return createProcess({ stdout: '' });
+      }
+
+      if (cmd[0] === 'nmcli') {
+        return createProcess({ stdout: 'no:Guest\nyes:   \n' });
+      }
+
+      throw new Error(`Unexpected command: ${cmd.join(' ')}`);
+    }) as typeof Bun.spawn);
+
+    const result = await detectCurrentNetwork();
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null on unsupported platforms without spawning subprocesses', async () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'win32',
+      configurable: true,
+    });
+
+    spawnSpy = spyOn(Bun, 'spawn');
+
+    const result = await detectCurrentNetwork();
+
+    expect(result).toBeNull();
+    expect(spawnSpy).not.toHaveBeenCalled();
+  });
 });
 
 function createProcess({
