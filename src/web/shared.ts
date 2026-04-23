@@ -1336,9 +1336,7 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push(
     '    else{document.documentElement.removeAttribute("data-theme");}',
   );
-  parts.push(
-    '    try{localStorage.setItem("omniclaw_theme",t)}catch(e){}',
-  );
+  parts.push('    try{localStorage.setItem("omniclaw_theme",t)}catch(e){}');
   parts.push('    updateThemeToggle(t);');
   parts.push('  }');
   parts.push('  updateThemeToggle(getTheme());');
