@@ -702,7 +702,12 @@ function handleSearchMessages(url: URL, state: WebStateProvider): Response {
     Math.max(1, parseInt(url.searchParams.get('limit') || '50', 10) || 50),
     200,
   );
-  const results = state.searchMessages(query, chatJid, limit);
+  const fromDate = url.searchParams.get('from') || undefined;
+  const toDate = url.searchParams.get('to') || undefined;
+  const sender = url.searchParams.get('sender') || undefined;
+  const filters =
+    fromDate || toDate || sender ? { fromDate, toDate, sender } : undefined;
+  const results = state.searchMessages(query, chatJid, limit, filters);
   return json(results);
 }
 

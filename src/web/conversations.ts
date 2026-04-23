@@ -2,6 +2,19 @@ import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 
+/** Build chat filter <option> list for the search panel dropdown. */
+function chatOptions(chats: Array<{ jid: string; name: string }>): string {
+  return (
+    '<option value="">all chats</option>' +
+    chats
+      .map(
+        (c) =>
+          `<option value="${escapeHtml(c.jid)}">${escapeHtml(c.name || c.jid)}</option>`,
+      )
+      .join('')
+  );
+}
+
 /** Render conversations content (no shell). */
 export function renderConversationsContent(state: WebStateProvider): string {
   const chats = state.getChats();
@@ -33,6 +46,15 @@ export function renderConversationsContent(state: WebStateProvider): string {
     `<div id="filter-input-wrap"><input id="chat-search" type="text" placeholder="filter chats\u2026"></div>` +
     `<div id="search-input-wrap" style="display:none">` +
     `<input id="msg-search" type="text" placeholder="search messages\u2026">` +
+    `<div class="search-filters" id="search-filters">` +
+    `<select id="search-chat-filter" class="search-filter-select">${chatOptions(chats)}</select>` +
+    `<input id="search-sender" type="text" class="search-filter-input" placeholder="sender\u2026">` +
+    `<div class="search-date-row">` +
+    `<input id="search-from" type="date" class="search-filter-date" title="From date">` +
+    `<span class="search-date-sep">\u2013</span>` +
+    `<input id="search-to" type="date" class="search-filter-date" title="To date">` +
+    `</div>` +
+    `</div>` +
     `</div>` +
     `</div>` +
     `<div class="chat-count" id="chat-count">${chats.length} chat${chats.length !== 1 ? 's' : ''}</div>` +

@@ -732,40 +732,67 @@ export function getMessagesSince(
  * Search messages by content across all chats or within a specific chat.
  * Uses SQLite LIKE for substring matching (case-insensitive).
  */
+export interface SearchMessagesOptions {
+  query: string;
+  chatJid?: string;
+  limit?: number;
+  fromDate?: string;
+  toDate?: string;
+  sender?: string;
+}
+
 export function searchMessages(
-  query: string,
+  queryOrOpts: string | SearchMessagesOptions,
   chatJid?: string,
   limit: number = 50,
 ): NewMessage[] {
-  const trimmedQuery = query.trim();
+  // Support both legacy positional args and new options object
+  const opts: SearchMessagesOptions =
+    typeof queryOrOpts === 'string'
+      ? { query: queryOrOpts, chatJid, limit }
+      : queryOrOpts;
+
+  const trimmedQuery = opts.query.trim();
   if (!trimmedQuery) return [];
 
   const escapedQuery = escapeSqlLikePattern(trimmedQuery);
   const pattern = `%${escapedQuery}%`;
-  const clampedLimit = Math.min(Math.max(1, limit), 200);
+  const clampedLimit = Math.min(Math.max(1, opts.limit ?? 50), 200);
 
-  if (chatJid) {
-    const sql = `
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, sender_platform, sender_user_id, mentions
-      FROM messages
-      WHERE chat_jid = ? AND content LIKE ? ESCAPE '\\' COLLATE NOCASE
-      ORDER BY timestamp DESC
-      LIMIT ?
-    `;
-    const rows = db
-      .prepare(sql)
-      .all(chatJid, pattern, clampedLimit) as MessageRow[];
-    return rows.map(mapMessageRow);
+  const conditions: string[] = ["content LIKE ? ESCAPE '\\' COLLATE NOCASE"];
+  const params: (string | number)[] = [pattern];
+
+  if (opts.chatJid) {
+    conditions.push('chat_jid = ?');
+    params.push(opts.chatJid);
   }
+
+  if (opts.fromDate) {
+    conditions.push('timestamp >= ?');
+    params.push(opts.fromDate);
+  }
+
+  if (opts.toDate) {
+    conditions.push('timestamp <= ?');
+    params.push(opts.toDate);
+  }
+
+  if (opts.sender) {
+    const senderPattern = `%${escapeSqlLikePattern(opts.sender)}%`;
+    conditions.push("sender_name LIKE ? ESCAPE '\\' COLLATE NOCASE");
+    params.push(senderPattern);
+  }
+
+  params.push(clampedLimit);
 
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp, sender_platform, sender_user_id, mentions
     FROM messages
-    WHERE content LIKE ? ESCAPE '\\' COLLATE NOCASE
+    WHERE ${conditions.join(' AND ')}
     ORDER BY timestamp DESC
     LIMIT ?
   `;
-  const rows = db.prepare(sql).all(pattern, clampedLimit) as MessageRow[];
+  const rows = db.prepare(sql).all(...params) as MessageRow[];
   return rows.map(mapMessageRow);
 }
 
