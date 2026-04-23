@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 
-import { createLogger } from './logger.js';
+import { createLogger, logger, subscribeToLogs } from './logger.js';
 
 describe('logger', () => {
   let stderrOutput: string[];
@@ -397,6 +397,50 @@ describe('logger', () => {
       expect(stderrOutput[0]).toContain('1234567890abcdef');
       expect(stderrOutput[0]).not.toContain('1234567890abcdefghijk');
     });
+
+    it('uses op-based colors for non-error pretty logs', () => {
+      const logger = createLogger({ group: 'main' }, 'trace');
+
+      logger.info({ op: 'startup' }, 'booting');
+      logger.info({ op: 'containerExit' }, 'stopped');
+      logger.info({ op: 'ipcProcess' }, 'processing ipc');
+      logger.info({ op: 'messageReceived' }, 'message in');
+      logger.info({ op: 'taskRun' }, 'running task');
+      logger.info({ op: 'agentRun' }, 'running agent');
+
+      expect(stderrOutput[0]).toContain('\x1b[32m');
+      expect(stderrOutput[1]).toContain('\x1b[31m');
+      expect(stderrOutput[2]).toContain('\x1b[34m');
+      expect(stderrOutput[3]).toContain('\x1b[33m');
+      expect(stderrOutput[4]).toContain('\x1b[35m');
+      expect(stderrOutput[5]).toContain('\x1b[36m');
+    });
+
+    it('uses level-based colors when no op is present and keeps errors red', () => {
+      const logger = createLogger({ group: 'main' }, 'trace');
+
+      logger.info('plain info');
+      logger.warn('plain warning');
+      logger.debug('plain debug');
+      logger.trace('plain trace');
+      logger.error({ op: 'startup' }, 'errored startup');
+
+      expect(stderrOutput[0]).toContain('\x1b[32m');
+      expect(stderrOutput[1]).toContain('\x1b[33m');
+      expect(stderrOutput[2]).toContain('\x1b[2m');
+      expect(stderrOutput[3]).toContain('\x1b[2m');
+      expect(stderrOutput[4]).toContain('\x1b[31m');
+      expect(stderrOutput[4]).toContain('ERROR');
+    });
+
+    it('falls back to dim coloring for unknown ops', () => {
+      const logger = createLogger({ group: 'main' }, 'trace');
+
+      logger.info({ op: 'mysteryOp' }, 'unknown op');
+
+      expect(stderrOutput[0]).toContain('\x1b[2m');
+      expect(stderrOutput[0]).toContain('unknown op');
+    });
   });
 
   describe('subscribers', () => {
@@ -425,7 +469,10 @@ describe('logger', () => {
       logger.info({ op: 'startup' }, 'started');
 
       expect(subscriber).toHaveBeenCalledTimes(1);
-      expect(subscriber.mock.calls[0]?.[0]).toMatchObject({
+      const subscriberCalls = subscriber.mock.calls as unknown as Array<
+        [Record<string, unknown>]
+      >;
+      expect(subscriberCalls[0]?.[0]).toMatchObject({
         group: 'main',
         op: 'startup',
         msg: 'started',
@@ -457,6 +504,24 @@ describe('logger', () => {
       expect(() => logger.info('fan out')).not.toThrow();
       expect(badSubscriber).toHaveBeenCalledTimes(1);
       expect(goodSubscriber).toHaveBeenCalledTimes(1);
+    });
+
+    it('supports subscribing through the default logger alias', () => {
+      const subscriber = mock(() => {});
+      const unsubscribe = subscribeToLogs(subscriber);
+
+      logger.error('default logger event');
+
+      expect(subscriber).toHaveBeenCalledTimes(1);
+      const subscriberCalls = subscriber.mock.calls as unknown as Array<
+        [Record<string, unknown>]
+      >;
+      expect(subscriberCalls[0]?.[0]).toMatchObject({
+        msg: 'default logger event',
+        level: 'error',
+      });
+
+      unsubscribe();
     });
   });
 });
