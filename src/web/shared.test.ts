@@ -292,6 +292,8 @@ describe('dark mode / theme toggle', () => {
 
     expect(html).toContain('id="btn-theme-toggle"');
     expect(html).toContain('class="theme-toggle"');
+    expect(html).toContain('aria-label="Toggle theme: dark"');
+    expect(html).toContain('aria-pressed="false"');
   });
 
   it('includes light theme CSS variables', () => {
@@ -338,6 +340,10 @@ describe('dark mode / theme toggle', () => {
     expect(html).toContain('btn-theme-toggle');
     expect(html).toContain('omniclaw_theme');
     expect(html).toContain('window.__toggleTheme');
+    expect(html).toContain('try{t=localStorage.getItem("omniclaw_theme")}catch(e){}');
+    expect(html).toContain('try{localStorage.setItem("omniclaw_theme",t)}catch(e){}');
+    expect(html).toContain('themeBtn.setAttribute("aria-label"');
+    expect(html).toContain('themeBtn.setAttribute("aria-pressed"');
   });
 
   it('adds theme toggle to shortcut help modal', () => {

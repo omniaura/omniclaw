@@ -46,7 +46,7 @@ export function renderNav(
     `<div class="brand">omniclaw</div>` +
     `<nav id="nav-links">${renderNavLinks(activePath)}</nav>` +
     `<div class="header-right">` +
-    `<button id="btn-theme-toggle" class="theme-toggle" title="Toggle theme">\u263E</button>` +
+    `<button id="btn-theme-toggle" class="theme-toggle" title="Toggle theme" aria-label="Toggle theme: dark" aria-pressed="false">\u263E</button>` +
     `<span id="ws-status" class="status-badge disconnected">disconnected</span>` +
     `</div>` +
     `</header>`
@@ -79,7 +79,7 @@ export function renderShell(
     `</head><body>` +
     // Inline theme init to prevent FOUC (data-theme-init prevents test regex match)
     `<scr` +
-    `ipt data-theme-init>(function(){var t=localStorage.getItem("omniclaw_theme");if(!t){t=matchMedia("(prefers-color-scheme:light)").matches?"light":"dark";}if(t==="light")document.documentElement.setAttribute("data-theme","light");})()</scr` +
+    `ipt data-theme-init>(function(){var t=null;try{t=localStorage.getItem("omniclaw_theme")}catch(e){}if(!t){t=matchMedia("(prefers-color-scheme:light)").matches?"light":"dark";}if(t==="light")document.documentElement.setAttribute("data-theme","light");})()</scr` +
     `ipt>` +
     // Persistent SSE connector (outside #content so it survives navigation)
     `<div id="sse-init" style="display:none" data-init="@get('/api/events?channels=logs,stats,agents,tasks')"></div>` +
@@ -1316,6 +1316,19 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push(
     '  function getTheme(){return document.documentElement.getAttribute("data-theme")||"dark";}',
   );
+  parts.push('  function updateThemeToggle(t){');
+  parts.push('    if(!themeBtn)return;');
+  parts.push('    themeBtn.textContent=t==="light"?"\\u2600":"\\u263E";');
+  parts.push(
+    '    themeBtn.title=t==="light"?"Switch to dark mode":"Switch to light mode";',
+  );
+  parts.push(
+    '    themeBtn.setAttribute("aria-label",t==="light"?"Toggle theme: light":"Toggle theme: dark");',
+  );
+  parts.push(
+    '    themeBtn.setAttribute("aria-pressed",t==="light"?"true":"false");',
+  );
+  parts.push('  }');
   parts.push('  function setTheme(t){');
   parts.push(
     '    if(t==="light"){document.documentElement.setAttribute("data-theme","light");}',
@@ -1323,20 +1336,14 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push(
     '    else{document.documentElement.removeAttribute("data-theme");}',
   );
-  parts.push('    localStorage.setItem("omniclaw_theme",t);');
-  parts.push('    themeBtn.textContent=t==="light"?"\\u2600":"\\u263E";');
   parts.push(
-    '    themeBtn.title=t==="light"?"Switch to dark mode":"Switch to light mode";',
+    '    try{localStorage.setItem("omniclaw_theme",t)}catch(e){}',
   );
+  parts.push('    updateThemeToggle(t);');
   parts.push('  }');
+  parts.push('  updateThemeToggle(getTheme());');
   parts.push(
-    '  themeBtn.textContent=getTheme()==="light"?"\\u2600":"\\u263E";',
-  );
-  parts.push(
-    '  themeBtn.title=getTheme()==="light"?"Switch to dark mode":"Switch to light mode";',
-  );
-  parts.push(
-    '  themeBtn.addEventListener("click",function(){setTheme(getTheme()==="dark"?"light":"dark");});',
+    '  if(themeBtn)themeBtn.addEventListener("click",function(){setTheme(getTheme()==="dark"?"light":"dark");});',
   );
   parts.push(
     '  window.__toggleTheme=function(){setTheme(getTheme()==="dark"?"light":"dark");};',
