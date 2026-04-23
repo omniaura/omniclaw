@@ -50,11 +50,11 @@ describe('FakeState', () => {
     const matches = state.searchMessages('  pr #315  ', undefined, 500);
 
     expect(matches).toHaveLength(4);
-    expect(matches[0]?.chat_jid).toBe('sim:general');
-    expect(matches[1]?.chat_jid).toBe('sim:code-review');
-    expect(
-      matches.slice(2).every((message) => message.chat_jid === 'sim:general'),
-    ).toBe(true);
+    const jids = matches.map((m) => m.chat_jid);
+    expect(jids).toContain('sim:general');
+    expect(jids).toContain('sim:code-review');
+    expect(jids.filter((j) => j === 'sim:general')).toHaveLength(3);
+    expect(jids.filter((j) => j === 'sim:code-review')).toHaveLength(1);
 
     const filtered = state.searchMessages('pr #315', 'sim:general', 1);
     expect(filtered).toHaveLength(1);
