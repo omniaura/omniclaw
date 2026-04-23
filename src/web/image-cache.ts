@@ -1,6 +1,8 @@
 import { createHash } from 'crypto';
 import { lookup } from 'dns/promises';
 import fs from 'fs';
+import http from 'node:http';
+import https from 'node:https';
 import { isIP } from 'net';
 import path from 'path';
 
@@ -30,6 +32,8 @@ export interface RemoteImageCacheOptions {
   fetchImpl?: RemoteImageFetch;
   /** Maximum bytes to read from the upstream response. Defaults to 5 MiB. */
   maxBytes?: number;
+  /** Override DNS resolution (primarily for tests). */
+  lookupHostAddresses?: (hostname: string) => Promise<string[]>;
 }
 
 export interface RemoteImageUrlValidationOptions {
@@ -100,35 +104,46 @@ function isBlockedPrivateAddress(address: string): boolean {
   return false;
 }
 
-export async function validateRemoteImageUrl(
+export interface RemoteImageUrlValidationResult {
+  error: string | null;
+  /** Pre-resolved IP addresses. Empty for direct-IP URLs. */
+  resolvedAddresses: string[];
+}
+
+/**
+ * Validate a remote image URL and resolve its hostname to IP addresses.
+ * Returns both the validation result and the resolved addresses so callers
+ * can pin DNS for the subsequent fetch (preventing DNS rebinding).
+ */
+export async function resolveAndValidateRemoteImageUrl(
   url: string,
   options: RemoteImageUrlValidationOptions = {},
-): Promise<string | null> {
+): Promise<RemoteImageUrlValidationResult> {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    return 'invalid url';
+    return { error: 'invalid url', resolvedAddresses: [] };
   }
 
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    return 'unsupported protocol';
+    return { error: 'unsupported protocol', resolvedAddresses: [] };
   }
 
   if (parsed.username || parsed.password) {
-    return 'embedded credentials are not allowed';
+    return { error: 'embedded credentials are not allowed', resolvedAddresses: [] };
   }
 
   const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
-    return 'loopback host is not allowed';
+    return { error: 'loopback host is not allowed', resolvedAddresses: [] };
   }
 
   if (isIP(hostname) && isBlockedPrivateAddress(hostname)) {
-    return 'private address is not allowed';
+    return { error: 'private address is not allowed', resolvedAddresses: [] };
   }
 
-  if (isIP(hostname)) return null;
+  if (isIP(hostname)) return { error: null, resolvedAddresses: [] };
 
   const resolveHostAddresses =
     options.lookupHostAddresses ?? lookupHostAddresses;
@@ -136,13 +151,24 @@ export async function validateRemoteImageUrl(
   try {
     const addresses = await resolveHostAddresses(hostname);
     if (addresses.some((address) => isBlockedPrivateAddress(address))) {
-      return 'resolved private address is not allowed';
+      return { error: 'resolved private address is not allowed', resolvedAddresses: [] };
     }
+    return { error: null, resolvedAddresses: addresses };
   } catch {
-    return 'dns lookup failed - cannot verify host safety';
+    return { error: 'dns lookup failed - cannot verify host safety', resolvedAddresses: [] };
   }
+}
 
-  return null;
+/**
+ * Validate a remote image URL. Returns an error string or null if valid.
+ * Backward-compatible wrapper around resolveAndValidateRemoteImageUrl.
+ */
+export async function validateRemoteImageUrl(
+  url: string,
+  options: RemoteImageUrlValidationOptions = {},
+): Promise<string | null> {
+  const result = await resolveAndValidateRemoteImageUrl(url, options);
+  return result.error;
 }
 
 export function describeImageUrl(url: string): string {
@@ -233,14 +259,122 @@ export async function readStreamWithCap(
   return Buffer.concat(chunks, totalBytes);
 }
 
+/**
+ * Fetch a URL with DNS pinned to a pre-resolved address, preventing DNS
+ * rebinding. Uses Node's http/https modules with a custom `lookup` that
+ * always returns the validated address instead of re-resolving.
+ */
+export async function fetchWithPinnedDns(
+  url: string,
+  pinnedAddress: string,
+  timeoutMs: number,
+): Promise<Response> {
+  const parsed = new URL(url);
+  const isSecure = parsed.protocol === 'https:';
+  const requestFn = isSecure ? https.request : http.request;
+  const defaultPort = isSecure ? 443 : 80;
+  const port = parsed.port ? Number.parseInt(parsed.port, 10) : defaultPort;
+  const family = pinnedAddress.includes(':') ? 6 : 4;
+
+  return new Promise<Response>((resolve, reject) => {
+    let settled = false;
+    const settle = (fn: () => void) => {
+      if (!settled) {
+        settled = true;
+        fn();
+      }
+    };
+
+    const timer = setTimeout(() => {
+      req.destroy();
+      settle(() =>
+        reject(new Error(`Image fetch timed out after ${timeoutMs}ms`)),
+      );
+    }, timeoutMs);
+
+    const req = requestFn(
+      {
+        method: 'GET',
+        hostname: parsed.hostname,
+        port,
+        path: `${parsed.pathname}${parsed.search}`,
+        // Pin DNS: always return the pre-validated address.
+        // Bun's http client calls lookup with { all: true } and expects
+        // an array result; Node.js uses the simple (err, address, family) form.
+        lookup: (
+          _hostname: string,
+          _opts: unknown,
+          cb?: Function,
+        ) => {
+          const callback = typeof _opts === 'function' ? _opts : cb!;
+          const opts =
+            typeof _opts === 'object' && _opts !== null
+              ? (_opts as Record<string, unknown>)
+              : {};
+          if (opts.all) {
+            callback(null, [{ address: pinnedAddress, family }]);
+          } else {
+            callback(null, pinnedAddress, family);
+          }
+        },
+        ...(isSecure
+          ? { servername: parsed.hostname, rejectUnauthorized: true }
+          : {}),
+      },
+      (res: http.IncomingMessage) => {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            res.on('data', (chunk: Buffer) => {
+              controller.enqueue(new Uint8Array(chunk));
+            });
+            res.on('end', () => {
+              clearTimeout(timer);
+              controller.close();
+            });
+            res.on('error', (err) => {
+              clearTimeout(timer);
+              controller.error(err);
+            });
+          },
+          cancel() {
+            res.destroy();
+          },
+        });
+
+        const headers = new Headers();
+        for (const [key, val] of Object.entries(res.headers)) {
+          if (val === undefined) continue;
+          const values = Array.isArray(val) ? val : [val];
+          for (const v of values) headers.append(key, v);
+        }
+
+        settle(() =>
+          resolve(
+            new Response(body, {
+              status: res.statusCode ?? 200,
+              statusText: res.statusMessage ?? '',
+              headers,
+            }),
+          ),
+        );
+      },
+    );
+
+    req.on('error', (err: Error) => {
+      clearTimeout(timer);
+      settle(() => reject(err));
+    });
+
+    req.end();
+  });
+}
+
 export async function serveCachedRemoteImage(
   cacheKey: string,
   resolveUrl: () => Promise<string | null>,
   options: RemoteImageCacheOptions = {},
 ): Promise<Response | null> {
   const cacheDir = options.cacheDir ?? IMAGE_CACHE_DIR;
-  const fetchImpl: RemoteImageFetch =
-    options.fetchImpl ?? ((input, init) => fetch(input, init));
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_IMAGE_BYTES;
   fs.mkdirSync(cacheDir, { recursive: true });
   const { dataPath, metaPath } = getCachePaths(cacheDir, cacheKey);
@@ -257,13 +391,15 @@ export async function serveCachedRemoteImage(
   const url = await resolveUrl();
   if (!url) return null;
 
-  const blockReason = await validateRemoteImageUrl(url);
-  if (blockReason) {
+  const validation = await resolveAndValidateRemoteImageUrl(url, {
+    lookupHostAddresses: options.lookupHostAddresses,
+  });
+  if (validation.error) {
     logger.warn(
       {
         cacheKey,
         imageUrl: describeImageUrl(url),
-        blockReason,
+        blockReason: validation.error,
       },
       'Blocked remote image fetch',
     );
@@ -271,13 +407,27 @@ export async function serveCachedRemoteImage(
   }
 
   try {
-    // This still has a DNS rebinding/TOCTOU gap because fetch() resolves the
-    // hostname again. The write-time validation in routes.ts prevents
-    // persistence of malicious custom avatar URLs, and this fetch-time check
-    // adds a second guard for stored remote image URLs.
-    const upstream = await fetchImpl(url, {
-      signal: AbortSignal.timeout(REMOTE_IMAGE_FETCH_TIMEOUT_MS),
-    });
+    let upstream: Response;
+    if (options.fetchImpl) {
+      // Caller-provided fetch (tests, custom transports).
+      upstream = await options.fetchImpl(url, {
+        signal: AbortSignal.timeout(REMOTE_IMAGE_FETCH_TIMEOUT_MS),
+      });
+    } else if (validation.resolvedAddresses.length > 0) {
+      // Hostname URL: connect to the pre-validated IP, preventing DNS
+      // rebinding between validation and fetch.
+      upstream = await fetchWithPinnedDns(
+        url,
+        validation.resolvedAddresses[0],
+        REMOTE_IMAGE_FETCH_TIMEOUT_MS,
+      );
+    } else {
+      // Direct-IP URL: already validated above, safe to fetch directly.
+      upstream = await fetch(url, {
+        signal: AbortSignal.timeout(REMOTE_IMAGE_FETCH_TIMEOUT_MS),
+      });
+    }
+
     if (!upstream.ok) {
       logger.warn(
         {
