@@ -1,10 +1,41 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 
 import {
   createControlPlaneFetch,
+  startControlPlaneServer,
   type ControlPlaneDeps,
 } from './control-plane.js';
+import { logger } from './logger.js';
 import type { RegisteredGroup, ScheduledTask } from './types.js';
+
+const RealDate = Date;
+const realBunServe = Bun.serve;
+const realLoggerInfo = logger.info;
+
+function installFixedDate(iso: string) {
+  const fixedTime = new RealDate(iso).getTime();
+  class FixedDate extends RealDate {
+    constructor(value?: string | number | Date) {
+      if (value !== undefined) {
+        super(value);
+        return;
+      }
+      super(fixedTime);
+    }
+
+    static override now() {
+      return fixedTime;
+    }
+  }
+
+  globalThis.Date = FixedDate as DateConstructor;
+}
+
+afterEach(() => {
+  globalThis.Date = RealDate;
+  Bun.serve = realBunServe;
+  logger.info = realLoggerInfo;
+});
 
 function makeTask(id: string, status: ScheduledTask['status']): ScheduledTask {
   return {
@@ -65,12 +96,14 @@ function makeDeps(overrides: Partial<ControlPlaneDeps> = {}): ControlPlaneDeps {
 
 describe('control-plane routes', () => {
   it('serves health endpoint', async () => {
+    installFixedDate('2026-04-23T12:34:56.000Z');
     const fetch = createControlPlaneFetch(makeDeps());
     const res = await fetch(new Request('http://localhost/healthz'));
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean };
+    const body = (await res.json()) as { ok: boolean; now: string };
     expect(body.ok).toBe(true);
+    expect(body.now).toBe('2026-04-23T12:34:56.000Z');
   });
 
   it('returns state summary and queue snapshot', async () => {
@@ -104,6 +137,29 @@ describe('control-plane routes', () => {
     expect(pauseTask).toHaveBeenCalledWith('task-1');
   });
 
+  it('returns the current task list', async () => {
+    const getTasks = mock(() => [
+      makeTask('task-a', 'active'),
+      makeTask('task-b', 'paused'),
+      makeTask('task-c', 'completed'),
+    ]);
+    const fetch = createControlPlaneFetch(makeDeps({ getTasks }));
+
+    const res = await fetch(
+      new Request('http://localhost/api/control-plane/tasks'),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; tasks: ScheduledTask[] };
+    expect(body.ok).toBe(true);
+    expect(body.tasks.map((task) => task.id)).toEqual([
+      'task-a',
+      'task-b',
+      'task-c',
+    ]);
+    expect(getTasks).toHaveBeenCalledTimes(1);
+  });
+
   it('maps missing tasks to 404 on actions', async () => {
     const fetch = createControlPlaneFetch(
       makeDeps({ runTaskNow: () => ({ ok: false, reason: 'not_found' }) }),
@@ -130,5 +186,89 @@ describe('control-plane routes', () => {
     );
 
     expect(res.status).toBe(409);
+  });
+
+  it('maps other task action failures to 400', async () => {
+    const fetch = createControlPlaneFetch(
+      makeDeps({ cancelTask: () => ({ ok: false, reason: 'not_allowed' }) }),
+    );
+
+    const res = await fetch(
+      new Request('http://localhost/api/control-plane/tasks/task-a/cancel', {
+        method: 'POST',
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'not_allowed' });
+  });
+
+  it('returns 404 for unsupported methods on task actions', async () => {
+    const runTaskNow = mock(() => ({ ok: true as const }));
+    const fetch = createControlPlaneFetch(makeDeps({ runTaskNow }));
+
+    const res = await fetch(
+      new Request('http://localhost/api/control-plane/tasks/task-a/run-now'),
+    );
+
+    expect(res.status).toBe(404);
+    expect(runTaskNow).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for unknown routes', async () => {
+    const fetch = createControlPlaneFetch(makeDeps());
+
+    const res = await fetch(
+      new Request('http://localhost/api/control-plane/missing'),
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ ok: false, error: 'not_found' });
+  });
+});
+
+describe('startControlPlaneServer', () => {
+  it('starts Bun.serve with the control plane fetcher and logs startup metadata', async () => {
+    const fakeServer = {
+      hostname: '127.0.0.1',
+      port: 4312,
+      stop: mock(),
+    } as unknown as ReturnType<typeof Bun.serve>;
+    const serveMockFn = mock((options: Parameters<typeof Bun.serve>[0]) => ({
+      hostname: options.hostname,
+      port: options.port,
+      stop: fakeServer.stop,
+    }));
+    const serveMock = serveMockFn as unknown as typeof Bun.serve;
+    const infoMock = mock(() => {});
+    Bun.serve = serveMock;
+    logger.info = infoMock as typeof logger.info;
+
+    const deps = makeDeps();
+    const server = startControlPlaneServer(deps, {
+      hostname: '127.0.0.1',
+      port: 4312,
+    });
+
+    expect(serveMockFn).toHaveBeenCalledTimes(1);
+    const serveOptions = serveMockFn.mock.calls[0]?.[0];
+    expect(serveOptions?.hostname).toBe('127.0.0.1');
+    expect(serveOptions?.port).toBe(4312);
+    const res = (await serveOptions!.fetch!.call(
+      fakeServer,
+      new Request('http://localhost/api/control-plane/tasks'),
+      fakeServer,
+    )) as Response;
+    expect(res.status).toBe(200);
+    expect(server.hostname).toBe('127.0.0.1');
+    expect(server.port).toBe(4312);
+    expect(infoMock).toHaveBeenCalledWith(
+      {
+        hostname: '127.0.0.1',
+        port: 4312,
+        op: 'controlPlane',
+      },
+      'Control plane HTTP server started',
+    );
   });
 });
