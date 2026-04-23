@@ -469,7 +469,10 @@ describe('logger', () => {
       logger.info({ op: 'startup' }, 'started');
 
       expect(subscriber).toHaveBeenCalledTimes(1);
-      expect(subscriber.mock.calls[0]?.[0]).toMatchObject({
+      const subscriberCalls = subscriber.mock.calls as unknown as Array<
+        [Record<string, unknown>]
+      >;
+      expect(subscriberCalls[0]?.[0]).toMatchObject({
         group: 'main',
         op: 'startup',
         msg: 'started',
@@ -510,7 +513,10 @@ describe('logger', () => {
       logger.error('default logger event');
 
       expect(subscriber).toHaveBeenCalledTimes(1);
-      expect(subscriber.mock.calls[0]?.[0]).toMatchObject({
+      const subscriberCalls = subscriber.mock.calls as unknown as Array<
+        [Record<string, unknown>]
+      >;
+      expect(subscriberCalls[0]?.[0]).toMatchObject({
         msg: 'default logger event',
         level: 'error',
       });
