@@ -375,6 +375,104 @@ describe('dark mode / theme toggle', () => {
   });
 });
 
+describe('mobile responsive layout', () => {
+  const shell = () => renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+  it('includes the hamburger button in the header', () => {
+    const html = renderNav('/');
+
+    expect(html).toContain('id="btn-hamburger"');
+    expect(html).toContain('class="hamburger"');
+    expect(html).toContain('aria-label="Toggle navigation"');
+    expect(html).toContain('aria-expanded="false"');
+  });
+
+  it('includes the nav backdrop overlay in the shell', () => {
+    const html = shell();
+
+    expect(html).toContain('id="nav-backdrop"');
+    expect(html).toContain('class="nav-backdrop"');
+  });
+
+  it('includes hamburger CSS hidden on desktop', () => {
+    const html = shell();
+
+    expect(html).toContain('.hamburger{display:none');
+  });
+
+  it('includes responsive breakpoint at 768px for nav dropdown', () => {
+    const html = shell();
+
+    expect(html).toContain('@media(max-width:768px)');
+    expect(html).toContain('.hamburger{display:flex}');
+    expect(html).toContain('nav#nav-links{display:none');
+    expect(html).toContain('nav#nav-links.open{display:flex}');
+  });
+
+  it('makes workspace single column on mobile', () => {
+    const html = shell();
+
+    expect(html).toContain(
+      '.workspace{grid-template-columns:1fr !important',
+    );
+  });
+
+  it('makes log sidebar a fixed overlay on mobile', () => {
+    const html = shell();
+
+    expect(html).toContain('.log-sidebar{display:none;position:fixed');
+  });
+
+  it('stacks conversation layout vertically on mobile', () => {
+    const html = shell();
+
+    expect(html).toContain('.conv-layout{flex-direction:column}');
+    expect(html).toContain('.conv-sidebar{width:100%');
+  });
+
+  it('stacks context viewer vertically on mobile', () => {
+    const html = shell();
+
+    expect(html).toContain('.ctx-layout{flex-direction:column}');
+    expect(html).toContain('.ctx-sidebar{width:100%');
+  });
+
+  it('includes small mobile breakpoint at 480px', () => {
+    const html = shell();
+
+    expect(html).toContain('@media(max-width:480px)');
+  });
+
+  it('includes the hamburger toggle script', () => {
+    const html = shell();
+
+    expect(html).toContain('btn-hamburger');
+    expect(html).toContain('nav-backdrop');
+    expect(html).toContain('closeNav');
+    expect(html).toContain('openNav');
+  });
+
+  it('auto-collapses sidebar on mobile viewport', () => {
+    const html = shell();
+
+    expect(html).toContain('window.innerWidth<=768');
+    expect(html).toContain('sidebar-collapsed');
+  });
+
+  it('includes nav backdrop CSS', () => {
+    const html = shell();
+
+    expect(html).toContain('.nav-backdrop{display:none');
+    expect(html).toContain('.nav-backdrop.visible{display:block}');
+  });
+
+  it('closes nav on resize back to desktop', () => {
+    const html = shell();
+
+    expect(html).toContain('window.innerWidth>768');
+  });
+});
+
 describe('toast notification system', () => {
   const shell = () => renderShell('/', 'Dashboard', '<div>content</div>', {});
 
