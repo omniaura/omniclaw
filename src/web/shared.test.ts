@@ -412,9 +412,7 @@ describe('mobile responsive layout', () => {
   it('makes workspace single column on mobile', () => {
     const html = shell();
 
-    expect(html).toContain(
-      '.workspace{grid-template-columns:1fr !important',
-    );
+    expect(html).toContain('.workspace{grid-template-columns:1fr !important');
   });
 
   it('makes log sidebar a fixed overlay on mobile', () => {

@@ -1444,10 +1444,16 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push('  var nav=document.getElementById("nav-links");');
   parts.push('  var backdrop=document.getElementById("nav-backdrop");');
   parts.push('  if(!hamburger||!nav)return;');
-  parts.push('  function closeNav(){nav.classList.remove("open");backdrop.classList.remove("visible");hamburger.setAttribute("aria-expanded","false");}');
-  parts.push('  function openNav(){nav.classList.add("open");backdrop.classList.add("visible");hamburger.setAttribute("aria-expanded","true");}');
+  parts.push(
+    '  function closeNav(){nav.classList.remove("open");backdrop.classList.remove("visible");hamburger.setAttribute("aria-expanded","false");}',
+  );
+  parts.push(
+    '  function openNav(){nav.classList.add("open");backdrop.classList.add("visible");hamburger.setAttribute("aria-expanded","true");}',
+  );
   parts.push('  hamburger.addEventListener("click",function(){');
-  parts.push('    if(nav.classList.contains("open")){closeNav();}else{openNav();}');
+  parts.push(
+    '    if(nav.classList.contains("open")){closeNav();}else{openNav();}',
+  );
   parts.push('  });');
   parts.push('  backdrop.addEventListener("click",closeNav);');
   parts.push('  nav.addEventListener("click",function(e){');
