@@ -404,6 +404,14 @@ describe('validateRemoteImageUrl', () => {
       }),
     ).resolves.toBeNull();
   });
+
+  it('rejects hostnames that resolve no addresses', async () => {
+    await expect(
+      validateRemoteImageUrl('https://cdn.example.com/avatar.png', {
+        lookupHostAddresses: async () => [],
+      }),
+    ).resolves.toBe('no addresses resolved');
+  });
 });
 
 describe('resolveAndValidateRemoteImageUrl', () => {
@@ -511,7 +519,7 @@ describe('fetchWithPinnedDns', () => {
 });
 
 describe('serveCachedRemoteImage DNS rebinding prevention', () => {
-  it('uses pinned DNS when no fetchImpl is provided', async () => {
+  it('uses pinned DNS for hostname URLs even when fetchImpl is provided', async () => {
     const testImageCacheDir = path.join(
       DATA_DIR,
       'image-cache-rebinding-test',
@@ -535,16 +543,24 @@ describe('serveCachedRemoteImage DNS rebinding prevention', () => {
     const port = (server.address() as { port: number }).port;
 
     try {
-      // Use a public IP (93.184.216.34) that will pass validation, but the
-      // server actually listens on 127.0.0.1. We test fetchWithPinnedDns
-      // directly to verify the pinned path works end-to-end.
-      const response = await fetchWithPinnedDns(
-        `http://cdn.example.com:${port}/avatar.png`,
-        '127.0.0.1',
-        5000,
+      const response = await serveCachedRemoteImage(
+        'pinned-hostname-key',
+        async () => `http://cdn.example.com:${port}/avatar.png`,
+        {
+          cacheDir: testImageCacheDir,
+          lookupHostAddresses: async () => ['93.184.216.34'],
+          fetchImpl: (async () => {
+            throw new Error('fetchImpl must not be used for hostname URLs');
+          }) as RemoteImageFetch,
+          fetchWithPinnedDnsImpl: (url, pinnedAddress, timeoutMs) => {
+            expect(pinnedAddress).toBe('93.184.216.34');
+            return fetchWithPinnedDns(url, '127.0.0.1', timeoutMs);
+          },
+        },
       );
 
-      expect(response.status).toBe(200);
+      expect(response).not.toBeNull();
+      expect(response!.status).toBe(200);
       // Verify the Host header carries the original hostname, not the pinned IP.
       expect(receivedHost).toBe(`cdn.example.com:${port}`);
     } finally {

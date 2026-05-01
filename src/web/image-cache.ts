@@ -27,9 +27,17 @@ export type RemoteImageFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+export type PinnedRemoteImageFetch = (
+  url: string,
+  pinnedAddress: string,
+  timeoutMs: number,
+) => Promise<Response>;
+
 export interface RemoteImageCacheOptions {
   cacheDir?: string;
   fetchImpl?: RemoteImageFetch;
+  /** Override pinned DNS fetch (primarily for tests). */
+  fetchWithPinnedDnsImpl?: PinnedRemoteImageFetch;
   /** Maximum bytes to read from the upstream response. Defaults to 5 MiB. */
   maxBytes?: number;
   /** Override DNS resolution (primarily for tests). */
@@ -153,6 +161,9 @@ export async function resolveAndValidateRemoteImageUrl(
 
   try {
     const addresses = await resolveHostAddresses(hostname);
+    if (addresses.length === 0) {
+      return { error: 'no addresses resolved', resolvedAddresses: [] };
+    }
     if (addresses.some((address) => isBlockedPrivateAddress(address))) {
       return {
         error: 'resolved private address is not allowed',
@@ -413,19 +424,21 @@ export async function serveCachedRemoteImage(
 
   try {
     let upstream: Response;
-    if (options.fetchImpl) {
-      // Caller-provided fetch (tests, custom transports).
-      upstream = await options.fetchImpl(url, {
-        signal: AbortSignal.timeout(REMOTE_IMAGE_FETCH_TIMEOUT_MS),
-      });
-    } else if (validation.resolvedAddresses.length > 0) {
+    if (validation.resolvedAddresses.length > 0) {
       // Hostname URL: connect to the pre-validated IP, preventing DNS
       // rebinding between validation and fetch.
-      upstream = await fetchWithPinnedDns(
+      const pinnedFetch = options.fetchWithPinnedDnsImpl ?? fetchWithPinnedDns;
+      upstream = await pinnedFetch(
         url,
         validation.resolvedAddresses[0],
         REMOTE_IMAGE_FETCH_TIMEOUT_MS,
       );
+    } else if (options.fetchImpl) {
+      // Caller-provided fetch is only safe for direct-IP URLs, where there is
+      // no hostname to re-resolve after validation.
+      upstream = await options.fetchImpl(url, {
+        signal: AbortSignal.timeout(REMOTE_IMAGE_FETCH_TIMEOUT_MS),
+      });
     } else {
       // Direct-IP URL: already validated above, safe to fetch directly.
       upstream = await fetch(url, {
