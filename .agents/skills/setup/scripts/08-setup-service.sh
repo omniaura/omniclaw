@@ -31,15 +31,46 @@ if [ -z "$PLATFORM" ]; then
   esac
 fi
 
-NODE_PATH=$(which bun || which node)
+BUN_PATH="$(command -v bun || true)"
+NODE_PATH="${BUN_PATH:-$(command -v node || true)}"
 PROJECT_PATH="$PROJECT_ROOT"
 HOME_PATH="$HOME"
 
 log "Setting up service: platform=$PLATFORM node=$NODE_PATH project=$PROJECT_PATH"
 
+if [ -z "$NODE_PATH" ]; then
+  log "No Bun or Node runtime found"
+  cat <<EOF
+=== OMNICLAW SETUP: SETUP_SERVICE ===
+SERVICE_TYPE: unknown
+NODE_PATH:
+PROJECT_PATH: $PROJECT_PATH
+STATUS: failed
+ERROR: runtime_not_found
+LOG: logs/setup.log
+=== END ===
+EOF
+  exit 1
+fi
+
 # Build first
 log "Building TypeScript"
-if ! bun run build >> "$LOG_FILE" 2>&1; then
+if [ -z "$BUN_PATH" ]; then
+  log "Bun not found; build requires Bun"
+  cat <<EOF
+=== OMNICLAW SETUP: SETUP_SERVICE ===
+SERVICE_TYPE: unknown
+NODE_PATH: $NODE_PATH
+PROJECT_PATH: $PROJECT_PATH
+STATUS: failed
+ERROR: bun_not_found
+LOG: logs/setup.log
+=== END ===
+EOF
+  exit 1
+fi
+
+if ! "$BUN_PATH" run build >> "$LOG_FILE" 2>&1; then
   log "Build failed"
   cat <<EOF
 === OMNICLAW SETUP: SETUP_SERVICE ===
@@ -145,7 +176,7 @@ WorkingDirectory=${PROJECT_PATH}
 Restart=always
 RestartSec=5
 Environment=HOME=${HOME_PATH}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${HOME_PATH}/.local/bin
+Environment=PATH=${HOME_PATH}/.bun/bin:/usr/local/bin:/usr/bin:/bin:${HOME_PATH}/.local/bin
 StandardOutput=append:${PROJECT_PATH}/logs/omniclaw.stdout.log
 StandardError=append:${PROJECT_PATH}/logs/omniclaw.log
 

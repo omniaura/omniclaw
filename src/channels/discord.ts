@@ -192,7 +192,7 @@ export interface DiscordChannelOpts {
   botId: string;
   token: string;
   multiBotMode?: boolean;
-  onSyntheticMessage?: (message: NewMessage) => void;
+  onSyntheticMessage?: (message: NewMessage) => void | Promise<void>;
   registeredGroups?: () => Record<string, RegisteredGroup>;
   onReaction?: (
     chatJid: string,
@@ -1269,7 +1269,7 @@ export class DiscordChannel implements Channel {
         chatName,
         interaction.guildId || undefined,
       );
-      this.opts.onSyntheticMessage?.({
+      await this.opts.onSyntheticMessage?.({
         id: `slash-${interaction.id}`,
         chat_jid: chatJid,
         sender: `discord:${interaction.user.id}`,

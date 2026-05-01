@@ -3,10 +3,22 @@ set -e
 
 export HOME=/home/bun
 
-# When running as host uid (--user 501:20), there's no /etc/passwd entry.
+# When running as host uid (--user 501:20), there's no passwd entry.
 # Many tools (claude, git, ssh-keygen) need to resolve the current user.
 if ! id -un &>/dev/null 2>&1; then
-  echo "omniclaw:x:$(id -u):$(id -g):OmniClaw Agent:${HOME}:/bin/bash" >> /etc/passwd
+  NSS_WRAPPER_PASSWD="$(mktemp)"
+  NSS_WRAPPER_GROUP="$(mktemp)"
+  cp /etc/passwd "$NSS_WRAPPER_PASSWD"
+  cp /etc/group "$NSS_WRAPPER_GROUP"
+  echo "omniclaw:x:$(id -u):$(id -g):OmniClaw Agent:${HOME}:/bin/bash" >> "$NSS_WRAPPER_PASSWD"
+  echo "omniclaw:x:$(id -g):" >> "$NSS_WRAPPER_GROUP"
+  export NSS_WRAPPER_PASSWD NSS_WRAPPER_GROUP
+  for NSS_WRAPPER_LIB in /usr/lib/*/libnss_wrapper.so /usr/lib/libnss_wrapper.so; do
+    if [ -f "$NSS_WRAPPER_LIB" ]; then
+      export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$NSS_WRAPPER_LIB"
+      break
+    fi
+  done
 fi
 
 # Source environment variables from mounted env file
@@ -95,11 +107,16 @@ const home = process.env.HOME || '/home/bun';
 // Use ssh-keygen to convert PKCS#8 PEM to OpenSSH format
 fs.writeFileSync(home + '/.ssh/id_ed25519.pem', privPem, { mode: 0o600 });
 fs.writeFileSync(home + '/.ssh/id_ed25519.pub', sshPub + '\n', { mode: 0o644 });
-  " && ssh-keygen -p -N "" -m pem -f "$HOME/.ssh/id_ed25519.pem" -q 2>/dev/null && mv "$HOME/.ssh/id_ed25519.pem" "$HOME/.ssh/id_ed25519" || {
+  "
+  if ! ssh-keygen -p -N "" -m pem -f "$HOME/.ssh/id_ed25519.pem" -q 2>/dev/null; then
     # Fallback: ssh-keygen conversion failed, try direct approach
     rm -f "$HOME/.ssh/id_ed25519.pem"
     return 1
-  }
+  fi
+  if ! mv "$HOME/.ssh/id_ed25519.pem" "$HOME/.ssh/id_ed25519"; then
+    rm -f "$HOME/.ssh/id_ed25519.pem"
+    return 1
+  fi
   chmod 600 "$HOME/.ssh/id_ed25519"
 }
 
@@ -122,7 +139,7 @@ if [ -n "$SSH_KEY_SEED" ]; then
     cp "$HOME/.ssh/id_ed25519.pub" /workspace/group/.ssh/id_ed25519.pub
     chmod 600 /workspace/group/.ssh/id_ed25519
     PUBKEY=$(cat "$HOME/.ssh/id_ed25519.pub")
-    echo "{\"type\":\"ssh_pubkey\",\"pubkey\":\"$PUBKEY\"}" > /workspace/ipc/messages/ssh_pubkey_$(date +%s%N).json
+    echo "{\"type\":\"ssh_pubkey\",\"pubkey\":\"$PUBKEY\"}" > "/workspace/ipc/messages/ssh_pubkey_$(date +%s%N).json"
   fi
 elif [ -f /workspace/group/.ssh/id_ed25519 ]; then
   # Persistent key from previous container run
@@ -138,7 +155,7 @@ else
   chmod 600 /workspace/group/.ssh/id_ed25519
   # Notify host via IPC that a new key was generated
   PUBKEY=$(cat "$HOME/.ssh/id_ed25519.pub")
-  echo "{\"type\":\"ssh_pubkey\",\"pubkey\":\"$PUBKEY\"}" > /workspace/ipc/messages/ssh_pubkey_$(date +%s%N).json
+  echo "{\"type\":\"ssh_pubkey\",\"pubkey\":\"$PUBKEY\"}" > "/workspace/ipc/messages/ssh_pubkey_$(date +%s%N).json"
 fi
 ssh-keyscan github.com gitlab.com >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
 
