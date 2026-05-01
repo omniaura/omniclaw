@@ -43,6 +43,7 @@ export function renderNav(
 ): string {
   return (
     `<header>` +
+    `<button id="btn-hamburger" class="hamburger" title="Menu" aria-label="Toggle navigation" aria-expanded="false">\u2261</button>` +
     `<div class="brand">omniclaw</div>` +
     `<nav id="nav-links">${renderNavLinks(activePath)}</nav>` +
     `<div class="header-right">` +
@@ -84,6 +85,7 @@ export function renderShell(
     // Persistent SSE connector (outside #content so it survives navigation)
     `<div id="sse-init" style="display:none" data-init="@get('/api/events?channels=logs,stats,agents,tasks')"></div>` +
     renderNav(activePath) +
+    `<div class="nav-backdrop" id="nav-backdrop"></div>` +
     `<div class="workspace" id="workspace">` +
     `<main id="content">${contentHtml}</main>` +
     `<div class="resize-handle" id="resize-handle"><div class="resize-grip"></div></div>` +
@@ -713,9 +715,80 @@ function shellCSS(): string {
     `.theme-toggle{background:none;border:1px solid transparent;color:var(--text-dim);cursor:pointer;font-size:14px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:4px;transition:all .12s}`,
     `.theme-toggle:hover{color:var(--text);background:var(--surface-2);border-color:var(--border)}`,
 
-    // --- Responsive ---
+    // --- Hamburger button (hidden on desktop) ---
+    `.hamburger{display:none;background:none;border:1px solid transparent;color:var(--text-dim);cursor:pointer;font-size:18px;width:32px;height:32px;align-items:center;justify-content:center;border-radius:4px;transition:all .12s;flex-shrink:0;-webkit-tap-highlight-color:transparent}`,
+    `.hamburger:hover{color:var(--text);background:var(--surface-2);border-color:var(--border)}`,
+
+    // --- Mobile nav overlay backdrop ---
+    `.nav-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:89}`,
+    `.nav-backdrop.visible{display:block}`,
+
+    // --- Responsive: tablet (<=768px) ---
     `@media(max-width:900px){.stats-grid{grid-template-columns:repeat(2,1fr)}.tables-grid{grid-template-columns:1fr}.system-grid{grid-template-columns:1fr}}`,
-    `@media(max-width:600px){.stats-grid{grid-template-columns:1fr}}`,
+    `@media(max-width:768px){`,
+    // Header: show hamburger, collapse nav into dropdown
+    `.hamburger{display:flex}`,
+    `nav#nav-links{display:none;position:fixed;top:40px;left:0;right:0;background:var(--surface);border-bottom:1px solid var(--border);flex-direction:column;padding:8px;gap:2px;z-index:90;box-shadow:0 8px 24px rgba(0,0,0,.3);max-height:calc(100vh - 40px);overflow-y:auto}`,
+    `nav#nav-links.open{display:flex}`,
+    `.nav-link{padding:10px 12px;font-size:12px;border-radius:6px}`,
+    // Workspace: hide sidebar by default, overlay when open
+    `.workspace{grid-template-columns:1fr !important;grid-template-areas:"content" !important}`,
+    `.workspace .resize-handle{display:none !important}`,
+    `.log-sidebar{display:none;position:fixed;top:40px;right:0;bottom:0;width:min(85vw,380px);z-index:80;border-left:1px solid var(--border);box-shadow:-4px 0 16px rgba(0,0,0,.3)}`,
+    `.workspace.sidebar-left .log-sidebar{right:auto;left:0;border-left:none;border-right:1px solid var(--border);box-shadow:4px 0 16px rgba(0,0,0,.3)}`,
+    `.workspace:not(.sidebar-collapsed) .log-sidebar{display:flex}`,
+    `.sidebar-reopen{display:block !important;top:48px}`,
+    `.workspace:not(.sidebar-collapsed)~.sidebar-reopen{display:none !important}`,
+    // Conversation layout: stack vertically
+    `.conv-layout{flex-direction:column}`,
+    `.conv-sidebar{width:100%;max-height:35vh;border-right:none;border-bottom:1px solid var(--border)}`,
+    `.chat-item{padding:10px 12px}`,
+    `.msg-row{max-width:95%}`,
+    // Context viewer: stack vertically
+    `.ctx-layout{flex-direction:column}`,
+    `.ctx-sidebar{width:100%;min-width:0;max-height:30vh;border-right:none;border-bottom:1px solid var(--border);overflow-y:auto}`,
+    // Dashboard
+    `.dash-layout{flex-direction:column}`,
+    `.tables-grid{grid-template-columns:1fr}`,
+    // Agent detail
+    `.ad-info-grid{grid-template-columns:1fr 1fr}`,
+    `.ad-header{flex-wrap:wrap}`,
+    // Tasks table
+    `.tasks-table td,.tasks-table th{padding:5px 6px;font-size:11px}`,
+    `.td-prompt{max-width:140px}`,
+    `.td-agent{max-width:80px}`,
+    // Agents table
+    `.ap-table td,.ap-table th{padding:5px 6px;font-size:11px}`,
+    `.ap-filters{flex-direction:column;gap:4px}`,
+    `.ap-search{width:100%}`,
+    // General
+    `.btn{padding:6px 10px;min-height:36px}`,
+    `.btn-sm{min-height:28px}`,
+    `.filter-btn{padding:4px 8px;min-height:28px}`,
+    `.modal{width:95vw;max-width:95vw}`,
+    `.cmd-palette{width:95vw}`,
+    `.toast-container{left:.5rem;right:.5rem;bottom:.5rem}`,
+    `.toast{max-width:100%}`,
+    `}`,
+
+    // --- Responsive: small mobile (<=480px) ---
+    `@media(max-width:480px){`,
+    `.stats-grid{grid-template-columns:1fr}`,
+    `.stat-card .value{font-size:16px}`,
+    `header{padding:0 .5rem;gap:.5rem}`,
+    `.brand{font-size:11px}`,
+    `.header-right .status-badge{display:none}`,
+    `.ad-info-grid{grid-template-columns:1fr}`,
+    `.tasks-stats{flex-wrap:wrap;gap:6px}`,
+    `.tasks-title-row{flex-direction:column;align-items:flex-start;gap:6px}`,
+    `.ap-title-row{flex-direction:column;align-items:flex-start;gap:6px}`,
+    `.message-header{flex-wrap:wrap}`,
+    `.message-header .msg-count{margin-left:0}`,
+    `.search-filters{flex-direction:column}`,
+    `.logs-toolbar{flex-direction:column;align-items:stretch;gap:6px}`,
+    `.logs-toolbar-center{max-width:100%;min-width:0}`,
+    `.conv-sidebar{max-height:30vh}`,
+    `}`,
   ].join('\n');
 }
 
@@ -1368,6 +1441,40 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push(
     '  window.__toggleTheme=function(){setTheme(getTheme()==="dark"?"light":"dark");};',
   );
+  parts.push('})();');
+
+  // ---- Mobile hamburger menu ----
+  parts.push('(function(){');
+  parts.push('  var hamburger=document.getElementById("btn-hamburger");');
+  parts.push('  var nav=document.getElementById("nav-links");');
+  parts.push('  var backdrop=document.getElementById("nav-backdrop");');
+  parts.push('  if(!hamburger||!nav)return;');
+  parts.push(
+    '  function closeNav(){nav.classList.remove("open");backdrop.classList.remove("visible");hamburger.setAttribute("aria-expanded","false");}',
+  );
+  parts.push(
+    '  function openNav(){nav.classList.add("open");backdrop.classList.add("visible");hamburger.setAttribute("aria-expanded","true");}',
+  );
+  parts.push('  hamburger.addEventListener("click",function(){');
+  parts.push(
+    '    if(nav.classList.contains("open")){closeNav();}else{openNav();}',
+  );
+  parts.push('  });');
+  parts.push('  backdrop.addEventListener("click",closeNav);');
+  parts.push('  nav.addEventListener("click",function(e){');
+  parts.push('    if(e.target.closest(".nav-link"))closeNav();');
+  parts.push('  });');
+  // Close nav on resize back to desktop
+  parts.push('  window.addEventListener("resize",function(){');
+  parts.push('    if(window.innerWidth>768)closeNav();');
+  parts.push('  });');
+  parts.push('})();');
+
+  // Also auto-collapse sidebar on mobile on first load
+  parts.push('(function(){');
+  parts.push('  if(window.innerWidth<=768&&workspace&&prefs.collapsed==null){');
+  parts.push('    workspace.classList.add("sidebar-collapsed");');
+  parts.push('  }');
   parts.push('})();');
 
   // ---- Toast helper (used by multiple pages) ----
