@@ -481,18 +481,6 @@ export class WhatsAppChannel implements Channel {
               await this.buildSenderIdentity(rawSender);
             const senderName = msg.pushName?.trim() || '';
 
-            if (!senderName) {
-              logger.warn(
-                {
-                  op: 'senderIdentity',
-                  counter: 'sender_name_empty',
-                  platform: 'whatsapp',
-                  sender,
-                },
-                'WhatsApp message has empty sender_name',
-              );
-            }
-
             // Prepend reply context so the agent knows what's being replied to
             const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
             if (contextInfo?.quotedMessage || contextInfo?.stanzaId) {
