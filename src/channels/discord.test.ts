@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { MessageFlags } from 'discord.js';
 
 import {
   jidToChannelId,
@@ -298,7 +299,9 @@ describe('Discord slash flows', () => {
       }
     ).handleSlashCommand(interaction);
 
-    expect(interaction.deferReply).toHaveBeenCalledWith({ ephemeral: true });
+    expect(interaction.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
     expect(interaction.editReply).toHaveBeenCalledWith({
       content: 'Queued "/mergemaster" for Clayton.',
     });
@@ -371,7 +374,9 @@ describe('Discord slash flows', () => {
     ).handleSlashCommand(interaction);
 
     expect(interaction.deferReply).toHaveBeenCalledTimes(1);
-    expect(interaction.deferReply).toHaveBeenCalledWith({ ephemeral: true });
+    expect(interaction.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
     expect(interaction.editReply).toHaveBeenCalledTimes(1);
     expect(interaction.editReply).toHaveBeenCalledWith({
       content: 'Queued "/mergemaster" for Clayton.',

@@ -9,6 +9,7 @@ import {
   GatewayIntentBits,
   type Message,
   type MessageReaction,
+  MessageFlags,
   type PartialMessageReaction,
   Partials,
   type PartialUser,
@@ -271,8 +272,28 @@ export class DiscordChannel implements Channel {
 
       this.client.on(Events.InteractionCreate, (interaction) => {
         if (!interaction.isChatInputCommand()) return;
+        logger.info(
+          {
+            botId: this.botId,
+            command: interaction.commandName,
+            interactionId: interaction.id,
+            guildId: interaction.guildId,
+            channelId: interaction.channelId,
+          },
+          'Discord slash interaction received',
+        );
         this.handleSlashCommand(interaction).catch((err) =>
-          logger.error({ err }, 'Error handling Discord slash command'),
+          logger.error(
+            {
+              err,
+              botId: this.botId,
+              command: interaction.commandName,
+              interactionId: interaction.id,
+              guildId: interaction.guildId,
+              channelId: interaction.channelId,
+            },
+            'Error handling Discord slash command',
+          ),
         );
       });
 
@@ -1163,7 +1184,35 @@ export class DiscordChannel implements Channel {
   private async handleSlashCommand(
     interaction: ChatInputCommandInteraction,
   ): Promise<void> {
-    await interaction.deferReply({ ephemeral: true });
+    const receivedAt = Date.now();
+    try {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      logger.info(
+        {
+          botId: this.botId,
+          command: interaction.commandName,
+          interactionId: interaction.id,
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          ackDurationMs: Date.now() - receivedAt,
+        },
+        'Discord slash interaction deferred',
+      );
+    } catch (err) {
+      logger.error(
+        {
+          err,
+          botId: this.botId,
+          command: interaction.commandName,
+          interactionId: interaction.id,
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          ackDurationMs: Date.now() - receivedAt,
+        },
+        'Failed to defer Discord slash interaction',
+      );
+      throw err;
+    }
 
     if (!interaction.inGuild()) {
       await interaction.editReply({
