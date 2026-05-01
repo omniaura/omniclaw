@@ -105,6 +105,8 @@ case "$PLATFORM" in
     <string>com.omniclaw</string>
     <key>ProgramArguments</key>
     <array>
+        <string>/usr/bin/caffeinate</string>
+        <string>-dimsu</string>
         <string>${NODE_PATH}</string>
         <string>${PROJECT_PATH}/dist/index.js</string>
     </array>
