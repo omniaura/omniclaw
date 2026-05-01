@@ -1163,10 +1163,11 @@ export class DiscordChannel implements Channel {
   private async handleSlashCommand(
     interaction: ChatInputCommandInteraction,
   ): Promise<void> {
+    await interaction.deferReply({ ephemeral: true });
+
     if (!interaction.inGuild()) {
-      await interaction.reply({
+      await interaction.editReply({
         content: 'Slash flows are only available in registered guild channels.',
-        ephemeral: true,
       });
       return;
     }
@@ -1174,9 +1175,8 @@ export class DiscordChannel implements Channel {
     const chatJid = `dc:${interaction.channelId}`;
     const group = this.resolveGroupForChannel(chatJid);
     if (!group) {
-      await interaction.reply({
+      await interaction.editReply({
         content: 'This channel is not registered to an OmniClaw agent yet.',
-        ephemeral: true,
       });
       return;
     }
@@ -1186,17 +1186,15 @@ export class DiscordChannel implements Channel {
       if (
         !interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
       ) {
-        await interaction.reply({
+        await interaction.editReply({
           content:
             'You need the **Manage Channels** permission to use session commands.',
-          ephemeral: true,
         });
         return;
       }
       if (!this.opts.onSessionCommand) {
-        await interaction.reply({
+        await interaction.editReply({
           content: 'Session commands are not configured.',
-          ephemeral: true,
         });
         return;
       }
@@ -1208,7 +1206,7 @@ export class DiscordChannel implements Channel {
         group,
         sessionId,
       );
-      await interaction.reply({ content: result.message, ephemeral: true });
+      await interaction.editReply({ content: result.message });
       return;
     }
 
@@ -1216,10 +1214,9 @@ export class DiscordChannel implements Channel {
       (candidate) => candidate.name === interaction.commandName,
     );
     if (!command) {
-      await interaction.reply({
+      await interaction.editReply({
         content:
           'That slash flow is not configured for this channel. Add it to this workspace and restart or re-sync the bot.',
-        ephemeral: true,
       });
       return;
     }
@@ -1257,9 +1254,8 @@ export class DiscordChannel implements Channel {
         ? interaction.channel.name || chatJid
         : chatJid;
 
-    await interaction.reply({
+    await interaction.editReply({
       content: `Queued "/${command.name}" for ${group.name}.`,
-      ephemeral: true,
     });
 
     try {

@@ -230,13 +230,13 @@ describe('Discord download guards', () => {
 
 describe('Discord slash flows', () => {
   it('acknowledges the interaction before queueing the synthetic message', async () => {
-    let replied = false;
+    let deferred = false;
     let queued = false;
     const channel = new DiscordChannel({
       token: 'test-token-not-used',
       botId: 'PRIMARY',
       onSyntheticMessage: () => {
-        expect(replied).toBe(true);
+        expect(deferred).toBe(true);
         queued = true;
       },
     });
@@ -285,9 +285,10 @@ describe('Discord slash flows', () => {
         getInteger: (name: string) => (name === 'duration_minutes' ? 60 : null),
         getBoolean: () => null,
       },
-      reply: mock(async () => {
-        replied = true;
+      deferReply: mock(async () => {
+        deferred = true;
       }),
+      editReply: mock(async () => {}),
       followUp: mock(async () => {}),
     };
 
@@ -297,9 +298,9 @@ describe('Discord slash flows', () => {
       }
     ).handleSlashCommand(interaction);
 
-    expect(interaction.reply).toHaveBeenCalledWith({
+    expect(interaction.deferReply).toHaveBeenCalledWith({ ephemeral: true });
+    expect(interaction.editReply).toHaveBeenCalledWith({
       content: 'Queued "/mergemaster" for Clayton.',
-      ephemeral: true,
     });
     expect(queued).toBe(true);
     expect(interaction.followUp).not.toHaveBeenCalled();
@@ -358,7 +359,8 @@ describe('Discord slash flows', () => {
         getInteger: (name: string) => (name === 'duration_minutes' ? 60 : null),
         getBoolean: () => null,
       },
-      reply: mock(async () => {}),
+      deferReply: mock(async () => {}),
+      editReply: mock(async () => {}),
       followUp: mock(async () => {}),
     };
 
@@ -368,10 +370,11 @@ describe('Discord slash flows', () => {
       }
     ).handleSlashCommand(interaction);
 
-    expect(interaction.reply).toHaveBeenCalledTimes(1);
-    expect(interaction.reply).toHaveBeenCalledWith({
+    expect(interaction.deferReply).toHaveBeenCalledTimes(1);
+    expect(interaction.deferReply).toHaveBeenCalledWith({ ephemeral: true });
+    expect(interaction.editReply).toHaveBeenCalledTimes(1);
+    expect(interaction.editReply).toHaveBeenCalledWith({
       content: 'Queued "/mergemaster" for Clayton.',
-      ephemeral: true,
     });
     expect(interaction.followUp).toHaveBeenCalledTimes(1);
     expect(interaction.followUp).toHaveBeenCalledWith({
