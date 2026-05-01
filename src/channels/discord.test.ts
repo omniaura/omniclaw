@@ -6,11 +6,7 @@ import {
   getAttachmentWorkspaceFolder,
   isImageAttachment,
 } from './discord.js';
-import {
-  _initTestDatabase,
-  setAgent,
-  setChannelSubscription,
-} from '../db.js';
+import { _initTestDatabase, setAgent, setChannelSubscription } from '../db.js';
 import {
   downloadBinaryAttachment,
   downloadTextAttachment,
@@ -286,8 +282,7 @@ describe('Discord slash flows', () => {
             : name === 'goal'
               ? 'clear the queue'
               : null,
-        getInteger: (name: string) =>
-          name === 'duration_minutes' ? 60 : null,
+        getInteger: (name: string) => (name === 'duration_minutes' ? 60 : null),
         getBoolean: () => null,
       },
       reply: mock(async () => {
@@ -296,9 +291,11 @@ describe('Discord slash flows', () => {
       followUp: mock(async () => {}),
     };
 
-    await (channel as unknown as {
-      handleSlashCommand: (input: typeof interaction) => Promise<void>;
-    }).handleSlashCommand(interaction);
+    await (
+      channel as unknown as {
+        handleSlashCommand: (input: typeof interaction) => Promise<void>;
+      }
+    ).handleSlashCommand(interaction);
 
     expect(interaction.reply).toHaveBeenCalledWith({
       content: 'Queued "/mergemaster" for Clayton.',
