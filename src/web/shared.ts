@@ -1467,7 +1467,7 @@ function shellScript(pageScripts: Record<string, string>): string {
 
   // Also auto-collapse sidebar on mobile on first load
   parts.push('(function(){');
-  parts.push('  if(window.innerWidth<=768&&workspace&&!prefs.collapsed){');
+  parts.push('  if(window.innerWidth<=768&&workspace&&prefs.collapsed==null){');
   parts.push('    workspace.classList.add("sidebar-collapsed");');
   parts.push('  }');
   parts.push('})();');

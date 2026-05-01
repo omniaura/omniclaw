@@ -454,6 +454,7 @@ describe('mobile responsive layout', () => {
     const html = shell();
 
     expect(html).toContain('window.innerWidth<=768');
+    expect(html).toContain('prefs.collapsed==null');
     expect(html).toContain('sidebar-collapsed');
   });
 
