@@ -141,6 +141,63 @@ describe('renderTasksContent', () => {
   });
 });
 
+describe('renderTasksContent — schedule input groups', () => {
+  it('renders interval input with number and unit selector', () => {
+    const html = renderTasksContent(makeState());
+
+    // Create modal interval inputs
+    expect(html).toContain('id="tmc-interval-num"');
+    expect(html).toContain('id="tmc-interval-unit"');
+    expect(html).toContain('id="tmc-interval-group"');
+    // Unit options
+    expect(html).toContain('>seconds</option>');
+    expect(html).toContain('>minutes</option>');
+    expect(html).toContain('>hours</option>');
+  });
+
+  it('renders datetime-local input for one-shot tasks', () => {
+    const html = renderTasksContent(makeState());
+
+    // Create modal datetime picker
+    expect(html).toContain('id="tmc-once-datetime"');
+    expect(html).toContain('type="datetime-local"');
+    expect(html).toContain('id="tmc-once-group"');
+  });
+
+  it('renders separate cron, interval, and once input groups for both modals', () => {
+    const html = renderTasksContent(makeState());
+
+    // Create modal groups
+    expect(html).toContain('id="tmc-cron-group"');
+    expect(html).toContain('id="tmc-interval-group"');
+    expect(html).toContain('id="tmc-once-group"');
+    // Edit modal groups
+    expect(html).toContain('id="tme-cron-group"');
+    expect(html).toContain('id="tme-interval-group"');
+    expect(html).toContain('id="tme-once-group"');
+  });
+
+  it('hides interval and once groups by default', () => {
+    const html = renderTasksContent(makeState());
+
+    // Interval and once groups should be hidden by default (cron is shown)
+    expect(html).toContain('id="tmc-interval-group" style="display:none"');
+    expect(html).toContain('id="tmc-once-group" style="display:none"');
+    // Cron group should not have display:none
+    expect(html).not.toContain('id="tmc-cron-group" style="display:none"');
+  });
+
+  it('renders schedule type dropdown without raw format hints', () => {
+    const html = renderTasksContent(makeState());
+
+    // Should use clean labels, not "Interval (ms)" or "Once (ISO timestamp)"
+    expect(html).toContain('>Interval</option>');
+    expect(html).toContain('>Once</option>');
+    expect(html).not.toContain('Interval (ms)');
+    expect(html).not.toContain('ISO timestamp');
+  });
+});
+
 describe('renderTasks', () => {
   it('wraps the task manager in the shared shell', () => {
     const html = renderTasks(makeState());

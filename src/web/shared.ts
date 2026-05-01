@@ -630,6 +630,11 @@ function shellCSS(): string {
     `.tm-run-header h3{font-size:12px;font-weight:600;color:var(--text-bright)}`,
     `.tm-delete-msg{font-size:12px;color:var(--text);margin-bottom:.75rem}`,
     `.schedule-preview{font-size:10px;color:var(--accent);margin-top:3px;min-height:14px}`,
+    `.schedule-preview.warning{color:var(--yellow)}`,
+    `.interval-row{display:flex;gap:6px}`,
+    `.interval-num{flex:1}`,
+    `.interval-unit{width:auto;min-width:90px}`,
+    `.datetime-input{width:100%}`,
 
     // --- Page: Logs ---
     `.logs-page{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}`,
