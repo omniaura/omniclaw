@@ -836,9 +836,25 @@ function showScheduleGroup(prefix,type){
   var cronG=document.getElementById(prefix+"-cron-group");
   var intG=document.getElementById(prefix+"-interval-group");
   var onceG=document.getElementById(prefix+"-once-group");
-  if(cronG)cronG.style.display=type==="cron"?"":"none";
-  if(intG)intG.style.display=type==="interval"?"":"none";
-  if(onceG)onceG.style.display=type==="once"?"":"none";
+  [[cronG,"cron"],[intG,"interval"],[onceG,"once"]].forEach(function(pair){
+    var group=pair[0];if(!group)return;
+    var active=type===pair[1];
+    group.style.display=active?"":"none";
+    group.querySelectorAll("input,select,textarea,button").forEach(function(ctrl){ctrl.disabled=!active;});
+  });
+}
+
+function pad2(n){return n<10?"0"+n:String(n);}
+function dateToLocalDatetimeValue(d){
+  return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate())+"T"+pad2(d.getHours())+":"+pad2(d.getMinutes());
+}
+function toDatetimeLocalValue(rawValue){
+  var value=String(rawValue||"");
+  if(!value)return"";
+  if(!/[zZ]|[+-]\\d{2}:?\\d{2}$/.test(value))return value.slice(0,16);
+  var d=new Date(value);
+  if(isNaN(d.getTime()))return"";
+  return dateToLocalDatetimeValue(d);
 }
 
 // ---- Get schedule value from the active input group ----
@@ -854,7 +870,7 @@ function getScheduleValue(prefix){
   }else if(type==="once"){
     var dtVal=document.getElementById(prefix+"-once-datetime").value;
     if(!dtVal)return"";
-    return new Date(dtVal).toISOString().replace(/Z$/,"").replace(/\\.\\d{3}$/,"");
+    return dtVal;
   }
   return"";
 }
@@ -874,11 +890,7 @@ function setScheduleInputs(prefix,type,rawValue){
     else{unitEl.value="1000";numEl.value=String(ms/1000);}
   }else if(type==="once"){
     var dtEl=document.getElementById(prefix+"-once-datetime");
-    try{
-      var d=new Date(rawValue);
-      var iso=d.toISOString().slice(0,16);
-      dtEl.value=iso;
-    }catch(e){dtEl.value="";}
+    dtEl.value=toDatetimeLocalValue(rawValue);
   }
   updateSchedulePreview(prefix);
 }
@@ -988,6 +1000,7 @@ tbody.addEventListener("click",function(e){
 document.getElementById("tm-btn-create").addEventListener("click",function(){
   createModal.classList.add("open");
   document.getElementById("tmc-error").textContent="";
+  document.getElementById("tmc-schedule-type").value="cron";
   showScheduleGroup("tmc","cron");
 });
 createModal.addEventListener("click",function(e){if(e.target===createModal)createModal.classList.remove("open");});
@@ -1034,8 +1047,10 @@ document.getElementById("tmc-form").addEventListener("submit",function(e){
   .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})
   .then(function(t){
     window.__toast("Task created: "+t.id.slice(0,12));
+    sb.disabled=false;
     createModal.classList.remove("open");
     document.getElementById("tmc-form").reset();
+    document.getElementById("tmc-schedule-type").value="cron";
     showScheduleGroup("tmc","cron");
     document.getElementById("tmc-schedule-preview").textContent="";
     refreshTasks();
@@ -1099,6 +1114,7 @@ document.getElementById("tme-form").addEventListener("submit",function(e){
   .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})
   .then(function(t){
     window.__toast("Task updated");
+    sb.disabled=false;
     editModal.classList.remove("open");editingTaskId=null;
     refreshTasks();
   })

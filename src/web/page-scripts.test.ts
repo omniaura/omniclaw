@@ -62,6 +62,26 @@ describe('tasks page script', () => {
       "+'<span class=\"sched-label\">'+window.__esc(sl)+'</span></td>'",
     );
   });
+
+  it('preserves one-shot datetime-local wall-clock values', () => {
+    const script = allPageScripts().tasks;
+
+    expect(script).toContain('return dtVal;');
+    expect(script).toContain('dtEl.value=toDatetimeLocalValue(rawValue);');
+    expect(script).toContain('function dateToLocalDatetimeValue(d){');
+    expect(script).not.toContain('new Date(dtVal).toISOString()');
+    expect(script).not.toContain('d.toISOString().slice(0,16)');
+  });
+
+  it('keeps task form schedule controls and submit buttons resettable', () => {
+    const script = allPageScripts().tasks;
+
+    expect(script).toContain('ctrl.disabled=!active;');
+    expect(script).toContain(
+      'document.getElementById("tmc-schedule-type").value="cron";',
+    );
+    expect(script).toContain('sb.disabled=false;');
+  });
 });
 
 describe('context page script', () => {
