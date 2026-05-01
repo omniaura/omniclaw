@@ -1257,30 +1257,57 @@ export class DiscordChannel implements Channel {
         ? interaction.channel.name || chatJid
         : chatJid;
 
-    storeChatMetadata(
-      chatJid,
-      timestamp,
-      chatName,
-      interaction.guildId || undefined,
-    );
-    this.opts.onSyntheticMessage?.({
-      id: `slash-${interaction.id}`,
-      chat_jid: chatJid,
-      sender: `discord:${interaction.user.id}`,
-      sender_name: senderName,
-      content: group.trigger
-        ? `${group.trigger} ${renderedPrompt}`
-        : renderedPrompt,
-      timestamp,
-      is_from_me: false,
-      sender_platform: 'discord',
-      sender_user_id: interaction.user.id,
-    });
-
     await interaction.reply({
       content: `Queued "/${command.name}" for ${group.name}.`,
       ephemeral: true,
     });
+
+    try {
+      storeChatMetadata(
+        chatJid,
+        timestamp,
+        chatName,
+        interaction.guildId || undefined,
+      );
+      this.opts.onSyntheticMessage?.({
+        id: `slash-${interaction.id}`,
+        chat_jid: chatJid,
+        sender: `discord:${interaction.user.id}`,
+        sender_name: senderName,
+        content: group.trigger
+          ? `${group.trigger} ${renderedPrompt}`
+          : renderedPrompt,
+        timestamp,
+        is_from_me: false,
+        sender_platform: 'discord',
+        sender_user_id: interaction.user.id,
+      });
+      logger.info(
+        {
+          command: command.name,
+          chatJid,
+          group: group.folder,
+          interactionId: interaction.id,
+        },
+        'Discord slash flow queued',
+      );
+    } catch (err) {
+      logger.error(
+        {
+          err,
+          command: command.name,
+          chatJid,
+          group: group.folder,
+          interactionId: interaction.id,
+        },
+        'Failed to queue Discord slash flow',
+      );
+      await interaction.followUp({
+        content:
+          'I acknowledged the command, but failed to queue it. Check OmniClaw logs for details.',
+        ephemeral: true,
+      });
+    }
   }
 }
 

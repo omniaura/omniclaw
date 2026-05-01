@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 import {
   jidToChannelId,
@@ -6,6 +6,11 @@ import {
   getAttachmentWorkspaceFolder,
   isImageAttachment,
 } from './discord.js';
+import {
+  _initTestDatabase,
+  setAgent,
+  setChannelSubscription,
+} from '../db.js';
 import {
   downloadBinaryAttachment,
   downloadTextAttachment,
@@ -17,6 +22,10 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+beforeEach(() => {
+  _initTestDatabase();
 });
 
 function createStream(
@@ -220,6 +229,83 @@ describe('Discord download guards', () => {
     await expect(
       downloadTextAttachment('https://cdn.discordapp.test/file.txt'),
     ).rejects.toThrow('Download exceeded 102400 bytes');
+  });
+});
+
+describe('Discord slash flows', () => {
+  it('acknowledges the interaction before queueing the synthetic message', async () => {
+    let replied = false;
+    let queued = false;
+    const channel = new DiscordChannel({
+      token: 'test-token-not-used',
+      botId: 'PRIMARY',
+      onSyntheticMessage: () => {
+        expect(replied).toBe(true);
+        queued = true;
+      },
+    });
+
+    setAgent({
+      id: 'clayton-discord',
+      name: 'Clayton',
+      folder: 'clayton-discord',
+      backend: 'apple-container',
+      agentRuntime: 'claude-agent-sdk',
+      isAdmin: false,
+      createdAt: '2026-05-01T00:00:00.000Z',
+    });
+    setChannelSubscription({
+      channelJid: 'dc:1474995286903361772',
+      agentId: 'clayton-discord',
+      trigger: '@Clayton',
+      requiresTrigger: true,
+      priority: 0,
+      isPrimary: true,
+      discordBotId: 'PRIMARY',
+      discordGuildId: '753336633083953213',
+      createdAt: '2026-05-01T00:00:00.000Z',
+    });
+
+    const interaction = {
+      id: '1499999999999999999',
+      commandName: 'mergemaster',
+      channelId: '1474995286903361772',
+      guildId: '753336633083953213',
+      inGuild: () => true,
+      member: { displayName: 'Future Trees' },
+      user: {
+        id: '217828620029132802',
+        globalName: 'Future Trees',
+        username: 'futuretrees',
+      },
+      channel: { name: 'agentflow' },
+      options: {
+        getString: (name: string) =>
+          name === 'repo'
+            ? 'omniclaw'
+            : name === 'goal'
+              ? 'clear the queue'
+              : null,
+        getInteger: (name: string) =>
+          name === 'duration_minutes' ? 60 : null,
+        getBoolean: () => null,
+      },
+      reply: mock(async () => {
+        replied = true;
+      }),
+      followUp: mock(async () => {}),
+    };
+
+    await (channel as unknown as {
+      handleSlashCommand: (input: typeof interaction) => Promise<void>;
+    }).handleSlashCommand(interaction);
+
+    expect(interaction.reply).toHaveBeenCalledWith({
+      content: 'Queued "/mergemaster" for Clayton.',
+      ephemeral: true,
+    });
+    expect(queued).toBe(true);
+    expect(interaction.followUp).not.toHaveBeenCalled();
   });
 });
 
