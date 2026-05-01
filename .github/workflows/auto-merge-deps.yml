@@ -60,11 +60,27 @@ jobs:
             exit 0
           fi
 
+          enable_auto_merge() {
+            local pr="$1"
+            local err_file
+            err_file=$(mktemp)
+            if gh pr merge "$pr" --repo omniaura/omniclaw --auto --squash 2>"$err_file"; then
+              echo "  ✓ Auto-merge enabled for PR #$pr"
+            elif grep -Eiq 'auto-merge.*(not enabled|not allowed|disabled)|Pull request Auto merge is not allowed' "$err_file"; then
+              echo "::warning::Could not enable auto-merge for PR #$pr (is auto-merge enabled in repo settings?)"
+              cat "$err_file"
+            else
+              echo "::error::Failed to enable auto-merge for PR #$pr"
+              cat "$err_file" >&2
+              rm -f "$err_file"
+              return 1
+            fi
+            rm -f "$err_file"
+          }
+
           for PR in $PRS; do
             echo "Enabling auto-merge for PR #$PR..."
-            gh pr merge "$PR" --repo omniaura/omniclaw --auto --squash \
-              && echo "  ✓ Auto-merge enabled for PR #$PR" \
-              || echo "::warning::Could not enable auto-merge for PR #$PR"
+            enable_auto_merge "$PR"
           done
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || github.token }}
