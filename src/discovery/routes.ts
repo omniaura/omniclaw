@@ -67,6 +67,8 @@ const PAIR_RATE_WINDOW_MS = 60_000;
 const RATE_LIMITER_MAX_ENTRIES = 10_000;
 const MAX_DISCOVERY_JSON_BODY_BYTES = 64 * 1024;
 const MAX_DISCOVERY_CONTEXT_WRITE_BODY_BYTES = 1024 * 1024;
+const MAX_PROXIED_LOG_STREAM_CLIENTS = 100;
+let proxiedLogStreamClients = 0;
 
 function checkRateLimit(
   ip: string,
@@ -299,7 +301,7 @@ export function handleDiscoveryRequest(
     const instanceId = decodeURIComponent(
       pathname.slice('/api/discovery/peers/'.length, -'/logs'.length),
     );
-    return handleProxyLogStream(instanceId, ctx);
+    return handleProxyLogStream(instanceId, req, ctx);
   }
 
   // GET /api/discovery/peers/:id/context/layers
@@ -983,18 +985,64 @@ function sseError(message: string, status = 200): Response {
 
 async function handleProxyLogStream(
   instanceId: string,
+  req: Request,
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
   const result = getPeerClientResult(instanceId, ctx);
   if (!result.client) return sseError(result.error);
 
+  if (proxiedLogStreamClients >= MAX_PROXIED_LOG_STREAM_CLIENTS) {
+    return sseError('Too many proxied log stream connections', 429);
+  }
+
+  proxiedLogStreamClients += 1;
+  let reader: {
+    read: () => Promise<{ done: boolean; value?: Uint8Array }>;
+    cancel: () => Promise<unknown>;
+  } | null = null;
+  let closed = false;
+
+  const cleanup = (cancelUpstream: boolean) => {
+    if (closed) return;
+    closed = true;
+    if (proxiedLogStreamClients > 0) proxiedLogStreamClients -= 1;
+    if (cancelUpstream) {
+      reader?.cancel().catch(() => {});
+    }
+  };
+
   try {
     const response = await result.client.streamLogs();
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('text/event-stream') || !response.body) {
+      cleanup(true);
       return sseError('Remote peer returned non-SSE response');
     }
-    return new Response(response.body, {
+    reader = response.body.getReader();
+
+    const stream = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const chunk = await reader!.read();
+          if (chunk.done) {
+            cleanup(false);
+            controller.close();
+            return;
+          }
+          if (chunk.value) controller.enqueue(chunk.value);
+        } catch (err) {
+          cleanup(false);
+          controller.error(err);
+        }
+      },
+      cancel() {
+        cleanup(true);
+      },
+    });
+
+    req.signal.addEventListener('abort', () => cleanup(true), { once: true });
+
+    return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-cache, no-transform',
@@ -1002,6 +1050,7 @@ async function handleProxyLogStream(
       },
     });
   } catch (err) {
+    cleanup(true);
     const msg = err instanceof Error ? err.message : String(err);
     return sseError(`Proxy error: ${msg}`);
   }

@@ -543,6 +543,79 @@ describe('checkPeerAuth — body hash verification', () => {
     expect(body).toContain('remote log');
   });
 
+  it('caps concurrent proxied peer log streams and releases slots on cancel', async () => {
+    let streamCalls = 0;
+    const ctx = makeContext({
+      trustStore: {
+        getPeer: () => ({
+          instanceId: 'peer-1',
+          status: 'trusted',
+          sharedSecret: 'secret',
+          host: '127.0.0.1',
+          port: 6001,
+        }),
+        updatePeerLastSeen: () => {},
+      } as any,
+      createPeerClient: () => ({
+        getAgents: async () => [],
+        getStats: async () => ({}),
+        streamLogs: async () => {
+          streamCalls += 1;
+          return new Response(new ReadableStream<Uint8Array>(), {
+            headers: { 'Content-Type': 'text/event-stream; charset=utf-8' },
+          });
+        },
+        getContextLayers: async () => ({}),
+        listContextFiles: async () => [],
+        writeContextFile: async () => ({ ok: true }),
+      }),
+    });
+
+    const responses: Response[] = [];
+    try {
+      for (let i = 0; i < 100; i += 1) {
+        const req = new Request(
+          'http://localhost/api/discovery/peers/peer-1/logs',
+          { method: 'GET' },
+        );
+        const res = await handleDiscoveryRequest(req, new URL(req.url), ctx);
+        expect(res).not.toBeNull();
+        responses.push(res as Response);
+      }
+
+      const cappedReq = new Request(
+        'http://localhost/api/discovery/peers/peer-1/logs',
+        { method: 'GET' },
+      );
+      const capped = (await handleDiscoveryRequest(
+        cappedReq,
+        new URL(cappedReq.url),
+        ctx,
+      )) as Response;
+
+      expect(capped.status).toBe(429);
+      expect(await capped.text()).toContain(
+        'Too many proxied log stream connections',
+      );
+      expect(streamCalls).toBe(100);
+    } finally {
+      await Promise.all(responses.map((response) => response.body?.cancel()));
+    }
+
+    const retryReq = new Request(
+      'http://localhost/api/discovery/peers/peer-1/logs',
+      { method: 'GET' },
+    );
+    const retry = (await handleDiscoveryRequest(
+      retryReq,
+      new URL(retryReq.url),
+      ctx,
+    )) as Response;
+    expect(retry.status).toBe(200);
+    await retry.body?.cancel();
+    expect(streamCalls).toBe(101);
+  });
+
   it('returns SSE error event when peer is not trusted for log stream', async () => {
     const req = new Request(
       'http://localhost/api/discovery/peers/unknown-peer/logs',
