@@ -42,6 +42,7 @@ import {
   SESSION_MAX_AGE,
   SLACK_BOTS,
   SLACK_DEFAULT_BOT_ID,
+  STARTUP_CONFIRMATIONS,
   TELEGRAM_BOT_TOKENS,
   WEB_UI_CORS_ORIGIN,
   WEB_UI_HOST,
@@ -2281,6 +2282,11 @@ function recoverPendingMessages(): void {
 }
 
 function queueStartupConfirmationMessages(): void {
+  if (!STARTUP_CONFIRMATIONS) {
+    logger.info('Startup confirmation prompts disabled');
+    return;
+  }
+
   if (
     !hasPriorRuntimeState({
       lastTimestamp,

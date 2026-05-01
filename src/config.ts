@@ -58,6 +58,10 @@ const configSchema = z
       parseBooleanString,
       z.boolean().default(false),
     ),
+    STARTUP_CONFIRMATIONS: z.preprocess(
+      parseBooleanString,
+      z.boolean().default(true),
+    ),
     LOCAL_RUNTIME: z.string().default('container'),
     CONTAINER_IMAGE: z.string().default('omniclaw-agent:latest'),
     CONTAINER_MEMORY: z.string().default('4G'),
@@ -333,6 +337,7 @@ export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 export const MAIN_GROUP_FOLDER = 'main';
 
 export const LOCAL_RUNTIME = CONFIG.LOCAL_RUNTIME;
+export const STARTUP_CONFIRMATIONS = CONFIG.STARTUP_CONFIRMATIONS;
 export const CONTAINER_IMAGE = CONFIG.CONTAINER_IMAGE;
 export const CONTAINER_MEMORY = CONFIG.CONTAINER_MEMORY;
 export const SPLIT_EXECUTION = CONFIG.SPLIT_EXECUTION;
