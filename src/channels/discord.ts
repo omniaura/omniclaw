@@ -9,6 +9,7 @@ import {
   GatewayIntentBits,
   type Message,
   type MessageReaction,
+  MessageFlags,
   type PartialMessageReaction,
   Partials,
   type PartialUser,
@@ -192,7 +193,7 @@ export interface DiscordChannelOpts {
   botId: string;
   token: string;
   multiBotMode?: boolean;
-  onSyntheticMessage?: (message: NewMessage) => void;
+  onSyntheticMessage?: (message: NewMessage) => void | Promise<void>;
   registeredGroups?: () => Record<string, RegisteredGroup>;
   onReaction?: (
     chatJid: string,
@@ -271,8 +272,28 @@ export class DiscordChannel implements Channel {
 
       this.client.on(Events.InteractionCreate, (interaction) => {
         if (!interaction.isChatInputCommand()) return;
+        logger.info(
+          {
+            botId: this.botId,
+            command: interaction.commandName,
+            interactionId: interaction.id,
+            guildId: interaction.guildId,
+            channelId: interaction.channelId,
+          },
+          'Discord slash interaction received',
+        );
         this.handleSlashCommand(interaction).catch((err) =>
-          logger.error({ err }, 'Error handling Discord slash command'),
+          logger.error(
+            {
+              err,
+              botId: this.botId,
+              command: interaction.commandName,
+              interactionId: interaction.id,
+              guildId: interaction.guildId,
+              channelId: interaction.channelId,
+            },
+            'Error handling Discord slash command',
+          ),
         );
       });
 
@@ -1163,10 +1184,39 @@ export class DiscordChannel implements Channel {
   private async handleSlashCommand(
     interaction: ChatInputCommandInteraction,
   ): Promise<void> {
+    const receivedAt = Date.now();
+    try {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      logger.info(
+        {
+          botId: this.botId,
+          command: interaction.commandName,
+          interactionId: interaction.id,
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          ackDurationMs: Date.now() - receivedAt,
+        },
+        'Discord slash interaction deferred',
+      );
+    } catch (err) {
+      logger.error(
+        {
+          err,
+          botId: this.botId,
+          command: interaction.commandName,
+          interactionId: interaction.id,
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          ackDurationMs: Date.now() - receivedAt,
+        },
+        'Failed to defer Discord slash interaction',
+      );
+      throw err;
+    }
+
     if (!interaction.inGuild()) {
-      await interaction.reply({
+      await interaction.editReply({
         content: 'Slash flows are only available in registered guild channels.',
-        ephemeral: true,
       });
       return;
     }
@@ -1174,9 +1224,8 @@ export class DiscordChannel implements Channel {
     const chatJid = `dc:${interaction.channelId}`;
     const group = this.resolveGroupForChannel(chatJid);
     if (!group) {
-      await interaction.reply({
+      await interaction.editReply({
         content: 'This channel is not registered to an OmniClaw agent yet.',
-        ephemeral: true,
       });
       return;
     }
@@ -1186,17 +1235,15 @@ export class DiscordChannel implements Channel {
       if (
         !interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
       ) {
-        await interaction.reply({
+        await interaction.editReply({
           content:
             'You need the **Manage Channels** permission to use session commands.',
-          ephemeral: true,
         });
         return;
       }
       if (!this.opts.onSessionCommand) {
-        await interaction.reply({
+        await interaction.editReply({
           content: 'Session commands are not configured.',
-          ephemeral: true,
         });
         return;
       }
@@ -1208,7 +1255,7 @@ export class DiscordChannel implements Channel {
         group,
         sessionId,
       );
-      await interaction.reply({ content: result.message, ephemeral: true });
+      await interaction.editReply({ content: result.message });
       return;
     }
 
@@ -1216,10 +1263,9 @@ export class DiscordChannel implements Channel {
       (candidate) => candidate.name === interaction.commandName,
     );
     if (!command) {
-      await interaction.reply({
+      await interaction.editReply({
         content:
           'That slash flow is not configured for this channel. Add it to this workspace and restart or re-sync the bot.',
-        ephemeral: true,
       });
       return;
     }
@@ -1257,30 +1303,56 @@ export class DiscordChannel implements Channel {
         ? interaction.channel.name || chatJid
         : chatJid;
 
-    storeChatMetadata(
-      chatJid,
-      timestamp,
-      chatName,
-      interaction.guildId || undefined,
-    );
-    this.opts.onSyntheticMessage?.({
-      id: `slash-${interaction.id}`,
-      chat_jid: chatJid,
-      sender: `discord:${interaction.user.id}`,
-      sender_name: senderName,
-      content: group.trigger
-        ? `${group.trigger} ${renderedPrompt}`
-        : renderedPrompt,
-      timestamp,
-      is_from_me: false,
-      sender_platform: 'discord',
-      sender_user_id: interaction.user.id,
+    await interaction.editReply({
+      content: `Queued "/${command.name}" for ${group.name}.`,
     });
 
-    await interaction.reply({
-      content: `Queued "/${command.name}" for ${group.name}.`,
-      ephemeral: true,
-    });
+    try {
+      storeChatMetadata(
+        chatJid,
+        timestamp,
+        chatName,
+        interaction.guildId || undefined,
+      );
+      await this.opts.onSyntheticMessage?.({
+        id: `slash-${interaction.id}`,
+        chat_jid: chatJid,
+        sender: `discord:${interaction.user.id}`,
+        sender_name: senderName,
+        content: group.trigger
+          ? `${group.trigger} ${renderedPrompt}`
+          : renderedPrompt,
+        timestamp,
+        is_from_me: false,
+        sender_platform: 'discord',
+        sender_user_id: interaction.user.id,
+      });
+      logger.info(
+        {
+          command: command.name,
+          chatJid,
+          group: group.folder,
+          interactionId: interaction.id,
+        },
+        'Discord slash flow queued',
+      );
+    } catch (err) {
+      logger.error(
+        {
+          err,
+          command: command.name,
+          chatJid,
+          group: group.folder,
+          interactionId: interaction.id,
+        },
+        'Failed to queue Discord slash flow',
+      );
+      await interaction.followUp({
+        content:
+          'I acknowledged the command, but failed to queue it. Check OmniClaw logs for details.',
+        ephemeral: true,
+      });
+    }
   }
 }
 
