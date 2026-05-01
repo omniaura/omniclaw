@@ -442,7 +442,7 @@ describe('isGitHubWebhookDeliveryRecorded (DB)', () => {
 describe('webhook server retry behavior (#365)', () => {
   const secret = 'test-secret';
   let port: number;
-  let server: { stop: () => void };
+  let server: { stop: () => void; port: number };
   let handlerCalls: number;
   let handlerShouldThrow: boolean;
 
@@ -487,6 +487,7 @@ describe('webhook server retry behavior (#365)', () => {
   beforeEach(() => {
     _initTestDatabase();
     _resetGitHubWebhookReplayCacheForTest();
+    expect(isGitHubWebhookDeliveryRecorded('no-double-process')).toBe(false);
     handlerCalls = 0;
     handlerShouldThrow = false;
 
@@ -505,16 +506,15 @@ describe('webhook server retry behavior (#365)', () => {
       }),
     );
 
-    // Pick a random high port to avoid conflicts with parallel tests.
-    port = 30_000 + Math.floor(Math.random() * 20_000);
     server = startGitHubWebhookServer({
       secret,
-      port,
+      port: 0,
       async onNotification() {
         handlerCalls++;
         if (handlerShouldThrow) throw new Error('transient failure');
       },
     });
+    port = server.port;
   });
 
   afterAll(() => {
