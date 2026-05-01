@@ -142,11 +142,14 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/server /workspace/ext
 # Pre-create /home/bun/.local so Docker bind mounts (e.g. opencode data at
 # /home/bun/.local/share/opencode) don't create it as root, which blocks
 # OpenCode from writing to /home/bun/.local/state/.
-# Make /etc/passwd group-writable so --user can add a dynamic entry at runtime
+# Make /etc/passwd writable so --user can add a dynamic entry at runtime.
+# Apple Container may run with the host uid/gid rather than the image's bun
+# group, so group-writable is not sufficient there.
 RUN chown -R bun:bun /workspace && chmod 777 /home/bun \
     && mkdir -p /home/bun/.local/state /home/bun/.local/share \
     && chown -R bun:bun /home/bun/.local \
-    && chmod 664 /etc/passwd
+    && chmod 777 /home/bun/.local /home/bun/.local/state /home/bun/.local/share \
+    && chmod 666 /etc/passwd
 
 # Pre-warm tsgo (native TypeScript checker) so `npx tsgo` / `bunx tsgo` works.
 # Host-mounted projects may have platform-specific binaries; npm global install

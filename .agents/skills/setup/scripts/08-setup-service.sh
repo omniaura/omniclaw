@@ -31,7 +31,7 @@ if [ -z "$PLATFORM" ]; then
   esac
 fi
 
-NODE_PATH=$(which node)
+NODE_PATH=$(which bun || which node)
 PROJECT_PATH="$PROJECT_ROOT"
 HOME_PATH="$HOME"
 
@@ -86,7 +86,7 @@ case "$PLATFORM" in
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:${HOME_PATH}/.local/bin</string>
+        <string>${HOME_PATH}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${HOME_PATH}/.local/bin</string>
         <key>HOME</key>
         <string>${HOME_PATH}</string>
     </dict>

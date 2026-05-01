@@ -1,10 +1,12 @@
 #!/bin/bash.real
 set -e
 
+export HOME=/home/bun
+
 # When running as host uid (--user 501:20), there's no /etc/passwd entry.
 # Many tools (claude, git, ssh-keygen) need to resolve the current user.
 if ! id -un &>/dev/null 2>&1; then
-  echo "omniclaw:x:$(id -u):$(id -g):OmniClaw Agent:${HOME:-/home/bun}:/bin/bash" >> /etc/passwd
+  echo "omniclaw:x:$(id -u):$(id -g):OmniClaw Agent:${HOME}:/bin/bash" >> /etc/passwd
 fi
 
 # Source environment variables from mounted env file
@@ -49,7 +51,7 @@ if [ -n "$GITHUB_TOKEN" ]; then
 fi
 
 # SSH key setup: deterministic from SSH_KEY_SEED, workspace-persisted, or random
-mkdir -p ~/.ssh
+mkdir -p "$HOME/.ssh"
 AGENT_FOLDER=$(basename /workspace/group)
 
 generate_deterministic_key() {
@@ -93,52 +95,52 @@ const home = process.env.HOME || '/home/bun';
 // Use ssh-keygen to convert PKCS#8 PEM to OpenSSH format
 fs.writeFileSync(home + '/.ssh/id_ed25519.pem', privPem, { mode: 0o600 });
 fs.writeFileSync(home + '/.ssh/id_ed25519.pub', sshPub + '\n', { mode: 0o644 });
-" && ssh-keygen -p -N "" -m pem -f ~/.ssh/id_ed25519.pem -q 2>/dev/null && mv ~/.ssh/id_ed25519.pem ~/.ssh/id_ed25519 || {
+  " && ssh-keygen -p -N "" -m pem -f "$HOME/.ssh/id_ed25519.pem" -q 2>/dev/null && mv "$HOME/.ssh/id_ed25519.pem" "$HOME/.ssh/id_ed25519" || {
     # Fallback: ssh-keygen conversion failed, try direct approach
-    rm -f ~/.ssh/id_ed25519.pem
+    rm -f "$HOME/.ssh/id_ed25519.pem"
     return 1
   }
-  chmod 600 ~/.ssh/id_ed25519
+  chmod 600 "$HOME/.ssh/id_ed25519"
 }
 
 if [ -n "$SSH_KEY_SEED" ]; then
   if generate_deterministic_key; then
     # Persist to workspace
     mkdir -p /workspace/group/.ssh
-    cp ~/.ssh/id_ed25519 /workspace/group/.ssh/id_ed25519
-    cp ~/.ssh/id_ed25519.pub /workspace/group/.ssh/id_ed25519.pub
+    cp "$HOME/.ssh/id_ed25519" /workspace/group/.ssh/id_ed25519
+    cp "$HOME/.ssh/id_ed25519.pub" /workspace/group/.ssh/id_ed25519.pub
     chmod 600 /workspace/group/.ssh/id_ed25519
   elif [ -f /workspace/group/.ssh/id_ed25519 ]; then
     # Deterministic generation failed, fall back to persisted key
-    cp /workspace/group/.ssh/id_ed25519 ~/.ssh/id_ed25519
-    chmod 600 ~/.ssh/id_ed25519
+    cp /workspace/group/.ssh/id_ed25519 "$HOME/.ssh/id_ed25519"
+    chmod 600 "$HOME/.ssh/id_ed25519"
   else
     # Last resort: random key
-    ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 -q
+    ssh-keygen -t ed25519 -N "" -f "$HOME/.ssh/id_ed25519" -q
     mkdir -p /workspace/group/.ssh
-    cp ~/.ssh/id_ed25519 /workspace/group/.ssh/id_ed25519
-    cp ~/.ssh/id_ed25519.pub /workspace/group/.ssh/id_ed25519.pub
+    cp "$HOME/.ssh/id_ed25519" /workspace/group/.ssh/id_ed25519
+    cp "$HOME/.ssh/id_ed25519.pub" /workspace/group/.ssh/id_ed25519.pub
     chmod 600 /workspace/group/.ssh/id_ed25519
-    PUBKEY=$(cat ~/.ssh/id_ed25519.pub)
+    PUBKEY=$(cat "$HOME/.ssh/id_ed25519.pub")
     echo "{\"type\":\"ssh_pubkey\",\"pubkey\":\"$PUBKEY\"}" > /workspace/ipc/messages/ssh_pubkey_$(date +%s%N).json
   fi
 elif [ -f /workspace/group/.ssh/id_ed25519 ]; then
   # Persistent key from previous container run
-  cp /workspace/group/.ssh/id_ed25519 ~/.ssh/id_ed25519
-  chmod 600 ~/.ssh/id_ed25519
+  cp /workspace/group/.ssh/id_ed25519 "$HOME/.ssh/id_ed25519"
+  chmod 600 "$HOME/.ssh/id_ed25519"
 else
   # Generate a new random key for this agent
-  ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 -q
+  ssh-keygen -t ed25519 -N "" -f "$HOME/.ssh/id_ed25519" -q
   # Persist to workspace so it survives container restarts
   mkdir -p /workspace/group/.ssh
-  cp ~/.ssh/id_ed25519 /workspace/group/.ssh/id_ed25519
-  cp ~/.ssh/id_ed25519.pub /workspace/group/.ssh/id_ed25519.pub
+  cp "$HOME/.ssh/id_ed25519" /workspace/group/.ssh/id_ed25519
+  cp "$HOME/.ssh/id_ed25519.pub" /workspace/group/.ssh/id_ed25519.pub
   chmod 600 /workspace/group/.ssh/id_ed25519
   # Notify host via IPC that a new key was generated
-  PUBKEY=$(cat ~/.ssh/id_ed25519.pub)
+  PUBKEY=$(cat "$HOME/.ssh/id_ed25519.pub")
   echo "{\"type\":\"ssh_pubkey\",\"pubkey\":\"$PUBKEY\"}" > /workspace/ipc/messages/ssh_pubkey_$(date +%s%N).json
 fi
-ssh-keyscan github.com gitlab.com >> ~/.ssh/known_hosts 2>/dev/null || true
+ssh-keyscan github.com gitlab.com >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
 
 # Buffer stdin then run agent.
 # If /tmp/input.json already exists, skip the stdin buffering step.
