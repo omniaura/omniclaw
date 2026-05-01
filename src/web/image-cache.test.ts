@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import fs from 'fs';
+import http from 'node:http';
 import path from 'path';
 
 import { describe, expect, it } from 'bun:test';
@@ -8,8 +9,10 @@ import { DATA_DIR } from '../config.js';
 import { logger } from '../logger.js';
 import {
   describeImageUrl,
+  fetchWithPinnedDns,
   readStreamWithCap,
   type RemoteImageFetch,
+  resolveAndValidateRemoteImageUrl,
   serveCachedRemoteImage,
   validateRemoteImageUrl,
 } from './image-cache.js';
@@ -400,5 +403,246 @@ describe('validateRemoteImageUrl', () => {
         lookupHostAddresses: async () => ['93.184.216.34'],
       }),
     ).resolves.toBeNull();
+  });
+
+  it('rejects hostnames that resolve no addresses', async () => {
+    await expect(
+      validateRemoteImageUrl('https://cdn.example.com/avatar.png', {
+        lookupHostAddresses: async () => [],
+      }),
+    ).resolves.toBe('no addresses resolved');
+  });
+});
+
+describe('resolveAndValidateRemoteImageUrl', () => {
+  it('returns resolved addresses for hostname-based urls', async () => {
+    const result = await resolveAndValidateRemoteImageUrl(
+      'https://cdn.example.com/avatar.png',
+      {
+        lookupHostAddresses: async () => [
+          '93.184.216.34',
+          '2606:2800:220:1:248:1893:25c8:1946',
+        ],
+      },
+    );
+    expect(result.error).toBeNull();
+    expect(result.resolvedAddresses).toEqual([
+      '93.184.216.34',
+      '2606:2800:220:1:248:1893:25c8:1946',
+    ]);
+  });
+
+  it('returns empty addresses for direct-IP urls', async () => {
+    const result = await resolveAndValidateRemoteImageUrl(
+      'https://93.184.216.34/avatar.png',
+    );
+    expect(result.error).toBeNull();
+    expect(result.resolvedAddresses).toEqual([]);
+  });
+
+  it('returns error and empty addresses for blocked urls', async () => {
+    const result = await resolveAndValidateRemoteImageUrl(
+      'http://127.0.0.1/avatar.png',
+    );
+    expect(result.error).toBe('private address is not allowed');
+    expect(result.resolvedAddresses).toEqual([]);
+  });
+
+  it('returns error when hostname resolves to private address', async () => {
+    const result = await resolveAndValidateRemoteImageUrl(
+      'https://evil.test/avatar.png',
+      { lookupHostAddresses: async () => ['10.0.0.1'] },
+    );
+    expect(result.error).toBe('resolved private address is not allowed');
+    expect(result.resolvedAddresses).toEqual([]);
+  });
+});
+
+describe('fetchWithPinnedDns', () => {
+  it('connects to the pinned address instead of resolving DNS', async () => {
+    const body = 'pinned-response-body';
+    let receivedHost: string | undefined;
+
+    const server = http.createServer((req, res) => {
+      receivedHost = req.headers.host;
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end(body);
+    });
+
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    const port = (server.address() as { port: number }).port;
+
+    try {
+      // Fetch a URL with hostname "cdn.example.com" but pin to 127.0.0.1.
+      // Without pinning, this would attempt real DNS resolution for cdn.example.com.
+      const response = await fetchWithPinnedDns(
+        `http://cdn.example.com:${port}/avatar.png`,
+        '127.0.0.1',
+        5000,
+      );
+
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(text).toBe(body);
+      // The Host header should carry the original hostname.
+      expect(receivedHost).toBe(`cdn.example.com:${port}`);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('rejects after timeout', async () => {
+    // Start a server that never responds
+    const server = http.createServer(() => {
+      // intentionally hang
+    });
+
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    const port = (server.address() as { port: number }).port;
+
+    try {
+      await expect(
+        fetchWithPinnedDns(
+          `http://cdn.example.com:${port}/slow.png`,
+          '127.0.0.1',
+          100,
+        ),
+      ).rejects.toThrow(/timed out/i);
+    } finally {
+      server.close();
+    }
+  });
+});
+
+describe('serveCachedRemoteImage DNS rebinding prevention', () => {
+  it('uses pinned DNS for hostname URLs even when fetchImpl is provided', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-rebinding-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    // Start a local HTTP server that serves an image.
+    const body = Buffer.from('fake-png-data');
+    let receivedHost: string | undefined;
+    const server = http.createServer((req, res) => {
+      receivedHost = req.headers.host;
+      res.writeHead(200, { 'content-type': 'image/png' });
+      res.end(body);
+    });
+
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    const port = (server.address() as { port: number }).port;
+
+    try {
+      const response = await serveCachedRemoteImage(
+        'pinned-hostname-key',
+        async () => `http://cdn.example.com:${port}/avatar.png`,
+        {
+          cacheDir: testImageCacheDir,
+          lookupHostAddresses: async () => ['93.184.216.34'],
+          fetchImpl: (async () => {
+            throw new Error('fetchImpl must not be used for hostname URLs');
+          }) as RemoteImageFetch,
+          fetchWithPinnedDnsImpl: (url, pinnedAddress, timeoutMs) => {
+            expect(pinnedAddress).toBe('93.184.216.34');
+            return fetchWithPinnedDns(url, '127.0.0.1', timeoutMs);
+          },
+        },
+      );
+
+      expect(response).not.toBeNull();
+      expect(response!.status).toBe(200);
+      // Verify the Host header carries the original hostname, not the pinned IP.
+      expect(receivedHost).toBe(`cdn.example.com:${port}`);
+    } finally {
+      server.close();
+      clearTestImageCache(testImageCacheDir);
+    }
+  });
+
+  it('blocks fetch when DNS resolves to a private address', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-rebinding-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    const originalWarn = logger.warn;
+    const records: Array<Record<string, unknown>> = [];
+    logger.warn = ((fieldsOrMsg: Record<string, unknown> | string) => {
+      if (typeof fieldsOrMsg !== 'string') {
+        records.push(fieldsOrMsg);
+      }
+    }) as unknown as typeof logger.warn;
+
+    try {
+      // DNS resolver returns a private address — should be blocked at
+      // validation time, never reaching any fetch.
+      const response = await serveCachedRemoteImage(
+        'rebind-key',
+        async () => 'http://evil.test/avatar.png',
+        {
+          cacheDir: testImageCacheDir,
+          lookupHostAddresses: async () => ['10.0.0.1'],
+        },
+      );
+
+      expect(response).toBeNull();
+      expect(
+        records.some(
+          (r) => r.blockReason === 'resolved private address is not allowed',
+        ),
+      ).toBe(true);
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+      logger.warn = originalWarn;
+    }
+  });
+
+  it('passes lookupHostAddresses through to validation', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-rebinding-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    const originalWarn = logger.warn;
+    logger.warn = (() => {}) as unknown as typeof logger.warn;
+
+    let lookupCalled = false;
+
+    try {
+      await serveCachedRemoteImage(
+        'lookup-passthrough-key',
+        async () => 'http://cdn.example.com/avatar.png',
+        {
+          cacheDir: testImageCacheDir,
+          lookupHostAddresses: async () => {
+            lookupCalled = true;
+            // Return a private address to trigger block (easiest way to verify
+            // that our custom resolver was actually used).
+            return ['192.168.1.1'];
+          },
+        },
+      );
+
+      expect(lookupCalled).toBe(true);
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+      logger.warn = originalWarn;
+    }
   });
 });
