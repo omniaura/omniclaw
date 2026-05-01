@@ -179,6 +179,20 @@ jobs:
             --head "$BRANCH" \
             --title "${{ steps.check.outputs.commit_title }}" \
             --body-file "$BODY_FILE"
+
+          NEW_PR=$(gh pr list --repo omniaura/omniclaw --base main --head "$BRANCH" --json number --jq '.[0].number // ""')
+          if [ -z "$NEW_PR" ]; then
+            echo "::error::Could not find newly created PR for $BRANCH"
+            exit 1
+          fi
+
+          PREFIX="update/opencode-"
+          OLD_PRS=$(gh pr list --repo omniaura/omniclaw --base main --state open --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("'"$PREFIX"'")) | select(.number != '"$NEW_PR"') | .number')
+          for OLD_PR in $OLD_PRS; do
+            echo "Closing superseded PR #$OLD_PR (superseded by #$NEW_PR)"
+            gh pr close "$OLD_PR" --repo omniaura/omniclaw --comment "Superseded by #$NEW_PR"
+          done
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || github.token }}
 
