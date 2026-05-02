@@ -154,6 +154,17 @@ describe('buildHealthData', () => {
     expect(health.memory.heap_total_mb).toBeGreaterThan(0);
   });
 
+  it('reports cpu count and load averages', () => {
+    const health = buildHealthData(makeState(), 0);
+    expect(health.cpu.count).toBeGreaterThan(0);
+    expect(typeof health.cpu.load_1m).toBe('number');
+    expect(typeof health.cpu.load_5m).toBe('number');
+    expect(typeof health.cpu.load_15m).toBe('number');
+    expect(health.cpu.load_1m).toBeGreaterThanOrEqual(0);
+    expect(health.cpu.load_5m).toBeGreaterThanOrEqual(0);
+    expect(health.cpu.load_15m).toBeGreaterThanOrEqual(0);
+  });
+
   it('reports runtime info', () => {
     const health = buildHealthData(makeState(), 0);
     expect(health.runtime.platform).toBe(process.platform);
@@ -226,6 +237,7 @@ describe('renderSystemContent', () => {
     expect(html).toContain('server');
     expect(html).toContain('runtime');
     expect(html).toContain('memory');
+    expect(html).toContain('cpu');
     expect(html).toContain('containers');
     expect(html).toContain('agents');
     expect(html).toContain('tasks');
@@ -251,6 +263,10 @@ describe('renderSystemContent', () => {
     expect(html).toContain('id="sys-containers-active"');
     expect(html).toContain('id="sys-tasks-active"');
     expect(html).toContain('id="health-status"');
+    expect(html).toContain('id="sys-cpu-count"');
+    expect(html).toContain('id="sys-cpu-load-1m"');
+    expect(html).toContain('id="sys-cpu-load-5m"');
+    expect(html).toContain('id="sys-cpu-load-15m"');
   });
 
   it('escapes HTML in values', () => {
