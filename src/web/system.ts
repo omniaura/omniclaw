@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 
 import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
@@ -12,6 +13,12 @@ export interface HealthData {
     rss_mb: number;
     heap_used_mb: number;
     heap_total_mb: number;
+  };
+  cpu: {
+    count: number;
+    load_1m: number;
+    load_5m: number;
+    load_15m: number;
   };
   runtime: {
     bun: string;
@@ -65,6 +72,8 @@ export function buildHealthData(
   const tasks = state.getTasks();
   const stats = state.getQueueStats();
   const mem = process.memoryUsage();
+  const load = os.loadavg();
+  const cpuCount = os.cpus().length;
 
   const byBackend: Record<string, number> = {};
   const byRuntime: Record<string, number> = {};
@@ -90,6 +99,12 @@ export function buildHealthData(
       rss_mb: Math.round((mem.rss / 1024 / 1024) * 10) / 10,
       heap_used_mb: Math.round((mem.heapUsed / 1024 / 1024) * 10) / 10,
       heap_total_mb: Math.round((mem.heapTotal / 1024 / 1024) * 10) / 10,
+    },
+    cpu: {
+      count: cpuCount,
+      load_1m: Math.round((load[0] ?? 0) * 100) / 100,
+      load_5m: Math.round((load[1] ?? 0) * 100) / 100,
+      load_15m: Math.round((load[2] ?? 0) * 100) / 100,
     },
     runtime: {
       bun: typeof Bun !== 'undefined' ? Bun.version : process.version,
@@ -209,6 +224,18 @@ export function renderSystemContent(
           'heap total',
           `${health.memory.heap_total_mb} MB`,
           'sys-heap-total',
+        ),
+    ) +
+    // CPU
+    metricCard(
+      'cpu',
+      metricRow('cores', String(health.cpu.count), 'sys-cpu-count') +
+        metricRow('load 1m', health.cpu.load_1m.toFixed(2), 'sys-cpu-load-1m') +
+        metricRow('load 5m', health.cpu.load_5m.toFixed(2), 'sys-cpu-load-5m') +
+        metricRow(
+          'load 15m',
+          health.cpu.load_15m.toFixed(2),
+          'sys-cpu-load-15m',
         ),
     ) +
     // Containers
