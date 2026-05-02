@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -13,6 +13,7 @@ import {
   parseExecRequest,
   readExecBrokerText,
   resolveGitHubTokenForContainer,
+  runExecBrokerRequest,
 } from './local-backend.js';
 
 function uniqueId(): string {
@@ -821,6 +822,18 @@ describe('LocalBackend', () => {
       }
     });
 
+    it('returns null when an execution request file cannot be statted', () => {
+      const fixture = createFixture();
+      try {
+        fs.mkdirSync(fixture.ipcDir, { recursive: true });
+        const requestPath = path.join(fixture.ipcDir, 'missing.json');
+
+        expect(parseExecRequest(requestPath, log)).toBeNull();
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
     it('limits execution broker stream capture', async () => {
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
@@ -832,6 +845,80 @@ describe('LocalBackend', () => {
       await expect(readExecBrokerText(stream, 'stdout')).rejects.toThrow(
         ExecBrokerOutputLimitError,
       );
+    });
+
+    it('limits cumulative execution broker stream capture', async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (let i = 0; i < 1024; i++) {
+            controller.enqueue(new Uint8Array(1024));
+          }
+          controller.enqueue(new Uint8Array(1));
+          controller.close();
+        },
+      });
+
+      await expect(readExecBrokerText(stream, 'stderr')).rejects.toThrow(
+        ExecBrokerOutputLimitError,
+      );
+    });
+
+    it('writes a synthetic broker response when output exceeds the limit', async () => {
+      const fixture = createFixture();
+      const spawnSpy = spyOn(Bun, 'spawn').mockImplementation((() => ({
+        stdout: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(1024 * 1024 + 1));
+            controller.close();
+          },
+        }),
+        stderr: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        exited: Promise.resolve(0),
+        kill: mock(() => {}),
+      })) as unknown as typeof Bun.spawn);
+
+      try {
+        const responseDir = path.join(fixture.ipcDir, 'exec-responses');
+        fs.mkdirSync(responseDir, { recursive: true });
+
+        await runExecBrokerRequest(
+          {
+            id: 'exec-req-limit',
+            cwd: '/workspace/group',
+            args: ['-lc', 'printf ok'],
+            env: {},
+          },
+          'exec-sidecar',
+          responseDir,
+          { debug() {} } as any,
+        );
+
+        expect(
+          fs.readFileSync(
+            path.join(responseDir, 'exec-req-limit.stdout'),
+            'utf8',
+          ),
+        ).toBe('');
+        expect(
+          fs.readFileSync(
+            path.join(responseDir, 'exec-req-limit.stderr'),
+            'utf8',
+          ),
+        ).toContain('Execution broker stdout exceeded');
+        expect(
+          fs.readFileSync(
+            path.join(responseDir, 'exec-req-limit.exitcode'),
+            'utf8',
+          ),
+        ).toBe('125');
+      } finally {
+        spawnSpy.mockRestore();
+        fixture.cleanup();
+      }
     });
   });
 

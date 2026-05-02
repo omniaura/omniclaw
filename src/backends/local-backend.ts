@@ -892,7 +892,13 @@ export function parseExecRequest(
   requestPath: string,
   log: typeof logger,
 ): ExecRequest | null {
-  const { size } = fs.statSync(requestPath);
+  let size: number;
+  try {
+    size = fs.statSync(requestPath).size;
+  } catch (err) {
+    log.warn({ requestPath, err }, 'Rejected unreadable execution request');
+    return null;
+  }
   if (size > MAX_EXEC_BROKER_REQUEST_BYTES) {
     log.warn(
       { requestPath, size, maxBytes: MAX_EXEC_BROKER_REQUEST_BYTES },
@@ -967,7 +973,7 @@ function writeExecBrokerResponse(
   fs.renameSync(`${exitCodePath}.tmp`, exitCodePath);
 }
 
-async function runExecBrokerRequest(
+export async function runExecBrokerRequest(
   request: ExecRequest,
   execContainerName: string,
   responseDir: string,
@@ -987,6 +993,7 @@ async function runExecBrokerRequest(
 
   let stdout = '';
   let stderr = '';
+  // 125 means the broker synthesized a response before the child returned one.
   let exitCode = 125;
   try {
     [stdout, stderr, exitCode] = await Promise.all([
@@ -996,7 +1003,17 @@ async function runExecBrokerRequest(
     ]);
   } catch (err) {
     proc.kill();
-    await proc.exited.catch(() => undefined);
+    const exitedAfterTerm = await Promise.race([
+      proc.exited.then(
+        () => true,
+        () => true,
+      ),
+      Bun.sleep(1000).then(() => false),
+    ]);
+    if (!exitedAfterTerm) {
+      proc.kill('SIGKILL');
+      await proc.exited.catch(() => undefined);
+    }
     writeExecBrokerResponse(responseDir, request.id, {
       stdout: '',
       stderr: err instanceof Error ? err.message : 'Execution broker failed',
