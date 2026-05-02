@@ -8,7 +8,10 @@ import {
   buildExecInvocationArgs,
   buildExecutionContainerArgs,
   buildVolumeMounts,
+  ExecBrokerOutputLimitError,
   LocalBackend,
+  parseExecRequest,
+  readExecBrokerText,
   resolveGitHubTokenForContainer,
 } from './local-backend.js';
 
@@ -797,6 +800,38 @@ describe('LocalBackend', () => {
         '-lc',
         'pwd',
       ]);
+    });
+  });
+
+  describe('execution broker parsing', () => {
+    const log = {
+      warn() {},
+    } as any;
+
+    it('rejects oversized execution request files before parsing JSON', () => {
+      const fixture = createFixture();
+      try {
+        fs.mkdirSync(fixture.ipcDir, { recursive: true });
+        const requestPath = path.join(fixture.ipcDir, 'oversized.json');
+        fs.writeFileSync(requestPath, 'x'.repeat(64 * 1024 + 1));
+
+        expect(parseExecRequest(requestPath, log)).toBeNull();
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
+    it('limits execution broker stream capture', async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(1024 * 1024 + 1));
+          controller.close();
+        },
+      });
+
+      await expect(readExecBrokerText(stream, 'stdout')).rejects.toThrow(
+        ExecBrokerOutputLimitError,
+      );
     });
   });
 

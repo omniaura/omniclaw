@@ -581,6 +581,8 @@ export interface ExecRequest {
 const EXEC_BROKER_REQUEST_DIR = '/workspace/ipc/exec-requests';
 const EXEC_BROKER_RESPONSE_DIR = '/workspace/ipc/exec-responses';
 const EXEC_BROKER_POLL_INTERVAL_MS = 50;
+const MAX_EXEC_BROKER_REQUEST_BYTES = 64 * 1024;
+const MAX_EXEC_BROKER_OUTPUT_BYTES = 1024 * 1024;
 const SAFE_EXEC_REQUEST_ID = /^[A-Za-z0-9_-]+$/;
 const SAFE_ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -849,10 +851,56 @@ async function spawnExecutionContainer(
   };
 }
 
-function parseExecRequest(
+export class ExecBrokerOutputLimitError extends Error {
+  constructor(label: string) {
+    super(
+      `Execution broker ${label} exceeded ${MAX_EXEC_BROKER_OUTPUT_BYTES} bytes`,
+    );
+    this.name = 'ExecBrokerOutputLimitError';
+  }
+}
+
+export async function readExecBrokerText(
+  stream: ReadableStream<Uint8Array> | number | null | undefined,
+  label: string,
+): Promise<string> {
+  if (typeof stream === 'number' || !stream) return '';
+
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = '';
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_EXEC_BROKER_OUTPUT_BYTES) {
+        throw new ExecBrokerOutputLimitError(label);
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return text;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export function parseExecRequest(
   requestPath: string,
   log: typeof logger,
 ): ExecRequest | null {
+  const { size } = fs.statSync(requestPath);
+  if (size > MAX_EXEC_BROKER_REQUEST_BYTES) {
+    log.warn(
+      { requestPath, size, maxBytes: MAX_EXEC_BROKER_REQUEST_BYTES },
+      'Rejected oversized execution request',
+    );
+    return null;
+  }
+
   const raw = fs.readFileSync(requestPath, 'utf-8');
   const parsed = JSON.parse(raw) as Partial<ExecRequest>;
 
@@ -937,19 +985,25 @@ async function runExecBrokerRequest(
     },
   );
 
-  const stdoutPromise =
-    typeof proc.stdout === 'number' || !proc.stdout
-      ? Promise.resolve('')
-      : new Response(proc.stdout).text();
-  const stderrPromise =
-    typeof proc.stderr === 'number' || !proc.stderr
-      ? Promise.resolve('')
-      : new Response(proc.stderr).text();
-  const [stdout, stderr, exitCode] = await Promise.all([
-    stdoutPromise,
-    stderrPromise,
-    proc.exited,
-  ]);
+  let stdout = '';
+  let stderr = '';
+  let exitCode = 125;
+  try {
+    [stdout, stderr, exitCode] = await Promise.all([
+      readExecBrokerText(proc.stdout, 'stdout'),
+      readExecBrokerText(proc.stderr, 'stderr'),
+      proc.exited,
+    ]);
+  } catch (err) {
+    proc.kill();
+    await proc.exited.catch(() => undefined);
+    writeExecBrokerResponse(responseDir, request.id, {
+      stdout: '',
+      stderr: err instanceof Error ? err.message : 'Execution broker failed',
+      exitCode,
+    });
+    return;
+  }
 
   writeExecBrokerResponse(responseDir, request.id, {
     stdout,
