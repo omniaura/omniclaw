@@ -151,6 +151,8 @@ describe('renderNetworkContent', () => {
     );
     expect(html).toContain('<strong>Home &lt;Wi-Fi&gt;</strong>');
     expect(html).toContain('ssid:home&lt;&amp;&gt;');
+    expect(html).toContain('<strong>Lab Network</strong>');
+    expect(html).toContain('ssid:lab');
     expect(html).toContain('data-network-action="untrust-network"');
     expect(html).not.toContain('No trusted Wi-Fi networks yet.');
   });

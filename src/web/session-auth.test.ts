@@ -123,6 +123,7 @@ describe('SessionStore', () => {
       const purgeToken = store.create();
       expect(store.size).toBe(2);
 
+      // Advance to exactly expiresAt to cover the <= expiry boundary.
       now.mockReturnValue(1_000 + 24 * 60 * 60 * 1000);
       expect(store.validate(token)).toBe(false);
       expect(store.size).toBe(1);
@@ -152,6 +153,29 @@ describe('SessionStore', () => {
       expect(store.size).toBe(100);
       expect(store.validate(tokens[0])).toBe(false);
       expect(store.validate(tokens[1])).toBe(true);
+      expect(store.validate(newest)).toBe(true);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('purges expired sessions before evicting at capacity', () => {
+    const now = spyOn(Date, 'now');
+    try {
+      const store = createSessionStore();
+      const tokens: string[] = [];
+
+      for (let i = 0; i < 100; i++) {
+        now.mockReturnValue(10_000 + i);
+        tokens.push(store.create());
+      }
+
+      now.mockReturnValue(10_000 + 99 + 24 * 60 * 60 * 1000);
+      const newest = store.create();
+
+      expect(store.size).toBe(1);
+      expect(store.validate(tokens[0]!)).toBe(false);
+      expect(store.validate(tokens[99]!)).toBe(false);
       expect(store.validate(newest)).toBe(true);
     } finally {
       now.mockRestore();
