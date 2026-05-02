@@ -128,6 +128,32 @@ describe('renderNetworkContent', () => {
       'Discovery controls are unavailable in this environment.',
     );
   });
+
+  it('renders current and trusted Wi-Fi networks with escaped identifiers', () => {
+    const html = renderNetworkContent({
+      instanceId: 'local-id',
+      instanceName: 'Main Node',
+      discoveryAvailable: true,
+      discoveryEnabled: true,
+      runtime: makeRuntime({
+        currentNetwork: { id: 'ssid:office<&>', label: 'Office <Wi-Fi>' },
+        trustedNetworks: [
+          { id: 'ssid:home<&>', label: 'Home <Wi-Fi>' },
+          { id: 'ssid:lab', label: 'Lab Network' },
+        ],
+      }),
+      peers: [],
+      pendingRequests: [],
+    });
+
+    expect(html).toContain(
+      'Current Wi-Fi: <strong>Office &lt;Wi-Fi&gt;</strong>',
+    );
+    expect(html).toContain('<strong>Home &lt;Wi-Fi&gt;</strong>');
+    expect(html).toContain('ssid:home&lt;&amp;&gt;');
+    expect(html).toContain('data-network-action="untrust-network"');
+    expect(html).not.toContain('No trusted Wi-Fi networks yet.');
+  });
 });
 
 describe('renderPendingRequests', () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'bun:test';
+import { describe, it, expect, afterEach, spyOn } from 'bun:test';
 
 import {
   createSessionStore,
@@ -112,6 +112,50 @@ describe('SessionStore', () => {
     // but we can verify purge runs without errors
     store.purge();
     expect(store.validate(token)).toBe(true);
+  });
+
+  it('invalidates expired sessions during validation and purge', () => {
+    const now = spyOn(Date, 'now');
+    try {
+      now.mockReturnValue(1_000);
+      const store = createSessionStore();
+      const token = store.create();
+      const purgeToken = store.create();
+      expect(store.size).toBe(2);
+
+      now.mockReturnValue(1_000 + 24 * 60 * 60 * 1000);
+      expect(store.validate(token)).toBe(false);
+      expect(store.size).toBe(1);
+
+      store.purge();
+      expect(store.validate(purgeToken)).toBe(false);
+      expect(store.size).toBe(0);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('evicts the oldest session when the store reaches capacity', () => {
+    const now = spyOn(Date, 'now');
+    try {
+      const store = createSessionStore();
+      const tokens: string[] = [];
+
+      for (let i = 0; i < 100; i++) {
+        now.mockReturnValue(10_000 + i);
+        tokens.push(store.create());
+      }
+
+      now.mockReturnValue(20_000);
+      const newest = store.create();
+
+      expect(store.size).toBe(100);
+      expect(store.validate(tokens[0])).toBe(false);
+      expect(store.validate(tokens[1])).toBe(true);
+      expect(store.validate(newest)).toBe(true);
+    } finally {
+      now.mockRestore();
+    }
   });
 });
 
