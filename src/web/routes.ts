@@ -774,7 +774,7 @@ function handleExportMessages(url: URL, state: WebStateProvider): Response {
 
     for (const msg of messages) {
       const time = new Date(msg.timestamp).toLocaleString();
-      const sender = msg.sender_name || msg.sender || 'Unknown';
+      const sender = msg.sender_name || 'Unknown';
       lines.push(`[${time}] ${sender}:`);
       lines.push(msg.content || '');
       lines.push('');
