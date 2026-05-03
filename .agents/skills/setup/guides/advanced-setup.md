@@ -84,7 +84,7 @@ DISCORD_BOT_<BOT_ID>_TOKEN=<token>
 DISCORD_BOT_DEFAULT=<BOT_ID>
 ```
 
-Optionally: `DISCORD_BOT_<BOT_ID>_RUNTIME=opencode`
+Optionally: `DISCORD_BOT_<BOT_ID>_RUNTIME=opencode` or `DISCORD_BOT_<BOT_ID>_RUNTIME=codex`
 
 **Never remove an existing `DISCORD_BOT_TOKEN` unless user explicitly asks.**
 
@@ -99,7 +99,7 @@ JID format: `dc:<channel_id>`. Ask user to right-click the channel → Copy Chan
   --trigger "@<TRIGGER>" \
   --folder "<FOLDER_NAME>" \
   --discord-bot-id "<BOT_ID>" \
-  --agent-runtime "<claude-agent-sdk|opencode>" \
+  --agent-runtime "<claude-agent-sdk|opencode|codex>" \
   --assistant-name "<AssistantName>"
 ```
 

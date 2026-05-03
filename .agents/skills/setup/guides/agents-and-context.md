@@ -116,12 +116,14 @@ You are **<AgentName>** (@<Trigger>), <role description>.
 `DISCORD_BOT_IDS` in `.env` uses **your own human-readable keys** (e.g. `PRIMARY`, `OCPEYTON`). These are NOT Discord's numeric snowflake IDs.
 
 ```dotenv
-DISCORD_BOT_IDS=PRIMARY,OCPEYTON
+DISCORD_BOT_IDS=PRIMARY,OCPEYTON,CODEX
 DISCORD_BOT_PRIMARY_TOKEN=<token>
 DISCORD_BOT_OCPEYTON_TOKEN=<token>
+DISCORD_BOT_CODEX_TOKEN=<token>
 DISCORD_BOT_DEFAULT=PRIMARY
 # Optional per-bot runtime override:
 DISCORD_BOT_OCPEYTON_RUNTIME=opencode
+DISCORD_BOT_CODEX_RUNTIME=codex
 ```
 
 The `discord_bot_id` column in `channel_subscriptions` must match one of these keys exactly. Mismatch = messages never reach the agent.
@@ -331,7 +333,7 @@ The `registered_groups.folder` column has a UNIQUE constraint, so you **cannot**
      --trigger "@<Trigger>" \
      --folder "<agent-folder>" \
      --discord-bot-id "<NEW_KEY>" \
-     --agent-runtime "claude-agent-sdk"
+     --agent-runtime "claude-agent-sdk|opencode|codex"
    ```
 
    This creates the `agents` row and `channel_subscriptions` row.
