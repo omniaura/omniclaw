@@ -15,6 +15,11 @@ set -e
 #   AGENT_SERVER_DIR  - (optional)
 #   AGENT_PROJECT_DIR - e.g. /workspace/project
 
+# Shared-VM execs must always receive isolated per-agent paths.
+: "${AGENT_WORKSPACE:?AGENT_WORKSPACE is required}"
+: "${AGENT_IPC_DIR:?AGENT_IPC_DIR is required}"
+: "${AGENT_SESSION_DIR:?AGENT_SESSION_DIR is required}"
+
 # Source per-agent environment variables
 if [ -n "$AGENT_ENV_DIR" ] && [ -f "$AGENT_ENV_DIR/env" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
@@ -46,12 +51,11 @@ if [ -n "$GITHUB_TOKEN" ]; then
 fi
 
 # Set HOME to per-agent session dir's parent so .claude/ lands correctly
-if [ -n "$AGENT_SESSION_DIR" ]; then
-  export HOME=$(dirname "$AGENT_SESSION_DIR")
-fi
+HOME="$(dirname "$AGENT_SESSION_DIR")"
+export HOME
 
 # SSH key setup: use workspace-persisted key or generate new
-AGENT_FOLDER=$(basename "${AGENT_WORKSPACE:-/workspace/group}")
+AGENT_FOLDER=$(basename "$AGENT_WORKSPACE")
 mkdir -p ~/.ssh
 
 generate_deterministic_key() {
@@ -94,7 +98,9 @@ fs.writeFileSync(home + '/.ssh/id_ed25519.pub', sshPub + '\n', { mode: 0o644 });
   chmod 600 ~/.ssh/id_ed25519
 }
 
-WORKSPACE="${AGENT_WORKSPACE:-/workspace/group}"
+WORKSPACE="$AGENT_WORKSPACE"
+IPC_DIR="$AGENT_IPC_DIR"
+mkdir -p "$IPC_DIR/messages"
 
 if [ -n "$SSH_KEY_SEED" ]; then
   if generate_deterministic_key; then
@@ -112,7 +118,6 @@ if [ -n "$SSH_KEY_SEED" ]; then
     cp ~/.ssh/id_ed25519.pub "$WORKSPACE/.ssh/id_ed25519.pub"
     chmod 600 "$WORKSPACE/.ssh/id_ed25519"
     PUBKEY=$(cat ~/.ssh/id_ed25519.pub)
-    IPC_DIR="${AGENT_IPC_DIR:-/workspace/ipc}"
     echo "{\"type\":\"ssh_pubkey\",\"pubkey\":\"$PUBKEY\"}" > "$IPC_DIR/messages/ssh_pubkey_$(date +%s%N).json"
   fi
 elif [ -f "$WORKSPACE/.ssh/id_ed25519" ]; then
@@ -125,14 +130,13 @@ else
   cp ~/.ssh/id_ed25519.pub "$WORKSPACE/.ssh/id_ed25519.pub"
   chmod 600 "$WORKSPACE/.ssh/id_ed25519"
   PUBKEY=$(cat ~/.ssh/id_ed25519.pub)
-  IPC_DIR="${AGENT_IPC_DIR:-/workspace/ipc}"
   echo "{\"type\":\"ssh_pubkey\",\"pubkey\":\"$PUBKEY\"}" > "$IPC_DIR/messages/ssh_pubkey_$(date +%s%N).json"
 fi
 ssh-keyscan github.com gitlab.com >> ~/.ssh/known_hosts 2>/dev/null || true
 
 # Buffer stdin then run agent (per-agent temp file to avoid conflicts in shared VM)
 INPUT_FILE="/tmp/input-$$.json"
+trap 'rm -f "$INPUT_FILE"' EXIT
 cat > "$INPUT_FILE"
-cd "${AGENT_WORKSPACE:-/workspace/group}"
+cd "$AGENT_WORKSPACE"
 bun /app/src/index.ts < "$INPUT_FILE"
-rm -f "$INPUT_FILE"
