@@ -95,7 +95,7 @@ export class SharedVmManager {
         );
       }
     } catch (err) {
-      logger.warn(err, 'Failed to clean up orphaned shared VMs');
+      logger.warn({ err }, 'Failed to clean up orphaned shared VMs');
     }
   }
 

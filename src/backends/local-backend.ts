@@ -1616,10 +1616,7 @@ export class LocalBackend implements AgentBackend {
     }
     const srvFolder = getServerFolder(group);
     if (srvFolder) {
-      execArgs.push(
-        '-e',
-        `AGENT_SERVER_DIR=/workspace/groups/${srvFolder}`,
-      );
+      execArgs.push('-e', `AGENT_SERVER_DIR=/workspace/groups/${srvFolder}`);
     }
 
     // Exec container env vars
@@ -1655,10 +1652,9 @@ export class LocalBackend implements AgentBackend {
     fs.mkdirSync(logsDir, { recursive: true });
 
     let container: ReturnType<typeof Bun.spawn>;
-    const execBroker =
-      execContainer
-        ? startExecBroker(runtimeFolder, execContainer.name, log)
-        : null;
+    const execBroker = execContainer
+      ? startExecBroker(runtimeFolder, execContainer.name, log)
+      : null;
     try {
       container = Bun.spawn([LOCAL_RUNTIME, ...execArgs], {
         stdin: 'pipe',

@@ -1036,10 +1036,7 @@ async function runQuery(
 
   // Append agent identity as a fallback for agents without agent context CLAUDE.md
   // When the agent has an identity file, the SDK auto-loads it via additionalDirectories
-  if (
-    containerInput.agentName &&
-    !fs.existsSync(`${PATHS.agent}/CLAUDE.md`)
-  ) {
+  if (containerInput.agentName && !fs.existsSync(`${PATHS.agent}/CLAUDE.md`)) {
     const identityParts = [`You are **${containerInput.agentName}**.`];
     if (containerInput.agentTrigger) {
       identityParts.push(`Your trigger is \`${containerInput.agentTrigger}\`.`);
@@ -1107,11 +1104,7 @@ async function runQuery(
   // 1. Context layers: agent, server, category
   // 2. Extra mounts: /workspace/extra/*
   const extraDirs: string[] = [];
-  const contextDirs = [
-    PATHS.agent,
-    PATHS.server,
-    PATHS.category,
-  ];
+  const contextDirs = [PATHS.agent, PATHS.server, PATHS.category];
   for (const dir of contextDirs) {
     if (fs.existsSync(dir)) extraDirs.push(dir);
   }
