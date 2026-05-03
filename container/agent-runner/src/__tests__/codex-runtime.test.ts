@@ -1,6 +1,4 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import fs from 'fs';
-import path from 'path';
 
 import {
   buildCodexAppServerArgs,
@@ -8,15 +6,12 @@ import {
   buildCodexThreadResumeParams,
   buildCodexThreadStartParams,
   buildCodexTurnStartParams,
-  expandSlashCommandPrompt,
   extractAssistantTextFromItem,
   extractTextFromCodexContent,
   isRecoverableThreadResumeError,
 } from '../codex-runtime.js';
 
 const ORIGINAL_ENV = { ...process.env };
-const TEST_COMMANDS_DIR = path.join(process.cwd(), '.tmp-codex-slash-commands');
-const TEST_COMMAND_FILE = path.join(TEST_COMMANDS_DIR, 'codexslashtest.md');
 
 function resetEnv(): void {
   for (const key of Object.keys(process.env)) {
@@ -30,11 +25,6 @@ function resetEnv(): void {
 }
 
 afterEach(() => {
-  try {
-    fs.rmSync(TEST_COMMANDS_DIR, { recursive: true, force: true });
-  } catch {
-    /* ignore */
-  }
   resetEnv();
 });
 
@@ -54,7 +44,6 @@ describe('buildCodexEnv', () => {
 
   it('preserves github auth for Codex shell commands', () => {
     process.env.GITHUB_TOKEN = 'gh-token';
-    delete process.env.GH_TOKEN;
 
     const env = buildCodexEnv({} as any);
 
@@ -180,27 +169,6 @@ describe('buildCodexTurnStartParams', () => {
         networkAccess: 'restricted',
       },
     });
-  });
-});
-
-describe('expandSlashCommandPrompt', () => {
-  it('expands Claude-style slash command files before sending to Codex', () => {
-    process.env.OMNICLAW_SLASH_COMMAND_ROOTS = TEST_COMMANDS_DIR;
-    fs.mkdirSync(TEST_COMMANDS_DIR, { recursive: true });
-    fs.writeFileSync(
-      TEST_COMMAND_FILE,
-      'Run the shared workflow with: $ARGUMENTS\n',
-    );
-
-    expect(expandSlashCommandPrompt('/codexslashtest repo cleanup')).toBe(
-      'Run the shared workflow with: repo cleanup',
-    );
-  });
-
-  it('leaves unknown slash commands unchanged for native Codex handling', () => {
-    expect(expandSlashCommandPrompt('/__test_codex_missing arg')).toBe(
-      '/__test_codex_missing arg',
-    );
   });
 });
 
