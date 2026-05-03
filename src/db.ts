@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
+import { discordCommandsSchema } from './agent-topology.js';
 import { DATA_DIR, STORE_DIR } from './config.js';
 import { TrustStore } from './discovery/trust-store.js';
 import { logger } from './logger.js';
@@ -39,6 +40,7 @@ interface RegisteredGroupRow {
   description: string | null;
   auto_respond_to_questions: number | null;
   auto_respond_keywords: string | null;
+  discord_commands: string | null;
 }
 
 /** Row type for agents table SELECT * queries */
@@ -122,6 +124,23 @@ function normalizeAgentRuntime(
   return 'claude-agent-sdk';
 }
 
+function parseDiscordCommands(
+  value: string | null,
+  jid: string,
+): RegisteredGroup['discordCommands'] {
+  const parsed = safeJsonParse<unknown>(value, { jid }, 'discord_commands');
+  if (parsed === undefined) return undefined;
+  const result = discordCommandsSchema.safeParse(parsed);
+  if (!result.success) {
+    logger.warn(
+      { jid, issues: result.error.issues },
+      'Invalid discord_commands in DB, ignoring',
+    );
+    return undefined;
+  }
+  return result.data;
+}
+
 /** Map a database row to a RegisteredGroup object (without jid field) */
 function mapRowToRegisteredGroup(
   row: RegisteredGroupRow,
@@ -149,6 +168,7 @@ function mapRowToRegisteredGroup(
       { jid: row.jid },
       'auto_respond_keywords',
     ),
+    discordCommands: parseDiscordCommands(row.discord_commands, row.jid),
   };
 }
 
@@ -1236,8 +1256,8 @@ export function getRegisteredGroup(
 /** Insert or replace a registered group entry. */
 export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   db.query(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, discord_bot_id, discord_guild_id, server_folder, backend, description, auto_respond_to_questions, auto_respond_keywords)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, discord_bot_id, discord_guild_id, server_folder, backend, description, auto_respond_to_questions, auto_respond_keywords, discord_commands)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -1255,6 +1275,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.autoRespondKeywords
       ? JSON.stringify(group.autoRespondKeywords)
       : null,
+    group.discordCommands ? JSON.stringify(group.discordCommands) : null,
   );
 }
 

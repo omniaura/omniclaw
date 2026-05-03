@@ -41,6 +41,12 @@ agents:
     agentRuntime: opencode
     description: Infrastructure agent
     serverFolder: servers/omniaura
+    discordCommands:
+      enabled:
+        - product-driver
+        - issue-driver
+      disabled:
+        - mergemaster
     containerConfig:
       timeout: 300000
       memory: 4096
@@ -72,6 +78,10 @@ agents:
       discordGuildId: '789',
       serverFolder: 'servers/omniaura',
       channelFolder: 'servers/omniaura/omniclaw',
+      discordCommands: {
+        enabled: ['product-driver', 'issue-driver'],
+        disabled: ['mergemaster'],
+      },
       containerConfig: {
         timeout: 300000,
         memory: 4096,
@@ -183,6 +193,23 @@ agents:
 
     expect(() => loadDeclarativeAgentTopology(filePath)).toThrow(
       /Unrecognized key: "chanels"/,
+    );
+  });
+
+  it('rejects invalid Discord command filter names', () => {
+    const filePath = writeTopology(`
+agents:
+  main:
+    discordCommands:
+      disabled:
+        - "Bad Command!"
+    channels:
+      - jid: "dc:123"
+        trigger: "@Omni"
+`);
+
+    expect(() => loadDeclarativeAgentTopology(filePath)).toThrow(
+      /must be a Discord slash command name/,
     );
   });
 

@@ -13,11 +13,10 @@ export interface Migration {
 }
 
 /**
- * The version that represents the full current schema. Existing databases that
- * predate the migration framework are stamped here (they already have
- * everything via the old addColumnIfNotExists pattern).
+ * The version that represents the latest schema. Existing databases that
+ * predate the migration framework are advanced through every migration to this.
  */
-export const BASELINE_VERSION = 1;
+export const BASELINE_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // Schema helpers (available for use in migrations)
@@ -496,6 +495,14 @@ const migration1: Migration = {
   },
 };
 
+const migration2: Migration = {
+  version: 2,
+  description: 'Persist per-agent Discord command filters',
+  up: (db) => {
+    addColumnIfNotExists(db, 'registered_groups', 'discord_commands', 'TEXT');
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Migration registry
 // ---------------------------------------------------------------------------
@@ -506,4 +513,4 @@ const migration1: Migration = {
  * can use plain `ALTER TABLE` without try/catch — the version tracker
  * guarantees each migration runs exactly once.
  */
-export const allMigrations: Migration[] = [migration1];
+export const allMigrations: Migration[] = [migration1, migration2];

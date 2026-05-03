@@ -80,6 +80,15 @@ export interface RegisteredGroup {
   categoryFolder?: string; // e.g., 'servers/omni-aura/ditto-assistant'
   /** Agent identity folder. Mounted read-write at /workspace/agent/. */
   agentContextFolder?: string; // e.g., 'agents/peytonomi'
+  /** Discord slash command availability for this agent/channel registration. */
+  discordCommands?: DiscordCommandConfig;
+}
+
+export interface DiscordCommandConfig {
+  /** Optional allowlist. Omit to enable all built-in and workspace commands. */
+  enabled?: string[];
+  /** Optional denylist applied after enabled. */
+  disabled?: string[];
 }
 
 /**

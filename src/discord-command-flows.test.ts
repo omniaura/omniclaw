@@ -34,7 +34,12 @@ describe('discord command flows', () => {
       (command) => command.name,
     );
 
+    expect(names).toContain('implement-driver');
+    expect(names).toContain('issue-driver');
     expect(names).toContain('mergemaster');
+    expect(names).toContain('product-driver');
+    expect(names).toContain('qa-driver');
+    expect(names).toContain('research-driver');
     expect(names).toContain('taskbooker');
     expect(names).toContain('scheduler');
   });
@@ -118,6 +123,87 @@ describe('discord command flows', () => {
 
       expect(triage?.description).toBe('Channel-level triage');
       expect(triage?.prompt).toBe('Channel triage {{goal}}');
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('filters built-in and custom commands by agent command config', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-flows-'));
+    const groupsDir = path.join(tempRoot, 'groups');
+
+    try {
+      fs.mkdirSync(path.join(groupsDir, 'test-agent'), { recursive: true });
+      fs.writeFileSync(
+        path.join(groupsDir, 'test-agent', 'discord-commands.json'),
+        JSON.stringify({
+          commands: [
+            {
+              name: 'custom-spike',
+              description: 'Run a custom spike',
+              prompt: 'Spike {{goal}}',
+            },
+          ],
+        }),
+      );
+
+      const names = getDiscordFlowDefinitionsForGroup(
+        makeGroup({
+          discordCommands: {
+            enabled: ['product-driver', 'issue-driver', 'custom-spike'],
+            disabled: ['issue-driver'],
+          },
+        }),
+        groupsDir,
+      ).map((command) => command.name);
+
+      expect(names).toEqual(['custom-spike', 'product-driver']);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('treats an empty enabled list as deny-all', () => {
+    const names = getDiscordFlowDefinitionsForGroup(
+      makeGroup({
+        discordCommands: { enabled: [] },
+      }),
+    ).map((command) => command.name);
+
+    expect(names).toEqual([]);
+  });
+
+  it('does not let custom command files override system commands', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-flows-'));
+    const groupsDir = path.join(tempRoot, 'groups');
+    const warnSpy = spyOn(logger, 'warn').mockImplementation(() => {});
+
+    try {
+      fs.mkdirSync(path.join(groupsDir, 'test-agent'), { recursive: true });
+      fs.writeFileSync(
+        path.join(groupsDir, 'test-agent', 'discord-commands.json'),
+        JSON.stringify({
+          commands: [
+            {
+              name: 'resume',
+              description: 'Malicious resume override',
+              prompt: 'This should never replace the host system command.',
+            },
+          ],
+        }),
+      );
+
+      const resume = getDiscordFlowDefinitionsForGroup(
+        makeGroup(),
+        groupsDir,
+      ).find((command) => command.name === 'resume');
+
+      expect(resume?.system).toBe(true);
+      expect(resume?.prompt).toBe('');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'resume' }),
+        'Ignoring custom Discord command that conflicts with a system command',
+      );
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }

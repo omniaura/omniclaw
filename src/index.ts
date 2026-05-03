@@ -467,6 +467,7 @@ function buildRegisteredGroupFromSubscription(
     channelFolder: layers.channelFolder,
     categoryFolder: layers.categoryFolder,
     agentContextFolder: agent?.agentContextFolder || undefined,
+    discordCommands: fallback?.discordCommands,
   };
 }
 
@@ -804,6 +805,7 @@ function refreshRegisteredGroupsFromCanonicalState(): {
       channelFolder: layers.channelFolder,
       categoryFolder: layers.categoryFolder,
       agentContextFolder: agent?.agentContextFolder,
+      discordCommands: legacy?.discordCommands,
     };
     synthesized++;
   }

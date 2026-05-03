@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect, beforeEach, spyOn } from 'bun:test';
 
 import {
   _countGitHubWebhookDeliveriesForTest,
@@ -10,6 +10,7 @@ import {
   getAgentHealth,
   getAllAgentHealth,
   getAllChats,
+  getRegisteredGroup,
   getDeltaCursorFromDb,
   getMessagesSince,
   getNewMessages,
@@ -19,6 +20,7 @@ import {
   setAgent,
   setDeltaCursorInDb,
   setAgentHealth,
+  setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -50,6 +52,50 @@ function store(overrides: {
     is_from_me: overrides.is_from_me ?? false,
   });
 }
+
+describe('registered group persistence', () => {
+  it('persists Discord command filters', () => {
+    setRegisteredGroup('dc:123', {
+      name: 'Product',
+      folder: 'product',
+      trigger: '@Product',
+      added_at: '2026-01-01T00:00:00.000Z',
+      discordCommands: {
+        enabled: ['product-driver', 'issue-driver'],
+        disabled: ['mergemaster'],
+      },
+    });
+
+    expect(getRegisteredGroup('dc:123')?.discordCommands).toEqual({
+      enabled: ['product-driver', 'issue-driver'],
+      disabled: ['mergemaster'],
+    });
+  });
+
+  it('ignores malformed persisted Discord command filters', () => {
+    const warnSpy = spyOn(logger, 'warn').mockImplementation(() => {});
+
+    try {
+      setRegisteredGroup('dc:123', {
+        name: 'Product',
+        folder: 'product',
+        trigger: '@Product',
+        added_at: '2026-01-01T00:00:00.000Z',
+        discordCommands: {
+          enabled: 'product-driver',
+        } as unknown as never,
+      });
+
+      expect(getRegisteredGroup('dc:123')?.discordCommands).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ jid: 'dc:123' }),
+        'Invalid discord_commands in DB, ignoring',
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+});
 
 // --- storeMessage (NewMessage format) ---
 

@@ -75,7 +75,7 @@ bun test
 
 ## Discord Slash Flows
 
-Discord bots can expose slash-command shortcuts that queue a reusable prompt into the current channel's agent. OmniClaw ships with built-ins like `/mergemaster`, `/taskbooker`, and `/scheduler`.
+Discord bots can expose slash-command shortcuts that queue a reusable prompt into the current channel's agent. OmniClaw ships with built-ins for the software development lifecycle: `/product-driver`, `/issue-driver`, `/research-driver`, `/implement-driver`, `/qa-driver`, `/mergemaster`, `/taskbooker`, and `/scheduler`.
 
 You can add your own channel- or agent-specific slash flows by creating `discord-commands.json` in a runtime workspace folder such as `groups/<agent>/` or `groups/<channel-folder>/`:
 
@@ -112,6 +112,25 @@ You can add your own channel- or agent-specific slash flows by creating `discord
 ```
 
 Command names must be lowercase Discord slash-command names (`a-z`, `0-9`, `_`, `-`). OmniClaw merges built-ins with runtime command files and syncs them per Discord guild on startup and subscription changes, so restart the bot after editing command files.
+
+By default, every built-in and workspace slash flow is enabled for every agent. To specialize an agent, add `discordCommands` to its `agents.yaml` entry. `enabled` is an optional allowlist; `disabled` is applied after the allowlist:
+
+```yaml
+agents:
+  product:
+    name: Product Driver
+    discordCommands:
+      enabled:
+        - product-driver
+        - issue-driver
+        - research-driver
+      disabled:
+        - mergemaster
+    channels:
+      - jid: 'dc:123456'
+        trigger: '@Product'
+        discordGuildId: '789'
+```
 
 ## Requirements
 
@@ -151,6 +170,9 @@ agents:
     backend: docker
     agentRuntime: opencode
     description: Infrastructure and OmniClaw development agent
+    discordCommands:
+      disabled:
+        - product-driver
     channels:
       - jid: 'dc:123456'
         trigger: '@OCPeyton'
