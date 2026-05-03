@@ -467,6 +467,7 @@ function buildRegisteredGroupFromSubscription(
     channelFolder: layers.channelFolder,
     categoryFolder: layers.categoryFolder,
     agentContextFolder: agent?.agentContextFolder || undefined,
+    discordCommands: fallback?.discordCommands,
   };
 }
 

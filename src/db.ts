@@ -39,6 +39,7 @@ interface RegisteredGroupRow {
   description: string | null;
   auto_respond_to_questions: number | null;
   auto_respond_keywords: string | null;
+  discord_commands: string | null;
 }
 
 /** Row type for agents table SELECT * queries */
@@ -148,6 +149,11 @@ function mapRowToRegisteredGroup(
       row.auto_respond_keywords,
       { jid: row.jid },
       'auto_respond_keywords',
+    ),
+    discordCommands: safeJsonParse<RegisteredGroup['discordCommands']>(
+      row.discord_commands,
+      { jid: row.jid },
+      'discord_commands',
     ),
   };
 }
@@ -1236,8 +1242,8 @@ export function getRegisteredGroup(
 /** Insert or replace a registered group entry. */
 export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   db.query(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, discord_bot_id, discord_guild_id, server_folder, backend, description, auto_respond_to_questions, auto_respond_keywords)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, discord_bot_id, discord_guild_id, server_folder, backend, description, auto_respond_to_questions, auto_respond_keywords, discord_commands)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -1255,6 +1261,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.autoRespondKeywords
       ? JSON.stringify(group.autoRespondKeywords)
       : null,
+    group.discordCommands ? JSON.stringify(group.discordCommands) : null,
   );
 }
 

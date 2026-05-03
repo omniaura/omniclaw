@@ -67,6 +67,130 @@ const BUILTIN_COMMANDS: DiscordFlowDefinition[] = [
     ],
   },
   {
+    name: 'product-driver',
+    description: 'Drive product discovery and issue creation',
+    prompt:
+      'You are product driver for {{repo}} for the next {{duration_minutes}} minutes.\n\nGoal: {{goal}}\n\nYour job is to turn ambiguous product direction into concrete product progress. Start by reading the repo context, open issues, recent PRs, product docs, and relevant user conversations. De-duplicate before filing anything.\n\nExpected output:\n- identify the highest-leverage product gaps or opportunities\n- file clear issues with user problem, scope, acceptance criteria, and test notes when the repo needs tracking issues\n- direct small exploratory PRs only when code discovery is needed to clarify the product path\n- keep implementation delegated or narrowly exploratory; do not drift into broad feature work\n- leave a short queue update naming filed issues, delegated owners, blockers, and next decisions needed',
+    options: [
+      {
+        name: 'repo',
+        description: 'Repository or product area to drive',
+        type: 'string',
+        defaultValue: 'the target repo',
+      },
+      {
+        name: 'goal',
+        description: 'Product outcome or customer problem',
+        type: 'string',
+        defaultValue: 'meaningful product progress',
+      },
+      {
+        name: 'duration_minutes',
+        description: 'How long to stay in product-driver mode',
+        type: 'integer',
+        defaultValue: 60,
+      },
+    ],
+  },
+  {
+    name: 'issue-driver',
+    description: 'Triage, dedupe, and file actionable issues',
+    prompt:
+      'You are issue driver for {{repo}} for the next {{duration_minutes}} minutes.\n\nGoal: {{goal}}\n\nWork the issue queue like a product-minded engineer. Inspect existing issues and recent PRs first, then decide whether to update, close, split, prioritize, or file new issues. Prefer fewer high-quality issues over many vague ones.\n\nIssue quality bar:\n- concrete problem statement and why it matters\n- reproduction or evidence when applicable\n- proposed scope, non-goals, acceptance criteria, and verification plan\n- priority recommendation and dependencies\n- links to relevant files, PRs, conversations, or docs\n\nDo not implement fixes unless explicitly asked. End with a concise issue ledger and recommended next owners.',
+    options: [
+      {
+        name: 'repo',
+        description: 'Repository or project issue queue',
+        type: 'string',
+        defaultValue: 'the target repo',
+      },
+      {
+        name: 'goal',
+        description: 'Triage theme or product area',
+        type: 'string',
+        defaultValue: 'open issue quality and prioritization',
+      },
+      {
+        name: 'duration_minutes',
+        description: 'How long to stay in issue-driver mode',
+        type: 'integer',
+        defaultValue: 45,
+      },
+    ],
+  },
+  {
+    name: 'research-driver',
+    description: 'Run technical/product research and propose paths',
+    prompt:
+      'You are research driver for {{repo}} for the next {{duration_minutes}} minutes.\n\nQuestion or area: {{goal}}\n\nBuild evidence before recommending direction. Read primary sources, current repo code, open issues, and comparable implementations. When web research is needed, prefer official docs, source repos, specs, and recent primary references over summaries.\n\nDeliverables:\n- concise findings with source links or file references\n- option set with tradeoffs, risks, and confidence level\n- recommended next step and smallest validation PR or spike\n- issues to file only when they are actionable and de-duplicated\n\nDo not present speculation as fact; call out unknowns and verification gaps.',
+    options: [
+      {
+        name: 'repo',
+        description: 'Repository or product area to research',
+        type: 'string',
+        defaultValue: 'the target repo',
+      },
+      {
+        name: 'goal',
+        description: 'Research question or decision',
+        type: 'string',
+        required: true,
+      },
+      {
+        name: 'duration_minutes',
+        description: 'Research timebox in minutes',
+        type: 'integer',
+        defaultValue: 45,
+      },
+    ],
+  },
+  {
+    name: 'implement-driver',
+    description: 'Take a scoped issue through a PR-ready patch',
+    prompt:
+      'You are implementation driver for {{repo}}.\n\nTarget: {{goal}}\n\nTake one well-scoped change from intent to PR-ready state. Inspect the existing code and tests first, confirm the smallest coherent implementation path, then write the patch, add or update focused tests, run the relevant validation, and push or open/update the PR if repo policy expects it.\n\nConstraints:\n- keep scope tight and avoid unrelated refactors\n- preserve user or teammate work in the worktree\n- document any product or technical ambiguity instead of guessing silently\n- request review when the PR is ready, with a short verification summary\n\nIf the target is not implementation-ready, file or update an issue with the missing requirements and hand it back to product/issue driver.',
+    options: [
+      {
+        name: 'repo',
+        description: 'Repository to modify',
+        type: 'string',
+        defaultValue: 'the target repo',
+      },
+      {
+        name: 'goal',
+        description: 'Issue, PR, or scoped implementation target',
+        type: 'string',
+        required: true,
+      },
+    ],
+  },
+  {
+    name: 'qa-driver',
+    description: 'Verify behavior, PRs, and release readiness',
+    prompt:
+      'You are QA driver for {{repo}} for the next {{duration_minutes}} minutes.\n\nTarget: {{goal}}\n\nValidate behavior from the user and release perspective. Inspect the diff or feature path, identify risk areas, run the most relevant automated and manual checks available in this environment, and file focused follow-up issues for defects or missing coverage.\n\nQA checklist:\n- confirm expected behavior and edge cases from product context\n- run targeted tests before broad tests when possible\n- reproduce reported bugs with clear steps and evidence\n- verify UI/API behavior where applicable\n- separate blockers from follow-up polish\n\nDo not merge. End with pass/fail status, evidence, blockers, and recommended next action.',
+    options: [
+      {
+        name: 'repo',
+        description: 'Repository, PR, or feature to verify',
+        type: 'string',
+        defaultValue: 'the target repo',
+      },
+      {
+        name: 'goal',
+        description: 'Behavior, issue, or PR to validate',
+        type: 'string',
+        required: true,
+      },
+      {
+        name: 'duration_minutes',
+        description: 'QA timebox in minutes',
+        type: 'integer',
+        defaultValue: 45,
+      },
+    ],
+  },
+  {
     name: 'taskbooker',
     description: 'Have the agent book and delegate a work plan',
     prompt:
@@ -255,6 +379,19 @@ function loadFlowFile(filePath: string): DiscordFlowDefinition[] {
   }
 }
 
+function isCommandEnabledForGroup(
+  command: DiscordFlowDefinition,
+  group: RegisteredGroup,
+): boolean {
+  const config = group.discordCommands;
+  if (!config) return true;
+
+  const enabled = new Set(config.enabled || []);
+  const disabled = new Set(config.disabled || []);
+  if (enabled.size > 0 && !enabled.has(command.name)) return false;
+  return !disabled.has(command.name);
+}
+
 function getGroupCommandPaths(
   group: RegisteredGroup,
   groupsDir = GROUPS_DIR,
@@ -292,7 +429,9 @@ export function getDiscordFlowDefinitionsForGroup(
     }
   }
 
-  return [...commands.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return [...commands.values()]
+    .filter((command) => isCommandEnabledForGroup(command, group))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function buildDiscordSlashCommandPayloads(

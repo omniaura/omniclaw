@@ -11,6 +11,15 @@ const folderSchema = z
 
 const backendSchema = z.enum(['apple-container', 'docker']);
 const agentRuntimeSchema = z.enum(['claude-agent-sdk', 'opencode', 'codex']);
+const discordCommandNameSchema = z
+  .string()
+  .regex(/^[a-z0-9_-]{1,32}$/, 'must be a Discord slash command name');
+const discordCommandsSchema = z
+  .object({
+    enabled: z.array(discordCommandNameSchema).optional(),
+    disabled: z.array(discordCommandNameSchema).optional(),
+  })
+  .strict();
 const additionalMountSchema = z
   .object({
     hostPath: z.string().min(1),
@@ -59,6 +68,7 @@ const agentSchema = z
     containerConfig: containerConfigSchema.optional(),
     serverFolder: z.string().min(1).optional(),
     agentContextFolder: z.string().min(1).optional(),
+    discordCommands: discordCommandsSchema.optional(),
     channels: z.array(channelSchema).min(1),
   })
   .strict();
@@ -140,6 +150,7 @@ export function loadDeclarativeAgentTopology(
         channelFolder: channel.channelFolder,
         categoryFolder: channel.categoryFolder,
         agentContextFolder: agent.agentContextFolder,
+        discordCommands: agent.discordCommands,
       };
       registrations.push({ jid: channel.jid, group });
     }
