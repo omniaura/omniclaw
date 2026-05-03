@@ -233,22 +233,23 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 
 ### Channel Credentials
 
-| Variable                   | Required For | Purpose                                                                      |
-| -------------------------- | ------------ | ---------------------------------------------------------------------------- |
-| `DISCORD_BOT_TOKEN`        | Discord      | Single bot token (backward compatible)                                       |
-| `DISCORD_BOT_IDS`          | Discord      | Ordered bot IDs for prefixed multi-bot config (e.g. `CLAUDE,OPENCODE`)       |
-| `DISCORD_BOT_<ID>_TOKEN`   | Discord      | Token for a specific Discord bot ID                                          |
-| `DISCORD_BOT_<ID>_RUNTIME` | Discord      | Default runtime for that bot ID (`claude-agent-sdk`, `opencode`, or `codex`) |
-| `DISCORD_BOT_DEFAULT`      | Discord      | Default bot ID for unassigned Discord channels                               |
-| `TELEGRAM_BOT_TOKENS`      | Telegram     | Comma/newline-separated bot tokens for multi-bot mode                        |
-| `TELEGRAM_BOT_TOKEN`       | Telegram     | Legacy single bot token (backward compatible)                                |
-| `TELEGRAM_ONLY`            | Telegram     | Run Telegram-only mode (no WhatsApp)                                         |
-| `SLACK_BOT_IDS`            | Slack        | Ordered bot IDs for prefixed multi-bot config (e.g. `OPS,SUPPORT`)           |
-| `SLACK_BOT_<ID>_TOKEN`     | Slack        | Bot token (xoxb-...) for a specific Slack bot ID                             |
-| `SLACK_BOT_<ID>_APP_TOKEN` | Slack        | App token (xapp-...) for a specific Slack bot ID                             |
-| `SLACK_BOT_DEFAULT`        | Slack        | Default Slack bot ID for legacy/unscoped Slack routes in multi-bot mode      |
-| `SLACK_BOT_TOKEN`          | Slack        | Bot token (xoxb-...)                                                         |
-| `SLACK_APP_TOKEN`          | Slack        | Legacy app token for single-bot Socket Mode                                  |
+| Variable                              | Required For | Purpose                                                                      |
+| ------------------------------------- | ------------ | ---------------------------------------------------------------------------- |
+| `DISCORD_BOT_TOKEN`                   | Discord      | Single bot token (backward compatible)                                       |
+| `DISCORD_BOT_IDS`                     | Discord      | Ordered bot IDs for prefixed multi-bot config (e.g. `CLAUDE,OPENCODE`)       |
+| `DISCORD_BOT_<ID>_TOKEN`              | Discord      | Token for a specific Discord bot ID                                          |
+| `DISCORD_BOT_<ID>_RUNTIME`            | Discord      | Default runtime for that bot ID (`claude-agent-sdk`, `opencode`, or `codex`) |
+| `DISCORD_BOT_<ID>_PRIVILEGED_INTENTS` | Discord      | Set to `false` for bot apps without Discord privileged gateway intents       |
+| `DISCORD_BOT_DEFAULT`                 | Discord      | Default bot ID for unassigned Discord channels                               |
+| `TELEGRAM_BOT_TOKENS`                 | Telegram     | Comma/newline-separated bot tokens for multi-bot mode                        |
+| `TELEGRAM_BOT_TOKEN`                  | Telegram     | Legacy single bot token (backward compatible)                                |
+| `TELEGRAM_ONLY`                       | Telegram     | Run Telegram-only mode (no WhatsApp)                                         |
+| `SLACK_BOT_IDS`                       | Slack        | Ordered bot IDs for prefixed multi-bot config (e.g. `OPS,SUPPORT`)           |
+| `SLACK_BOT_<ID>_TOKEN`                | Slack        | Bot token (xoxb-...) for a specific Slack bot ID                             |
+| `SLACK_BOT_<ID>_APP_TOKEN`            | Slack        | App token (xapp-...) for a specific Slack bot ID                             |
+| `SLACK_BOT_DEFAULT`                   | Slack        | Default Slack bot ID for legacy/unscoped Slack routes in multi-bot mode      |
+| `SLACK_BOT_TOKEN`                     | Slack        | Bot token (xoxb-...)                                                         |
+| `SLACK_APP_TOKEN`                     | Slack        | Legacy app token for single-bot Socket Mode                                  |
 
 Discord multi-bot examples:
 

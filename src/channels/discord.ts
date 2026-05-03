@@ -192,6 +192,7 @@ export interface SessionCommandResult {
 export interface DiscordChannelOpts {
   botId: string;
   token: string;
+  privilegedIntents?: boolean;
   multiBotMode?: boolean;
   onSyntheticMessage?: (message: NewMessage) => void | Promise<void>;
   registeredGroups?: () => Record<string, RegisteredGroup>;
@@ -222,15 +223,20 @@ export class DiscordChannel implements Channel {
   constructor(opts: DiscordChannelOpts) {
     this.opts = opts;
     this.botId = opts.botId;
-    this.client = new Client({
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
+    const intents = [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.DirectMessages,
+      GatewayIntentBits.GuildMessageReactions,
+    ];
+    if (opts.privilegedIntents !== false) {
+      intents.push(
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.GuildMessageReactions,
         GatewayIntentBits.GuildMembers,
-      ],
+      );
+    }
+    this.client = new Client({
+      intents,
       partials: [Partials.Channel, Partials.Message, Partials.Reaction],
     });
   }

@@ -8,6 +8,7 @@ export interface DiscordBotConfig {
   id: string;
   token: string;
   runtime?: AgentRuntime;
+  privilegedIntents: boolean;
 }
 
 export interface SlackBotConfig {
@@ -197,6 +198,16 @@ function parseAgentRuntime(
   return undefined;
 }
 
+function parseOptionalBooleanEnv(
+  value: string | undefined,
+): boolean | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return undefined;
+}
+
 function sanitizeBotId(raw: string): string {
   return raw
     .trim()
@@ -229,7 +240,20 @@ export function buildDiscordBotConfigFromEnv(env: NodeJS.ProcessEnv): {
           `Invalid OmniClaw configuration:\nDISCORD_BOT_${id}_RUNTIME: expected one of ${AGENT_RUNTIME_VALUES.join(', ')}`,
         );
       }
-      bots.push({ id, token, runtime });
+      const privilegedIntentsValue =
+        env[`DISCORD_BOT_${id}_PRIVILEGED_INTENTS`]?.trim();
+      const privilegedIntents = parseOptionalBooleanEnv(privilegedIntentsValue);
+      if (privilegedIntentsValue && privilegedIntents === undefined) {
+        throw new Error(
+          `Invalid OmniClaw configuration:\nDISCORD_BOT_${id}_PRIVILEGED_INTENTS: expected boolean`,
+        );
+      }
+      bots.push({
+        id,
+        token,
+        runtime,
+        privilegedIntents: privilegedIntents ?? true,
+      });
     }
     const preferredDefault = sanitizeBotId(env.DISCORD_BOT_DEFAULT || '');
     const defaultBotId = bots.some((b) => b.id === preferredDefault)
@@ -240,7 +264,14 @@ export function buildDiscordBotConfigFromEnv(env: NodeJS.ProcessEnv): {
 
   const token = (env.DISCORD_BOT_TOKEN || '').trim();
   const bots = token
-    ? [{ id: 'PRIMARY', token, runtime: undefined as AgentRuntime | undefined }]
+    ? [
+        {
+          id: 'PRIMARY',
+          token,
+          runtime: undefined as AgentRuntime | undefined,
+          privilegedIntents: true,
+        },
+      ]
     : [];
   return {
     bots,

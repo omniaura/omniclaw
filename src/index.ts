@@ -2976,6 +2976,7 @@ async function main(): Promise<void> {
               const discord = new DiscordChannel({
                 botId: bot.id,
                 token: bot.token,
+                privilegedIntents: bot.privilegedIntents,
                 multiBotMode: DISCORD_BOTS.length > 1,
                 onSyntheticMessage: (message) => storeAndBroadcast(message),
                 registeredGroups: () => registeredGroups,

@@ -107,8 +107,18 @@ describe('buildDiscordBotConfigFromEnv', () => {
     });
 
     expect(parsed.bots).toEqual([
-      { id: 'CLAUDE', token: 'token-a', runtime: undefined },
-      { id: 'OPENCODE', token: 'token-b', runtime: 'opencode' },
+      {
+        id: 'CLAUDE',
+        token: 'token-a',
+        runtime: undefined,
+        privilegedIntents: true,
+      },
+      {
+        id: 'OPENCODE',
+        token: 'token-b',
+        runtime: 'opencode',
+        privilegedIntents: true,
+      },
     ]);
     expect(parsed.defaultBotId).toBe('OPENCODE');
   });
@@ -131,7 +141,29 @@ describe('buildDiscordBotConfigFromEnv', () => {
     });
 
     expect(parsed.bots).toEqual([
-      { id: 'CODEX', token: 'token-codex', runtime: 'codex' },
+      {
+        id: 'CODEX',
+        token: 'token-codex',
+        runtime: 'codex',
+        privilegedIntents: true,
+      },
+    ]);
+  });
+
+  it('allows a Discord bot to disable privileged intents', () => {
+    const parsed = buildDiscordBotConfigFromEnv({
+      DISCORD_BOT_IDS: 'CODEX',
+      DISCORD_BOT_CODEX_TOKEN: 'token-codex',
+      DISCORD_BOT_CODEX_PRIVILEGED_INTENTS: 'false',
+    });
+
+    expect(parsed.bots).toEqual([
+      {
+        id: 'CODEX',
+        token: 'token-codex',
+        runtime: undefined,
+        privilegedIntents: false,
+      },
     ]);
   });
 
@@ -141,7 +173,12 @@ describe('buildDiscordBotConfigFromEnv', () => {
     });
 
     expect(parsed.bots).toEqual([
-      { id: 'PRIMARY', token: 'legacy-token', runtime: undefined },
+      {
+        id: 'PRIMARY',
+        token: 'legacy-token',
+        runtime: undefined,
+        privilegedIntents: true,
+      },
     ]);
     expect(parsed.defaultBotId).toBe('PRIMARY');
   });
