@@ -76,15 +76,104 @@ const BUILTIN_ALLOWED_TOOLS = [
 const RESERVED_MCP_SERVER_NAME = 'omniclaw';
 const MCP_SERVER_NAME_RE = /^[A-Za-z0-9_-]+$/;
 const SAFE_BINARY_NAME_RE = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Resolve workspace paths from environment variables (shared VM mode)
+ * or fall back to legacy hardcoded paths (per-VM mode).
+ */
+function resolveWorkspacePaths() {
+  return {
+    group: process.env.AGENT_WORKSPACE || '/workspace/group',
+    ipc: process.env.AGENT_IPC_DIR || '/workspace/ipc',
+    sessions: process.env.AGENT_SESSION_DIR || '/home/bun/.claude',
+    global: process.env.AGENT_GLOBAL_DIR || '/workspace/global',
+    agent: process.env.AGENT_CONTEXT_DIR || '/workspace/agent',
+    category: process.env.AGENT_CATEGORY_DIR || '/workspace/category',
+    server: process.env.AGENT_SERVER_DIR || '/workspace/server',
+    project: process.env.AGENT_PROJECT_DIR || '/workspace/project',
+    envDir: process.env.AGENT_ENV_DIR || '/workspace/env-dir',
+  };
+}
+
+const PATHS = resolveWorkspacePaths();
+const IS_SHARED_VM_MODE = !!process.env.AGENT_WORKSPACE;
+
+export function resolveCurrentChatFile(): string {
+  return (
+    process.env.OMNICLAW_CURRENT_CHAT_FILE ||
+    path.join('/tmp', `current_chat_jid-${process.pid}`)
+  );
+}
+
 const ALLOWED_EXTERNAL_MCP_COMMAND_ROOTS = [
-  '/workspace/group',
-  '/workspace/project',
-  '/workspace/global',
-  '/workspace/agent',
-  '/workspace/category',
-  '/workspace/server',
+  PATHS.group,
+  PATHS.project,
+  PATHS.global,
+  PATHS.agent,
+  PATHS.category,
+  PATHS.server,
   '/workspace/extra',
 ] as const;
+
+const SHARED_VM_VISIBLE_PARENT_ROOTS = [
+  '/workspace/groups',
+  '/data/ipc',
+  '/data/sessions',
+] as const;
+
+const ALLOWED_AGENT_PATH_ROOTS = [
+  PATHS.group,
+  PATHS.global,
+  PATHS.agent,
+  PATHS.category,
+  PATHS.server,
+  PATHS.project,
+  '/workspace/extra',
+] as const;
+
+function isPathWithinRoot(filePath: string, root: string): boolean {
+  const resolved = path.resolve(filePath);
+  const resolvedRoot = path.resolve(root);
+  return (
+    resolved === resolvedRoot ||
+    resolved.startsWith(`${resolvedRoot}${path.sep}`)
+  );
+}
+
+export function isPathAllowedForSharedVmAgent(filePath: string): boolean {
+  return ALLOWED_AGENT_PATH_ROOTS.some((root) =>
+    isPathWithinRoot(filePath, root),
+  );
+}
+
+function referencesSharedVmParentRoot(filePath: string): boolean {
+  return SHARED_VM_VISIBLE_PARENT_ROOTS.some((root) =>
+    isPathWithinRoot(filePath, root),
+  );
+}
+
+function assertSharedVmPathAllowed(filePath: string): void {
+  if (!IS_SHARED_VM_MODE) return;
+  if (!referencesSharedVmParentRoot(filePath)) return;
+  if (isPathAllowedForSharedVmAgent(filePath)) return;
+  throw new Error(
+    `Access to ${filePath} is not allowed in shared-VM mode because it is outside this agent's mounted workspace allowlist.`,
+  );
+}
+
+function assertSharedVmCommandAllowed(command: string): void {
+  if (!IS_SHARED_VM_MODE) return;
+  const referencedPaths = command.match(
+    /\/(?:workspace\/groups|data\/(?:ipc|sessions))[^\s'"`;|&)]*/g,
+  );
+  for (const referencedPath of referencedPaths || []) {
+    if (!isPathAllowedForSharedVmAgent(referencedPath)) {
+      throw new Error(
+        "This command references shared-VM parent mounts outside this agent's workspace allowlist.",
+      );
+    }
+  }
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -135,7 +224,7 @@ export function validateExternalMcpCommand(
 
   const resolved = trimmed.startsWith('/')
     ? path.resolve(trimmed)
-    : path.resolve('/workspace/group', trimmed);
+    : path.resolve(PATHS.group, trimmed);
   const isAllowed = ALLOWED_EXTERNAL_MCP_COMMAND_ROOTS.some((root) => {
     const resolvedRoot = path.resolve(root);
     return (
@@ -274,14 +363,14 @@ interface SDKUserMessage {
 
 // Defaults to the message lane; reassigned to input-task/ after stdin is parsed
 // when containerInput.isScheduledTask is true.
-let IPC_INPUT_DIR = '/workspace/ipc/input';
+let IPC_INPUT_DIR = `${PATHS.ipc}/input`;
 
 /**
  * Determine the IPC input directory based on whether this is a scheduled task.
  * Exported for testing.
  */
 export function resolveIpcInputDir(isScheduledTask?: boolean): string {
-  return isScheduledTask ? '/workspace/ipc/input-task' : '/workspace/ipc/input';
+  return isScheduledTask ? `${PATHS.ipc}/input-task` : `${PATHS.ipc}/input`;
 }
 const IPC_POLL_MS = 500;
 
@@ -386,7 +475,7 @@ const EXT_TO_MEDIA_TYPE: Record<string, string> = {
   '.webp': 'image/webp',
 };
 
-const MEDIA_DIR = '/workspace/group/media';
+const MEDIA_DIR = `${PATHS.group}/media`;
 
 /**
  * Parse [attachment:image file=...] markers in text.
@@ -516,7 +605,7 @@ function createPreCompactHook(assistantName: string): HookCallback {
       const summary = getSessionSummary(sessionId, transcriptPath);
       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
-      const conversationsDir = '/workspace/group/conversations';
+      const conversationsDir = `${PATHS.group}/conversations`;
       fs.mkdirSync(conversationsDir, { recursive: true });
 
       const date = new Date().toISOString().split('T')[0];
@@ -595,8 +684,9 @@ export function createSanitizeBashHook(): HookCallback {
 
     // Block other sensitive paths
     const blockedPaths = [
-      /\/tmp\/input\.json/, // Stdin buffer
-      /\/workspace\/env-dir(?:\/|$)/, // Mounted env directory (with or without trailing slash)
+      /\/tmp\/input(?:-\d+)?\.json/, // Stdin buffer (input.json or input-<pid>.json)
+      /\/workspace\/env-dir(?:\/|$)/, // Mounted env directory (legacy per-VM mode)
+      /\/data\/env(?:\/|$)/, // Mounted env directory (shared VM mode)
       /\/workspace\/project\/\.env(?:\s|$|[;|&><)\n]|\$\()/, // Project root .env (masked by /dev/null mount, defense-in-depth)
       /\/proc\/.*\/mountinfo/, // Mount enumeration
       /\/proc\/.*\/mounts/, // Mount list
@@ -612,6 +702,8 @@ export function createSanitizeBashHook(): HookCallback {
         );
       }
     }
+
+    assertSharedVmCommandAllowed(command);
 
     // Prepend unset for defense-in-depth
     // (Even though secrets shouldn't be in process.env, unset provides extra safety)
@@ -708,8 +800,9 @@ export function createSanitizeReadHook(): HookCallback {
     // Block reads of sensitive files
     const blockedPatterns = [
       /^\/proc\/(?:\d+|self)(?:\/[^/]+)*\/environ$/, // Process/task environ (any depth: /proc/<pid>/task/<tid>/environ)
-      /^\/tmp\/input\.json$/, // Stdin buffer
-      /^\/workspace\/env-dir\//, // Mounted env directory
+      /^\/tmp\/input(?:-\d+)?\.json$/, // Stdin buffer (input.json or input-<pid>.json)
+      /^\/workspace\/env-dir\//, // Mounted env directory (legacy per-VM mode)
+      /^\/data\/env\//, // Mounted env directory (shared VM mode)
       /^\/workspace\/project\/\.env$/, // Project root .env (masked by /dev/null mount, defense-in-depth)
       /^\/proc\/(\d+|self)\/mountinfo$/, // Mount enumeration for any PID (Issue #79)
       /^\/proc\/(\d+|self)\/mounts$/, // Mount list for any PID
@@ -727,6 +820,30 @@ export function createSanitizeReadHook(): HookCallback {
       }
     }
 
+    assertSharedVmPathAllowed(normalized);
+
+    return {};
+  };
+}
+
+export function createWorkspaceIsolationHook(): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const preInput = input as PreToolUseHookInput;
+    const toolInput = preInput.tool_input as {
+      file_path?: string;
+      path?: string;
+    };
+    const filePath = toolInput.file_path || toolInput.path;
+    if (!filePath) return {};
+
+    let normalized = path.resolve(filePath);
+    try {
+      normalized = fs.realpathSync(normalized);
+    } catch {
+      // Non-existent writes still need path-level validation.
+    }
+
+    assertSharedVmPathAllowed(normalized);
     return {};
   };
 }
@@ -814,8 +931,8 @@ function formatTranscriptMarkdown(
 }
 
 // Track the current chat JID for multi-channel agents.
-// Written to /tmp/current_chat_jid so the MCP server can read it.
-const CURRENT_CHAT_FILE = '/tmp/current_chat_jid';
+// In shared-VM mode, multiple runner processes share /tmp, so this must be per exec.
+const CURRENT_CHAT_FILE = resolveCurrentChatFile();
 let currentChatJidValue = '';
 
 function setCurrentChat(chatJid: string): void {
@@ -1005,18 +1122,15 @@ async function runQuery(
   let resultCount = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+  const globalClaudeMdPath = `${PATHS.global}/CLAUDE.md`;
   let globalClaudeMd: string | undefined;
   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
-  // Append agent identity as a fallback for agents without /workspace/agent/CLAUDE.md
+  // Append agent identity as a fallback for agents without agent context CLAUDE.md
   // When the agent has an identity file, the SDK auto-loads it via additionalDirectories
-  if (
-    containerInput.agentName &&
-    !fs.existsSync('/workspace/agent/CLAUDE.md')
-  ) {
+  if (containerInput.agentName && !fs.existsSync(`${PATHS.agent}/CLAUDE.md`)) {
     const identityParts = [`You are **${containerInput.agentName}**.`];
     if (containerInput.agentTrigger) {
       identityParts.push(`Your trigger is \`${containerInput.agentTrigger}\`.`);
@@ -1081,14 +1195,10 @@ async function runQuery(
   }
 
   // Discover additional directories for CLAUDE.md auto-loading:
-  // 1. Context layers: /workspace/agent, /workspace/server, /workspace/category
+  // 1. Context layers: agent, server, category
   // 2. Extra mounts: /workspace/extra/*
   const extraDirs: string[] = [];
-  const contextDirs = [
-    '/workspace/agent',
-    '/workspace/server',
-    '/workspace/category',
-  ];
+  const contextDirs = [PATHS.agent, PATHS.server, PATHS.category];
   for (const dir of contextDirs) {
     if (fs.existsSync(dir)) extraDirs.push(dir);
   }
@@ -1114,7 +1224,7 @@ async function runQuery(
     prompt: stream,
     options: {
       model: sdkEnv.CLAUDE_MODEL || 'claude-opus-4-6',
-      cwd: '/workspace/group',
+      cwd: PATHS.group,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: sessionId ? resumeAt : undefined,
@@ -1139,6 +1249,8 @@ async function runQuery(
             OMNICLAW_CHAT_JID: containerInput.chatJid,
             OMNICLAW_GROUP_FOLDER: containerInput.groupFolder,
             OMNICLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            OMNICLAW_IPC_DIR: PATHS.ipc,
+            OMNICLAW_CURRENT_CHAT_FILE: CURRENT_CHAT_FILE,
             ...(containerInput.discordGuildId
               ? { OMNICLAW_DISCORD_GUILD_ID: containerInput.discordGuildId }
               : {}),
@@ -1174,6 +1286,10 @@ async function runQuery(
             matcher: 'Read',
             hooks: [createSanitizeReadHook(), createFileSizeHook()],
           },
+          { matcher: 'Write', hooks: [createWorkspaceIsolationHook()] },
+          { matcher: 'Edit', hooks: [createWorkspaceIsolationHook()] },
+          { matcher: 'Glob', hooks: [createWorkspaceIsolationHook()] },
+          { matcher: 'Grep', hooks: [createWorkspaceIsolationHook()] },
         ],
       },
     },
@@ -1485,8 +1601,8 @@ async function main(): Promise<void> {
   // Scheduled tasks use a separate IPC input directory so reactions and
   // follow-up messages don't leak into the task lane.
   if (containerInput.isScheduledTask) {
-    IPC_INPUT_DIR = '/workspace/ipc/input-task';
-    log('Using task IPC lane: /workspace/ipc/input-task');
+    IPC_INPUT_DIR = `${PATHS.ipc}/input-task`;
+    log(`Using task IPC lane: ${PATHS.ipc}/input-task`);
   }
 
   // Build SDK env: merge secrets into process.env for the SDK only.

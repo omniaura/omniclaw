@@ -2,7 +2,9 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   buildAllowedTools,
+  isPathAllowedForSharedVmAgent,
   normalizeExternalMcpServers,
+  resolveCurrentChatFile,
   validateExternalMcpCommand,
 } from '../index.ts';
 
@@ -58,6 +60,21 @@ describe('external MCP config security', () => {
 
   it('accepts bare executable names for stdio MCP servers', () => {
     expect(validateExternalMcpCommand('gmail', 'npx')).toBe('npx');
+  });
+
+  it('uses a process-scoped current chat file by default', () => {
+    expect(resolveCurrentChatFile()).toBe(
+      `/tmp/current_chat_jid-${process.pid}`,
+    );
+  });
+
+  it('does not allow shared-VM agents to target sibling group folders', () => {
+    expect(isPathAllowedForSharedVmAgent('/workspace/group/CLAUDE.md')).toBe(
+      true,
+    );
+    expect(
+      isPathAllowedForSharedVmAgent('/workspace/groups/other/CLAUDE.md'),
+    ).toBe(false);
   });
 
   it('rejects non-http MCP URLs', () => {
