@@ -230,6 +230,74 @@ describe('Discord download guards', () => {
 });
 
 describe('Discord slash flows', () => {
+  it('syncs slash commands for a Codex bot from channel subscriptions', async () => {
+    const setCommands = mock(async (_commands: unknown[]) => {});
+    const channel = new DiscordChannel({
+      token: 'test-token-not-used',
+      botId: 'CODEX',
+      multiBotMode: true,
+      registeredGroups: () => ({
+        'dc:1474995286903361772': {
+          name: 'Clayton',
+          folder: 'clayton-discord',
+          trigger: '@Clayton',
+          added_at: '2026-05-01T00:00:00.000Z',
+          discordBotId: 'CLAUDE',
+          discordGuildId: '753336633083953213',
+          backend: 'apple-container',
+          agentRuntime: 'claude-agent-sdk',
+        },
+      }),
+    });
+
+    setAgent({
+      id: 'dex-discord',
+      name: 'Dex',
+      folder: 'dex-discord',
+      backend: 'apple-container',
+      agentRuntime: 'codex',
+      isAdmin: false,
+      createdAt: '2026-05-01T00:00:00.000Z',
+    });
+    setChannelSubscription({
+      channelJid: 'dc:1474995286903361772',
+      agentId: 'dex-discord',
+      trigger: '@Dex',
+      requiresTrigger: true,
+      priority: 1,
+      isPrimary: false,
+      discordBotId: 'CODEX',
+      discordGuildId: '753336633083953213',
+      createdAt: '2026-05-01T00:00:00.000Z',
+    });
+
+    (
+      channel as unknown as {
+        connected: boolean;
+        client: { guilds: { fetch: (guildId: string) => Promise<unknown> } };
+      }
+    ).connected = true;
+    (
+      channel as unknown as {
+        client: { guilds: { fetch: (guildId: string) => Promise<unknown> } };
+      }
+    ).client = {
+      guilds: {
+        fetch: mock(async () => ({
+          commands: { set: setCommands },
+        })),
+      },
+    };
+
+    await channel.refreshSlashCommands();
+
+    expect(setCommands).toHaveBeenCalledTimes(1);
+    const commands = setCommands.mock.calls[0]?.[0] as Array<{
+      name: string;
+    }>;
+    expect(commands.map((command) => command.name)).toContain('mergemaster');
+  });
+
   it('acknowledges the interaction before queueing the synthetic message', async () => {
     let deferred = false;
     let queued = false;

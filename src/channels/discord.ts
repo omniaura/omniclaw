@@ -24,6 +24,7 @@ import path from 'path';
 import { buildTriggerPattern, DATA_DIR } from '../config.js';
 import {
   getAllAgents,
+  getAllChannelSubscriptions,
   getSubscriptionsForChannel,
   storeChatMetadata,
   storeMessage,
@@ -437,12 +438,7 @@ export class DiscordChannel implements Channel {
 
   async refreshSlashCommands(): Promise<void> {
     if (!this.connected) return;
-    const groups = this.opts.registeredGroups
-      ? Object.values(this.opts.registeredGroups()).filter(
-          (group) =>
-            group.discordBotId === this.botId && !!group.discordGuildId,
-        )
-      : [];
+    const groups = this.getSlashCommandGroups();
 
     const guildGroups = new Map<string, RegisteredGroup[]>();
     for (const group of groups) {
@@ -470,6 +466,59 @@ export class DiscordChannel implements Channel {
         );
       }
     }
+  }
+
+  private getSlashCommandGroups(): RegisteredGroup[] {
+    const groups = new Map<string, RegisteredGroup>();
+    const agents = getAllAgents();
+    const subscriptionsByChannel = getAllChannelSubscriptions();
+
+    for (const [channelJid, subs] of Object.entries(subscriptionsByChannel)) {
+      if (!channelJid.startsWith('dc:')) continue;
+
+      for (const sub of subs) {
+        const ownsSubscription = sub.discordBotId
+          ? sub.discordBotId === this.botId
+          : !this.opts.multiBotMode;
+        if (!ownsSubscription || !sub.discordGuildId) continue;
+
+        const agent = agents[sub.agentId];
+        if (!agent) continue;
+        const group: RegisteredGroup = {
+          name: agent.name,
+          folder: agent.folder,
+          trigger: sub.trigger,
+          added_at: sub.createdAt,
+          containerConfig: agent.containerConfig,
+          requiresTrigger: sub.requiresTrigger,
+          discordBotId: sub.discordBotId || this.botId,
+          discordGuildId: sub.discordGuildId,
+          serverFolder: agent.serverFolder,
+          channelFolder: sub.channelFolder,
+          categoryFolder: sub.categoryFolder,
+          agentContextFolder: agent.agentContextFolder,
+          backend: agent.backend,
+          agentRuntime: agent.agentRuntime,
+          description: agent.description,
+        };
+        groups.set(`${sub.discordGuildId}:${agent.id}:${channelJid}`, group);
+      }
+    }
+
+    const legacyGroups = this.opts.registeredGroups
+      ? Object.values(this.opts.registeredGroups()).filter(
+          (group) =>
+            group.discordBotId === this.botId && !!group.discordGuildId,
+        )
+      : [];
+    for (const group of legacyGroups) {
+      groups.set(
+        `${group.discordGuildId}:${group.folder}:legacy:${group.channelFolder || ''}`,
+        group,
+      );
+    }
+
+    return [...groups.values()];
   }
 
   /**
