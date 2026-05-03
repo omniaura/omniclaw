@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import { LOCAL_RUNTIME, SHARED_CLAUDE_VM_MEMORY } from '../config.js';
 import { SharedVmManager } from './shared-vm.js';
@@ -25,8 +28,22 @@ function makeProcess(
 }
 
 describe('SharedVmManager', () => {
+  const originalExtraDir = process.env.OMNICLAW_EXTRA_DIR;
+  let extraDir = '';
+
+  beforeEach(() => {
+    extraDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-extra-'));
+    process.env.OMNICLAW_EXTRA_DIR = extraDir;
+  });
+
   afterEach(() => {
     mock.restore();
+    if (originalExtraDir === undefined) {
+      delete process.env.OMNICLAW_EXTRA_DIR;
+    } else {
+      process.env.OMNICLAW_EXTRA_DIR = originalExtraDir;
+    }
+    fs.rmSync(extraDir, { recursive: true, force: true });
   });
 
   it('returns an existing live container without spawning a new one', async () => {
