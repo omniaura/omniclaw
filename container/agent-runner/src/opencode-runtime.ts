@@ -56,20 +56,24 @@ function log(message: string): void {
 
 /** Resolve IPC input directory based on whether this is a scheduled task. */
 function resolveIpcInputDir(isScheduledTask?: boolean): string {
-  return isScheduledTask ? '/workspace/ipc/input-task' : '/workspace/ipc/input';
+  const ipcDir = process.env.AGENT_IPC_DIR || '/workspace/ipc';
+  return isScheduledTask ? `${ipcDir}/input-task` : `${ipcDir}/input`;
 }
 
 // ---------------------------------------------------------------------------
 // IPC helpers (same protocol as Claude SDK runtime)
 // ---------------------------------------------------------------------------
 
-let ipcInputDir = '/workspace/ipc/input';
+let ipcInputDir = resolveIpcInputDir(false);
 let currentChatJid = '';
+const currentChatFile =
+  process.env.OMNICLAW_CURRENT_CHAT_FILE ||
+  path.join('/tmp', `current_chat_jid-${process.pid}`);
 
 function setCurrentChat(chatJid: string): void {
   currentChatJid = chatJid;
   try {
-    fs.writeFileSync('/tmp/current_chat_jid', chatJid);
+    fs.writeFileSync(currentChatFile, chatJid);
   } catch {
     /* ignore */
   }
@@ -608,8 +612,8 @@ export async function runOpenCodeRuntime(
 
   // Configure IPC directories
   if (containerInput.isScheduledTask) {
-    ipcInputDir = '/workspace/ipc/input-task';
-    log('Using task IPC lane: /workspace/ipc/input-task');
+    ipcInputDir = resolveIpcInputDir(true);
+    log(`Using task IPC lane: ${ipcInputDir}`);
   }
   fs.mkdirSync(ipcInputDir, { recursive: true });
 
@@ -668,6 +672,8 @@ export async function runOpenCodeRuntime(
     OMNICLAW_CHAT_JID: containerInput.chatJid,
     OMNICLAW_GROUP_FOLDER: containerInput.groupFolder,
     OMNICLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+    OMNICLAW_IPC_DIR: ipcInputDir.replace(/\/input-task$|\/input$/, ''),
+    OMNICLAW_CURRENT_CHAT_FILE: currentChatFile,
   };
   if (containerInput.discordGuildId)
     mcpEnv.OMNICLAW_DISCORD_GUILD_ID = containerInput.discordGuildId;

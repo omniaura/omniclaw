@@ -11,7 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
-const IPC_DIR = '/workspace/ipc';
+const IPC_DIR = process.env.OMNICLAW_IPC_DIR || '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const RESPONSES_DIR = path.join(IPC_DIR, 'responses');
@@ -21,6 +21,9 @@ const USER_REGISTRY_PATH = path.join(IPC_DIR, 'user_registry.json');
 const initialChatJid = process.env.OMNICLAW_CHAT_JID!;
 const groupFolder = process.env.OMNICLAW_GROUP_FOLDER!;
 const isMain = process.env.OMNICLAW_IS_MAIN === '1';
+const currentChatFile =
+  process.env.OMNICLAW_CURRENT_CHAT_FILE ||
+  path.join('/tmp', `current_chat_jid-${process.ppid || process.pid}`);
 
 // Shared protocol types — import type only (erased at runtime, no module needed in container).
 import type { ChannelInfo } from '@omniclaw/protocol';
@@ -68,7 +71,7 @@ function resolveTargetJid(target: string): string {
 function getCurrentChatJid(): string {
   if (isMultiChannel) {
     try {
-      const current = fs.readFileSync('/tmp/current_chat_jid', 'utf-8').trim();
+      const current = fs.readFileSync(currentChatFile, 'utf-8').trim();
       if (current) return current;
     } catch {
       /* ignore */

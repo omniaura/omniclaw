@@ -14,6 +14,8 @@ import {
   readExecBrokerText,
   resolveGitHubTokenForContainer,
   runExecBrokerRequest,
+  sharedVmNetworkIsolationError,
+  SHARED_VM_NETWORK_ISOLATION_ERROR_CODE,
 } from './local-backend.js';
 
 function uniqueId(): string {
@@ -939,6 +941,18 @@ describe('LocalBackend', () => {
       expect(args.at(-1)).not.toContain('exec sleep infinity');
       expect(args.at(-1)).toContain('export GITHUB_TOKEN="$GH_TOKEN"');
       expect(args.at(-1)).toContain('export GH_TOKEN="$GITHUB_TOKEN"');
+    });
+  });
+
+  describe('shared VM network isolation', () => {
+    it('returns a structured rejection for network-isolated agents', () => {
+      const result = sharedVmNetworkIsolationError('restricted-agent');
+
+      expect(result.status).toBe('error');
+      expect(result.result).toBeNull();
+      expect(result.error).toContain(SHARED_VM_NETWORK_ISOLATION_ERROR_CODE);
+      expect(result.error).toContain('restricted-agent');
+      expect(result.error).toContain('network isolation');
     });
   });
 });

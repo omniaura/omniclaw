@@ -113,7 +113,8 @@ function log(message: string): void {
 
 /** Resolve IPC input directory based on whether this is a scheduled task. */
 function resolveIpcInputDir(isScheduledTask?: boolean): string {
-  return isScheduledTask ? '/workspace/ipc/input-task' : '/workspace/ipc/input';
+  const ipcDir = process.env.AGENT_IPC_DIR || '/workspace/ipc';
+  return isScheduledTask ? `${ipcDir}/input-task` : `${ipcDir}/input`;
 }
 
 function asObject(value: unknown): Record<string, unknown> | undefined {
@@ -785,13 +786,16 @@ async function runCodexTurn(
 // IPC helpers (same protocol as Claude SDK and OpenCode runtimes)
 // ---------------------------------------------------------------------------
 
-let ipcInputDir = '/workspace/ipc/input';
+let ipcInputDir = resolveIpcInputDir(false);
 let currentChatJid = '';
+const currentChatFile =
+  process.env.OMNICLAW_CURRENT_CHAT_FILE ||
+  path.join('/tmp', `current_chat_jid-${process.pid}`);
 
 function setCurrentChat(chatJid: string): void {
   currentChatJid = chatJid;
   try {
-    fs.writeFileSync('/tmp/current_chat_jid', chatJid);
+    fs.writeFileSync(currentChatFile, chatJid);
   } catch {
     /* ignore */
   }

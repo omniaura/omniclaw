@@ -1131,6 +1131,19 @@ function isSharedVmEnabled(): boolean {
   );
 }
 
+export const SHARED_VM_NETWORK_ISOLATION_ERROR_CODE =
+  'SHARED_VM_NETWORK_ISOLATION_UNSUPPORTED';
+
+export function sharedVmNetworkIsolationError(
+  groupName: string,
+): ContainerOutput {
+  return {
+    status: 'error',
+    result: null,
+    error: `${SHARED_VM_NETWORK_ISOLATION_ERROR_CODE}: Shared-VM mode does not enforce per-agent network isolation. Disable shared-VM mode for ${groupName} or set containerConfig.networkMode to 'full' explicitly.`,
+  };
+}
+
 export class LocalBackend implements AgentBackend {
   readonly name = LOCAL_RUNTIME === 'docker' ? 'docker' : 'apple-container';
   private sharedVm = new SharedVmManager();
@@ -1553,6 +1566,18 @@ export class LocalBackend implements AgentBackend {
 
     const effectiveNetwork =
       containerCfg?.networkMode ?? (input.isMain ? 'full' : 'none');
+    if (effectiveNetwork === 'none') {
+      logger.error(
+        {
+          code: SHARED_VM_NETWORK_ISOLATION_ERROR_CODE,
+          group: groupName,
+          runtimeFolder,
+          backend: this.name,
+        },
+        'Refusing shared-VM agent run because network isolation cannot be enforced per exec',
+      );
+      return sharedVmNetworkIsolationError(groupName);
+    }
     const splitExecutionEnabled = isSplitExecutionEnabled();
 
     // Exec container stays per-agent (unchanged from per-VM mode)

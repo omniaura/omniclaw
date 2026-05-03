@@ -96,6 +96,14 @@ function resolveWorkspacePaths() {
 }
 
 const PATHS = resolveWorkspacePaths();
+const IS_SHARED_VM_MODE = !!process.env.AGENT_WORKSPACE;
+
+export function resolveCurrentChatFile(): string {
+  return (
+    process.env.OMNICLAW_CURRENT_CHAT_FILE ||
+    path.join('/tmp', `current_chat_jid-${process.pid}`)
+  );
+}
 
 const ALLOWED_EXTERNAL_MCP_COMMAND_ROOTS = [
   PATHS.group,
@@ -106,6 +114,66 @@ const ALLOWED_EXTERNAL_MCP_COMMAND_ROOTS = [
   PATHS.server,
   '/workspace/extra',
 ] as const;
+
+const SHARED_VM_VISIBLE_PARENT_ROOTS = [
+  '/workspace/groups',
+  '/data/ipc',
+  '/data/sessions',
+] as const;
+
+const ALLOWED_AGENT_PATH_ROOTS = [
+  PATHS.group,
+  PATHS.global,
+  PATHS.agent,
+  PATHS.category,
+  PATHS.server,
+  PATHS.project,
+  '/workspace/extra',
+] as const;
+
+function isPathWithinRoot(filePath: string, root: string): boolean {
+  const resolved = path.resolve(filePath);
+  const resolvedRoot = path.resolve(root);
+  return (
+    resolved === resolvedRoot ||
+    resolved.startsWith(`${resolvedRoot}${path.sep}`)
+  );
+}
+
+export function isPathAllowedForSharedVmAgent(filePath: string): boolean {
+  return ALLOWED_AGENT_PATH_ROOTS.some((root) =>
+    isPathWithinRoot(filePath, root),
+  );
+}
+
+function referencesSharedVmParentRoot(filePath: string): boolean {
+  return SHARED_VM_VISIBLE_PARENT_ROOTS.some((root) =>
+    isPathWithinRoot(filePath, root),
+  );
+}
+
+function assertSharedVmPathAllowed(filePath: string): void {
+  if (!IS_SHARED_VM_MODE) return;
+  if (!referencesSharedVmParentRoot(filePath)) return;
+  if (isPathAllowedForSharedVmAgent(filePath)) return;
+  throw new Error(
+    `Access to ${filePath} is not allowed in shared-VM mode because it is outside this agent's mounted workspace allowlist.`,
+  );
+}
+
+function assertSharedVmCommandAllowed(command: string): void {
+  if (!IS_SHARED_VM_MODE) return;
+  const referencedPaths = command.match(
+    /\/(?:workspace\/groups|data\/(?:ipc|sessions))[^\s'"`;|&)]*/g,
+  );
+  for (const referencedPath of referencedPaths || []) {
+    if (!isPathAllowedForSharedVmAgent(referencedPath)) {
+      throw new Error(
+        "This command references shared-VM parent mounts outside this agent's workspace allowlist.",
+      );
+    }
+  }
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -635,6 +703,8 @@ export function createSanitizeBashHook(): HookCallback {
       }
     }
 
+    assertSharedVmCommandAllowed(command);
+
     // Prepend unset for defense-in-depth
     // (Even though secrets shouldn't be in process.env, unset provides extra safety)
     const unsetPrefix = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
@@ -750,6 +820,30 @@ export function createSanitizeReadHook(): HookCallback {
       }
     }
 
+    assertSharedVmPathAllowed(normalized);
+
+    return {};
+  };
+}
+
+export function createWorkspaceIsolationHook(): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const preInput = input as PreToolUseHookInput;
+    const toolInput = preInput.tool_input as {
+      file_path?: string;
+      path?: string;
+    };
+    const filePath = toolInput.file_path || toolInput.path;
+    if (!filePath) return {};
+
+    let normalized = path.resolve(filePath);
+    try {
+      normalized = fs.realpathSync(normalized);
+    } catch {
+      // Non-existent writes still need path-level validation.
+    }
+
+    assertSharedVmPathAllowed(normalized);
     return {};
   };
 }
@@ -837,8 +931,8 @@ function formatTranscriptMarkdown(
 }
 
 // Track the current chat JID for multi-channel agents.
-// Written to /tmp/current_chat_jid so the MCP server can read it.
-const CURRENT_CHAT_FILE = '/tmp/current_chat_jid';
+// In shared-VM mode, multiple runner processes share /tmp, so this must be per exec.
+const CURRENT_CHAT_FILE = resolveCurrentChatFile();
 let currentChatJidValue = '';
 
 function setCurrentChat(chatJid: string): void {
@@ -1155,6 +1249,8 @@ async function runQuery(
             OMNICLAW_CHAT_JID: containerInput.chatJid,
             OMNICLAW_GROUP_FOLDER: containerInput.groupFolder,
             OMNICLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            OMNICLAW_IPC_DIR: PATHS.ipc,
+            OMNICLAW_CURRENT_CHAT_FILE: CURRENT_CHAT_FILE,
             ...(containerInput.discordGuildId
               ? { OMNICLAW_DISCORD_GUILD_ID: containerInput.discordGuildId }
               : {}),
@@ -1190,6 +1286,10 @@ async function runQuery(
             matcher: 'Read',
             hooks: [createSanitizeReadHook(), createFileSizeHook()],
           },
+          { matcher: 'Write', hooks: [createWorkspaceIsolationHook()] },
+          { matcher: 'Edit', hooks: [createWorkspaceIsolationHook()] },
+          { matcher: 'Glob', hooks: [createWorkspaceIsolationHook()] },
+          { matcher: 'Grep', hooks: [createWorkspaceIsolationHook()] },
         ],
       },
     },
