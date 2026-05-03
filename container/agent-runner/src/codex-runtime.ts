@@ -88,6 +88,9 @@ const OUTPUT_END_MARKER = '---OMNICLAW_OUTPUT_END---';
 const IPC_POLL_MS = 500;
 const APP_SERVER_REQUEST_TIMEOUT_MS = 30_000;
 const TURN_TIMEOUT_MS = 1_800_000; // 30 min
+const SLASH_COMMAND_FILE_MAX_BYTES = 64 * 1024;
+const SLASH_COMMAND_NAME_RE =
+  /^[A-Za-z0-9][A-Za-z0-9_-]*(?::[A-Za-z0-9][A-Za-z0-9_-]*)?$/;
 
 const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   'not found',
@@ -877,6 +880,136 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
+// Slash command expansion
+// ---------------------------------------------------------------------------
+
+interface SlashCommandInvocation {
+  name: string;
+  arguments: string;
+}
+
+function isPathWithin(child: string, parent: string): boolean {
+  const relative = path.relative(parent, child);
+  return (
+    relative === '' ||
+    (!relative.startsWith('..') && !path.isAbsolute(relative))
+  );
+}
+
+function parseSlashCommandInvocation(
+  prompt: string,
+): SlashCommandInvocation | null {
+  const trimmed = prompt.trimStart();
+  if (!trimmed.startsWith('/')) return null;
+
+  const firstLineEnd = trimmed.search(/\r?\n/);
+  const firstLine =
+    firstLineEnd === -1 ? trimmed : trimmed.slice(0, firstLineEnd);
+  const match =
+    /^\/([A-Za-z0-9][A-Za-z0-9_-]*(?::[A-Za-z0-9][A-Za-z0-9_-]*)?)(?:\s+([\s\S]*))?$/.exec(
+      firstLine,
+    );
+  if (!match) return null;
+
+  const [, name, inlineArgs = ''] = match;
+  if (!SLASH_COMMAND_NAME_RE.test(name)) return null;
+
+  const trailingPrompt =
+    firstLineEnd === -1 ? '' : trimmed.slice(firstLineEnd).trim();
+  const args = [inlineArgs.trim(), trailingPrompt].filter(Boolean).join('\n\n');
+  return { name, arguments: args };
+}
+
+function slashCommandSearchRoots(): string[] {
+  const configuredRoots = process.env.OMNICLAW_SLASH_COMMAND_ROOTS?.split('\n')
+    .map((root) => root.trim())
+    .filter(Boolean);
+  if (configuredRoots && configuredRoots.length > 0) {
+    return configuredRoots;
+  }
+
+  return [
+    '/workspace/group/.claude/commands',
+    '/workspace/category/.claude/commands',
+    '/workspace/server/.claude/commands',
+    '/workspace/agent/.claude/commands',
+    '/home/bun/.claude/commands',
+    '/workspace/group/.codex/prompts',
+    '/workspace/category/.codex/prompts',
+    '/workspace/server/.codex/prompts',
+    '/workspace/agent/.codex/prompts',
+    '/home/bun/.codex/prompts',
+  ];
+}
+
+function slashCommandCandidateNames(name: string): string[] {
+  const candidates = new Set<string>();
+  candidates.add(name);
+
+  const [namespace, command] = name.split(':');
+  if (command) {
+    candidates.add(path.join(namespace, command));
+    if (namespace === 'project' || namespace === 'user') {
+      candidates.add(command);
+    }
+  }
+
+  return [...candidates];
+}
+
+function resolveSlashCommandFile(name: string): string | null {
+  for (const root of slashCommandSearchRoots()) {
+    if (!fs.existsSync(root)) continue;
+
+    const absoluteRoot = path.resolve(root);
+    for (const candidate of slashCommandCandidateNames(name)) {
+      const paths = [
+        path.resolve(absoluteRoot, `${candidate}.md`),
+        path.resolve(absoluteRoot, candidate, 'index.md'),
+      ];
+      for (const candidatePath of paths) {
+        if (
+          isPathWithin(candidatePath, absoluteRoot) &&
+          fs.existsSync(candidatePath) &&
+          fs.statSync(candidatePath).isFile()
+        ) {
+          return candidatePath;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+export function expandSlashCommandPrompt(prompt: string): string {
+  const invocation = parseSlashCommandInvocation(prompt);
+  if (!invocation) return prompt;
+
+  const commandFile = resolveSlashCommandFile(invocation.name);
+  if (!commandFile) return prompt;
+
+  const stat = fs.statSync(commandFile);
+  if (stat.size > SLASH_COMMAND_FILE_MAX_BYTES) {
+    log(`Ignoring oversized slash command file: ${commandFile}`);
+    return prompt;
+  }
+
+  const commandPrompt = fs.readFileSync(commandFile, 'utf-8').trim();
+  if (!commandPrompt) return prompt;
+
+  const args = invocation.arguments;
+  const expanded = commandPrompt
+    .replaceAll('$ARGUMENTS', args)
+    .replaceAll('{{ARGUMENTS}}', args);
+
+  if (expanded === commandPrompt && args) {
+    return `${expanded}\n\nArguments:\n${args}`;
+  }
+  return expanded;
+}
+
+// ---------------------------------------------------------------------------
 // System context
 // ---------------------------------------------------------------------------
 
@@ -1045,6 +1178,7 @@ export async function runCodexRuntime(
         break;
       }
 
+      prompt = expandSlashCommandPrompt(prompt);
       log(
         `Running Codex turn (${prompt.length} chars) on thread ${threadId}...`,
       );
