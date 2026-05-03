@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'crypto';
 import { Effect } from 'effect';
 import fs from 'fs';
 import path from 'path';
+import { applyDeclarativeAgentTopology } from './agent-topology.js';
 import { syncAvatars } from './avatar-sync.js';
 import {
   initializeBackends,
@@ -18,6 +19,7 @@ import { SlackChannel } from './channels/slack.js';
 import { TelegramChannel } from './channels/telegram.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
+  AGENTS_CONFIG_PATH,
   buildTriggerPattern,
   CHANNEL_ROSTER_CACHE_TTL_MS,
   CHANNEL_ROSTER_ROLE_FILTERS,
@@ -2503,6 +2505,11 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  applyDeclarativeAgentTopology({
+    filePath: AGENTS_CONFIG_PATH,
+    existingGroups: registeredGroups,
+    registerGroup,
+  });
   sanitizePersistedTelegramAvatarUrls();
 
   const webState: WebStateProvider = {
