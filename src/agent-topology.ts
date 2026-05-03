@@ -7,13 +7,30 @@ import type { BackendType, ContainerConfig, RegisteredGroup } from './types.js';
 
 const folderSchema = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9_-]*$/i, 'must be a safe folder name');
+  .regex(/^[a-z0-9][a-z0-9_-]*$/, 'must be a lowercase safe folder name');
 
 const backendSchema = z.enum(['apple-container', 'docker']);
 const agentRuntimeSchema = z.enum(['claude-agent-sdk', 'opencode', 'codex']);
+const additionalMountSchema = z
+  .object({
+    hostPath: z.string().min(1),
+    containerPath: z.string().min(1).optional(),
+    readonly: z.boolean().optional(),
+  })
+  .strict();
 const containerConfigSchema = z
-  .object({})
-  .passthrough()
+  .object({
+    additionalMounts: z.array(additionalMountSchema).optional(),
+    timeout: z.number().int().positive().optional(),
+    memory: z.number().int().positive().optional(),
+    networkMode: z.enum(['full', 'none']).optional(),
+    mcpServers: z
+      .record(z.string(), z.record(z.string(), z.unknown()))
+      .optional(),
+    allowGcpCredentials: z.boolean().optional(),
+    streamIntermediates: z.boolean().optional(),
+  })
+  .strict()
   .transform((value) => value as ContainerConfig);
 
 const channelSchema = z
@@ -23,19 +40,12 @@ const channelSchema = z
     trigger: z.string().min(1),
     requiresTrigger: z.boolean().optional(),
     discordBotId: z.string().min(1).optional(),
-    discord_bot_id: z.string().min(1).optional(),
     discordGuildId: z.string().min(1).optional(),
-    discord_guild_id: z.string().min(1).optional(),
     serverFolder: z.string().min(1).optional(),
-    server_folder: z.string().min(1).optional(),
     channelFolder: z.string().min(1).optional(),
-    channel_folder: z.string().min(1).optional(),
     categoryFolder: z.string().min(1).optional(),
-    category_folder: z.string().min(1).optional(),
     autoRespondToQuestions: z.boolean().optional(),
-    auto_respond_to_questions: z.boolean().optional(),
     autoRespondKeywords: z.array(z.string().min(1)).optional(),
-    auto_respond_keywords: z.array(z.string().min(1)).optional(),
   })
   .strict();
 
@@ -45,15 +55,10 @@ const agentSchema = z
     folder: folderSchema.optional(),
     backend: backendSchema.optional(),
     agentRuntime: agentRuntimeSchema.optional(),
-    agent_runtime: agentRuntimeSchema.optional(),
     description: z.string().min(1).optional(),
     containerConfig: containerConfigSchema.optional(),
-    container_config: containerConfigSchema.optional(),
     serverFolder: z.string().min(1).optional(),
-    server_folder: z.string().min(1).optional(),
     agentContextFolder: z.string().min(1).optional(),
-    agent_context_folder: z.string().min(1).optional(),
-    heartbeat: z.object({}).passthrough().optional(),
     channels: z.array(channelSchema).min(1),
   })
   .strict();
@@ -122,26 +127,19 @@ export function loadDeclarativeAgentTopology(
         folder,
         trigger: channel.trigger,
         added_at: existing?.added_at || new Date().toISOString(),
-        containerConfig: agent.containerConfig || agent.container_config,
+        containerConfig: agent.containerConfig,
         requiresTrigger: channel.requiresTrigger,
-        discordBotId: channel.discordBotId || channel.discord_bot_id,
-        discordGuildId: channel.discordGuildId || channel.discord_guild_id,
-        serverFolder:
-          channel.serverFolder ||
-          channel.server_folder ||
-          agent.serverFolder ||
-          agent.server_folder,
+        discordBotId: channel.discordBotId,
+        discordGuildId: channel.discordGuildId,
+        serverFolder: channel.serverFolder || agent.serverFolder,
         backend: agent.backend as BackendType | undefined,
-        agentRuntime: agent.agentRuntime || agent.agent_runtime,
+        agentRuntime: agent.agentRuntime,
         description: agent.description,
-        autoRespondToQuestions:
-          channel.autoRespondToQuestions ?? channel.auto_respond_to_questions,
-        autoRespondKeywords:
-          channel.autoRespondKeywords || channel.auto_respond_keywords,
-        channelFolder: channel.channelFolder || channel.channel_folder,
-        categoryFolder: channel.categoryFolder || channel.category_folder,
-        agentContextFolder:
-          agent.agentContextFolder || agent.agent_context_folder,
+        autoRespondToQuestions: channel.autoRespondToQuestions,
+        autoRespondKeywords: channel.autoRespondKeywords,
+        channelFolder: channel.channelFolder,
+        categoryFolder: channel.categoryFolder,
+        agentContextFolder: agent.agentContextFolder,
       };
       registrations.push({ jid: channel.jid, group });
     }
@@ -159,6 +157,16 @@ export function applyDeclarativeAgentTopology(options: {
     options.filePath,
     options.existingGroups,
   );
+  const configuredJids = new Set(registrations.map((entry) => entry.jid));
+  const staleJids = Object.keys(options.existingGroups).filter(
+    (jid) => !configuredJids.has(jid),
+  );
+  if (registrations.length > 0 && staleJids.length > 0) {
+    logger.warn(
+      { filePath: options.filePath, staleJids },
+      'Existing registered groups are absent from declarative topology',
+    );
+  }
   for (const registration of registrations) {
     options.registerGroup(registration.jid, registration.group);
   }

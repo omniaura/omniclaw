@@ -41,6 +41,14 @@ agents:
     agentRuntime: opencode
     description: Infrastructure agent
     serverFolder: servers/omniaura
+    containerConfig:
+      timeout: 300000
+      memory: 4096
+      networkMode: full
+      additionalMounts:
+        - hostPath: /tmp/project
+          containerPath: project
+          readonly: true
     channels:
       - jid: "dc:123456"
         name: omniclaw
@@ -64,6 +72,18 @@ agents:
       discordGuildId: '789',
       serverFolder: 'servers/omniaura',
       channelFolder: 'servers/omniaura/omniclaw',
+      containerConfig: {
+        timeout: 300000,
+        memory: 4096,
+        networkMode: 'full',
+        additionalMounts: [
+          {
+            hostPath: '/tmp/project',
+            containerPath: 'project',
+            readonly: true,
+          },
+        ],
+      },
     });
     expect(registrations[0].group.added_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
@@ -105,6 +125,98 @@ agents:
     );
   });
 
+  it('rejects uppercase folder names', () => {
+    const filePath = writeTopology(`
+agents:
+  Main:
+    channels:
+      - jid: "123@s.whatsapp.net"
+        trigger: "@Omni"
+`);
+
+    expect(() => loadDeclarativeAgentTopology(filePath)).toThrow(
+      /Invalid key in record/,
+    );
+  });
+
+  it('rejects heartbeat blocks until scheduler wiring exists', () => {
+    const filePath = writeTopology(`
+agents:
+  main:
+    heartbeat:
+      enabled: true
+      interval: "1800000"
+    channels:
+      - jid: "123@s.whatsapp.net"
+        trigger: "@Omni"
+`);
+
+    expect(() => loadDeclarativeAgentTopology(filePath)).toThrow(
+      /Unrecognized key: "heartbeat"/,
+    );
+  });
+
+  it('rejects snake_case aliases', () => {
+    const filePath = writeTopology(`
+agents:
+  main:
+    agent_runtime: opencode
+    channels:
+      - jid: "dc:123"
+        trigger: "@Omni"
+        discord_guild_id: "456"
+`);
+
+    expect(() => loadDeclarativeAgentTopology(filePath)).toThrow(
+      /Unrecognized key/,
+    );
+  });
+
+  it('rejects unknown agent keys', () => {
+    const filePath = writeTopology(`
+agents:
+  main:
+    chanels:
+      - jid: "dc:123"
+        trigger: "@Omni"
+`);
+
+    expect(() => loadDeclarativeAgentTopology(filePath)).toThrow(
+      /Unrecognized key: "chanels"/,
+    );
+  });
+
+  it('rejects unknown containerConfig keys', () => {
+    const filePath = writeTopology(`
+agents:
+  main:
+    containerConfig:
+      memmory: 4096
+    channels:
+      - jid: "dc:123"
+        trigger: "@Omni"
+`);
+
+    expect(() => loadDeclarativeAgentTopology(filePath)).toThrow(
+      /Unrecognized key: "memmory"/,
+    );
+  });
+
+  it('prefixes YAML parse errors clearly', () => {
+    const filePath = writeTopology(`
+agents:
+  main:
+    channels:
+      - jid: "dc:123"
+        trigger: "@Omni"
+       badIndent: true
+`);
+
+    expect(() => loadDeclarativeAgentTopology(filePath)).toThrow(
+      /Invalid agent topology YAML:/,
+    );
+  });
+
   it('rejects duplicate channel jids', () => {
     const filePath = writeTopology(`
 agents:
@@ -125,6 +237,20 @@ agents:
 });
 
 describe('applyDeclarativeAgentTopology', () => {
+  it('returns 0 and does not register groups when the topology file is absent', () => {
+    const filePath = path.join(os.tmpdir(), 'missing-agents.yaml');
+    const registered: Array<{ jid: string; group: RegisteredGroup }> = [];
+
+    const count = applyDeclarativeAgentTopology({
+      filePath,
+      existingGroups: {},
+      registerGroup: (jid, group) => registered.push({ jid, group }),
+    });
+
+    expect(count).toBe(0);
+    expect(registered).toEqual([]);
+  });
+
   it('registers each loaded topology channel', () => {
     const filePath = writeTopology(`
 agents:
@@ -152,5 +278,35 @@ agents:
     expect(registered.every((entry) => entry.group.folder === 'main')).toBe(
       true,
     );
+  });
+
+  it('does not delete existing groups that are absent from topology', () => {
+    const filePath = writeTopology(`
+agents:
+  main:
+    channels:
+      - jid: "123@s.whatsapp.net"
+        trigger: "@Omni"
+`);
+    const existingGroups: Record<string, RegisteredGroup> = {
+      'stale@s.whatsapp.net': {
+        name: 'Stale',
+        folder: 'stale',
+        trigger: '@Stale',
+        added_at: '2026-01-01T00:00:00.000Z',
+      },
+    };
+    const registered: Array<{ jid: string; group: RegisteredGroup }> = [];
+
+    const count = applyDeclarativeAgentTopology({
+      filePath,
+      existingGroups,
+      registerGroup: (jid, group) => registered.push({ jid, group }),
+    });
+
+    expect(count).toBe(1);
+    expect(registered.map((entry) => entry.jid)).toEqual([
+      '123@s.whatsapp.net',
+    ]);
   });
 });

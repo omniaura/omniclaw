@@ -157,7 +157,7 @@ agents:
         discordGuildId: '789'
 ```
 
-Set `AGENTS_CONFIG_PATH` to load a different file. Startup upserts configured registrations through the same path as IPC `register_group`; it does not delete DB rows that are absent from the file.
+Set `AGENTS_CONFIG_PATH` to load a different file. Loading is opt-in by file existence; if the configured file does not exist, startup skips declarative topology. Startup upserts configured registrations through the same path as IPC `register_group`; it does not delete DB rows that are absent from the file. The config uses camelCase keys only. Heartbeat blocks are not accepted yet because scheduler wiring is separate runtime state.
 
 ### Layered context
 
