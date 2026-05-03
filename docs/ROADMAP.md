@@ -1,6 +1,6 @@
 # OmniClaw Roadmap
 
-Last updated: 2026-03-25
+Last updated: 2026-05-02
 
 ## Guiding Principles
 
@@ -32,19 +32,19 @@ Last updated: 2026-03-25
 
 ### Product Features
 
-| Feature                         | Maturity | Notes                                                                                                        |
-| ------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------ |
-| Agent/channel decoupling        | Stable   | One agent can own multiple channels                                                                          |
-| Scheduled tasks                 | Stable   | Cron, interval, one-shot, pause/resume, recovery logic                                                       |
-| Persistent session + memory     | Stable   | CLAUDE.md hierarchy, SQLite state, task/run persistence                                                      |
-| Web UI (SolidStart)             | Stable   | 11 pages: dashboard, agents, logs, tasks, conversations, context, IPC, network, system, settings             |
-| LAN discovery + pairing         | Active   | mDNS discovery, trust workflow, `/network` page, remote peer browsing                                        |
-| GitHub context injection        | Stable   | Snapshot context, delta digest, linked PR/issue context                                                      |
-| Inter-agent messaging           | Stable   | `send_message`, agent registry, IPC snapshots                                                                |
-| Browser automation              | Stable   | Agent browser available inside containers                                                                    |
-| Container split execution       | Stable   | Separate execution path for local runtime workloads                                                          |
-| Startup confirmation on restart | Stable   | Agents wake and announce they are back after orchestrator restart                                            |
-| Security hardening              | Stable   | Path traversal guards, mount allowlist, webhook replay defense, external MCP validation, remote image limits |
+| Feature                         | Maturity | Notes                                                                                                                                                                                        |
+| ------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent/channel decoupling        | Stable   | One agent can own multiple channels                                                                                                                                                          |
+| Scheduled tasks                 | Stable   | Cron, interval, one-shot, pause/resume, recovery logic                                                                                                                                       |
+| Persistent session + memory     | Stable   | CLAUDE.md hierarchy, SQLite state, task/run persistence                                                                                                                                      |
+| Web UI (SolidStart)             | Stable   | 11 pages, mobile-responsive layout, dark/light theme toggle, command palette, conversation search/export                                                                                     |
+| LAN discovery + pairing         | Active   | mDNS discovery, trust workflow, `/network` page, remote peer browsing                                                                                                                        |
+| GitHub context injection        | Stable   | Snapshot context, delta digest, linked PR/issue context                                                                                                                                      |
+| Inter-agent messaging           | Stable   | `send_message`, agent registry, IPC snapshots                                                                                                                                                |
+| Browser automation              | Stable   | Agent browser available inside containers                                                                                                                                                    |
+| Container split execution       | Stable   | Separate execution path for local runtime workloads                                                                                                                                          |
+| Startup confirmation on restart | Stable   | Agents wake and announce they are back after orchestrator restart                                                                                                                            |
+| Security hardening              | Stable   | Path traversal guards, mount allowlist, webhook replay defense, external MCP validation, remote image limits, login rate limiting + body caps, DNS rebinding SSRF defense, peer log SSE caps |
 
 ---
 
@@ -60,13 +60,22 @@ The active multi-machine direction is now LAN discovery plus trust-based pairing
 - next step is useful multi-instance sync: context exchange, remote coordination, and safe cross-instance workflows (#278)
 - keep one orchestrator simple; add networking only where it improves real operator workflows
 
-#### Web UI for OmniClaw (#157, closed)
+#### Web UI for OmniClaw (#157, closed; Phase 3 #505)
 
-The web UI is core product surface area, now built on SolidStart (SolidJS + Vinxi + Tailwind CSS).
+The web UI is core product surface area, built on SolidStart (SolidJS + Vinxi + Tailwind CSS).
 
 - all original scope delivered: dashboard, agents, logs, tasks, conversations, context viewer, IPC inspector, network, system, settings
 - SolidStart migration from Datastar completed in #418 (11 pages, 8.7K lines)
-- next work tracked in #420: remove `WEB_UI_SOLID` feature flag, clean up old Datastar route handlers, add SolidStart component test coverage
+- Phase 3 (#505) effectively complete: session auth, login rate limiting, task form UX, dark mode, mobile-responsive layout, conversation search/export, toast system
+- remaining: SolidStart component test coverage, ongoing polish
+
+#### CI Health and Dep Bump Reliability (#484)
+
+Self-maintenance is core to the AI-native operations principle, and the dep bump pipeline is the largest remaining gap.
+
+- #484 needs admin secret config so GitHub App can trigger CI on dep bump PRs
+- dependent on operator action; no agent-side fix possible until secrets are configured
+- once unblocked, the auto-close superseded dep bumps (#617) and auto-merge error surfacing (#616) workflows will run cleanly
 
 #### Scheduler Reliability and Chat Cohesion (#162, #186)
 
@@ -147,6 +156,44 @@ Push from "personal assistant with tasks" toward a genuine multi-agent factory.
 ---
 
 ## Completed Recently
+
+### Apr–May 2026
+
+#### Web UI Phase 3
+
+- mobile-responsive layout shipped across all pages (#597, closes #596)
+- dark mode / light theme toggle with localStorage persistence and `prefers-color-scheme` detection (#568)
+- task form UX improvements: unit selectors and datetime picker (#537, closes #536)
+- CPU cores and load average added to system health page (#619)
+- conversation search filters: chat, sender, date range (#572)
+- conversation export to JSON and plain text (#526)
+- unified toast/notification system (#577)
+- session auth (#533) and login rate limiting (#544, closes #540) shipped earlier in Phase 3
+
+#### Security Hardening
+
+- DNS rebinding SSRF defense in remote image cache (#588, closes #587)
+- peer log SSE response caps to bound proxied stream growth (#613, closes #595)
+- execution broker payload caps (#622)
+- WhatsApp media size cap shipped (closes #576)
+- Web UI login request body cap (#567, closes #548)
+- discovery LAN trust auth tightening (closes #557)
+- Sender Identity Pipeline (#204) wrapped: audit doc plus instrumentation cleanup (#618, #620) landed; tracking issue closed Mar 28
+
+#### CI Health Restoration
+
+- auto-close superseded dep bump PRs (#617, closes #517)
+- surface auto-merge errors in dep bump workflows (#616, closes #496)
+- flaky webhook dedup test stabilized (#615, closes #527)
+- macOS Apple Container runtime setup fix (#612)
+- Discord slash flow ack-before-queue fix (#614)
+- typecheck on main restored (#560/#551), mock leakage fixes (#550), prettier check restored (#552), all closing the CI health restoration sprint (#583)
+
+#### Test Coverage Expansion
+
+- control plane route and startup branch coverage (#594)
+- Web UI fallback and pairing failure coverage (#581)
+- discovery, index, logger, and path-security coverage (#566, #556)
 
 ### Mar 2026
 
