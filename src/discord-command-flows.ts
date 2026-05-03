@@ -263,6 +263,12 @@ const BUILTIN_COMMANDS: DiscordFlowDefinition[] = [
   },
 ];
 
+const BUILTIN_SYSTEM_COMMAND_NAMES = new Set(
+  BUILTIN_COMMANDS.filter((command) => command.system).map(
+    (command) => command.name,
+  ),
+);
+
 function normalizeOptionType(value: unknown): DiscordFlowOptionType {
   return value === 'integer' || value === 'boolean' ? value : 'string';
 }
@@ -388,7 +394,7 @@ function isCommandEnabledForGroup(
 
   const enabled = new Set(config.enabled || []);
   const disabled = new Set(config.disabled || []);
-  if (enabled.size > 0 && !enabled.has(command.name)) return false;
+  if (config.enabled !== undefined && !enabled.has(command.name)) return false;
   return !disabled.has(command.name);
 }
 
@@ -425,6 +431,13 @@ export function getDiscordFlowDefinitionsForGroup(
   for (const filePath of getGroupCommandPaths(group, groupsDir)) {
     if (!fs.existsSync(filePath)) continue;
     for (const command of loadFlowFile(filePath)) {
+      if (BUILTIN_SYSTEM_COMMAND_NAMES.has(command.name)) {
+        logger.warn(
+          { command: command.name, filePath },
+          'Ignoring custom Discord command that conflicts with a system command',
+        );
+        continue;
+      }
       commands.set(command.name, command);
     }
   }
@@ -500,9 +513,7 @@ function stringifyOptionValue(value: string | number | boolean): string {
 }
 
 /** Names of built-in system commands (handled by host, not agent). */
-export const SYSTEM_COMMAND_NAMES = new Set(
-  BUILTIN_COMMANDS.filter((c) => c.system).map((c) => c.name),
-);
+export const SYSTEM_COMMAND_NAMES = new Set(BUILTIN_SYSTEM_COMMAND_NAMES);
 
 export function renderDiscordFlowPrompt(
   command: DiscordFlowDefinition,

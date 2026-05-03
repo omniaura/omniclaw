@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
+import { discordCommandsSchema } from './agent-topology.js';
 import { DATA_DIR, STORE_DIR } from './config.js';
 import { TrustStore } from './discovery/trust-store.js';
 import { logger } from './logger.js';
@@ -123,6 +124,23 @@ function normalizeAgentRuntime(
   return 'claude-agent-sdk';
 }
 
+function parseDiscordCommands(
+  value: string | null,
+  jid: string,
+): RegisteredGroup['discordCommands'] {
+  const parsed = safeJsonParse<unknown>(value, { jid }, 'discord_commands');
+  if (parsed === undefined) return undefined;
+  const result = discordCommandsSchema.safeParse(parsed);
+  if (!result.success) {
+    logger.warn(
+      { jid, issues: result.error.issues },
+      'Invalid discord_commands in DB, ignoring',
+    );
+    return undefined;
+  }
+  return result.data;
+}
+
 /** Map a database row to a RegisteredGroup object (without jid field) */
 function mapRowToRegisteredGroup(
   row: RegisteredGroupRow,
@@ -150,11 +168,7 @@ function mapRowToRegisteredGroup(
       { jid: row.jid },
       'auto_respond_keywords',
     ),
-    discordCommands: safeJsonParse<RegisteredGroup['discordCommands']>(
-      row.discord_commands,
-      { jid: row.jid },
-      'discord_commands',
-    ),
+    discordCommands: parseDiscordCommands(row.discord_commands, row.jid),
   };
 }
 

@@ -163,6 +163,52 @@ describe('discord command flows', () => {
     }
   });
 
+  it('treats an empty enabled list as deny-all', () => {
+    const names = getDiscordFlowDefinitionsForGroup(
+      makeGroup({
+        discordCommands: { enabled: [] },
+      }),
+    ).map((command) => command.name);
+
+    expect(names).toEqual([]);
+  });
+
+  it('does not let custom command files override system commands', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-flows-'));
+    const groupsDir = path.join(tempRoot, 'groups');
+    const warnSpy = spyOn(logger, 'warn').mockImplementation(() => {});
+
+    try {
+      fs.mkdirSync(path.join(groupsDir, 'test-agent'), { recursive: true });
+      fs.writeFileSync(
+        path.join(groupsDir, 'test-agent', 'discord-commands.json'),
+        JSON.stringify({
+          commands: [
+            {
+              name: 'resume',
+              description: 'Malicious resume override',
+              prompt: 'This should never replace the host system command.',
+            },
+          ],
+        }),
+      );
+
+      const resume = getDiscordFlowDefinitionsForGroup(
+        makeGroup(),
+        groupsDir,
+      ).find((command) => command.name === 'resume');
+
+      expect(resume?.system).toBe(true);
+      expect(resume?.prompt).toBe('');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'resume' }),
+        'Ignoring custom Discord command that conflicts with a system command',
+      );
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('ignores custom commands with oversized prompts', () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-flows-'));
     const groupsDir = path.join(tempRoot, 'groups');

@@ -805,6 +805,7 @@ function refreshRegisteredGroupsFromCanonicalState(): {
       channelFolder: layers.channelFolder,
       categoryFolder: layers.categoryFolder,
       agentContextFolder: agent?.agentContextFolder,
+      discordCommands: legacy?.discordCommands,
     };
     synthesized++;
   }

@@ -287,8 +287,7 @@ const migration1: Migration = {
         backend TEXT,
         description TEXT,
         auto_respond_to_questions INTEGER DEFAULT 0,
-        auto_respond_keywords TEXT,
-        discord_commands TEXT
+        auto_respond_keywords TEXT
       );
 
       CREATE TABLE IF NOT EXISTS agents (
@@ -437,7 +436,6 @@ const migration1: Migration = {
       'auto_respond_keywords',
       'TEXT',
     );
-    addColumnIfNotExists(db, 'registered_groups', 'discord_commands', 'TEXT');
     dropColumnIfExists(db, 'registered_groups', 'stream_intermediates');
 
     // agents

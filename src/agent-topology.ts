@@ -14,7 +14,7 @@ const agentRuntimeSchema = z.enum(['claude-agent-sdk', 'opencode', 'codex']);
 const discordCommandNameSchema = z
   .string()
   .regex(/^[a-z0-9_-]{1,32}$/, 'must be a Discord slash command name');
-const discordCommandsSchema = z
+export const discordCommandsSchema = z
   .object({
     enabled: z.array(discordCommandNameSchema).optional(),
     disabled: z.array(discordCommandNameSchema).optional(),
