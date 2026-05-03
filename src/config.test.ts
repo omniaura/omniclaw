@@ -294,6 +294,14 @@ describe('parseConfigEnv', () => {
     expect(parsed.CHANNEL_ROSTER_SCOPE).toBe('guild');
   });
 
+  it('treats blank shared VM memory as unset', () => {
+    const parsed = parseConfigEnv({
+      SHARED_CLAUDE_VM_MEMORY: '',
+    });
+
+    expect(parsed.SHARED_CLAUDE_VM_MEMORY).toBe('16G');
+  });
+
   it('throws a clear error for invalid numeric config', () => {
     expect(() =>
       parseConfigEnv({

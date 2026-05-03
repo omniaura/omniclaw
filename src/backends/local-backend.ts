@@ -1125,10 +1125,7 @@ function startExecBroker(
 }
 
 function isSharedVmEnabled(): boolean {
-  return (
-    (SHARED_CLAUDE_VM || process.env.SHARED_CLAUDE_VM === 'true') &&
-    LOCAL_RUNTIME !== 'docker'
-  );
+  return SHARED_CLAUDE_VM && LOCAL_RUNTIME !== 'docker';
 }
 
 export const SHARED_VM_NETWORK_ISOLATION_ERROR_CODE =
