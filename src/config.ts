@@ -161,6 +161,10 @@ const configSchema = z
       optionalTrimmedString,
       z.string().optional(),
     ),
+    AGENTS_CONFIG_PATH: z.preprocess(
+      optionalTrimmedString,
+      z.string().default('agents.yaml'),
+    ),
   })
   .passthrough();
 
@@ -343,6 +347,10 @@ export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 export const MAIN_GROUP_FOLDER = 'main';
+export const AGENTS_CONFIG_PATH = path.resolve(
+  PROJECT_ROOT,
+  CONFIG.AGENTS_CONFIG_PATH,
+);
 
 export const LOCAL_RUNTIME = CONFIG.LOCAL_RUNTIME;
 export const STARTUP_CONFIRMATIONS = CONFIG.STARTUP_CONFIRMATIONS;

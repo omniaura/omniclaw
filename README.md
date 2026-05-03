@@ -133,6 +133,32 @@ OmniClaw now routes channels to agents. An agent has:
 
 Multiple chats can map to the same agent, and one server can host multiple agents.
 
+### Declarative topology
+
+OmniClaw can load agent/channel registrations from `agents.yaml` at startup. SQLite remains the runtime state store for messages, sessions, task runs, and the imported routing rows; the YAML file is the versionable source for agent topology.
+
+```yaml
+agents:
+  main:
+    name: Omni
+    backend: apple-container
+    channels:
+      - jid: '123@s.whatsapp.net'
+        trigger: '@Omni'
+
+  omniclaw-discord:
+    name: OCPeyton
+    backend: docker
+    agentRuntime: opencode
+    description: Infrastructure and OmniClaw development agent
+    channels:
+      - jid: 'dc:123456'
+        trigger: '@OCPeyton'
+        discordGuildId: '789'
+```
+
+Set `AGENTS_CONFIG_PATH` to load a different file. Loading is opt-in by file existence; if the configured file does not exist, startup skips declarative topology. Startup upserts configured registrations through the same path as IPC `register_group`; it does not delete DB rows that are absent from the file. The config uses camelCase keys only. Heartbeat blocks are not accepted yet because scheduler wiring is separate runtime state.
+
 ### Layered context
 
 Context is no longer just a single per-group file. OmniClaw supports layered `CLAUDE.md` context at multiple scopes:
