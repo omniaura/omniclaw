@@ -2,7 +2,9 @@
 !Dockerfile
 !Dockerfile.base
 !agent-browser-wrapper.sh
+!agent-exec.sh
 !entrypoint.sh
 !exec-shim.sh
+!shared-entrypoint.sh
 !agent-runner/
 !agent-runner/**

@@ -473,6 +473,14 @@ function getDiscordRuntimeDefault(botId?: string): AgentRuntime | undefined {
   return DISCORD_BOTS.find((b) => b.id === botId)?.runtime;
 }
 
+function getErrorCauseMessage(err: unknown): string | undefined {
+  if (!err || typeof err !== 'object' || !('cause' in err)) return undefined;
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause == null) return undefined;
+  if (cause instanceof Error) return cause.message;
+  return String(cause);
+}
+
 function getDiscordBotIdForJid(jid: string): string | undefined {
   if (!jid.startsWith('dc:')) return undefined;
   const primarySub = (channelSubscriptions[jid] || []).find((s) => s.isPrimary);
@@ -2991,6 +2999,7 @@ async function main(): Promise<void> {
                 logger.error(
                   {
                     err,
+                    errCause: getErrorCauseMessage(err),
                     index: idx + 1,
                     total: DISCORD_BOTS.length,
                     botId: bot.id,
@@ -3000,7 +3009,7 @@ async function main(): Promise<void> {
                 return Effect.succeed(null);
               }),
             ),
-          { concurrency: 'unbounded' },
+          { concurrency: 1 },
         ).pipe(
           Effect.map((connected) =>
             connected.filter((ch): ch is DiscordChannel => ch !== null),
