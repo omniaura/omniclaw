@@ -76,7 +76,7 @@ if [ "$HAS_AGENTS_TABLE" = "1" ] && [ "$HAS_ROUTES_TABLE" = "1" ]; then
   [ -z "$BACKEND" ] && BACKEND="apple-container"
 
   case "$AGENT_RUNTIME" in
-    claude-agent-sdk|opencode) ;;
+    claude-agent-sdk|opencode|codex) ;;
     "") AGENT_RUNTIME="claude-agent-sdk" ;;
     *) AGENT_RUNTIME="claude-agent-sdk" ;;
   esac
