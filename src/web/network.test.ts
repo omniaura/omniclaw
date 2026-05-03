@@ -138,8 +138,16 @@ describe('renderNetworkContent', () => {
       runtime: makeRuntime({
         currentNetwork: { id: 'ssid:office<&>', label: 'Office <Wi-Fi>' },
         trustedNetworks: [
-          { id: 'ssid:home<&>', label: 'Home <Wi-Fi>' },
-          { id: 'ssid:lab', label: 'Lab Network' },
+          {
+            id: 'ssid:home<&>',
+            label: 'Home <Wi-Fi>',
+            trustedAt: '2026-03-01T00:00:00.000Z',
+          },
+          {
+            id: 'ssid:lab',
+            label: 'Lab Network',
+            trustedAt: '2026-03-02T00:00:00.000Z',
+          },
         ],
       }),
       peers: [],
