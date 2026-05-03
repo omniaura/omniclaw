@@ -194,6 +194,7 @@ export interface DiscordChannelOpts {
   token: string;
   privilegedIntents?: boolean;
   multiBotMode?: boolean;
+  slashCommandGroups?: () => RegisteredGroup[];
   onSyntheticMessage?: (message: NewMessage) => void | Promise<void>;
   registeredGroups?: () => Record<string, RegisteredGroup>;
   onReaction?: (
@@ -443,12 +444,15 @@ export class DiscordChannel implements Channel {
 
   async refreshSlashCommands(): Promise<void> {
     if (!this.connected) return;
-    const groups = this.opts.registeredGroups
-      ? Object.values(this.opts.registeredGroups()).filter(
-          (group) =>
-            group.discordBotId === this.botId && !!group.discordGuildId,
-        )
-      : [];
+    const groups = (
+      this.opts.slashCommandGroups
+        ? this.opts.slashCommandGroups()
+        : this.opts.registeredGroups
+          ? Object.values(this.opts.registeredGroups())
+          : []
+    ).filter(
+      (group) => group.discordBotId === this.botId && !!group.discordGuildId,
+    );
 
     const guildGroups = new Map<string, RegisteredGroup[]>();
     for (const group of groups) {
