@@ -6,7 +6,6 @@
  * so it doesn't need to be recreated when agents register/unregister.
  */
 
-import { $ } from 'bun';
 import fs from 'fs';
 import path from 'path';
 
@@ -69,7 +68,7 @@ export class SharedVmManager {
   /** Stop any orphaned shared VMs from previous runs. */
   async cleanupOrphans(): Promise<void> {
     try {
-      const lsResult = await $`container ls --format json`.quiet();
+      const lsResult = await Bun.$`${LOCAL_RUNTIME} ls --format json`.quiet();
       const containers: { status: string; configuration: { id: string } }[] =
         JSON.parse(lsResult.text() || '[]');
       const orphans = containers
@@ -168,7 +167,7 @@ export class SharedVmManager {
 
   private async isAlive(name: string): Promise<boolean> {
     try {
-      const lsResult = await $`container ls --format json`.quiet();
+      const lsResult = await Bun.$`${LOCAL_RUNTIME} ls --format json`.quiet();
       const containers: { status: string; configuration: { id: string } }[] =
         JSON.parse(lsResult.text() || '[]');
       return containers.some(

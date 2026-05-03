@@ -73,7 +73,10 @@ const configSchema = z
       parseBooleanString,
       z.boolean().default(false),
     ),
-    SHARED_CLAUDE_VM_MEMORY: z.string().default('16G'),
+    SHARED_CLAUDE_VM_MEMORY: z.preprocess(
+      optionalTrimmedString,
+      z.string().default('16G'),
+    ),
     EXEC_CONTAINER_MEMORY: z.string().optional(),
     CONTAINER_TIMEOUT: z.preprocess(
       parseIntegerString,
