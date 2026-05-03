@@ -225,6 +225,7 @@ Configuration constants are in `src/config.ts`. All values can be overridden via
 | `IDLE_TIMEOUT`              | `1800000`                       | Keep container alive after last result (30min) |
 | `SESSION_MAX_AGE`           | `14400000`                      | Rotate sessions after 4 hours                  |
 | `MAX_CONCURRENT_CONTAINERS` | `8`                             | Global container concurrency limit             |
+| `MAX_IDLE_CONTAINERS`       | `0`                             | Warm idle container pool size                  |
 | `MAX_TASK_CONTAINERS`       | `MAX_CONCURRENT_CONTAINERS - 1` | Containers reserved for scheduled tasks        |
 | `CONTAINER_IMAGE`           | `omniclaw-agent:latest`         | Container image name                           |
 | `CONTAINER_MEMORY`          | `4G`                            | Container memory limit                         |

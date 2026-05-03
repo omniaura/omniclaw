@@ -275,7 +275,7 @@ describe('parseConfigEnv', () => {
     const parsed = parseConfigEnv({});
 
     expect(parsed.CONTAINER_TIMEOUT).toBe(7200000);
-    expect(parsed.MAX_IDLE_CONTAINERS).toBe(4);
+    expect(parsed.MAX_IDLE_CONTAINERS).toBe(0);
     expect(parsed.DISCOVERY_ENABLED).toBe(false);
     expect(parsed.WEB_UI_PORT).toBeUndefined();
   });
