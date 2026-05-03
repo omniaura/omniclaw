@@ -32,18 +32,18 @@ Last updated: 2026-05-02
 
 ### Product Features
 
-| Feature                         | Maturity | Notes                                                                                                        |
-| ------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------ |
-| Agent/channel decoupling        | Stable   | One agent can own multiple channels                                                                          |
-| Scheduled tasks                 | Stable   | Cron, interval, one-shot, pause/resume, recovery logic                                                       |
-| Persistent session + memory     | Stable   | CLAUDE.md hierarchy, SQLite state, task/run persistence                                                      |
-| Web UI (SolidStart)             | Stable   | 11 pages, mobile-responsive layout, dark/light theme toggle, command palette, conversation search/export    |
-| LAN discovery + pairing         | Active   | mDNS discovery, trust workflow, `/network` page, remote peer browsing                                        |
-| GitHub context injection        | Stable   | Snapshot context, delta digest, linked PR/issue context                                                      |
-| Inter-agent messaging           | Stable   | `send_message`, agent registry, IPC snapshots                                                                |
-| Browser automation              | Stable   | Agent browser available inside containers                                                                    |
-| Container split execution       | Stable   | Separate execution path for local runtime workloads                                                          |
-| Startup confirmation on restart | Stable   | Agents wake and announce they are back after orchestrator restart                                            |
+| Feature                         | Maturity | Notes                                                                                                                                                                                        |
+| ------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent/channel decoupling        | Stable   | One agent can own multiple channels                                                                                                                                                          |
+| Scheduled tasks                 | Stable   | Cron, interval, one-shot, pause/resume, recovery logic                                                                                                                                       |
+| Persistent session + memory     | Stable   | CLAUDE.md hierarchy, SQLite state, task/run persistence                                                                                                                                      |
+| Web UI (SolidStart)             | Stable   | 11 pages, mobile-responsive layout, dark/light theme toggle, command palette, conversation search/export                                                                                     |
+| LAN discovery + pairing         | Active   | mDNS discovery, trust workflow, `/network` page, remote peer browsing                                                                                                                        |
+| GitHub context injection        | Stable   | Snapshot context, delta digest, linked PR/issue context                                                                                                                                      |
+| Inter-agent messaging           | Stable   | `send_message`, agent registry, IPC snapshots                                                                                                                                                |
+| Browser automation              | Stable   | Agent browser available inside containers                                                                                                                                                    |
+| Container split execution       | Stable   | Separate execution path for local runtime workloads                                                                                                                                          |
+| Startup confirmation on restart | Stable   | Agents wake and announce they are back after orchestrator restart                                                                                                                            |
 | Security hardening              | Stable   | Path traversal guards, mount allowlist, webhook replay defense, external MCP validation, remote image limits, login rate limiting + body caps, DNS rebinding SSRF defense, peer log SSE caps |
 
 ---
