@@ -19,7 +19,9 @@ import {
 import { logger } from '../logger.js';
 
 const SHARED_VM_PREFIX = 'omniclaw-shared-claude';
-const EXTRA_DIR = process.env.OMNICLAW_EXTRA_DIR || '/workspace/extra';
+function getExtraDir(): string {
+  return process.env.OMNICLAW_EXTRA_DIR || '/workspace/extra';
+}
 
 export class SharedVmManager {
   private containerName: string | null = null;
@@ -102,13 +104,14 @@ export class SharedVmManager {
   private async start(): Promise<string> {
     const name = `${SHARED_VM_PREFIX}-${Date.now()}`;
     const projectRoot = process.cwd();
+    const extraDir = getExtraDir();
 
     // Ensure parent dirs exist
     fs.mkdirSync(GROUPS_DIR, { recursive: true });
     fs.mkdirSync(path.join(DATA_DIR, 'ipc'), { recursive: true });
     fs.mkdirSync(path.join(DATA_DIR, 'sessions'), { recursive: true });
     fs.mkdirSync(path.join(DATA_DIR, 'env'), { recursive: true });
-    fs.mkdirSync(EXTRA_DIR, { recursive: true });
+    fs.mkdirSync(extraDir, { recursive: true });
 
     const args: string[] = [
       'run',
@@ -129,7 +132,7 @@ export class SharedVmManager {
       '-v',
       `${projectRoot}:/workspace/project:ro`,
       '-v',
-      `${EXTRA_DIR}:/workspace/extra:ro`,
+      `${extraDir}:/workspace/extra:ro`,
       // Agent runner source (shared, read-only)
       '--mount',
       `type=bind,source=${path.join(projectRoot, 'container', 'agent-runner', 'src')},target=/app/src,readonly`,
