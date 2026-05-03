@@ -35,6 +35,7 @@ import {
   renderDiscordFlowPrompt,
   SYSTEM_COMMAND_NAMES,
 } from '../discord-command-flows.js';
+import { resolveContextLayers } from '../context-layers.js';
 import { logger } from '../logger.js';
 import {
   cleanupExpiredMedia,
@@ -484,6 +485,13 @@ export class DiscordChannel implements Channel {
 
         const agent = agents[sub.agentId];
         if (!agent) continue;
+        const layers = resolveContextLayers({
+          channelJid,
+          discordGuildId: sub.discordGuildId,
+          serverFolder: agent.serverFolder,
+          categoryFolder: sub.categoryFolder,
+          channelFolder: sub.channelFolder,
+        });
         const group: RegisteredGroup = {
           name: agent.name,
           folder: agent.folder,
@@ -493,9 +501,9 @@ export class DiscordChannel implements Channel {
           requiresTrigger: sub.requiresTrigger,
           discordBotId: sub.discordBotId || this.botId,
           discordGuildId: sub.discordGuildId,
-          serverFolder: agent.serverFolder,
-          channelFolder: sub.channelFolder,
-          categoryFolder: sub.categoryFolder,
+          serverFolder: layers.serverFolder,
+          channelFolder: layers.channelFolder,
+          categoryFolder: layers.categoryFolder,
           agentContextFolder: agent.agentContextFolder,
           backend: agent.backend,
           agentRuntime: agent.agentRuntime,
@@ -508,7 +516,9 @@ export class DiscordChannel implements Channel {
     const legacyGroups = this.opts.registeredGroups
       ? Object.values(this.opts.registeredGroups()).filter(
           (group) =>
-            group.discordBotId === this.botId && !!group.discordGuildId,
+            !!group.discordGuildId &&
+            (group.discordBotId === this.botId ||
+              (!group.discordBotId && !this.opts.multiBotMode)),
         )
       : [];
     for (const group of legacyGroups) {

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { MessageFlags } from 'discord.js';
+import fs from 'fs';
+import path from 'path';
 
 import {
   jidToChannelId,
@@ -13,6 +15,7 @@ import {
   downloadTextAttachment,
   readStreamWithByteLimit,
 } from '../media.js';
+import { GROUPS_DIR } from '../config.js';
 import type { RegisteredGroup } from '../types.js';
 
 const originalFetch = globalThis.fetch;
@@ -230,6 +233,43 @@ describe('Discord download guards', () => {
 });
 
 describe('Discord slash flows', () => {
+  const slashFlowTestFolders = new Set<string>();
+
+  afterEach(() => {
+    for (const folder of slashFlowTestFolders) {
+      const absoluteFolder = path.join(GROUPS_DIR, folder);
+      if (fs.existsSync(absoluteFolder)) {
+        fs.rmSync(absoluteFolder, { recursive: true, force: true });
+      }
+    }
+    slashFlowTestFolders.clear();
+  });
+
+  function writeDiscordCommandFile(
+    relativeFolder: string,
+    commandName: string,
+  ) {
+    slashFlowTestFolders.add(relativeFolder);
+    const folder = path.join(GROUPS_DIR, relativeFolder);
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(
+      path.join(folder, 'discord-commands.json'),
+      JSON.stringify(
+        {
+          commands: [
+            {
+              name: commandName,
+              description: 'Run a test-only command',
+              prompt: 'Run the test-only command',
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+  }
+
   it('syncs slash commands for a Codex bot from channel subscriptions', async () => {
     const setCommands = mock(async (_commands: unknown[]) => {});
     const channel = new DiscordChannel({
@@ -269,6 +309,113 @@ describe('Discord slash flows', () => {
       discordBotId: 'CODEX',
       discordGuildId: '753336633083953213',
       createdAt: '2026-05-01T00:00:00.000Z',
+    });
+
+    (
+      channel as unknown as {
+        connected: boolean;
+        client: { guilds: { fetch: (guildId: string) => Promise<unknown> } };
+      }
+    ).connected = true;
+    (
+      channel as unknown as {
+        client: { guilds: { fetch: (guildId: string) => Promise<unknown> } };
+      }
+    ).client = {
+      guilds: {
+        fetch: mock(async () => ({
+          commands: { set: setCommands },
+        })),
+      },
+    };
+
+    await channel.refreshSlashCommands();
+
+    expect(setCommands).toHaveBeenCalledTimes(1);
+    const commands = setCommands.mock.calls[0]?.[0] as Array<{
+      name: string;
+    }>;
+    expect(commands.map((command) => command.name)).toContain('mergemaster');
+  });
+
+  it('uses derived Discord context folders for subscription slash commands', async () => {
+    const setCommands = mock(async (_commands: unknown[]) => {});
+    const guildId = '753336633083953214';
+    const channelId = '1474995286903361773';
+    const channelFolder = path.join('servers', guildId, 'channels', channelId);
+    writeDiscordCommandFile(channelFolder, 'channeltest');
+
+    const channel = new DiscordChannel({
+      token: 'test-token-not-used',
+      botId: 'CODEX',
+      multiBotMode: true,
+    });
+
+    setAgent({
+      id: 'dex-discord',
+      name: 'Dex',
+      folder: 'dex-discord',
+      backend: 'apple-container',
+      agentRuntime: 'codex',
+      isAdmin: false,
+      createdAt: '2026-05-01T00:00:00.000Z',
+    });
+    setChannelSubscription({
+      channelJid: `dc:${channelId}`,
+      agentId: 'dex-discord',
+      trigger: '@Dex',
+      requiresTrigger: true,
+      priority: 1,
+      isPrimary: false,
+      discordBotId: 'CODEX',
+      discordGuildId: guildId,
+      createdAt: '2026-05-01T00:00:00.000Z',
+    });
+
+    (
+      channel as unknown as {
+        connected: boolean;
+        client: { guilds: { fetch: (guildId: string) => Promise<unknown> } };
+      }
+    ).connected = true;
+    (
+      channel as unknown as {
+        client: { guilds: { fetch: (guildId: string) => Promise<unknown> } };
+      }
+    ).client = {
+      guilds: {
+        fetch: mock(async () => ({
+          commands: { set: setCommands },
+        })),
+      },
+    };
+
+    await channel.refreshSlashCommands();
+
+    expect(setCommands).toHaveBeenCalledTimes(1);
+    const commands = setCommands.mock.calls[0]?.[0] as Array<{
+      name: string;
+    }>;
+    expect(commands.map((command) => command.name)).toContain('channeltest');
+  });
+
+  it('keeps legacy single-bot slash groups without discordBotId', async () => {
+    const setCommands = mock(async (_commands: unknown[]) => {});
+    const channel = new DiscordChannel({
+      token: 'test-token-not-used',
+      botId: 'PRIMARY',
+      multiBotMode: false,
+      registeredGroups: () => ({
+        'dc:1474995286903361774': {
+          name: 'Clayton',
+          folder: 'clayton-discord',
+          trigger: '@Clayton',
+          added_at: '2026-05-01T00:00:00.000Z',
+          discordGuildId: '753336633083953215',
+          backend: 'apple-container',
+          agentRuntime: 'claude-agent-sdk',
+        },
+      }),
     });
 
     (
