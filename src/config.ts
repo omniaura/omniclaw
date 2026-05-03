@@ -114,7 +114,7 @@ const configSchema = z
     ),
     MAX_IDLE_CONTAINERS: z.preprocess(
       parseIntegerString,
-      z.number().int().nonnegative().default(4),
+      z.number().int().nonnegative().default(0),
     ),
     MAX_TASK_CONTAINERS: z.preprocess(
       parseIntegerString,
@@ -364,7 +364,7 @@ export const MAX_ACTIVE_CONTAINERS = Math.max(
   1,
   CONFIG.MAX_ACTIVE_CONTAINERS ?? CONFIG.MAX_CONCURRENT_CONTAINERS ?? 8,
 );
-/** Max warm containers sitting idle, waiting for the next message. */
+/** Max warm containers sitting idle, waiting for the next message. Defaults to 0 to prefer session resume over resident containers. */
 export const MAX_IDLE_CONTAINERS = Math.max(0, CONFIG.MAX_IDLE_CONTAINERS);
 /** Backward-compat alias. */
 export const MAX_CONCURRENT_CONTAINERS = MAX_ACTIVE_CONTAINERS;
