@@ -717,6 +717,16 @@ function refreshChannelSubscriptions(): void {
   channelSubscriptionsDirty = false;
 }
 
+function buildSlashCommandGroupsFromSubscriptions(): RegisteredGroup[] {
+  refreshChannelSubscriptions();
+  return Object.entries(channelSubscriptions).flatMap(([channelJid, subs]) =>
+    subs.flatMap((sub) => {
+      const group = buildRegisteredGroupFromSubscription(channelJid, sub);
+      return group ? [group] : [];
+    }),
+  );
+}
+
 /** Mark channel subscriptions as stale so the next loop tick re-reads from DB. */
 function invalidateChannelSubscriptions(): void {
   channelSubscriptionsDirty = true;
@@ -1267,6 +1277,17 @@ export function _setChannelSubscriptions(
   subscriptions: Record<string, ChannelSubscription[]>,
 ): void {
   channelSubscriptions = subscriptions;
+  channelSubscriptionsDirty = false;
+}
+
+/** @internal - exported for testing */
+export function _markChannelSubscriptionsDirty(): void {
+  channelSubscriptionsDirty = true;
+}
+
+/** @internal - exported for testing */
+export function _getSlashCommandGroupsFromSubscriptions(): RegisteredGroup[] {
+  return buildSlashCommandGroupsFromSubscriptions();
 }
 
 /**
@@ -2987,17 +3008,7 @@ async function main(): Promise<void> {
                 multiBotMode: DISCORD_BOTS.length > 1,
                 onSyntheticMessage: (message) => storeAndBroadcast(message),
                 registeredGroups: () => registeredGroups,
-                slashCommandGroups: () =>
-                  Object.entries(channelSubscriptions).flatMap(
-                    ([channelJid, subs]) =>
-                      subs.flatMap((sub) => {
-                        const group = buildRegisteredGroupFromSubscription(
-                          channelJid,
-                          sub,
-                        );
-                        return group ? [group] : [];
-                      }),
-                  ),
+                slashCommandGroups: buildSlashCommandGroupsFromSubscriptions,
                 onSessionCommand: (command, chatJid, group, sessionId) =>
                   handleSessionCommand(command, chatJid, group, sessionId),
                 onReaction: async (chatJid, messageId, emoji, userName) => {

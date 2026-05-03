@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 
-import { _initTestDatabase, storeChatMetadata } from './db.js';
 import {
+  _initTestDatabase,
+  setChannelSubscription,
+  storeChatMetadata,
+} from './db.js';
+import {
+  _getSlashCommandGroupsFromSubscriptions,
+  _markChannelSubscriptionsDirty,
   _setChannelSubscriptions,
   _setRegisteredGroups,
   getAvailableGroups,
@@ -137,5 +143,43 @@ describe('getAvailableGroups', () => {
     );
 
     expect(getAvailableGroups()).toEqual([]);
+  });
+});
+
+describe('slash command subscription groups', () => {
+  beforeEach(() => {
+    _initTestDatabase();
+    _setRegisteredGroups({});
+    _setChannelSubscriptions({});
+  });
+
+  it('refreshes dirty channel subscriptions before building slash command groups', () => {
+    _setRegisteredGroups({
+      'dc:guild-1:channel-1': {
+        ...BASE_GROUP,
+        name: 'Discord Fallback',
+        folder: 'agent-one',
+        discordBotId: 'bot-a',
+        discordGuildId: 'guild-1',
+      },
+    });
+    setChannelSubscription({
+      ...BASE_SUBSCRIPTION,
+      channelJid: 'dc:guild-1:channel-1',
+      agentId: 'agent-one',
+      trigger: '@Cody',
+      discordBotId: 'bot-a',
+      discordGuildId: 'guild-1',
+    });
+    _markChannelSubscriptionsDirty();
+
+    expect(_getSlashCommandGroupsFromSubscriptions()).toEqual([
+      expect.objectContaining({
+        folder: 'agent-one',
+        trigger: '@Cody',
+        discordBotId: 'bot-a',
+        discordGuildId: 'guild-1',
+      }),
+    ]);
   });
 });
