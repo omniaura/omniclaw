@@ -189,6 +189,22 @@ export interface SessionCommandResult {
   message: string;
 }
 
+export type SessionCommandName =
+  | 'new'
+  | 'resume'
+  | 'list'
+  | 'current'
+  | 'end'
+  | 'rename';
+
+export interface SessionCommandOptions {
+  sessionId?: string;
+  name?: string;
+  resumeFrom?: string;
+  limit?: number;
+  deprecatedAlias?: 'resume' | 'sessions';
+}
+
 export interface DiscordChannelOpts {
   botId: string;
   token: string;
@@ -204,10 +220,10 @@ export interface DiscordChannelOpts {
     userName: string,
   ) => void;
   onSessionCommand?: (
-    command: 'resume' | 'sessions',
+    command: SessionCommandName,
     chatJid: string,
     group: RegisteredGroup,
-    sessionId?: string,
+    options?: SessionCommandOptions,
   ) => SessionCommandResult;
 }
 
@@ -1240,7 +1256,7 @@ export class DiscordChannel implements Channel {
       return;
     }
 
-    // Handle system commands (resume, sessions) directly on the host
+    // Handle system commands directly on the host.
     if (SYSTEM_COMMAND_NAMES.has(interaction.commandName)) {
       if (
         !interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
@@ -1257,14 +1273,7 @@ export class DiscordChannel implements Channel {
         });
         return;
       }
-      const sessionId =
-        interaction.options.getString('session_id') ?? undefined;
-      const result = this.opts.onSessionCommand(
-        interaction.commandName as 'resume' | 'sessions',
-        chatJid,
-        group,
-        sessionId,
-      );
+      const result = this.dispatchSessionCommand(interaction, chatJid, group);
       await interaction.editReply({ content: result.message });
       return;
     }
@@ -1362,6 +1371,59 @@ export class DiscordChannel implements Channel {
           'I acknowledged the command, but failed to queue it. Check OmniClaw logs for details.',
         ephemeral: true,
       });
+    }
+  }
+
+  private dispatchSessionCommand(
+    interaction: ChatInputCommandInteraction,
+    chatJid: string,
+    group: RegisteredGroup,
+  ): SessionCommandResult {
+    if (!this.opts.onSessionCommand) {
+      return { message: 'Session commands are not configured.' };
+    }
+
+    if (interaction.commandName === 'resume') {
+      return this.opts.onSessionCommand('resume', chatJid, group, {
+        sessionId: interaction.options.getString('session_id') ?? undefined,
+        deprecatedAlias: 'resume',
+      });
+    }
+
+    if (interaction.commandName === 'sessions') {
+      return this.opts.onSessionCommand('list', chatJid, group, {
+        deprecatedAlias: 'sessions',
+      });
+    }
+
+    const subcommand = interaction.options.getSubcommand(false);
+    switch (subcommand) {
+      case 'new':
+        return this.opts.onSessionCommand('new', chatJid, group, {
+          name: interaction.options.getString('name') ?? undefined,
+          resumeFrom: interaction.options.getString('resume_from') ?? undefined,
+        });
+      case 'resume':
+        return this.opts.onSessionCommand('resume', chatJid, group, {
+          sessionId: interaction.options.getString('session_id') ?? undefined,
+        });
+      case 'list':
+        return this.opts.onSessionCommand('list', chatJid, group, {
+          limit: interaction.options.getInteger('limit') ?? undefined,
+        });
+      case 'current':
+        return this.opts.onSessionCommand('current', chatJid, group);
+      case 'end':
+        return this.opts.onSessionCommand('end', chatJid, group, {
+          sessionId: interaction.options.getString('session_id') ?? undefined,
+        });
+      case 'rename':
+        return this.opts.onSessionCommand('rename', chatJid, group, {
+          sessionId: interaction.options.getString('session_id') ?? undefined,
+          name: interaction.options.getString('name') ?? undefined,
+        });
+      default:
+        return { message: 'Unknown session subcommand.' };
     }
   }
 }

@@ -42,6 +42,7 @@ describe('discord command flows', () => {
     expect(names).toContain('research-driver');
     expect(names).toContain('taskbooker');
     expect(names).toContain('scheduler');
+    expect(names).toContain('session');
   });
 
   it('renders flow prompts with provided values and defaults', () => {
@@ -253,6 +254,31 @@ describe('discord command flows', () => {
       mergemaster?.options?.find((option) => option.name === 'duration_minutes')
         ?.type,
     ).toBe(ApplicationCommandOptionType.Integer);
+  });
+
+  it('builds the session command as native Discord subcommands', () => {
+    const payloads = buildDiscordSlashCommandPayloads([makeGroup()]);
+    const session = payloads.find((command) => command.name === 'session');
+
+    expect(session?.options?.map((option) => option.name)).toEqual([
+      'new',
+      'resume',
+      'list',
+      'current',
+      'end',
+      'rename',
+    ]);
+    expect(
+      session?.options?.every(
+        (option) => option.type === ApplicationCommandOptionType.Subcommand,
+      ),
+    ).toBe(true);
+    const rename = session?.options?.find((option) => option.name === 'rename');
+    expect(
+      rename && 'options' in rename
+        ? rename.options?.map((option) => option.name)
+        : [],
+    ).toEqual(['session_id', 'name']);
   });
 
   it('ignores invalid commands and invalid options from custom files', () => {

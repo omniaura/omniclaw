@@ -1205,6 +1205,10 @@ export function setSession(groupFolder: string, sessionId: string): void {
   ).run(groupFolder, sessionId);
 }
 
+export function clearSession(groupFolder: string): void {
+  db.query('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
+}
+
 export function getAllSessions(): Record<string, string> {
   const rows = db
     .prepare('SELECT group_folder, session_id FROM sessions')
@@ -1214,6 +1218,108 @@ export function getAllSessions(): Record<string, string> {
     result[row.group_folder] = row.session_id;
   }
   return result;
+}
+
+export interface SessionMetadata {
+  runtimeFolder: string;
+  sessionId: string;
+  name?: string;
+  endedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function mapSessionMetadataRow(row: {
+  runtime_folder: string;
+  session_id: string;
+  name: string | null;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+}): SessionMetadata {
+  return {
+    runtimeFolder: row.runtime_folder,
+    sessionId: row.session_id,
+    name: row.name || undefined,
+    endedAt: row.ended_at || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function getSessionMetadata(
+  runtimeFolder: string,
+  sessionId: string,
+): SessionMetadata | undefined {
+  const row = db
+    .prepare(
+      `SELECT runtime_folder, session_id, name, ended_at, created_at, updated_at
+       FROM session_metadata
+       WHERE runtime_folder = ? AND session_id = ?`,
+    )
+    .get(runtimeFolder, sessionId) as
+    | {
+        runtime_folder: string;
+        session_id: string;
+        name: string | null;
+        ended_at: string | null;
+        created_at: string;
+        updated_at: string;
+      }
+    | undefined;
+  return row ? mapSessionMetadataRow(row) : undefined;
+}
+
+export function getSessionMetadataForRuntime(
+  runtimeFolder: string,
+): Record<string, SessionMetadata> {
+  const rows = db
+    .prepare(
+      `SELECT runtime_folder, session_id, name, ended_at, created_at, updated_at
+       FROM session_metadata
+       WHERE runtime_folder = ?`,
+    )
+    .all(runtimeFolder) as Array<{
+    runtime_folder: string;
+    session_id: string;
+    name: string | null;
+    ended_at: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+  const result: Record<string, SessionMetadata> = {};
+  for (const row of rows) {
+    const metadata = mapSessionMetadataRow(row);
+    result[metadata.sessionId] = metadata;
+  }
+  return result;
+}
+
+export function setSessionName(
+  runtimeFolder: string,
+  sessionId: string,
+  name: string,
+): void {
+  db.query(
+    `INSERT INTO session_metadata
+       (runtime_folder, session_id, name, updated_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(runtime_folder, session_id)
+     DO UPDATE SET name = excluded.name, updated_at = datetime('now')`,
+  ).run(runtimeFolder, sessionId, name);
+}
+
+export function markSessionEnded(
+  runtimeFolder: string,
+  sessionId: string,
+): void {
+  db.query(
+    `INSERT INTO session_metadata
+       (runtime_folder, session_id, ended_at, updated_at)
+     VALUES (?, ?, datetime('now'), datetime('now'))
+     ON CONFLICT(runtime_folder, session_id)
+     DO UPDATE SET ended_at = datetime('now'), updated_at = datetime('now')`,
+  ).run(runtimeFolder, sessionId);
 }
 
 /**

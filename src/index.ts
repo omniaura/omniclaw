@@ -14,7 +14,11 @@ import {
   buildAgentToChannelsMapFromSubscriptions,
   buildSendToInstruction,
 } from './channel-routes.js';
-import { DiscordChannel } from './channels/discord.js';
+import {
+  DiscordChannel,
+  type SessionCommandName,
+  type SessionCommandOptions,
+} from './channels/discord.js';
 import { SlackChannel } from './channels/slack.js';
 import { TelegramChannel } from './channels/telegram.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
@@ -55,6 +59,7 @@ import {
 } from './config.js';
 import { resolveContextLayers } from './context-layers.js';
 import {
+  clearSession,
   createTrustStore,
   createTask as dbCreateTask,
   deleteTask as dbDeleteTask,
@@ -78,11 +83,13 @@ import {
   getNewMessages,
   getOrCreateDiscoveryInstanceId,
   getRouterState,
+  getSessionMetadataForRuntime,
   getSubscriptionsForAgent,
   getTaskById,
   getTaskRunLogs,
   getTaskRunPhaseEvents,
   initDatabase,
+  markSessionEnded,
   setAgent,
   setAgentHealth,
   setChannelRoute,
@@ -90,6 +97,7 @@ import {
   setRegisteredGroup,
   setRouterState,
   setSession,
+  setSessionName,
   storeChatMetadata,
   storeGuildRoster,
   storeMessage,
@@ -207,6 +215,8 @@ async function shutdown(): Promise<void> {
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
+const pendingSessionNames = new Map<string, string>();
+const pendingSessionForks = new Map<string, string>();
 const resumePositionStore = createResumePositionStore({
   persistentTaskState: PERSISTENT_TASK_STATE,
   initialResumePositions: {},
@@ -315,19 +325,13 @@ function getRuntimeGroupFolder(
   return runtimeFolder;
 }
 
-/**
- * Handle /resume and /sessions Discord slash commands.
- * These operate on the host's session store directly rather than sending
- * a prompt to the agent.
- */
-function handleSessionCommand(
-  command: 'resume' | 'sessions',
+function resolveSessionRuntime(
   chatJid: string,
   group: RegisteredGroup,
-  sessionId?: string,
-): { message: string } {
-  // Compute the correct runtime folder, accounting for subscription-based
-  // multi-agent channels that use makeDispatchKey for session keying.
+): {
+  runtimeFolder: string;
+  sessionsDir: string;
+} {
   const subs = getSubscriptionsForChannelInMemory(chatJid);
   const matchingSub = subs.find((s) => {
     const agent = agents[s.agentId];
@@ -345,69 +349,174 @@ function handleSessionCommand(
     'projects',
     '-workspace-group',
   );
+  return { runtimeFolder, sessionsDir };
+}
 
-  if (command === 'sessions') {
-    if (!fs.existsSync(sessionsDir)) {
-      return { message: 'No sessions found for this channel.' };
-    }
-    const files = fs
-      .readdirSync(sessionsDir)
-      .filter((f) => f.endsWith('.jsonl'));
-    if (files.length === 0) {
-      return { message: 'No sessions found for this channel.' };
+function isValidSessionId(sessionId: string): boolean {
+  return /^[a-f0-9-]+$/i.test(sessionId);
+}
+
+function listSessionFiles(sessionsDir: string): Array<{
+  sessionId: string;
+  modifiedAt: Date;
+  sizeBytes: number;
+}> {
+  if (!fs.existsSync(sessionsDir)) return [];
+  return fs
+    .readdirSync(sessionsDir)
+    .filter((f) => f.endsWith('.jsonl'))
+    .map((f) => {
+      const filePath = path.join(sessionsDir, f);
+      const stat = fs.statSync(filePath);
+      const sessionId = f.replace('.jsonl', '');
+      return { sessionId, modifiedAt: stat.mtime, sizeBytes: stat.size };
+    })
+    .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
+}
+
+function validateSessionFile(
+  sessionsDir: string,
+  sessionId: string,
+): string | null {
+  if (!isValidSessionId(sessionId)) {
+    return `Invalid session ID \`${sessionId}\`. Use \`/session list\` to list available sessions.`;
+  }
+  const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+  if (!fs.existsSync(sessionFile)) {
+    return `Session \`${sessionId}\` not found. Use \`/session list\` to list available sessions.`;
+  }
+  return null;
+}
+
+/**
+ * Handle Discord session slash commands on the host rather than sending a
+ * prompt to the agent.
+ */
+function handleSessionCommand(
+  command: SessionCommandName,
+  chatJid: string,
+  group: RegisteredGroup,
+  options: SessionCommandOptions = {},
+): { message: string } {
+  const { runtimeFolder, sessionsDir } = resolveSessionRuntime(chatJid, group);
+  const aliasNotice = options.deprecatedAlias
+    ? `\`/${options.deprecatedAlias}\` is deprecated; use \`/session ${options.deprecatedAlias === 'sessions' ? 'list' : 'resume'}\` instead.\n\n`
+    : '';
+
+  if (command === 'list') {
+    const sessionInfos = listSessionFiles(sessionsDir);
+    if (sessionInfos.length === 0) {
+      return { message: `${aliasNotice}No sessions found for this channel.` };
     }
 
     const currentSessionId = sessions[runtimeFolder];
-    const sessionInfos = files
-      .map((f) => {
-        const filePath = path.join(sessionsDir, f);
-        const stat = fs.statSync(filePath);
-        const sid = f.replace('.jsonl', '');
-        return { sessionId: sid, modifiedAt: stat.mtime, sizeBytes: stat.size };
-      })
-      .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
-
-    const lines = sessionInfos.map((s) => {
+    const metadataById = getSessionMetadataForRuntime(runtimeFolder);
+    const limit =
+      options.limit && options.limit > 0
+        ? Math.min(Math.floor(options.limit), 25)
+        : sessionInfos.length;
+    const lines = sessionInfos.slice(0, limit).map((s) => {
+      const metadata = metadataById[s.sessionId];
       const current = s.sessionId === currentSessionId ? ' **(active)**' : '';
+      const ended = metadata?.endedAt ? ' _(ended)_' : '';
+      const name = metadata?.name ? ` — ${metadata.name}` : '';
       const sizeKb = Math.round(s.sizeBytes / 1024);
       const age = formatAge(s.modifiedAt);
-      return `\`${s.sessionId}\` — ${sizeKb}KB, ${age}${current}`;
+      return `\`${s.sessionId}\`${name} — ${sizeKb}KB, ${age}${current}${ended}`;
     });
 
     return {
-      message: `**Sessions for this channel** (${runtimeFolder}):\n${lines.join('\n')}`,
+      message: `${aliasNotice}**Sessions for this channel** (${runtimeFolder}):\n${lines.join('\n')}`,
     };
   }
 
-  // command === 'resume'
-  if (!sessionId) {
-    // No session ID provided — show sessions instead
-    return handleSessionCommand('sessions', chatJid, group);
-  }
-
-  // Guard against path traversal — session IDs are hex UUIDs
-  if (!/^[a-f0-9-]+$/i.test(sessionId)) {
+  if (command === 'current') {
+    const currentSessionId = sessions[runtimeFolder];
+    if (!currentSessionId) {
+      return { message: 'No active session for this channel.' };
+    }
+    const metadata =
+      getSessionMetadataForRuntime(runtimeFolder)[currentSessionId];
+    const name = metadata?.name ? ` (${metadata.name})` : '';
     return {
-      message: `Invalid session ID \`${sessionId}\`. Use \`/sessions\` to list available sessions.`,
+      message: `Active session: \`${currentSessionId}\`${name}.`,
     };
   }
 
-  // Validate session file exists
-  const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
-  if (!fs.existsSync(sessionFile)) {
+  if (command === 'new') {
+    const resumeFrom = options.resumeFrom?.trim();
+    if (resumeFrom) {
+      const validationError = validateSessionFile(sessionsDir, resumeFrom);
+      if (validationError) return { message: validationError };
+      pendingSessionForks.set(runtimeFolder, resumeFrom);
+    } else {
+      pendingSessionForks.delete(runtimeFolder);
+    }
+    const name = options.name?.trim();
+    if (name) pendingSessionNames.set(runtimeFolder, name);
+    else pendingSessionNames.delete(runtimeFolder);
+    delete sessions[runtimeFolder];
+    clearSession(runtimeFolder);
+    resumePositionStore.set(runtimeFolder, '');
     return {
-      message: `Session \`${sessionId}\` not found. Use \`/sessions\` to list available sessions.`,
+      message: resumeFrom
+        ? `Fresh session queued from \`${resumeFrom}\`. The next message in this channel will branch from that session.`
+        : 'Fresh session queued. The next message in this channel will start a new session.',
     };
   }
 
-  // Override the session and clear resumeAt so the SDK resumes at latest
-  sessions[runtimeFolder] = sessionId;
-  setSession(runtimeFolder, sessionId);
-  resumePositionStore.set(runtimeFolder, '');
+  if (command === 'resume') {
+    const sessionId = options.sessionId?.trim();
+    if (!sessionId) {
+      return handleSessionCommand('list', chatJid, group, {
+        deprecatedAlias: options.deprecatedAlias,
+      });
+    }
+    const validationError = validateSessionFile(sessionsDir, sessionId);
+    if (validationError) return { message: `${aliasNotice}${validationError}` };
 
-  return {
-    message: `Session switched to \`${sessionId}\`. The next message in this channel will resume from that session.`,
-  };
+    sessions[runtimeFolder] = sessionId;
+    setSession(runtimeFolder, sessionId);
+    resumePositionStore.set(runtimeFolder, '');
+    pendingSessionForks.delete(runtimeFolder);
+    pendingSessionNames.delete(runtimeFolder);
+
+    return {
+      message: `${aliasNotice}Session switched to \`${sessionId}\`. The next message in this channel will resume from that session.`,
+    };
+  }
+
+  if (command === 'end') {
+    const sessionId = options.sessionId?.trim() || sessions[runtimeFolder];
+    if (!sessionId) return { message: 'No active session to end.' };
+    const validationError = validateSessionFile(sessionsDir, sessionId);
+    if (validationError) return { message: validationError };
+    markSessionEnded(runtimeFolder, sessionId);
+    if (sessions[runtimeFolder] === sessionId) {
+      delete sessions[runtimeFolder];
+      clearSession(runtimeFolder);
+      resumePositionStore.set(runtimeFolder, '');
+      pendingSessionForks.delete(runtimeFolder);
+      pendingSessionNames.delete(runtimeFolder);
+    }
+    return {
+      message: `Session \`${sessionId}\` ended. The next message will start a fresh session if this was active.`,
+    };
+  }
+
+  if (command === 'rename') {
+    const sessionId = options.sessionId?.trim();
+    const name = options.name?.trim();
+    if (!sessionId || !name) {
+      return { message: '`/session rename` requires `session_id` and `name`.' };
+    }
+    const validationError = validateSessionFile(sessionsDir, sessionId);
+    if (validationError) return { message: validationError };
+    setSessionName(runtimeFolder, sessionId, name);
+    return { message: `Session \`${sessionId}\` renamed to "${name}".` };
+  }
+
+  return { message: 'Unknown session command.' };
 }
 
 function formatAge(date: Date): string {
@@ -1767,7 +1876,9 @@ async function runAgent(
     );
   }
 
-  const sessionId = sessions[runtimeGroupFolder];
+  const forkFromSessionId = pendingSessionForks.get(runtimeGroupFolder);
+  const sessionId = forkFromSessionId ?? sessions[runtimeGroupFolder];
+  const forkSession = forkFromSessionId !== undefined;
 
   // Update tasks snapshot for container to read (filtered by group)
   writeTasksSnapshot(
@@ -1822,6 +1933,16 @@ async function runAgent(
         if (output.newSessionId) {
           sessions[runtimeGroupFolder] = output.newSessionId;
           setSession(runtimeGroupFolder, output.newSessionId);
+          const pendingName = pendingSessionNames.get(runtimeGroupFolder);
+          if (pendingName) {
+            setSessionName(
+              runtimeGroupFolder,
+              output.newSessionId,
+              pendingName,
+            );
+            pendingSessionNames.delete(runtimeGroupFolder);
+          }
+          pendingSessionForks.delete(runtimeGroupFolder);
         }
         if (output.resumeAt) {
           resumePositionStore.set(runtimeGroupFolder, output.resumeAt);
@@ -1886,6 +2007,7 @@ async function runAgent(
       {
         prompt,
         sessionId,
+        forkSession,
         resumeAt: resumePositionStore.get(runtimeGroupFolder),
         groupFolder: group.folder,
         runtimeFolder: runtimeGroupFolder,
@@ -1922,6 +2044,12 @@ async function runAgent(
     if (output.newSessionId) {
       sessions[runtimeGroupFolder] = output.newSessionId;
       setSession(runtimeGroupFolder, output.newSessionId);
+      const pendingName = pendingSessionNames.get(runtimeGroupFolder);
+      if (pendingName) {
+        setSessionName(runtimeGroupFolder, output.newSessionId, pendingName);
+        pendingSessionNames.delete(runtimeGroupFolder);
+      }
+      pendingSessionForks.delete(runtimeGroupFolder);
     }
     if (output.resumeAt) {
       resumePositionStore.set(runtimeGroupFolder, output.resumeAt);
@@ -3011,8 +3139,8 @@ async function main(): Promise<void> {
                 onSyntheticMessage: (message) => storeAndBroadcast(message),
                 registeredGroups: () => registeredGroups,
                 slashCommandGroups: buildSlashCommandGroupsFromSubscriptions,
-                onSessionCommand: (command, chatJid, group, sessionId) =>
-                  handleSessionCommand(command, chatJid, group, sessionId),
+                onSessionCommand: (command, chatJid, group, options) =>
+                  handleSessionCommand(command, chatJid, group, options),
                 onReaction: async (chatJid, messageId, emoji, userName) => {
                   await handleReactionNotification(
                     chatJid,

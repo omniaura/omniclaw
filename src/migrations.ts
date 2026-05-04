@@ -16,7 +16,7 @@ export interface Migration {
  * The version that represents the latest schema. Existing databases that
  * predate the migration framework are advanced through every migration to this.
  */
-export const BASELINE_VERSION = 2;
+export const BASELINE_VERSION = 3;
 
 // ---------------------------------------------------------------------------
 // Schema helpers (available for use in migrations)
@@ -272,6 +272,16 @@ const migration1: Migration = {
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
+      CREATE TABLE IF NOT EXISTS session_metadata (
+        runtime_folder TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        name TEXT,
+        ended_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (runtime_folder, session_id)
+      );
+
       CREATE TABLE IF NOT EXISTS registered_groups (
         jid TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -503,6 +513,24 @@ const migration2: Migration = {
   },
 };
 
+const migration3: Migration = {
+  version: 3,
+  description: 'Persist Discord session metadata',
+  up: (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS session_metadata (
+        runtime_folder TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        name TEXT,
+        ended_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (runtime_folder, session_id)
+      )
+    `);
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Migration registry
 // ---------------------------------------------------------------------------
@@ -513,4 +541,4 @@ const migration2: Migration = {
  * can use plain `ALTER TABLE` without try/catch — the version tracker
  * guarantees each migration runs exactly once.
  */
-export const allMigrations: Migration[] = [migration1, migration2];
+export const allMigrations: Migration[] = [migration1, migration2, migration3];

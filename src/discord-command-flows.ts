@@ -27,8 +27,15 @@ export interface DiscordFlowDefinition {
   description: string;
   prompt: string;
   options?: DiscordFlowOptionDefinition[];
+  subcommands?: DiscordFlowSubcommandDefinition[];
   /** System commands are handled by the host, not sent to the agent. */
   system?: boolean;
+}
+
+export interface DiscordFlowSubcommandDefinition {
+  name: string;
+  description: string;
+  options?: DiscordFlowOptionDefinition[];
 }
 
 interface DiscordFlowFile {
@@ -239,6 +246,85 @@ const BUILTIN_COMMANDS: DiscordFlowDefinition[] = [
         description: 'Planning timebox in minutes',
         type: 'integer',
         defaultValue: 30,
+      },
+    ],
+  },
+  {
+    name: 'session',
+    description: 'Control agent sessions in this channel',
+    prompt: '',
+    system: true,
+    subcommands: [
+      {
+        name: 'new',
+        description: 'Start a fresh agent session in this channel',
+        options: [
+          {
+            name: 'name',
+            description: 'Optional human-readable session name',
+            type: 'string',
+          },
+          {
+            name: 'resume_from',
+            description: 'Existing session ID to branch from',
+            type: 'string',
+          },
+        ],
+      },
+      {
+        name: 'resume',
+        description: 'Resume a previous session',
+        options: [
+          {
+            name: 'session_id',
+            description: 'Session ID to resume (omit to see recent sessions)',
+            type: 'string',
+          },
+        ],
+      },
+      {
+        name: 'list',
+        description: 'List recent sessions',
+        options: [
+          {
+            name: 'limit',
+            description: 'Maximum number of sessions to show',
+            type: 'integer',
+          },
+        ],
+      },
+      {
+        name: 'current',
+        description: 'Show the active session',
+      },
+      {
+        name: 'end',
+        description: 'End the current or specified session',
+        options: [
+          {
+            name: 'session_id',
+            description: 'Session ID to end (omit for current)',
+            type: 'string',
+          },
+        ],
+      },
+      {
+        name: 'rename',
+        description: 'Rename a session',
+        options: [
+          {
+            name: 'session_id',
+            description: 'Session ID to rename',
+            type: 'string',
+            required: true,
+          },
+          {
+            name: 'name',
+            description: 'New human-readable session name',
+            type: 'string',
+            required: true,
+          },
+        ],
       },
     ],
   },
@@ -472,8 +558,22 @@ export function buildDiscordSlashCommandPayloads(
     .map((command) => ({
       name: command.name,
       description: command.description,
-      options: command.options?.map((option) => toDiscordOptionData(option)),
+      options:
+        command.subcommands?.map((subcommand) =>
+          toDiscordSubcommandData(subcommand),
+        ) ?? command.options?.map((option) => toDiscordOptionData(option)),
     }));
+}
+
+function toDiscordSubcommandData(
+  subcommand: DiscordFlowSubcommandDefinition,
+): ApplicationCommandOptionData {
+  return {
+    name: subcommand.name,
+    description: subcommand.description,
+    type: ApplicationCommandOptionType.Subcommand,
+    options: subcommand.options?.map((option) => toDiscordOptionData(option)),
+  } as ApplicationCommandOptionData;
 }
 
 function toDiscordOptionData(

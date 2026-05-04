@@ -113,6 +113,11 @@ You can add your own channel- or agent-specific slash flows by creating `discord
 
 Command names must be lowercase Discord slash-command names (`a-z`, `0-9`, `_`, `-`). OmniClaw merges built-ins with runtime command files and syncs them per Discord guild on startup and subscription changes, so restart the bot after editing command files.
 
+Discord session control is exposed through the built-in `/session` namespace:
+`/session new`, `/session resume`, `/session list`, `/session current`,
+`/session end`, and `/session rename`. The legacy `/resume` and `/sessions`
+aliases remain registered for one release and return a deprecation notice.
+
 By default, every built-in and workspace slash flow is enabled for every agent. To specialize an agent, add `discordCommands` to its `agents.yaml` entry. `enabled` is an optional allowlist; `disabled` is applied after the allowlist:
 
 ```yaml

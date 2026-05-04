@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, spyOn } from 'bun:test';
 import {
   _countGitHubWebhookDeliveriesForTest,
   _initTestDatabase,
+  clearSession,
   cleanupExpiredGitHubWebhookDeliveries,
   createTask,
   deleteTask,
@@ -14,6 +15,8 @@ import {
   getDeltaCursorFromDb,
   getMessagesSince,
   getNewMessages,
+  getSession,
+  getSessionMetadata,
   getTaskById,
   loadAllDeltaCursors,
   recordGitHubWebhookDelivery,
@@ -21,6 +24,9 @@ import {
   setDeltaCursorInDb,
   setAgentHealth,
   setRegisteredGroup,
+  setSession,
+  setSessionName,
+  markSessionEnded,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -94,6 +100,26 @@ describe('registered group persistence', () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+});
+
+describe('session persistence', () => {
+  it('clears active sessions and stores session metadata', () => {
+    setSession('runtime-a', 'session-1');
+    expect(getSession('runtime-a')).toBe('session-1');
+
+    setSessionName('runtime-a', 'session-1', 'Planning thread');
+    expect(getSessionMetadata('runtime-a', 'session-1')?.name).toBe(
+      'Planning thread',
+    );
+
+    markSessionEnded('runtime-a', 'session-1');
+    expect(typeof getSessionMetadata('runtime-a', 'session-1')?.endedAt).toBe(
+      'string',
+    );
+
+    clearSession('runtime-a');
+    expect(getSession('runtime-a')).toBeUndefined();
   });
 });
 
