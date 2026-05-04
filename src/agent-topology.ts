@@ -9,7 +9,7 @@ const folderSchema = z
   .string()
   .regex(/^[a-z0-9][a-z0-9_-]*$/, 'must be a lowercase safe folder name');
 
-const backendSchema = z.enum(['apple-container', 'docker']);
+const backendSchema = z.enum(['apple-container', 'docker', 'cursor-sdk']);
 const agentRuntimeSchema = z.enum(['claude-agent-sdk', 'opencode', 'codex']);
 const discordCommandNameSchema = z
   .string()

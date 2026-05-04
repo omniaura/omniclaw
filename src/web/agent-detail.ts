@@ -180,7 +180,9 @@ export function renderAgentDetailContent(
       ? 'badge-apple-container'
       : data.backend === 'docker'
         ? 'badge-docker'
-        : '';
+        : data.backend === 'cursor-sdk'
+          ? 'badge-cursor-sdk'
+          : '';
 
   // --- Channels table ---
   const channelsHtml =

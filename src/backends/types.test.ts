@@ -137,6 +137,9 @@ describe('backends/types.ts', () => {
         'apple-container',
       );
       expect(getBackendType(makeAgent({ backend: 'docker' }))).toBe('docker');
+      expect(getBackendType(makeAgent({ backend: 'cursor-sdk' }))).toBe(
+        'cursor-sdk',
+      );
     });
 
     it('returns each backend type correctly for RegisteredGroup', () => {
@@ -144,6 +147,9 @@ describe('backends/types.ts', () => {
         'apple-container',
       );
       expect(getBackendType(makeGroup({ backend: 'docker' }))).toBe('docker');
+      expect(getBackendType(makeGroup({ backend: 'cursor-sdk' }))).toBe(
+        'cursor-sdk',
+      );
     });
   });
 

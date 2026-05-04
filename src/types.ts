@@ -47,7 +47,7 @@ export interface ContainerConfig {
   streamIntermediates?: boolean;
 }
 
-export type BackendType = 'apple-container' | 'docker';
+export type BackendType = 'apple-container' | 'docker' | 'cursor-sdk';
 
 import type {
   AgentRuntime as _AgentRuntime,

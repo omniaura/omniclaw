@@ -148,7 +148,9 @@ export function renderAgentGroups(
           ? 'badge-apple-container'
           : a.backend === 'docker'
             ? 'badge-docker'
-            : '';
+            : a.backend === 'cursor-sdk'
+              ? 'badge-cursor-sdk'
+              : '';
 
       const channelsHtml = a.channels
         .map((ch) => {
