@@ -474,7 +474,9 @@ export function buildDiscordSlashCommandPayloads(
       description: command.description,
       options: command.options
         ?.slice()
-        .sort((a, b) => Number(Boolean(b.required)) - Number(Boolean(a.required)))
+        .sort(
+          (a, b) => Number(Boolean(b.required)) - Number(Boolean(a.required)),
+        )
         .map((option) => toDiscordOptionData(option)),
     }));
 }
