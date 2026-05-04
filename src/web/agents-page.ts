@@ -21,7 +21,8 @@ export type AgentExecStatus =
   | 'running-task'
   | 'idle'
   | 'queued'
-  | 'offline';
+  | 'offline'
+  | 'disabled';
 
 /** Derive an agent's execution status from the group queue details. */
 export function getAgentExecStatus(
@@ -53,6 +54,7 @@ const EXEC_STATUS_LABELS: Record<AgentExecStatus, string> = {
   idle: 'idle',
   queued: 'queued',
   offline: 'offline',
+  disabled: 'disabled',
 };
 
 const EXEC_STATUS_CSS: Record<AgentExecStatus, string> = {
@@ -61,6 +63,7 @@ const EXEC_STATUS_CSS: Record<AgentExecStatus, string> = {
   idle: 'exec-idle',
   queued: 'exec-queued',
   offline: 'exec-offline',
+  disabled: 'exec-disabled',
 };
 
 function imageRev(value: string): string {
@@ -103,10 +106,20 @@ export function renderAgentRow(
       `<span class="ap-avatar-ph" style="display:none">${esc(agent.name.charAt(0).toUpperCase())}</span>`
     : `<span class="ap-avatar-ph">${esc(agent.name.charAt(0).toUpperCase())}</span>`;
 
+  // Local agents only — remote agents are toggled on their own host.
+  const isLocal = !agent.remoteInstanceId;
+  const isDisabled = execStatus === 'disabled';
+  const toggleLabel = isDisabled ? 'enable' : 'disable';
+  const toggleTarget = isDisabled ? 'true' : 'false';
+  const toggleBtn = isLocal
+    ? ` <button class="btn btn-sm" data-agent-toggle="${toggleTarget}" data-agent-id="${esc(agent.id)}">${toggleLabel}</button>`
+    : '';
+
   return (
     `<tr class="ap-row" data-agent-id="${esc(agent.id)}" data-backend="${esc(agent.backend)}" data-runtime="${esc(agent.agentRuntime)}"` +
     (agent.remoteInstanceId ? ` data-remote="true"` : ` data-remote="false"`) +
     (agent.isAdmin ? ` data-admin="true"` : '') +
+    (isDisabled ? ` data-disabled="true"` : '') +
     `>` +
     `<td class="td-agent-name">` +
     `<a href="${detailUrl}" data-nav data-page="agent-detail" data-agent-id="${esc(agent.id)}" class="ap-agent-link">` +
@@ -131,6 +144,7 @@ export function renderAgentRow(
     (agent.channels.length > 0
       ? ` <a href="/conversations?chat=${encodeURIComponent(agent.channels[0].jid)}" data-nav data-page="conversations" class="btn btn-sm">messages</a>`
       : '') +
+    toggleBtn +
     `</td>` +
     `</tr>`
   );
@@ -166,11 +180,17 @@ export function renderAgentsContent(
     .map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`)
     .join('');
 
+  const localAgents = state.getAgents();
   const rows = agentData
     .map((a) => {
-      const status = a.remoteInstanceId
-        ? 'offline'
-        : getAgentExecStatus(a.folder, queueDetails);
+      let status: AgentExecStatus;
+      if (a.remoteInstanceId) {
+        status = 'offline';
+      } else if (localAgents[a.id]?.enabled === false) {
+        status = 'disabled';
+      } else {
+        status = getAgentExecStatus(a.folder, queueDetails);
+      }
       return renderAgentRow(a, taskCounts[a.folder] || 0, status);
     })
     .join('\n');

@@ -124,6 +124,13 @@ export interface SchedulerDependencies {
     chatJid: string,
     agentFolder: string,
   ) => RegisteredGroup | undefined;
+  /**
+   * Check whether the agent owning `agentFolder` is enabled. When false the
+   * scheduler skips runs for that agent (web UI off-switch). Returns true for
+   * unknown/legacy folders so non-agent tasks (legacy registered groups) keep
+   * running.
+   */
+  isAgentEnabled?: (agentFolder: string) => boolean;
   getSessions: () => Record<string, string>;
   resumePositionStore: ResumePositionStore;
   queue: GroupQueue;
@@ -175,6 +182,17 @@ async function runTask(
     runtime.logger.info(
       { taskId: task.id, status: freshTask?.status ?? 'deleted' },
       'Task no longer active, skipping',
+    );
+    return;
+  }
+
+  // Skip runs when the owning agent is disabled via the web UI off-switch.
+  // next_run was already advanced before this call, so when the agent is
+  // re-enabled, future ticks pick the task up at its next scheduled time.
+  if (deps.isAgentEnabled && !deps.isAgentEnabled(task.group_folder)) {
+    runtime.logger.info(
+      { taskId: task.id, agentFolder: task.group_folder },
+      'Task skipped — agent is disabled',
     );
     return;
   }

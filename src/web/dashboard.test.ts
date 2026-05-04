@@ -103,6 +103,9 @@ function makeState(options?: {
     updateAgentAvatar: () => {
       throw new Error('Unexpected updateAgentAvatar during render');
     },
+    setAgentEnabled: () => {
+      throw new Error('Unexpected setAgentEnabled during render');
+    },
     resolveChatImage: async () => null,
     resolveDiscordGuildImage: async () => null,
   };

@@ -336,6 +336,13 @@ export interface Agent {
   avatarUrl?: string;
   /** Which platform the avatar was sourced from. */
   avatarSource?: 'discord' | 'telegram' | 'slack' | 'custom';
+  /**
+   * Whether this agent is enabled. When false, the orchestrator skips message
+   * dispatch and scheduled task execution for this agent. Inbound messages are
+   * still persisted; toggling back to true resumes processing from the next
+   * message. Defaults to true on existing rows via DB migration.
+   */
+  enabled?: boolean;
 }
 
 /** Volatile, sanitized runtime state for discovery/roster views. */

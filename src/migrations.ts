@@ -16,7 +16,7 @@ export interface Migration {
  * The version that represents the latest schema. Existing databases that
  * predate the migration framework are advanced through every migration to this.
  */
-export const BASELINE_VERSION = 3;
+export const BASELINE_VERSION = 4;
 
 // ---------------------------------------------------------------------------
 // Schema helpers (available for use in migrations)
@@ -304,7 +304,8 @@ const migration1: Migration = {
         agent_context_folder TEXT,
         roster_role_filters TEXT,
         avatar_url TEXT,
-        avatar_source TEXT
+        avatar_source TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1
       );
 
       CREATE TABLE IF NOT EXISTS channel_routes (
@@ -551,6 +552,14 @@ const migration3: Migration = {
   },
 };
 
+const migration4: Migration = {
+  version: 4,
+  description: 'Add per-agent enabled flag (off switch)',
+  up: (db) => {
+    addColumnIfNotExists(db, 'agents', 'enabled', 'INTEGER NOT NULL', '1');
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Migration registry
 // ---------------------------------------------------------------------------
@@ -561,4 +570,9 @@ const migration3: Migration = {
  * can use plain `ALTER TABLE` without try/catch — the version tracker
  * guarantees each migration runs exactly once.
  */
-export const allMigrations: Migration[] = [migration1, migration2, migration3];
+export const allMigrations: Migration[] = [
+  migration1,
+  migration2,
+  migration3,
+  migration4,
+];

@@ -34,6 +34,7 @@ function makeState(): WebStateProvider {
     readContextFile: () => null,
     writeContextFile: () => {},
     updateAgentAvatar: () => {},
+    setAgentEnabled: () => true,
   };
 }
 

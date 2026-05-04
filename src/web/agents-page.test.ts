@@ -92,6 +92,7 @@ function makeState(
     readContextFile: () => null,
     writeContextFile: () => {},
     updateAgentAvatar: () => {},
+    setAgentEnabled: () => true,
     resolveChatImage: async () => null,
     resolveDiscordGuildImage: async () => null,
   };
@@ -676,5 +677,54 @@ describe('renderAgentsContent with execution status', () => {
     const html = renderAgentsContent(makeState(), remotePeers);
     // Remote agents should show offline, not use queue details
     expect(html).toContain('exec-offline');
+  });
+
+  it('renders the disabled badge and an enable button for disabled local agents', () => {
+    const html = renderAgentsContent(
+      makeState({
+        'agent-1': makeAgent({ enabled: false }),
+      }),
+    );
+    expect(html).toContain('exec-disabled');
+    expect(html).toContain('data-disabled="true"');
+    expect(html).toContain('data-agent-toggle="true"');
+    expect(html).toContain('>enable<');
+  });
+
+  it('renders a disable button for enabled local agents', () => {
+    const html = renderAgentsContent(makeState());
+    expect(html).toContain('data-agent-toggle="false"');
+    expect(html).toContain('>disable<');
+  });
+
+  it('omits the toggle button for remote agents', () => {
+    const remotePeers = [
+      {
+        instanceId: 'peer-2',
+        instanceName: 'orangepi',
+        online: true,
+        host: '10.0.0.20',
+        port: 7777,
+        agents: [
+          {
+            id: 'remote-only',
+            name: 'Remote Only',
+            folder: 'remote-only',
+            backend: 'docker' as const,
+            agentRuntime: 'opencode' as const,
+            channels: [],
+          },
+        ],
+      },
+    ];
+    const html = renderAgentsContent(makeState({}), remotePeers);
+    // Remote row exists but no toggle
+    expect(html).toContain('Remote Only');
+    expect(html).not.toContain(
+      'data-agent-toggle="true" data-agent-id="peer-2:remote-only"',
+    );
+    expect(html).not.toContain(
+      'data-agent-toggle="false" data-agent-id="peer-2:remote-only"',
+    );
   });
 });

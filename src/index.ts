@@ -94,6 +94,7 @@ import {
   storeGuildRoster,
   storeMessage,
   updateAgentAvatar,
+  setAgentEnabled,
 } from './db.js';
 import {
   type DiscoveryHandle,
@@ -2103,7 +2104,9 @@ async function startMessageLoop(): Promise<void> {
         for (const [chatJid, groupMessages] of messagesByGroup) {
           const { selected: triggerSelected, selectedByTrigger } =
             selectSubscriptionsForMessage(chatJid, groupMessages);
-          let selectedSubs = triggerSelected;
+          let selectedSubs = triggerSelected.filter(
+            (s) => agents[s.agentId]?.enabled !== false,
+          );
 
           // Attentive follow-up: if agents were selected by explicit trigger/mention,
           // mark them attentive so the next human message is routed without a trigger.
@@ -2121,8 +2124,10 @@ async function startMessageLoop(): Promise<void> {
             const attentive = attentiveAgents[chatJid];
             if (attentive && attentive.size > 0) {
               const subs = getSubscriptionsForChannelInMemory(chatJid);
-              const attentiveSubs = subs.filter((s) =>
-                attentive.has(s.agentId),
+              const attentiveSubs = subs.filter(
+                (s) =>
+                  attentive.has(s.agentId) &&
+                  agents[s.agentId]?.enabled !== false,
               );
               if (attentiveSubs.length > 0) {
                 // Replace fallback selection with attentive agents — the user is
@@ -2277,6 +2282,13 @@ async function startMessageLoop(): Promise<void> {
 function recoverPendingMessages(): void {
   for (const [chatJid, subs] of Object.entries(channelSubscriptions)) {
     for (const sub of subs) {
+      if (agents[sub.agentId]?.enabled === false) {
+        logger.debug(
+          { chatJid, agentId: sub.agentId },
+          'Recovery: skipping — agent is disabled',
+        );
+        continue;
+      }
       const dispatchJid = makeDispatchKey(chatJid, sub.agentId);
       const sinceTimestamp = lastAgentTimestamp[dispatchJid] || '';
       const pending = getMessagesSince(chatJid, sinceTimestamp);
@@ -2599,6 +2611,17 @@ async function main(): Promise<void> {
         agents[agentId].avatarSource =
           (source as Agent['avatarSource']) || undefined;
       }
+    },
+    setAgentEnabled: (agentId, enabled) => {
+      if (!agents[agentId]) return false;
+      const ok = setAgentEnabled(agentId, enabled);
+      if (!ok) return false;
+      agents[agentId].enabled = enabled;
+      logger.info(
+        { agentId, enabled },
+        'Agent enabled flag updated via Web UI',
+      );
+      return true;
     },
     sendMessage: (agentId, chatJid, content, senderName) => {
       const msgId = `web-${randomUUID()}`;
@@ -3219,6 +3242,13 @@ async function main(): Promise<void> {
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getGroupForTask,
+    isAgentEnabled: (agentFolder) => {
+      // Agent IDs and group_folder values share the same key. Unknown folders
+      // (legacy registered-group tasks) default to enabled.
+      const agent = agents[agentFolder];
+      if (!agent) return true;
+      return agent.enabled !== false;
+    },
     getSessions: () => sessions,
     resumePositionStore,
     queue,

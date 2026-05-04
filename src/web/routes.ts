@@ -212,6 +212,16 @@ export function handleRequest(
     return json({ error: 'Method not allowed' }, 405);
   }
 
+  // Agent on/off switch
+  if (pathname.startsWith('/api/agents/') && pathname.endsWith('/enabled')) {
+    const agentId = decodeURIComponent(
+      pathname.slice('/api/agents/'.length, -'/enabled'.length),
+    );
+    if (!agentId) return json({ error: 'Missing agent ID' }, 400);
+    if (method === 'POST') return handleSetAgentEnabled(agentId, req, state);
+    return json({ error: 'Method not allowed' }, 405);
+  }
+
   // Agent detail API
   if (pathname.startsWith('/api/agents/') && pathname.endsWith('/detail')) {
     const agentId = decodeURIComponent(
@@ -1187,6 +1197,38 @@ async function handleSendMessage(
   } catch (err: any) {
     return json({ error: `Failed to send message: ${err.message}` }, 500);
   }
+}
+
+async function handleSetAgentEnabled(
+  agentId: string,
+  req: Request,
+  state: WebStateProvider,
+): Promise<Response> {
+  const agents = state.getAgents();
+  const agent = agents[agentId];
+  if (!agent) return json({ error: 'Agent not found' }, 404);
+
+  let body: Record<string, unknown>;
+  try {
+    body = await readJsonBody<Record<string, unknown>>(
+      req,
+      MAX_WEB_JSON_BODY_BYTES,
+    );
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      return json({ error: 'Request body too large' }, 413);
+    }
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  if (typeof body.enabled !== 'boolean') {
+    return json({ error: '"enabled" must be a boolean' }, 400);
+  }
+
+  const ok = state.setAgentEnabled(agentId, body.enabled);
+  if (!ok) return json({ error: 'Agent not found' }, 404);
+
+  return json({ ok: true, agentId, enabled: body.enabled });
 }
 
 // ---- Helpers ----
