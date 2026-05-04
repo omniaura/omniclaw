@@ -270,13 +270,14 @@ export class FactoryWorkflowStore {
     if (ttlMs <= 0) throw new Error('Workflow claim TTL must be positive');
     const nowIso = now.toISOString();
     const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
-    this.db
+    const result = this.db
       .prepare(
         `UPDATE factory_workflow_claims
          SET heartbeat_at = ?, expires_at = ?
-         WHERE workflow_id = ? AND owner_run_id = ?`,
+         WHERE workflow_id = ? AND owner_run_id = ? AND expires_at > ?`,
       )
-      .run(nowIso, expiresAt, workflowId, ownerRunId);
+      .run(nowIso, expiresAt, workflowId, ownerRunId, nowIso);
+    if (result.changes === 0) return undefined;
     return this.getClaim(workflowId);
   }
 

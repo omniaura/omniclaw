@@ -151,6 +151,33 @@ describe('FactoryWorkflowStore claims', () => {
     db.close();
   });
 
+  it('does not let stale owners refresh expired claims', () => {
+    const { db, store } = makeStore();
+    store.acquireClaim({
+      workflowId: 'workflow-1',
+      repo: 'omniaura/omniclaw',
+      ownerAgentId: 'ocpeyton',
+      ownerRunId: 'run-1',
+      phase: 'impl',
+      ttlMs: 1_000,
+      now: new Date('2026-05-04T00:00:00.000Z'),
+    });
+
+    const refreshed = store.refreshClaim(
+      'workflow-1',
+      'run-1',
+      60_000,
+      new Date('2026-05-04T00:00:02.000Z'),
+    );
+
+    expect(refreshed).toBeUndefined();
+    expect(store.getClaim('workflow-1')?.expiresAt).toBe(
+      '2026-05-04T00:00:01.000Z',
+    );
+
+    db.close();
+  });
+
   it('persists records and claims across database reopen', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-factory-'));
     tempDirs.push(dir);
