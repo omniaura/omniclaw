@@ -49,7 +49,9 @@ describe('backends/index', () => {
 
     it('backend has a valid name property', () => {
       const backend = getBackend('apple-container');
-      expect(['docker', 'apple-container', 'cursor-sdk']).toContain(backend.name);
+      expect(['docker', 'apple-container', 'cursor-sdk']).toContain(
+        backend.name,
+      );
     });
 
     it('backend implements AgentBackend interface', () => {

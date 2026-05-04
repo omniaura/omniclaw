@@ -30,7 +30,10 @@ import {
   getName,
 } from './types.js';
 
-function resolveWorkspaceDir(group: AgentOrGroup, input: ContainerInput): string {
+function resolveWorkspaceDir(
+  group: AgentOrGroup,
+  input: ContainerInput,
+): string {
   const folder = getFolder(group);
   const workspaceFolder = input.channelFolder || folder;
   return path.resolve(GROUPS_DIR, workspaceFolder);
@@ -44,9 +47,15 @@ function parseCloudReposEnv():
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed) || parsed.length === 0) return undefined;
-    return parsed as Array<{ url: string; startingRef?: string; prUrl?: string }>;
+    return parsed as Array<{
+      url: string;
+      startingRef?: string;
+      prUrl?: string;
+    }>;
   } catch {
-    logger.warn('CURSOR_AGENT_CLOUD_REPOS is not valid JSON; ignoring cloud mode');
+    logger.warn(
+      'CURSOR_AGENT_CLOUD_REPOS is not valid JSON; ignoring cloud mode',
+    );
     return undefined;
   }
 }
@@ -104,12 +113,14 @@ function extractAssistantSnippet(msg: SDKMessage): string | null {
   }
   if (msg.type === 'thinking' && msg.text?.trim())
     return `[thinking] ${msg.text.trim().slice(0, 500)}`;
-  if (msg.type === 'tool_call')
-    return `[tool] ${msg.name} (${msg.status})`;
+  if (msg.type === 'tool_call') return `[tool] ${msg.name} (${msg.status})`;
   return null;
 }
 
-async function waitRunWithTimeout(run: Run, timeoutMs: number): Promise<RunResult> {
+async function waitRunWithTimeout(
+  run: Run,
+  timeoutMs: number,
+): Promise<RunResult> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<RunResult>((_, reject) => {
     timer = setTimeout(() => {
@@ -181,8 +192,7 @@ export class CursorSdkBackend implements AgentBackend {
       };
     }
 
-    const modelId =
-      process.env.CURSOR_AGENT_MODEL?.trim() || 'composer-2';
+    const modelId = process.env.CURSOR_AGENT_MODEL?.trim() || 'composer-2';
     const containerCfg = getContainerConfig(group);
     const timeoutMs = containerCfg?.timeout || CONTAINER_TIMEOUT;
     const cloudRepos = parseCloudReposEnv();
@@ -247,7 +257,9 @@ export class CursorSdkBackend implements AgentBackend {
           const snippet = extractAssistantSnippet(msg);
           if (snippet && onOutput) {
             streamedText =
-              msg.type === 'assistant' ? snippet : streamedText + '\n' + snippet;
+              msg.type === 'assistant'
+                ? snippet
+                : streamedText + '\n' + snippet;
             await onOutput({
               status: 'success',
               result: snippet,
