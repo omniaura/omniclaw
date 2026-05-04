@@ -165,6 +165,21 @@ describe('buildHealthData', () => {
     expect(health.cpu.load_15m).toBeGreaterThanOrEqual(0);
   });
 
+  it('reports host memory totals, free, used, and percentage', () => {
+    const health = buildHealthData(makeState(), 0);
+    expect(health.host_memory.total_mb).toBeGreaterThan(0);
+    expect(health.host_memory.free_mb).toBeGreaterThanOrEqual(0);
+    expect(health.host_memory.used_mb).toBeGreaterThanOrEqual(0);
+    expect(health.host_memory.used_mb).toBeLessThanOrEqual(
+      health.host_memory.total_mb,
+    );
+    expect(health.host_memory.used_pct).toBeGreaterThanOrEqual(0);
+    expect(health.host_memory.used_pct).toBeLessThanOrEqual(100);
+    // used + free should approximately equal total (within rounding)
+    const sum = health.host_memory.used_mb + health.host_memory.free_mb;
+    expect(Math.abs(sum - health.host_memory.total_mb)).toBeLessThan(1);
+  });
+
   it('reports runtime info', () => {
     const health = buildHealthData(makeState(), 0);
     expect(health.runtime.platform).toBe(process.platform);
@@ -267,6 +282,14 @@ describe('renderSystemContent', () => {
     expect(html).toContain('id="sys-cpu-load-1m"');
     expect(html).toContain('id="sys-cpu-load-5m"');
     expect(html).toContain('id="sys-cpu-load-15m"');
+    expect(html).toContain('id="sys-host-mem-total"');
+    expect(html).toContain('id="sys-host-mem-used"');
+    expect(html).toContain('id="sys-host-mem-free"');
+  });
+
+  it('renders host memory metric card', () => {
+    const html = renderSystemContent(makeState(), 0);
+    expect(html).toContain('host memory');
   });
 
   it('escapes HTML in values', () => {
