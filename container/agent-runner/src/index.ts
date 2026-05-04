@@ -1228,6 +1228,7 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: sessionId ? resumeAt : undefined,
+      forkSession: containerInput.forkSession === true,
       systemPrompt: globalClaudeMd
         ? {
             type: 'preset' as const,

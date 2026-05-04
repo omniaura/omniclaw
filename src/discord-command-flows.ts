@@ -27,6 +27,7 @@ export interface DiscordFlowDefinition {
   description: string;
   prompt: string;
   options?: DiscordFlowOptionDefinition[];
+  subcommands?: DiscordFlowDefinition[];
   /** System commands are handled by the host, not sent to the agent. */
   system?: boolean;
 }
@@ -239,6 +240,97 @@ const BUILTIN_COMMANDS: DiscordFlowDefinition[] = [
         description: 'Planning timebox in minutes',
         type: 'integer',
         defaultValue: 30,
+      },
+    ],
+  },
+  {
+    name: 'session',
+    description: 'Manage the active agent session for this channel',
+    prompt: '',
+    system: true,
+    subcommands: [
+      {
+        name: 'new',
+        description: 'Start a fresh agent session in this channel',
+        prompt: '',
+        system: true,
+        options: [
+          {
+            name: 'name',
+            description: 'Optional friendly name for the next session',
+            type: 'string',
+          },
+          {
+            name: 'resume_from',
+            description: 'Optional existing session ID to fork from',
+            type: 'string',
+          },
+        ],
+      },
+      {
+        name: 'resume',
+        description: 'Resume a previous session in this channel',
+        prompt: '',
+        system: true,
+        options: [
+          {
+            name: 'session_id',
+            description: 'Session ID to resume (omit to see recent sessions)',
+            type: 'string',
+          },
+        ],
+      },
+      {
+        name: 'list',
+        description: 'List recent sessions for this channel',
+        prompt: '',
+        system: true,
+        options: [
+          {
+            name: 'limit',
+            description: 'Maximum number of sessions to show',
+            type: 'integer',
+          },
+        ],
+      },
+      {
+        name: 'current',
+        description: 'Show the active session for this channel',
+        prompt: '',
+        system: true,
+      },
+      {
+        name: 'end',
+        description: 'End the current or specified session',
+        prompt: '',
+        system: true,
+        options: [
+          {
+            name: 'session_id',
+            description: 'Specific session ID to end',
+            type: 'string',
+          },
+        ],
+      },
+      {
+        name: 'rename',
+        description: 'Give a session a friendly name',
+        prompt: '',
+        system: true,
+        options: [
+          {
+            name: 'session_id',
+            description: 'Session ID to rename',
+            type: 'string',
+            required: true,
+          },
+          {
+            name: 'name',
+            description: 'Friendly session name',
+            type: 'string',
+            required: true,
+          },
+        ],
       },
     ],
   },
@@ -472,13 +564,32 @@ export function buildDiscordSlashCommandPayloads(
     .map((command) => ({
       name: command.name,
       description: command.description,
-      options: command.options
-        ?.slice()
-        .sort(
-          (a, b) => Number(Boolean(b.required)) - Number(Boolean(a.required)),
-        )
-        .map((option) => toDiscordOptionData(option)),
+      options: command.subcommands
+        ? command.subcommands.map((subcommand) =>
+            toDiscordSubcommandData(subcommand),
+          )
+        : toSortedDiscordOptionData(command.options),
     }));
+}
+
+function toDiscordSubcommandData(
+  command: DiscordFlowDefinition,
+): ApplicationCommandOptionData {
+  return {
+    type: ApplicationCommandOptionType.Subcommand,
+    name: command.name,
+    description: command.description,
+    options: toSortedDiscordOptionData(command.options),
+  } as ApplicationCommandOptionData;
+}
+
+function toSortedDiscordOptionData(
+  options: DiscordFlowOptionDefinition[] | undefined,
+): ApplicationCommandOptionData[] | undefined {
+  return options
+    ?.slice()
+    .sort((a, b) => Number(Boolean(b.required)) - Number(Boolean(a.required)))
+    .map((option) => toDiscordOptionData(option));
 }
 
 function toDiscordOptionData(
@@ -519,6 +630,23 @@ function stringifyOptionValue(value: string | number | boolean): string {
 
 /** Names of built-in system commands (handled by host, not agent). */
 export const SYSTEM_COMMAND_NAMES = new Set(BUILTIN_SYSTEM_COMMAND_NAMES);
+
+export type DiscordSessionCommand =
+  | 'new'
+  | 'resume'
+  | 'list'
+  | 'current'
+  | 'end'
+  | 'rename';
+
+export const SESSION_COMMAND_NAMES = new Set<DiscordSessionCommand>([
+  'new',
+  'resume',
+  'list',
+  'current',
+  'end',
+  'rename',
+]);
 
 export function renderDiscordFlowPrompt(
   command: DiscordFlowDefinition,

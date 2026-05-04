@@ -230,6 +230,161 @@ describe('Discord download guards', () => {
 });
 
 describe('Discord slash flows', () => {
+  it('routes /session subcommands to the host session handler', async () => {
+    let received:
+      | {
+          command: string;
+          sessionId?: string;
+          name?: string;
+        }
+      | undefined;
+    const channel = new DiscordChannel({
+      token: 'test-token-not-used',
+      botId: 'PRIMARY',
+      onSessionCommand: (command, _chatJid, _group, options) => {
+        received = {
+          command,
+          sessionId: options?.sessionId,
+          name: options?.name,
+        };
+        return { message: 'renamed' };
+      },
+    });
+
+    setAgent({
+      id: 'clayton-discord',
+      name: 'Clayton',
+      folder: 'clayton-discord',
+      backend: 'apple-container',
+      agentRuntime: 'claude-agent-sdk',
+      isAdmin: false,
+      createdAt: '2026-05-01T00:00:00.000Z',
+    });
+    setChannelSubscription({
+      channelJid: 'dc:1474995286903361772',
+      agentId: 'clayton-discord',
+      trigger: '@Clayton',
+      requiresTrigger: true,
+      priority: 0,
+      isPrimary: true,
+      discordBotId: 'PRIMARY',
+      discordGuildId: '753336633083953213',
+      createdAt: '2026-05-01T00:00:00.000Z',
+    });
+
+    const interaction = {
+      id: '1499999999999999999',
+      commandName: 'session',
+      channelId: '1474995286903361772',
+      guildId: '753336633083953213',
+      inGuild: () => true,
+      memberPermissions: { has: () => true },
+      options: {
+        getSubcommand: () => 'rename',
+        getString: (name: string) =>
+          name === 'session_id'
+            ? '123e4567-e89b-12d3-a456-426614174000'
+            : name === 'name'
+              ? 'launch triage'
+              : null,
+        getInteger: () => null,
+        getBoolean: () => null,
+      },
+      deferReply: mock(async () => {}),
+      editReply: mock(async () => {}),
+      followUp: mock(async () => {}),
+    };
+
+    await (
+      channel as unknown as {
+        handleSlashCommand: (input: typeof interaction) => Promise<void>;
+      }
+    ).handleSlashCommand(interaction);
+
+    expect(received).toEqual({
+      command: 'rename',
+      sessionId: '123e4567-e89b-12d3-a456-426614174000',
+      name: 'launch triage',
+    });
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: 'renamed',
+    });
+    expect(interaction.followUp).not.toHaveBeenCalled();
+  });
+
+  it('routes legacy /sessions to /session list with deprecation metadata', async () => {
+    let received:
+      | {
+          command: string;
+          deprecatedAlias?: string;
+        }
+      | undefined;
+    const channel = new DiscordChannel({
+      token: 'test-token-not-used',
+      botId: 'PRIMARY',
+      onSessionCommand: (command, _chatJid, _group, options) => {
+        received = {
+          command,
+          deprecatedAlias: options?.deprecatedAlias,
+        };
+        return { message: 'listed' };
+      },
+    });
+
+    setAgent({
+      id: 'clayton-discord',
+      name: 'Clayton',
+      folder: 'clayton-discord',
+      backend: 'apple-container',
+      agentRuntime: 'claude-agent-sdk',
+      isAdmin: false,
+      createdAt: '2026-05-01T00:00:00.000Z',
+    });
+    setChannelSubscription({
+      channelJid: 'dc:1474995286903361772',
+      agentId: 'clayton-discord',
+      trigger: '@Clayton',
+      requiresTrigger: true,
+      priority: 0,
+      isPrimary: true,
+      discordBotId: 'PRIMARY',
+      discordGuildId: '753336633083953213',
+      createdAt: '2026-05-01T00:00:00.000Z',
+    });
+
+    const interaction = {
+      id: '1499999999999999999',
+      commandName: 'sessions',
+      channelId: '1474995286903361772',
+      guildId: '753336633083953213',
+      inGuild: () => true,
+      memberPermissions: { has: () => true },
+      options: {
+        getSubcommand: () => null,
+        getString: () => null,
+        getInteger: () => null,
+        getBoolean: () => null,
+      },
+      deferReply: mock(async () => {}),
+      editReply: mock(async () => {}),
+      followUp: mock(async () => {}),
+    };
+
+    await (
+      channel as unknown as {
+        handleSlashCommand: (input: typeof interaction) => Promise<void>;
+      }
+    ).handleSlashCommand(interaction);
+
+    expect(received).toEqual({
+      command: 'list',
+      deprecatedAlias: 'sessions',
+    });
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: 'listed',
+    });
+  });
+
   it('acknowledges the interaction before queueing the synthetic message', async () => {
     let deferred = false;
     let queued = false;

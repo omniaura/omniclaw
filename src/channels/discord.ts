@@ -30,8 +30,10 @@ import {
 } from '../db.js';
 import {
   buildDiscordSlashCommandPayloads,
+  type DiscordSessionCommand,
   getDiscordFlowDefinitionsForGroup,
   renderDiscordFlowPrompt,
+  SESSION_COMMAND_NAMES,
   SYSTEM_COMMAND_NAMES,
 } from '../discord-command-flows.js';
 import { logger } from '../logger.js';
@@ -189,6 +191,14 @@ export interface SessionCommandResult {
   message: string;
 }
 
+export interface SessionCommandOptions {
+  sessionId?: string;
+  name?: string;
+  resumeFrom?: string;
+  limit?: number;
+  deprecatedAlias?: 'resume' | 'sessions';
+}
+
 export interface DiscordChannelOpts {
   botId: string;
   token: string;
@@ -204,10 +214,10 @@ export interface DiscordChannelOpts {
     userName: string,
   ) => void;
   onSessionCommand?: (
-    command: 'resume' | 'sessions',
+    command: DiscordSessionCommand,
     chatJid: string,
     group: RegisteredGroup,
-    sessionId?: string,
+    options?: SessionCommandOptions,
   ) => SessionCommandResult;
 }
 
@@ -1240,7 +1250,7 @@ export class DiscordChannel implements Channel {
       return;
     }
 
-    // Handle system commands (resume, sessions) directly on the host
+    // Handle system commands (/session plus legacy aliases) directly on the host.
     if (SYSTEM_COMMAND_NAMES.has(interaction.commandName)) {
       if (
         !interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
@@ -1257,13 +1267,18 @@ export class DiscordChannel implements Channel {
         });
         return;
       }
-      const sessionId =
-        interaction.options.getString('session_id') ?? undefined;
+      const sessionCommand = this.resolveSessionCommand(interaction);
+      if (!sessionCommand) {
+        await interaction.editReply({
+          content: 'Unknown session command.',
+        });
+        return;
+      }
       const result = this.opts.onSessionCommand(
-        interaction.commandName as 'resume' | 'sessions',
+        sessionCommand.command,
         chatJid,
         group,
-        sessionId,
+        sessionCommand.options,
       );
       await interaction.editReply({ content: result.message });
       return;
@@ -1362,6 +1377,79 @@ export class DiscordChannel implements Channel {
           'I acknowledged the command, but failed to queue it. Check OmniClaw logs for details.',
         ephemeral: true,
       });
+    }
+  }
+
+  private resolveSessionCommand(
+    interaction: ChatInputCommandInteraction,
+  ): { command: DiscordSessionCommand; options: SessionCommandOptions } | null {
+    if (interaction.commandName === 'resume') {
+      return {
+        command: 'resume',
+        options: {
+          sessionId: interaction.options.getString('session_id') ?? undefined,
+          deprecatedAlias: 'resume',
+        },
+      };
+    }
+
+    if (interaction.commandName === 'sessions') {
+      return {
+        command: 'list',
+        options: { deprecatedAlias: 'sessions' },
+      };
+    }
+
+    if (interaction.commandName !== 'session') return null;
+
+    const subcommand = interaction.options.getSubcommand(false);
+    if (!SESSION_COMMAND_NAMES.has(subcommand as DiscordSessionCommand)) {
+      return null;
+    }
+
+    switch (subcommand) {
+      case 'new':
+        return {
+          command: 'new',
+          options: {
+            name: interaction.options.getString('name') ?? undefined,
+            resumeFrom:
+              interaction.options.getString('resume_from') ?? undefined,
+          },
+        };
+      case 'resume':
+        return {
+          command: 'resume',
+          options: {
+            sessionId: interaction.options.getString('session_id') ?? undefined,
+          },
+        };
+      case 'list':
+        return {
+          command: 'list',
+          options: {
+            limit: interaction.options.getInteger('limit') ?? undefined,
+          },
+        };
+      case 'end':
+        return {
+          command: 'end',
+          options: {
+            sessionId: interaction.options.getString('session_id') ?? undefined,
+          },
+        };
+      case 'rename':
+        return {
+          command: 'rename',
+          options: {
+            sessionId: interaction.options.getString('session_id') ?? undefined,
+            name: interaction.options.getString('name') ?? undefined,
+          },
+        };
+      case 'current':
+        return { command: 'current', options: {} };
+      default:
+        return null;
     }
   }
 }

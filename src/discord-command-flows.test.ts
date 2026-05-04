@@ -10,6 +10,7 @@ import {
   buildDiscordSlashCommandPayloads,
   getDiscordFlowDefinitionsForGroup,
   renderDiscordFlowPrompt,
+  SYSTEM_COMMAND_NAMES,
 } from './discord-command-flows.js';
 import { logger } from './logger.js';
 import type { RegisteredGroup } from './types.js';
@@ -298,6 +299,50 @@ describe('discord command flows', () => {
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it('builds /session with native Discord subcommands', () => {
+    const payloads = buildDiscordSlashCommandPayloads([makeGroup()]);
+    const session = payloads.find((command) => command.name === 'session');
+
+    expect(session).toBeDefined();
+    expect(session?.options?.map((option) => option.name)).toEqual([
+      'new',
+      'resume',
+      'list',
+      'current',
+      'end',
+      'rename',
+    ]);
+    expect(session?.options?.[0]?.type).toBe(
+      ApplicationCommandOptionType.Subcommand,
+    );
+
+    const rename = session?.options?.find((option) => option.name === 'rename');
+    expect(rename?.type).toBe(ApplicationCommandOptionType.Subcommand);
+    const renameOptions =
+      'options' in rename!
+        ? (rename.options as unknown as ReadonlyArray<{
+            name: string;
+            required?: boolean;
+          }>)
+        : [];
+    expect(
+      renameOptions.find((option) => option.name === 'session_id')?.required,
+    ).toBe(true);
+  });
+
+  it('keeps legacy session aliases registered as system commands', () => {
+    const names = getDiscordFlowDefinitionsForGroup(makeGroup()).map(
+      (command) => command.name,
+    );
+
+    expect(names).toContain('session');
+    expect(names).toContain('resume');
+    expect(names).toContain('sessions');
+    expect(SYSTEM_COMMAND_NAMES.has('session')).toBe(true);
+    expect(SYSTEM_COMMAND_NAMES.has('resume')).toBe(true);
+    expect(SYSTEM_COMMAND_NAMES.has('sessions')).toBe(true);
   });
 
   it('ignores invalid commands and invalid options from custom files', () => {
