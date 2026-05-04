@@ -20,6 +20,12 @@ export interface HealthData {
     load_5m: number;
     load_15m: number;
   };
+  host_memory: {
+    total_mb: number;
+    free_mb: number;
+    used_mb: number;
+    used_pct: number;
+  };
   runtime: {
     bun: string;
     platform: string;
@@ -74,6 +80,10 @@ export function buildHealthData(
   const mem = process.memoryUsage();
   const load = os.loadavg();
   const cpuCount = os.cpus().length;
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const usedMem = Math.max(0, totalMem - freeMem);
+  const usedPct = totalMem > 0 ? (usedMem / totalMem) * 100 : 0;
 
   const byBackend: Record<string, number> = {};
   const byRuntime: Record<string, number> = {};
@@ -105,6 +115,12 @@ export function buildHealthData(
       load_1m: Math.round((load[0] ?? 0) * 100) / 100,
       load_5m: Math.round((load[1] ?? 0) * 100) / 100,
       load_15m: Math.round((load[2] ?? 0) * 100) / 100,
+    },
+    host_memory: {
+      total_mb: Math.round((totalMem / 1024 / 1024) * 10) / 10,
+      free_mb: Math.round((freeMem / 1024 / 1024) * 10) / 10,
+      used_mb: Math.round((usedMem / 1024 / 1024) * 10) / 10,
+      used_pct: Math.round(usedPct * 10) / 10,
     },
     runtime: {
       bun: typeof Bun !== 'undefined' ? Bun.version : process.version,
@@ -236,6 +252,25 @@ export function renderSystemContent(
           'load 15m',
           health.cpu.load_15m.toFixed(2),
           'sys-cpu-load-15m',
+        ),
+    ) +
+    // Host memory
+    metricCard(
+      'host memory',
+      metricRow(
+        'total',
+        `${health.host_memory.total_mb} MB`,
+        'sys-host-mem-total',
+      ) +
+        metricRow(
+          'used',
+          `${health.host_memory.used_mb} MB (${health.host_memory.used_pct.toFixed(1)}%)`,
+          'sys-host-mem-used',
+        ) +
+        metricRow(
+          'free',
+          `${health.host_memory.free_mb} MB`,
+          'sys-host-mem-free',
         ),
     ) +
     // Containers
