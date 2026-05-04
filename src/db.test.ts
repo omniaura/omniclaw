@@ -214,6 +214,38 @@ describe('agent runtime persistence', () => {
   });
 });
 
+describe('setAgent enabled-flag preservation', () => {
+  const baseAgent: Agent = {
+    id: 'switch-agent',
+    name: 'Switch Agent',
+    folder: 'switch-agent',
+    backend: 'apple-container',
+    agentRuntime: 'claude-agent-sdk',
+    isAdmin: false,
+    createdAt: '2026-05-04T00:00:00.000Z',
+  };
+
+  it('defaults to enabled on first insert', () => {
+    setAgent(baseAgent);
+    expect(getAllAgents()['switch-agent']?.enabled).toBe(true);
+  });
+
+  it('preserves a disabled flag across re-registration without explicit enabled', () => {
+    setAgent({ ...baseAgent, enabled: false });
+    expect(getAllAgents()['switch-agent']?.enabled).toBe(false);
+
+    // Simulate registerGroup / topology resync — no enabled field passed.
+    setAgent({ ...baseAgent });
+    expect(getAllAgents()['switch-agent']?.enabled).toBe(false);
+  });
+
+  it('respects an explicit enabled=true to re-enable', () => {
+    setAgent({ ...baseAgent, enabled: false });
+    setAgent({ ...baseAgent, enabled: true });
+    expect(getAllAgents()['switch-agent']?.enabled).toBe(true);
+  });
+});
+
 // --- storeMessage (sender_missing counter) ---
 
 describe('storeMessage sender_missing counter', () => {

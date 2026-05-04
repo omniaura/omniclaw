@@ -718,13 +718,14 @@ describe('renderAgentsContent with execution status', () => {
       },
     ];
     const html = renderAgentsContent(makeState({}), remotePeers);
-    // Remote row exists but no toggle
+    // Remote row exists but no toggle (order-agnostic).
     expect(html).toContain('Remote Only');
-    expect(html).not.toContain(
-      'data-agent-toggle="true" data-agent-id="peer-2:remote-only"',
+    expect(html).toContain('data-agent-id="peer-2:remote-only"');
+    expect(html).not.toMatch(
+      /data-agent-id="peer-2:remote-only"[^>]*data-agent-toggle=/,
     );
-    expect(html).not.toContain(
-      'data-agent-toggle="false" data-agent-id="peer-2:remote-only"',
+    expect(html).not.toMatch(
+      /data-agent-toggle=[^>]*data-agent-id="peer-2:remote-only"/,
     );
   });
 });

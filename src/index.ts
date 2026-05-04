@@ -2107,6 +2107,12 @@ async function startMessageLoop(): Promise<void> {
           let selectedSubs = triggerSelected.filter(
             (s) => agents[s.agentId]?.enabled !== false,
           );
+          // Distinguish "no subs matched" from "matched subs were all
+          // disabled". The legacy group fallback below should only run when
+          // truly nothing matched — otherwise a disabled agent's trigger
+          // could still dispatch via the chat-level queue key.
+          const allTriggerMatchesDisabled =
+            triggerSelected.length > 0 && selectedSubs.length === 0;
 
           // Attentive follow-up: if agents were selected by explicit trigger/mention,
           // mark them attentive so the next human message is routed without a trigger.
@@ -2149,8 +2155,26 @@ async function startMessageLoop(): Promise<void> {
 
           // Legacy fallback: one-to-one registered group handling
           if (selectedSubs.length === 0) {
+            // If trigger matched only disabled agents, do not fall through.
+            if (allTriggerMatchesDisabled) {
+              logger.debug(
+                { chatJid },
+                'Trigger matched only disabled agents — dispatch skipped',
+              );
+              continue;
+            }
             const group = getRegisteredGroupForJid(chatJid);
             if (!group) continue;
+
+            // Honor off-switch on the legacy registered-group path too: the
+            // group folder doubles as the agent id when the agent exists.
+            if (agents[group.folder]?.enabled === false) {
+              logger.debug(
+                { chatJid, folder: group.folder },
+                'Legacy fallback skipped — agent is disabled',
+              );
+              continue;
+            }
 
             const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
             const needsTrigger =
@@ -2314,6 +2338,13 @@ function recoverPendingMessages(): void {
 
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     if ((channelSubscriptions[chatJid] || []).length > 0) continue;
+    if (agents[group.folder]?.enabled === false) {
+      logger.debug(
+        { chatJid, folder: group.folder },
+        'Recovery: legacy group skipped — agent is disabled',
+      );
+      continue;
+    }
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp);
     if (pending.length > 0) {

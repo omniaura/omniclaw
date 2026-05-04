@@ -1423,4 +1423,19 @@ describe('POST /api/agents/{id}/enabled (off-switch)', () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it('returns 400 for malformed agent ID encoding', async () => {
+    const state = makeState();
+    const res = await handle(
+      new Request('http://localhost/api/agents/%E0%A4%A/enabled', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true }),
+      }),
+      state,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('encoding');
+  });
 });

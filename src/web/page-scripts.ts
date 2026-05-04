@@ -786,7 +786,7 @@ if(searchInput&&tbody){
 }
 
 // ---- Agent on/off toggle (shared with agent-detail) ----
-document.addEventListener("click",function(e){
+function onAgentToggleClick(e){
   var btn=e.target.closest("[data-agent-toggle]");
   if(!btn)return;
   var agentId=btn.getAttribute("data-agent-id");
@@ -799,7 +799,9 @@ document.addEventListener("click",function(e){
     .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
     .then(function(){window.__toast&&window.__toast("Agent "+(enabled?"enabled":"disabled"));location.reload();})
     .catch(function(err){window.__toast&&window.__toast(err.message||"Failed","error");btn.disabled=false;btn.textContent=prevText;});
-});
+}
+document.addEventListener("click",onAgentToggleClick);
+window.__cleanup=function(){document.removeEventListener("click",onAgentToggleClick);};
 `;
 }
 
@@ -2363,7 +2365,24 @@ function agentDetailScript(): string {
     '    .catch(function(err){window.__toast&&window.__toast(err.message||"Failed","error");btn.disabled=false;btn.textContent=ns==="paused"?"pause":"resume";});',
     '});',
     '',
-    'window.__cleanup=function(){clearInterval(pollTimer);};',
+    '// Agent on/off toggle',
+    'function onAgentToggleClick(e){',
+    '  var btn=e.target.closest("[data-agent-toggle]");',
+    '  if(!btn)return;',
+    '  var agentId=btn.getAttribute("data-agent-id");',
+    '  var target=btn.getAttribute("data-agent-toggle");',
+    '  if(!agentId||target===null)return;',
+    '  var enabled=target==="true";',
+    '  var prevText=btn.textContent;',
+    '  btn.disabled=true;btn.textContent="...";',
+    '  fetch("/api/agents/"+encodeURIComponent(agentId)+"/enabled",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:enabled})})',
+    '    .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})',
+    '    .then(function(){window.__toast&&window.__toast("Agent "+(enabled?"enabled":"disabled"));location.reload();})',
+    '    .catch(function(err){window.__toast&&window.__toast(err.message||"Failed","error");btn.disabled=false;btn.textContent=prevText;});',
+    '}',
+    'document.addEventListener("click",onAgentToggleClick);',
+    '',
+    'window.__cleanup=function(){clearInterval(pollTimer);document.removeEventListener("click",onAgentToggleClick);};',
     '})();',
   ].join('\n');
 }

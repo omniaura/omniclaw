@@ -214,9 +214,14 @@ export function handleRequest(
 
   // Agent on/off switch
   if (pathname.startsWith('/api/agents/') && pathname.endsWith('/enabled')) {
-    const agentId = decodeURIComponent(
-      pathname.slice('/api/agents/'.length, -'/enabled'.length),
-    );
+    let agentId: string;
+    try {
+      agentId = decodeURIComponent(
+        pathname.slice('/api/agents/'.length, -'/enabled'.length),
+      );
+    } catch {
+      return json({ error: 'Invalid agent ID encoding' }, 400);
+    }
     if (!agentId) return json({ error: 'Missing agent ID' }, 400);
     if (method === 'POST') return handleSetAgentEnabled(agentId, req, state);
     return json({ error: 'Method not allowed' }, 405);
