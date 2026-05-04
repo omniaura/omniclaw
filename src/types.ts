@@ -425,7 +425,9 @@ export function registeredGroupToAgent(
     description: group.description,
     folder: group.folder,
     backend: backendType,
-    agentRuntime: group.agentRuntime || 'claude-agent-sdk',
+    agentRuntime:
+      group.agentRuntime ||
+      (backendType === 'cursor-sdk' ? 'cursor-sdk' : 'claude-agent-sdk'),
     containerConfig: group.containerConfig,
     isAdmin: isMainGroup,
     serverFolder: group.serverFolder,

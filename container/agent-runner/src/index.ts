@@ -1592,11 +1592,16 @@ async function main(): Promise<void> {
     await runCodexRuntime(containerInput);
     process.exit(0);
   }
+  if (runtime === 'cursor-sdk') {
+    const { runCursorSdkRuntime } = await import('./cursor-sdk-runtime.js');
+    await runCursorSdkRuntime(containerInput);
+    process.exit(0);
+  }
   if (runtime !== 'claude-agent-sdk') {
     writeOutput({
       status: 'error',
       result: null,
-      error: `Agent runtime '${runtime}' is not yet implemented. Supported: 'claude-agent-sdk', 'opencode', 'codex'.`,
+      error: `Agent runtime '${runtime}' is not yet implemented. Supported: 'claude-agent-sdk', 'opencode', 'codex', 'cursor-sdk'.`,
     });
     process.exit(1);
   }

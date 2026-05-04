@@ -171,5 +171,35 @@ describe('backends/types.ts', () => {
         'claude-agent-sdk',
       );
     });
+
+    it('forces cursor-sdk runtime when backend is cursor-sdk', () => {
+      expect(
+        getAgentRuntime(
+          makeAgent({
+            backend: 'cursor-sdk',
+            agentRuntime: 'claude-agent-sdk',
+          }),
+        ),
+      ).toBe('cursor-sdk');
+      expect(
+        getAgentRuntime(
+          makeGroup({
+            backend: 'cursor-sdk',
+            agentRuntime: undefined,
+          }),
+        ),
+      ).toBe('cursor-sdk');
+    });
+
+    it('uses explicit runtime when backend is not cursor-sdk', () => {
+      expect(
+        getAgentRuntime(
+          makeAgent({ backend: 'docker', agentRuntime: 'codex' }),
+        ),
+      ).toBe('codex');
+      expect(getAgentRuntime(makeGroup({ backend: 'docker' }))).toBe(
+        'claude-agent-sdk',
+      );
+    });
   });
 });

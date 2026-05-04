@@ -9,7 +9,11 @@ import {
   resolveBackend,
   shutdownBackends,
 } from './backends/index.js';
-import type { ChannelInfo, ContainerOutput } from './backends/types.js';
+import {
+  getAgentRuntime,
+  type ChannelInfo,
+  type ContainerOutput,
+} from './backends/types.js';
 import {
   buildAgentToChannelsMapFromSubscriptions,
   buildSendToInstruction,
@@ -2096,7 +2100,7 @@ async function runAgent(
         isMain,
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
-        agentRuntime: group.agentRuntime,
+        agentRuntime: getAgentRuntime(group),
         channels: agentChannels,
         currentChannelName,
         agentName: group.name,
@@ -2686,7 +2690,7 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
         name: group.name,
         description: group.description || '',
         backend: group.backend || 'apple-container',
-        agentRuntime: group.agentRuntime || 'claude-agent-sdk',
+        agentRuntime: getAgentRuntime(group),
         isMain: group.folder === MAIN_GROUP_FOLDER,
         trigger: group.trigger,
         sendTo: buildSendToInstruction(

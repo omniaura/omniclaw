@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
+import { LOCAL_RUNTIME } from '../config.js';
 import { logger } from '../logger.js';
 import { getBackend, initializeBackends, shutdownBackends } from './index.js';
-import { CursorSdkBackend } from './cursor-sdk-backend.js';
 import { LocalBackend } from './local-backend.js';
 
 /**
@@ -29,10 +29,13 @@ describe('backends/index', () => {
       expect(backend).toBeInstanceOf(LocalBackend);
     });
 
-    it('returns a CursorSdkBackend for cursor-sdk', () => {
-      const backend = getBackend('cursor-sdk');
-      expect(backend).toBeInstanceOf(CursorSdkBackend);
-      expect(backend.name).toBe('cursor-sdk');
+    it('delegates cursor-sdk to the active container backend singleton', () => {
+      const cursor = getBackend('cursor-sdk');
+      const container = getBackend(
+        LOCAL_RUNTIME === 'docker' ? 'docker' : 'apple-container',
+      );
+      expect(cursor).toBe(container);
+      expect(cursor).toBeInstanceOf(LocalBackend);
     });
 
     it('returns the same singleton for repeated calls', () => {
@@ -49,9 +52,7 @@ describe('backends/index', () => {
 
     it('backend has a valid name property', () => {
       const backend = getBackend('apple-container');
-      expect(['docker', 'apple-container', 'cursor-sdk']).toContain(
-        backend.name,
-      );
+      expect(['docker', 'apple-container']).toContain(backend.name);
     });
 
     it('backend implements AgentBackend interface', () => {
@@ -130,7 +131,6 @@ describe('backends/index', () => {
     it('attempts to shut down all initialized backends', async () => {
       const appleBackend = getBackend('apple-container');
       const dockerBackend = getBackend('docker');
-      const cursorBackend = getBackend('cursor-sdk');
       const appleShutdownSpy = spyOn(
         appleBackend,
         'shutdown',
@@ -139,32 +139,22 @@ describe('backends/index', () => {
         dockerBackend,
         'shutdown',
       ).mockResolvedValue();
-      const cursorShutdownSpy = spyOn(
-        cursorBackend,
-        'shutdown',
-      ).mockResolvedValue();
 
       await shutdownBackends();
 
       expect(appleShutdownSpy).toHaveBeenCalledTimes(1);
       expect(dockerShutdownSpy).toHaveBeenCalledTimes(1);
-      expect(cursorShutdownSpy).toHaveBeenCalledTimes(1);
     });
 
     it('logs and continues when a backend shutdown fails', async () => {
       const appleBackend = getBackend('apple-container');
       const dockerBackend = getBackend('docker');
-      const cursorBackend = getBackend('cursor-sdk');
       const failure = new Error('shutdown failed');
       const warnSpy = spyOn(logger, 'warn').mockImplementation(() => {});
 
       spyOn(appleBackend, 'shutdown').mockRejectedValue(failure);
       const dockerShutdownSpy = spyOn(
         dockerBackend,
-        'shutdown',
-      ).mockResolvedValue();
-      const cursorShutdownSpy = spyOn(
-        cursorBackend,
         'shutdown',
       ).mockResolvedValue();
 
@@ -175,7 +165,6 @@ describe('backends/index', () => {
         'Error shutting down backend',
       );
       expect(dockerShutdownSpy).toHaveBeenCalledTimes(1);
-      expect(cursorShutdownSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -424,6 +424,14 @@ export function buildVolumeMounts(
     ...(agentRuntime === 'codex'
       ? ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_MODEL']
       : []),
+    ...(agentRuntime === 'cursor-sdk'
+      ? [
+          'CURSOR_API_KEY',
+          'CURSOR_AGENT_MODEL',
+          'CURSOR_AGENT_CLOUD_REPOS',
+          'CURSOR_CLOUD_SKIP_REVIEWER_REQUEST',
+        ]
+      : []),
     ...(options?.allowGcpCredentials
       ? [
           'GOOGLE_APPLICATION_CREDENTIALS',

@@ -10,7 +10,11 @@
  */
 
 /** Which agent runtime runs inside the container. */
-export type AgentRuntime = 'claude-agent-sdk' | 'opencode' | 'codex';
+export type AgentRuntime =
+  | 'claude-agent-sdk'
+  | 'opencode'
+  | 'codex'
+  | 'cursor-sdk';
 
 /** Describes a channel that an agent can send/receive messages on. */
 export interface ChannelInfo {

@@ -60,6 +60,7 @@ export function getBackendType(entity: AgentOrGroup): BackendType {
 
 /** Get agent runtime from either type. */
 export function getAgentRuntime(entity: AgentOrGroup): AgentRuntime {
+  if (getBackendType(entity) === 'cursor-sdk') return 'cursor-sdk';
   if (isAgent(entity)) return entity.agentRuntime;
   return (entity as RegisteredGroup).agentRuntime || 'claude-agent-sdk';
 }
