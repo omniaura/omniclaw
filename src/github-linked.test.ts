@@ -1,12 +1,93 @@
-import { describe, it, expect } from 'bun:test';
+import { beforeEach, describe, it, expect, mock } from 'bun:test';
+
+const githubFetchMock = mock(async (_path: string) => null as unknown);
+const fetchPrReviewsMock = mock(async () => [] as unknown[]);
+const fetchPrReviewCommentsMock = mock(async () => [] as unknown[]);
+const fetchCombinedStatusMock = mock(async () => null as unknown);
+const formatPrMarkdownMock = mock(
+  (pr: { number: number; title: string }) =>
+    `### PR #${pr.number}: ${pr.title}`,
+);
 
 import {
   extractGitHubLinks,
   fetchGitHubLinkedContext,
+  type GitHubLinkedDeps,
   type ParsedGitHubLink,
 } from './github-linked.js';
 
+function linkedDeps(): GitHubLinkedDeps {
+  return {
+    githubFetch: githubFetchMock as unknown as GitHubLinkedDeps['githubFetch'],
+    fetchPrReviews:
+      fetchPrReviewsMock as unknown as GitHubLinkedDeps['fetchPrReviews'],
+    fetchPrReviewComments:
+      fetchPrReviewCommentsMock as unknown as GitHubLinkedDeps['fetchPrReviewComments'],
+    fetchCombinedStatus:
+      fetchCombinedStatusMock as unknown as GitHubLinkedDeps['fetchCombinedStatus'],
+    formatPrMarkdown:
+      formatPrMarkdownMock as unknown as GitHubLinkedDeps['formatPrMarkdown'],
+  };
+}
+
+function makePr(number: number, title = `Test PR ${number}`) {
+  return {
+    number,
+    title,
+    user: { login: 'alice' },
+    head: { ref: `branch-${number}` },
+    base: { ref: 'main' },
+    state: 'open',
+    draft: false,
+    requested_reviewers: [],
+    html_url: `https://github.com/org/repo/pull/${number}`,
+    body: null,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  };
+}
+
+function makeIssue(number: number, title = `Test issue ${number}`) {
+  return {
+    number,
+    title,
+    user: { login: 'bob' },
+    state: 'open',
+    labels: [{ name: 'bug' }, { name: 'p1' }],
+    assignee: { login: 'carol' },
+    html_url: `https://github.com/org/repo/issues/${number}`,
+    body: 'Issue body with useful detail',
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  };
+}
+
+const originalGithubToken = process.env.GITHUB_TOKEN;
+
 describe('github-linked', () => {
+  beforeEach(() => {
+    if (originalGithubToken === undefined) {
+      delete process.env.GITHUB_TOKEN;
+    } else {
+      process.env.GITHUB_TOKEN = originalGithubToken;
+    }
+
+    githubFetchMock.mockReset();
+    fetchPrReviewsMock.mockReset();
+    fetchPrReviewCommentsMock.mockReset();
+    fetchCombinedStatusMock.mockReset();
+    formatPrMarkdownMock.mockReset();
+
+    githubFetchMock.mockImplementation(async () => null);
+    fetchPrReviewsMock.mockImplementation(async () => []);
+    fetchPrReviewCommentsMock.mockImplementation(async () => []);
+    fetchCombinedStatusMock.mockImplementation(async () => null);
+    formatPrMarkdownMock.mockImplementation(
+      (pr: { number: number; title: string }) =>
+        `### PR #${pr.number}: ${pr.title}`,
+    );
+  });
+
   describe('extractGitHubLinks', () => {
     it('returns empty array for empty string', () => {
       expect(extractGitHubLinks('')).toEqual([]);
@@ -154,6 +235,200 @@ describe('github-linked', () => {
       const links = extractGitHubLinks(text);
       // extractGitHubLinks returns all, but fetchGitHubLinkedContext caps at 3
       expect(links).toHaveLength(5);
+    });
+
+    it('returns null without a GitHub token and avoids fetches', async () => {
+      delete process.env.GITHUB_TOKEN;
+
+      const result = await fetchGitHubLinkedContext(
+        [{ content: 'https://github.com/org/repo/pull/901' }],
+        linkedDeps(),
+      );
+
+      expect(result).toBeNull();
+      expect(githubFetchMock).not.toHaveBeenCalled();
+    });
+
+    it('fetches PR details, reviews, review comments, and CI status', async () => {
+      process.env.GITHUB_TOKEN = 'test-token';
+      githubFetchMock.mockImplementation(async (path: string) => {
+        if (path === '/repos/org/repo/pulls/902') return makePr(902, 'Ship it');
+        return null;
+      });
+      fetchPrReviewsMock.mockImplementation(async () => [
+        { state: 'APPROVED' },
+      ]);
+      fetchPrReviewCommentsMock.mockImplementation(async () => [
+        { path: 'src/index.ts', body: 'nit' },
+      ]);
+      fetchCombinedStatusMock.mockImplementation(async () => ({
+        state: 'success',
+      }));
+
+      const result = await fetchGitHubLinkedContext(
+        [{ content: 'Review https://github.com/org/repo/pull/902' }],
+        linkedDeps(),
+      );
+
+      expect(result).toContain('# Linked GitHub Context');
+      expect(result).toContain('### PR #902: Ship it');
+      expect(fetchPrReviewsMock).toHaveBeenCalledWith('org', 'repo', 902);
+      expect(fetchPrReviewCommentsMock).toHaveBeenCalledWith(
+        'org',
+        'repo',
+        902,
+      );
+      expect(fetchCombinedStatusMock).toHaveBeenCalledWith(
+        'org',
+        'repo',
+        'branch-902',
+      );
+      expect(formatPrMarkdownMock).toHaveBeenCalledWith(
+        expect.objectContaining({ number: 902 }),
+        [{ state: 'APPROVED' }],
+        [{ path: 'src/index.ts', body: 'nit' }],
+        { state: 'success' },
+      );
+    });
+
+    it('formats issue details and recent comments', async () => {
+      process.env.GITHUB_TOKEN = 'test-token';
+      githubFetchMock.mockImplementation(async (path: string) => {
+        if (path === '/repos/org/repo/issues/903') {
+          return makeIssue(903, 'Broken widget');
+        }
+        if (
+          path ===
+          '/repos/org/repo/issues/903/comments?per_page=10&sort=created&direction=desc'
+        ) {
+          return [
+            {
+              user: { login: 'dana' },
+              body: 'First comment',
+              created_at: 'now',
+            },
+            { user: null, body: 'Anonymous follow-up', created_at: 'now' },
+          ];
+        }
+        return null;
+      });
+
+      const result = await fetchGitHubLinkedContext(
+        [{ content: 'Triage https://github.com/org/repo/issues/903' }],
+        linkedDeps(),
+      );
+
+      expect(result).toContain('### Issue #903: Broken widget');
+      expect(result).toContain(
+        '- Author: bob | Labels: bug, p1 | Assignee: carol',
+      );
+      expect(result).toContain('- Description: Issue body with useful detail');
+      expect(result).toContain('- dana: First comment');
+      expect(result).toContain('- ?: Anonymous follow-up');
+    });
+
+    it('treats issue URLs that point at PRs as PR context', async () => {
+      process.env.GITHUB_TOKEN = 'test-token';
+      githubFetchMock.mockImplementation(async (path: string) => {
+        if (path === '/repos/org/repo/issues/904') {
+          return { ...makeIssue(904), pull_request: {} };
+        }
+        if (path === '/repos/org/repo/pulls/904') {
+          return makePr(904, 'PR via issue URL');
+        }
+        return null;
+      });
+
+      const result = await fetchGitHubLinkedContext(
+        [{ content: 'https://github.com/org/repo/issues/904' }],
+        linkedDeps(),
+      );
+
+      expect(result).toContain('### PR #904: PR via issue URL');
+      expect(fetchPrReviewsMock).toHaveBeenCalledWith('org', 'repo', 904);
+    });
+
+    it('deduplicates links across messages and reuses cached markdown', async () => {
+      process.env.GITHUB_TOKEN = 'test-token';
+      githubFetchMock.mockImplementation(async (path: string) => {
+        if (path === '/repos/org/repo/pulls/905')
+          return makePr(905, 'Cached PR');
+        return null;
+      });
+
+      const first = await fetchGitHubLinkedContext(
+        [
+          { content: 'https://github.com/org/repo/pull/905' },
+          { content: 'duplicate https://github.com/org/repo/pull/905' },
+        ],
+        linkedDeps(),
+      );
+      const second = await fetchGitHubLinkedContext(
+        [{ content: 'again https://github.com/org/repo/pull/905' }],
+        linkedDeps(),
+      );
+
+      expect(first).toContain('### PR #905: Cached PR');
+      expect(second).toBe(first);
+      expect(githubFetchMock).toHaveBeenCalledTimes(1);
+      expect(formatPrMarkdownMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('caps fetches to the first three unique linked items', async () => {
+      process.env.GITHUB_TOKEN = 'test-token';
+      githubFetchMock.mockImplementation(async (path: string) => {
+        const number = Number(path.match(/\/(\d+)$/)?.[1] ?? 0);
+        return makePr(number, `PR ${number}`);
+      });
+
+      const result = await fetchGitHubLinkedContext(
+        [
+          {
+            content: [
+              'https://github.com/org/repo/pull/906',
+              'https://github.com/org/repo/pull/907',
+              'https://github.com/org/repo/pull/908',
+              'https://github.com/org/repo/pull/909',
+              'https://github.com/org/repo/pull/910',
+            ].join(' '),
+          },
+        ],
+        linkedDeps(),
+      );
+
+      expect(githubFetchMock).toHaveBeenCalledTimes(3);
+      expect(result).toContain('### PR #906: PR 906');
+      expect(result).toContain('### PR #907: PR 907');
+      expect(result).toContain('### PR #908: PR 908');
+      expect(result).not.toContain('### PR #909: PR 909');
+      expect(result).not.toContain('### PR #910: PR 910');
+    });
+
+    it('returns successful sections when another linked fetch rejects', async () => {
+      process.env.GITHUB_TOKEN = 'test-token';
+      githubFetchMock.mockImplementation(async (path: string) => {
+        if (path === '/repos/org/repo/pulls/911') return makePr(911, 'Fails');
+        if (path === '/repos/org/repo/issues/912')
+          return makeIssue(912, 'Works');
+        if (path.includes('/comments?')) return [];
+        return null;
+      });
+      fetchPrReviewsMock.mockImplementation(async () => {
+        throw new Error('GitHub unavailable');
+      });
+
+      const result = await fetchGitHubLinkedContext(
+        [
+          {
+            content:
+              'https://github.com/org/repo/pull/911 https://github.com/org/repo/issues/912',
+          },
+        ],
+        linkedDeps(),
+      );
+
+      expect(result).toContain('### Issue #912: Works');
+      expect(result).not.toContain('### PR #911: Fails');
     });
   });
 });
