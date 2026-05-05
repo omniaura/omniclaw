@@ -48,6 +48,20 @@ export interface HealthData {
     completed: number;
     total: number;
   };
+  queue: {
+    /** Number of group folders currently tracked by the orchestrator. */
+    groups: number;
+    /** Total messages waiting across all message lanes. */
+    pending_messages: number;
+    /** Total scheduled tasks waiting across all task lanes. */
+    pending_tasks: number;
+    /** Number of groups whose message lane is actively processing. */
+    processing_groups: number;
+    /** Number of groups whose task lane has a task running. */
+    running_tasks: number;
+    /** Sum of consecutive retry counts across all group folders. */
+    retrying_groups: number;
+  };
   sse_clients: number;
   started_at: string;
 }
@@ -77,6 +91,7 @@ export function buildHealthData(
   const agents = Object.values(state.getAgents());
   const tasks = state.getTasks();
   const stats = state.getQueueStats();
+  const queueDetails = state.getQueueDetails();
   const mem = process.memoryUsage();
   const load = os.loadavg();
   const cpuCount = os.cpus().length;
@@ -99,6 +114,19 @@ export function buildHealthData(
     if (t.status === 'active') activeTasks++;
     else if (t.status === 'paused') pausedTasks++;
     else if (t.status === 'completed') completedTasks++;
+  }
+
+  let pendingMessages = 0;
+  let pendingTasks = 0;
+  let processingGroups = 0;
+  let runningTasks = 0;
+  let retryingGroups = 0;
+  for (const g of queueDetails) {
+    pendingMessages += g.messageLane.pendingCount;
+    pendingTasks += g.taskLane.pendingCount;
+    if (g.messageLane.active) processingGroups++;
+    if (g.taskLane.activeTask) runningTasks++;
+    if (g.retryCount > 0) retryingGroups++;
   }
 
   return {
@@ -143,6 +171,14 @@ export function buildHealthData(
       paused: pausedTasks,
       completed: completedTasks,
       total: tasks.length,
+    },
+    queue: {
+      groups: queueDetails.length,
+      pending_messages: pendingMessages,
+      pending_tasks: pendingTasks,
+      processing_groups: processingGroups,
+      running_tasks: runningTasks,
+      retrying_groups: retryingGroups,
     },
     sse_clients: sseClientCount,
     started_at: startedAt,
@@ -307,6 +343,36 @@ export function renderSystemContent(
           'sys-tasks-completed',
         ) +
         metricRow('total', String(health.tasks.total), 'sys-tasks-total'),
+    ) +
+    // Queue rollup (per-group lane aggregates from /ipc, summarized here)
+    metricCard(
+      'queue',
+      metricRow('groups', String(health.queue.groups), 'sys-queue-groups') +
+        metricRow(
+          'processing',
+          String(health.queue.processing_groups),
+          'sys-queue-processing',
+        ) +
+        metricRow(
+          'running tasks',
+          String(health.queue.running_tasks),
+          'sys-queue-running-tasks',
+        ) +
+        metricRow(
+          'pending msgs',
+          String(health.queue.pending_messages),
+          'sys-queue-pending-messages',
+        ) +
+        metricRow(
+          'pending tasks',
+          String(health.queue.pending_tasks),
+          'sys-queue-pending-tasks',
+        ) +
+        metricRow(
+          'retrying',
+          String(health.queue.retrying_groups),
+          'sys-queue-retrying',
+        ),
     ) +
     `</div>` +
     `</div>`
