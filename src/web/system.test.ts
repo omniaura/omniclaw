@@ -5,6 +5,7 @@ import { buildHealthData, renderSystemContent } from './system.js';
 import type { HealthData } from './system.js';
 import type { WebStateProvider } from './types.js';
 import type { Agent } from '../types.js';
+import type { GroupQueueDetail } from '../group-queue.js';
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -19,7 +20,10 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
   };
 }
 
-function makeState(agents: Agent[] = [makeAgent()]): WebStateProvider {
+function makeState(
+  agents: Agent[] = [makeAgent()],
+  queueDetails: GroupQueueDetail[] = [],
+): WebStateProvider {
   const agentMap: Record<string, Agent> = {};
   for (const a of agents) agentMap[a.id] = a;
   return {
@@ -81,7 +85,7 @@ function makeState(agents: Agent[] = [makeAgent()]): WebStateProvider {
       maxActive: 8,
       maxIdle: 4,
     }),
-    getQueueDetails: () => [],
+    getQueueDetails: () => queueDetails,
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
     getTaskRunPhaseEvents: () => [],
@@ -200,6 +204,81 @@ describe('buildHealthData', () => {
     expect(health.agents.by_backend).toEqual({});
     expect(health.agents.by_runtime).toEqual({});
   });
+
+  it('reports zero queue rollup when no groups are tracked', () => {
+    const health = buildHealthData(makeState(), 0);
+    expect(health.queue.groups).toBe(0);
+    expect(health.queue.pending_messages).toBe(0);
+    expect(health.queue.pending_tasks).toBe(0);
+    expect(health.queue.processing_groups).toBe(0);
+    expect(health.queue.running_tasks).toBe(0);
+    expect(health.queue.retrying_groups).toBe(0);
+  });
+
+  it('aggregates queue rollup across all tracked groups', () => {
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 3,
+          containerName: 'g1-msg',
+        },
+        taskLane: {
+          active: true,
+          pendingCount: 2,
+          containerName: 'g1-task',
+          activeTask: {
+            taskId: 't-running',
+            promptPreview: 'do work',
+            startedAt: Date.now() - 5_000,
+            runningMs: 5_000,
+          },
+        },
+        retryCount: 0,
+      },
+      {
+        folderKey: 'g2',
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 1,
+          containerName: null,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 4,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 2,
+      },
+      {
+        folderKey: 'g3',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'g3-msg',
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 1,
+      },
+    ];
+    const health = buildHealthData(makeState([makeAgent()], details), 0);
+    expect(health.queue.groups).toBe(3);
+    expect(health.queue.pending_messages).toBe(4); // 3 + 1 + 0
+    expect(health.queue.pending_tasks).toBe(6); // 2 + 4 + 0
+    expect(health.queue.processing_groups).toBe(2); // g1, g3
+    expect(health.queue.running_tasks).toBe(1); // only g1 has activeTask
+    expect(health.queue.retrying_groups).toBe(2); // g2, g3
+  });
 });
 
 describe('GET /api/health route', () => {
@@ -256,6 +335,44 @@ describe('renderSystemContent', () => {
     expect(html).toContain('containers');
     expect(html).toContain('agents');
     expect(html).toContain('tasks');
+    expect(html).toContain('queue');
+  });
+
+  it('renders queue rollup with stable IDs', () => {
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 7,
+          containerName: 'g1-msg',
+        },
+        taskLane: {
+          active: true,
+          pendingCount: 3,
+          containerName: 'g1-task',
+          activeTask: {
+            taskId: 't1',
+            promptPreview: 'preview',
+            startedAt: Date.now(),
+            runningMs: 100,
+          },
+        },
+        retryCount: 4,
+      },
+    ];
+    const html = renderSystemContent(makeState([makeAgent()], details), 0);
+    expect(html).toContain('id="sys-queue-groups"');
+    expect(html).toContain('id="sys-queue-processing"');
+    expect(html).toContain('id="sys-queue-running-tasks"');
+    expect(html).toContain('id="sys-queue-pending-messages"');
+    expect(html).toContain('id="sys-queue-pending-tasks"');
+    expect(html).toContain('id="sys-queue-retrying"');
+    // pending message count should appear (7)
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-queue-pending-messages">7</span>',
+    );
   });
 
   it('renders breakdown lists for agent backends', () => {
