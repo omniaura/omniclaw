@@ -472,7 +472,12 @@ export function buildDiscordSlashCommandPayloads(
     .map((command) => ({
       name: command.name,
       description: command.description,
-      options: command.options?.map((option) => toDiscordOptionData(option)),
+      options: command.options
+        ?.slice()
+        .sort(
+          (a, b) => Number(Boolean(b.required)) - Number(Boolean(a.required)),
+        )
+        .map((option) => toDiscordOptionData(option)),
     }));
 }
 

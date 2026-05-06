@@ -255,6 +255,51 @@ describe('discord command flows', () => {
     ).toBe(ApplicationCommandOptionType.Integer);
   });
 
+  it('orders required slash options before optional ones', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-flows-'));
+    const groupsDir = path.join(tempRoot, 'groups');
+
+    try {
+      fs.mkdirSync(path.join(groupsDir, 'test-agent'), { recursive: true });
+      fs.writeFileSync(
+        path.join(groupsDir, 'test-agent', 'discord-commands.json'),
+        JSON.stringify({
+          commands: [
+            {
+              name: 'ordered-test',
+              description: 'Ordering check',
+              prompt: 'Run with {{required_arg}} and {{optional_arg}}',
+              options: [
+                {
+                  name: 'optional_arg',
+                  description: 'Optional first in source',
+                  required: false,
+                },
+                {
+                  name: 'required_arg',
+                  description: 'Required second in source',
+                  required: true,
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      const payload = buildDiscordSlashCommandPayloads(
+        [makeGroup()],
+        groupsDir,
+      ).find((command) => command.name === 'ordered-test');
+
+      expect(payload?.options?.map((option) => option.name)).toEqual([
+        'required_arg',
+        'optional_arg',
+      ]);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('ignores invalid commands and invalid options from custom files', () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-flows-'));
     const groupsDir = path.join(tempRoot, 'groups');
