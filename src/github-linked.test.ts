@@ -261,9 +261,7 @@ describe('github-linked', () => {
       fetchPrReviewCommentsMock.mockImplementation(async () => [
         { path: 'src/index.ts', body: 'nit' },
       ]);
-      fetchCombinedStatusMock.mockImplementation(async () => ({
-        state: 'success',
-      }));
+      fetchCombinedStatusMock.mockImplementation(async () => 'success');
 
       const result = await fetchGitHubLinkedContext(
         [{ content: 'Review https://github.com/org/repo/pull/902' }],
@@ -287,7 +285,7 @@ describe('github-linked', () => {
         expect.objectContaining({ number: 902 }),
         [{ state: 'APPROVED' }],
         [{ path: 'src/index.ts', body: 'nit' }],
-        { state: 'success' },
+        'success',
       );
     });
 
