@@ -222,6 +222,42 @@ describe('renderDashboardContent', () => {
     );
   });
 
+  it('escapes topology JSON so script tag sentinels cannot break out', () => {
+    const payload = '</script><script>alert("xss")</script>&\u2028\u2029';
+    const html = renderDashboardContent(
+      makeState({
+        agents: [
+          makeAgent({
+            id: 'local-agent',
+            name: payload,
+            serverFolder: payload,
+          }),
+        ],
+        subscriptions: {
+          'dc:123': [makeSubscription({ channelFolder: payload })],
+        },
+        chats: [
+          {
+            jid: 'dc:123',
+            name: payload,
+            last_message_time: '2026-03-01T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+
+    expect(html).not.toContain('</script><script>');
+    expect(html).not.toContain('<script>alert("xss")</script>');
+    expect(html).toContain('\\u003c/script\\u003e');
+
+    const topoData = extractTopoData(html);
+    expect(topoData[0]?.name).toBe(payload);
+    expect(topoData[0]?.server).toBe(payload);
+    expect(
+      (topoData[0]?.channels as Array<Record<string, unknown>>)[0]?.name,
+    ).toBe(payload);
+  });
+
   it('only offers local agents in the task modal and escapes labels safely', () => {
     const html = renderDashboardContent(
       makeState({

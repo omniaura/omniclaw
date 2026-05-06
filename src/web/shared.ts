@@ -26,6 +26,15 @@ export function escapeHtml(str: string): string {
     .replace(/"/g, '&quot;');
 }
 
+export function escapeJsonForHtml(json: string): string {
+  return json
+    .replace(/&/g, '\\u0026')
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 /** Render just the nav link elements (used for SSE patching of active state). */
 export function renderNavLinks(activePath: string): string {
   return NAV_ITEMS.map(
