@@ -68,6 +68,17 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get update && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
+# Install local-first crawl tools. gitcrawl also provides the gh shim at
+# /usr/local/bin/gh; unsupported and mutating commands fall back to /usr/bin/gh.
+ARG GITCRAWL_VERSION=v0.2.1
+ARG DISCRAWL_VERSION=v0.6.6
+ENV GITCRAWL_GH_PATH=/usr/bin/gh
+COPY gitcrawl.sh discrawl.sh /tmp/
+RUN chmod +x /tmp/gitcrawl.sh /tmp/discrawl.sh \
+    && GITCRAWL_VERSION="${GITCRAWL_VERSION}" /tmp/gitcrawl.sh \
+    && DISCRAWL_VERSION="${DISCRAWL_VERSION}" /tmp/discrawl.sh \
+    && rm -f /tmp/gitcrawl.sh /tmp/discrawl.sh
+
 # Install Graphite CLI for stacked PRs workflow (pinned to stable version)
 ARG GRAPHITE_VERSION=1.8.5
 RUN npm install -g @withgraphite/graphite-cli@${GRAPHITE_VERSION}
