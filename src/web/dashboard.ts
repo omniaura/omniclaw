@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 
 import type { WebStateProvider } from './types.js';
-import { renderShell, escapeHtml } from './shared.js';
+import { renderShell, escapeHtml, escapeJsonForHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 import { buildAgentChannelData } from './agent-channels.js';
 import type { RemotePeerAgents } from '../discovery/types.js';
@@ -26,30 +26,32 @@ export function renderDashboardContent(
   const activeTasks = tasks.filter((t) => t.status === 'active').length;
 
   // Serialize agent topology data for canvas renderer
-  const topoData = JSON.stringify(
-    agentData.map((a) => ({
-      id: a.id,
-      name: a.name,
-      backend: a.backend,
-      runtime: a.agentRuntime,
-      isAdmin: a.isAdmin,
-      remoteInstanceId: a.remoteInstanceId || null,
-      remoteInstanceName: a.remoteInstanceName || null,
-      server: a.serverFolder || null,
-      serverIconUrl: a.serverIconUrl || null,
-      avatarUrl: a.avatarUrl
-        ? a.remoteInstanceId
-          ? `/api/discovery/peers/${encodeURIComponent(a.remoteInstanceId)}/agents/${encodeURIComponent(a.id.split(':').slice(1).join(':'))}/avatar/image?rev=${imageRev(a.avatarUrl)}`
-          : `/api/agents/${encodeURIComponent(a.id)}/avatar/image?rev=${imageRev(a.avatarUrl)}`
-        : null,
-      channels: a.channels.map((ch) => ({
-        jid: ch.jid,
-        name: ch.displayName,
-        category: ch.categoryFolder || null,
-        channelFolder: ch.channelFolder || null,
-        iconUrl: ch.iconUrl || null,
+  const topoData = escapeJsonForHtml(
+    JSON.stringify(
+      agentData.map((a) => ({
+        id: a.id,
+        name: a.name,
+        backend: a.backend,
+        runtime: a.agentRuntime,
+        isAdmin: a.isAdmin,
+        remoteInstanceId: a.remoteInstanceId || null,
+        remoteInstanceName: a.remoteInstanceName || null,
+        server: a.serverFolder || null,
+        serverIconUrl: a.serverIconUrl || null,
+        avatarUrl: a.avatarUrl
+          ? a.remoteInstanceId
+            ? `/api/discovery/peers/${encodeURIComponent(a.remoteInstanceId)}/agents/${encodeURIComponent(a.id.split(':').slice(1).join(':'))}/avatar/image?rev=${imageRev(a.avatarUrl)}`
+            : `/api/agents/${encodeURIComponent(a.id)}/avatar/image?rev=${imageRev(a.avatarUrl)}`
+          : null,
+        channels: a.channels.map((ch) => ({
+          jid: ch.jid,
+          name: ch.displayName,
+          category: ch.categoryFolder || null,
+          channelFolder: ch.channelFolder || null,
+          iconUrl: ch.iconUrl || null,
+        })),
       })),
-    })),
+    ),
   );
 
   const localAgentData = agentData.filter((a) => !a.remoteInstanceId);
