@@ -34,6 +34,22 @@ interface GitHubIssueComment {
   created_at: string;
 }
 
+export interface GitHubLinkedDeps {
+  githubFetch: typeof githubFetch;
+  fetchPrReviews: typeof fetchPrReviews;
+  fetchPrReviewComments: typeof fetchPrReviewComments;
+  fetchCombinedStatus: typeof fetchCombinedStatus;
+  formatPrMarkdown: typeof formatPrMarkdown;
+}
+
+const defaultDeps: GitHubLinkedDeps = {
+  githubFetch,
+  fetchPrReviews,
+  fetchPrReviewComments,
+  fetchCombinedStatus,
+  formatPrMarkdown,
+};
+
 // --- URL Parsing ---
 
 const GITHUB_URL_REGEX =
@@ -89,24 +105,29 @@ async function fetchSinglePr(
   owner: string,
   repo: string,
   number: number,
+  deps: GitHubLinkedDeps,
 ): Promise<GitHubPr | null> {
-  return githubFetch<GitHubPr>(`/repos/${owner}/${repo}/pulls/${number}`);
+  return deps.githubFetch<GitHubPr>(`/repos/${owner}/${repo}/pulls/${number}`);
 }
 
 async function fetchSingleIssue(
   owner: string,
   repo: string,
   number: number,
+  deps: GitHubLinkedDeps,
 ): Promise<GitHubIssue | null> {
-  return githubFetch<GitHubIssue>(`/repos/${owner}/${repo}/issues/${number}`);
+  return deps.githubFetch<GitHubIssue>(
+    `/repos/${owner}/${repo}/issues/${number}`,
+  );
 }
 
 async function fetchIssueComments(
   owner: string,
   repo: string,
   issueNumber: number,
+  deps: GitHubLinkedDeps,
 ): Promise<GitHubIssueComment[]> {
-  const comments = await githubFetch<GitHubIssueComment[]>(
+  const comments = await deps.githubFetch<GitHubIssueComment[]>(
     `/repos/${owner}/${repo}/issues/${issueNumber}/comments?per_page=10&sort=created&direction=desc`,
   );
   return comments || [];
@@ -143,41 +164,55 @@ function formatLinkedIssueMarkdown(
 
 // --- Per-link fetchers ---
 
-async function fetchLinkedPr(link: ParsedGitHubLink): Promise<string | null> {
+async function fetchLinkedPr(
+  link: ParsedGitHubLink,
+  deps: GitHubLinkedDeps,
+): Promise<string | null> {
   const cacheKey = linkedCacheKey(link);
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
-  const pr = await fetchSinglePr(link.owner, link.repo, link.number);
+  const pr = await fetchSinglePr(link.owner, link.repo, link.number, deps);
   if (!pr) return null;
 
   const [reviews, comments, ciStatus] = await Promise.all([
-    fetchPrReviews(link.owner, link.repo, link.number),
-    fetchPrReviewComments(link.owner, link.repo, link.number),
-    fetchCombinedStatus(link.owner, link.repo, pr.head.ref),
+    deps.fetchPrReviews(link.owner, link.repo, link.number),
+    deps.fetchPrReviewComments(link.owner, link.repo, link.number),
+    deps.fetchCombinedStatus(link.owner, link.repo, pr.head.ref),
   ]);
 
-  const markdown = formatPrMarkdown(pr, reviews, comments, ciStatus);
+  const markdown = deps.formatPrMarkdown(pr, reviews, comments, ciStatus);
   linkedCache.set(cacheKey, { markdown, fetchedAt: Date.now() });
   return markdown;
 }
 
 async function fetchLinkedIssue(
   link: ParsedGitHubLink,
+  deps: GitHubLinkedDeps,
 ): Promise<string | null> {
   const cacheKey = linkedCacheKey(link);
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
-  const issue = await fetchSingleIssue(link.owner, link.repo, link.number);
+  const issue = await fetchSingleIssue(
+    link.owner,
+    link.repo,
+    link.number,
+    deps,
+  );
   if (!issue) return null;
 
   // If this "issue" is actually a PR, fetch as PR for richer data
   if (issue.pull_request) {
-    return fetchLinkedPr({ ...link, type: 'pull' });
+    return fetchLinkedPr({ ...link, type: 'pull' }, deps);
   }
 
-  const comments = await fetchIssueComments(link.owner, link.repo, link.number);
+  const comments = await fetchIssueComments(
+    link.owner,
+    link.repo,
+    link.number,
+    deps,
+  );
   const markdown = formatLinkedIssueMarkdown(issue, comments);
   linkedCache.set(cacheKey, { markdown, fetchedAt: Date.now() });
   return markdown;
@@ -191,6 +226,7 @@ async function fetchLinkedIssue(
  */
 export async function fetchGitHubLinkedContext(
   messages: Array<{ content: string }>,
+  deps: GitHubLinkedDeps = defaultDeps,
 ): Promise<string | null> {
   if (!process.env.GITHUB_TOKEN) return null;
 
@@ -220,7 +256,9 @@ export async function fetchGitHubLinkedContext(
 
   const results = await Promise.allSettled(
     links.map((link) =>
-      link.type === 'pull' ? fetchLinkedPr(link) : fetchLinkedIssue(link),
+      link.type === 'pull'
+        ? fetchLinkedPr(link, deps)
+        : fetchLinkedIssue(link, deps),
     ),
   );
 
