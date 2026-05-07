@@ -2061,6 +2061,11 @@ function messagesMatchSubscription(
 ): boolean {
   if (messages.some((m) => /@allagents/i.test(m.content))) return true;
 
+  // Replying to one of the bot's own messages counts as an explicit trigger —
+  // the user is clearly addressing the bot even without an @mention. Channel
+  // adapters set is_reply_to_bot only when the reply targets THIS channel's bot.
+  if (messages.some((m) => m.is_reply_to_bot === true)) return true;
+
   const mentionPatterns = getMentionPatterns(sub);
   if (mentionPatterns.length > 0) {
     const hasMention = messages.some((m) => {

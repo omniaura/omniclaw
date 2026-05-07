@@ -276,6 +276,25 @@ export function formatTextFileMarker(
   return `[attachment:file name=${filename}]\n${content}\n[/attachment:file]`;
 }
 
+/**
+ * Format a binary file attachment marker for the agent runtime.
+ *
+ * Emits a path the agent can open with the Read tool. The path is relative
+ * to the agent's cwd (`/workspace/group`), so a downloaded media file at
+ * `<group>/media/<file>` becomes `media/<file>`.
+ *
+ * Use this for binary documents (PDFs, archives, etc.) that aren't images
+ * and aren't small enough to inline as text.
+ */
+export function formatBinaryFileMarker(
+  filename: string,
+  originalName?: string,
+): string {
+  const safe = path.basename(filename);
+  const display = originalName ? path.basename(originalName) : safe;
+  return `[attachment:file path=media/${safe} name=${display}]`;
+}
+
 /** Format a placeholder for unsupported or failed media types. */
 export function formatPlaceholder(
   type: 'video' | 'audio' | 'file',

@@ -138,6 +138,12 @@ export interface NewMessage {
     name: string;
     platform: 'discord' | 'whatsapp' | 'telegram' | 'slack';
   }>;
+  /**
+   * True when the message is a reply to one of the bot's own messages.
+   * Treated as an explicit trigger by the subscription filter, since the
+   * user is clearly addressing the bot even without an @mention.
+   */
+  is_reply_to_bot?: boolean;
 }
 
 /** Attachment type tag for the unified media pipeline. */
