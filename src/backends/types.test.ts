@@ -7,6 +7,7 @@ import {
   getContainerConfig,
   getServerFolder,
   getBackendType,
+  getAgentRuntime,
   type AgentOrGroup,
 } from './types.js';
 import type { Agent, RegisteredGroup } from '../types.js';
@@ -143,6 +144,26 @@ describe('backends/types.ts', () => {
         'apple-container',
       );
       expect(getBackendType(makeGroup({ backend: 'docker' }))).toBe('docker');
+    });
+  });
+
+  describe('getAgentRuntime', () => {
+    it('returns runtime from an Agent directly', () => {
+      expect(getAgentRuntime(makeAgent({ agentRuntime: 'opencode' }))).toBe(
+        'opencode',
+      );
+    });
+
+    it('returns runtime from a RegisteredGroup', () => {
+      expect(getAgentRuntime(makeGroup({ agentRuntime: 'opencode' }))).toBe(
+        'opencode',
+      );
+    });
+
+    it('defaults RegisteredGroups to the Claude Agent SDK runtime', () => {
+      expect(getAgentRuntime(makeGroup({ agentRuntime: undefined }))).toBe(
+        'claude-agent-sdk',
+      );
     });
   });
 });

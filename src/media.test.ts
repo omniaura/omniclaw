@@ -13,6 +13,7 @@ import {
   isTextByExtension,
   readStreamWithByteLimit,
   resolveWorkspaceFolder,
+  storeMediaAttachment,
   IMAGE_EXTENSIONS,
   MAX_BINARY_DOWNLOAD_BYTES,
   MAX_TEXT_DOWNLOAD_BYTES,
@@ -185,6 +186,53 @@ describe('buildSafeMediaPath', () => {
 });
 
 // ---------------------------------------------------------------------------
+// storeMediaAttachment
+// ---------------------------------------------------------------------------
+
+describe('storeMediaAttachment', () => {
+  const testFolder = `__store_media_test_${Date.now()}`;
+
+  afterEach(() => {
+    try {
+      fs.rmSync(path.join(GROUPS_DIR, testFolder), { recursive: true });
+    } catch {
+      // ignore
+    }
+  });
+
+  it('downloads bytes, writes a safe filename, and returns a descriptor', async () => {
+    globalThis.fetch = mock(() =>
+      Promise.resolve(new Response(createStream(['image-bytes']))),
+    ) as unknown as typeof globalThis.fetch;
+
+    const attachment = await storeMediaAttachment({
+      url: 'https://example.test/unsafe.png',
+      group: { folder: testFolder },
+      messageId: 'msg-1',
+      rawFilename: '../unsafe.png',
+      type: 'image',
+      mimeType: 'image/png',
+      filenamePrefix: 'photo',
+      maxBytes: 100,
+    });
+
+    expect(attachment).toEqual({
+      type: 'image',
+      mimeType: 'image/png',
+      localPath: path.join(
+        GROUPS_DIR,
+        testFolder,
+        'media',
+        'msg-1-photo-unsafe.png',
+      ),
+      originalUrl: 'https://example.test/unsafe.png',
+      filename: 'msg-1-photo-unsafe.png',
+    });
+    expect(fs.readFileSync(attachment.localPath, 'utf8')).toBe('image-bytes');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Marker formatting
 // ---------------------------------------------------------------------------
 
@@ -311,6 +359,10 @@ describe('cleanupExpiredMedia', () => {
   it('does nothing when media dir does not exist', () => {
     // Should not throw
     cleanupExpiredMedia({ folder: 'nonexistent-folder-xyz' });
+  });
+
+  it('swallows non-critical cleanup errors', () => {
+    cleanupExpiredMedia({ folder: '../outside-groups' });
   });
 });
 

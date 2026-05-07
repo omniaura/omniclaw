@@ -129,4 +129,128 @@ describe('createSimDiscoveryEnvironment', () => {
 
     await reader!.cancel();
   });
+
+  it('supports deterministic runtime toggles in network page state', () => {
+    const env = createSimDiscoveryEnvironment(new FakeState());
+    const runtime = env.context.runtime as unknown as {
+      setEnabled(enabled: boolean): { enabled: boolean; active: boolean };
+      isRemoteAccessAllowed(): boolean;
+    };
+
+    expect(env.getNetworkPageState().runtime.active).toBe(true);
+    expect(runtime.setEnabled(false)).toMatchObject({
+      enabled: false,
+      active: false,
+    });
+    expect(runtime.isRemoteAccessAllowed()).toBe(false);
+    expect(env.getNetworkPageState().runtime.active).toBe(false);
+
+    runtime.setEnabled(true);
+    expect(env.getNetworkPageState().runtime.active).toBe(true);
+  });
+
+  it('simulates pair request approval, rejection, and revocation state', () => {
+    const env = createSimDiscoveryEnvironment(new FakeState());
+    const originalDateNow = Date.now;
+    let now = 1_700_000_000_000;
+    const trustStore = env.context.trustStore as unknown as {
+      createPairRequest: (
+        fromInstanceId: string,
+        fromName: string,
+        fromHost: string,
+        fromPort: number,
+        callbackToken: string,
+      ) => { id: string; status: string; fromInstanceId: string };
+      approvePairRequest: (id: string) => { sharedSecret: string };
+      rejectPairRequest: (id: string) => void;
+      revokePeer: (instanceId: string) => void;
+      resetPeerToDiscovered: (instanceId: string) => void;
+      getPeer: (
+        instanceId: string,
+      ) => { status: string; sharedSecret: string | null } | null;
+      getPendingRequests: () => Array<{ status: string }>;
+    };
+
+    Date.now = () => now++;
+    try {
+      const approved = trustStore.createPairRequest(
+        'peer-new',
+        'New Peer',
+        'new-sim.local',
+        3100,
+        'token-a',
+      );
+      const rejected = trustStore.createPairRequest(
+        'peer-rejected',
+        'Rejected Peer',
+        'reject-sim.local',
+        3101,
+        'token-b',
+      );
+
+      expect(approved).toMatchObject({
+        status: 'pending',
+        fromInstanceId: 'peer-new',
+      });
+      expect(trustStore.getPendingRequests()).toHaveLength(2);
+
+      expect(trustStore.approvePairRequest(approved.id).sharedSecret).toBe(
+        'sim-secret-peer-new',
+      );
+      expect(trustStore.getPeer('peer-new')).toMatchObject({
+        status: 'trusted',
+        sharedSecret: 'sim-secret-peer-new',
+      });
+
+      trustStore.rejectPairRequest(rejected.id);
+      expect(
+        trustStore.getPendingRequests().map((request) => request.status),
+      ).toEqual(['approved', 'rejected']);
+
+      trustStore.revokePeer('peer-new');
+      expect(trustStore.getPeer('peer-new')).toMatchObject({
+        status: 'revoked',
+        sharedSecret: null,
+      });
+
+      trustStore.resetPeerToDiscovered('peer-new');
+      expect(trustStore.getPeer('peer-new')).toMatchObject({
+        status: 'discovered',
+      });
+    } finally {
+      Date.now = originalDateNow;
+    }
+  });
+
+  it('resets simulated peers and rejects mutations for missing peers', () => {
+    const env = createSimDiscoveryEnvironment(new FakeState());
+
+    env.addRemotePeer({
+      instanceId: 'peer-temp',
+      name: 'Temporary Peer',
+      host: 'temp-sim.local',
+      address: '192.168.1.90',
+      channelFolder: 'temp',
+    });
+    env.setPeerOnline('peer-temp', false);
+    expect(env.listRemotePeers()).toHaveLength(2);
+    expect(
+      env.listRemotePeers().find((peer) => peer.instanceId === 'peer-temp'),
+    ).toMatchObject({ online: false });
+
+    env.reset();
+    expect(env.listRemotePeers()).toEqual([
+      expect.objectContaining({ instanceId: 'peer-remote-1', online: true }),
+    ]);
+    expect(() =>
+      env.addRemoteLog('missing-peer', {
+        level: 'info',
+        msg: 'no-op',
+        source: 'missing-peer',
+      }),
+    ).toThrow('Remote peer not found: missing-peer');
+    expect(() => env.setPeerOnline('missing-peer', true)).toThrow(
+      'Remote peer not found: missing-peer',
+    );
+  });
 });
