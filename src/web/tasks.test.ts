@@ -110,6 +110,75 @@ describe('renderTaskTableRows', () => {
     expect(html).toContain('badge status-active');
     expect(html).toContain('badge status-paused');
   });
+
+  it('formats interval schedule labels across millisecond, second, minute, and hour boundaries', () => {
+    const html = renderTaskTableRows([
+      makeTask({
+        id: 'task-ms',
+        schedule_type: 'interval',
+        schedule_value: '999',
+      }),
+      makeTask({
+        id: 'task-sec',
+        schedule_type: 'interval',
+        schedule_value: '15000',
+      }),
+      makeTask({
+        id: 'task-min',
+        schedule_type: 'interval',
+        schedule_value: '120000',
+      }),
+      makeTask({
+        id: 'task-hour',
+        schedule_type: 'interval',
+        schedule_value: '5400000',
+      }),
+      makeTask({
+        id: 'task-invalid',
+        schedule_type: 'interval',
+        schedule_value: 'soon',
+      }),
+    ]);
+
+    expect(html).toContain('<span class="sched-label">999ms</span>');
+    expect(html).toContain('<span class="sched-label">15s</span>');
+    expect(html).toContain('<span class="sched-label">2m</span>');
+    expect(html).toContain('<span class="sched-label">1.5h</span>');
+    expect(html).toContain('<span class="sched-label">soon</span>');
+  });
+
+  it('formats next and last run times relative to a deterministic current time', () => {
+    const RealDate = Date;
+    const fixedNow = new RealDate('2026-05-08T12:00:00.000Z');
+
+    class FixedDate extends RealDate {
+      constructor(value?: string | number | Date) {
+        super(value ?? fixedNow.getTime());
+      }
+
+      static now() {
+        return fixedNow.getTime();
+      }
+    }
+
+    globalThis.Date = FixedDate as DateConstructor;
+    try {
+      const html = renderTaskTableRows([
+        makeTask({
+          id: 'task-relative',
+          next_run: '2026-05-08T12:45:00.000Z',
+          last_run: '2026-05-07T12:00:00.000Z',
+          last_result: 'error',
+        }),
+      ]);
+
+      expect(html).toContain('>in 45m</td>');
+      expect(html).toContain('class="td-time run-error"');
+      expect(html).toContain('>1d ago</td>');
+    } finally {
+      globalThis.Date = RealDate;
+    }
+  });
 });
 
 describe('renderTasksContent', () => {
