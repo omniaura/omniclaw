@@ -30,6 +30,31 @@ const BASE_RETRY_MS = 5000;
 export type Lane = 'message' | 'task';
 type MessageLaneState = 'idle' | 'running' | 'cooldown';
 
+/**
+ * Structured reason code describing why a message lane is in its current state.
+ *
+ * - `running`: actively processing a message
+ * - `cooling-down`: container kept warm, ready to reuse
+ * - `back-pressure`: messages pending but waiting for container capacity
+ * - `retrying`: backing off after a recent failure (retryCount > 0)
+ * - `no-work`: no pending messages, no container
+ */
+export type MessageLaneReason =
+  | 'running'
+  | 'cooling-down'
+  | 'back-pressure'
+  | 'retrying'
+  | 'no-work';
+
+/**
+ * Structured reason code describing why a task lane is in its current state.
+ *
+ * - `running`: actively executing a scheduled task
+ * - `back-pressure`: pending tasks but waiting for task-container capacity
+ * - `no-work`: no pending tasks, no task running
+ */
+export type TaskLaneReason = 'running' | 'back-pressure' | 'no-work';
+
 export interface GroupQueueDetail {
   folderKey: string;
   messageLane: {
@@ -37,6 +62,13 @@ export interface GroupQueueDetail {
     idle: boolean;
     pendingCount: number;
     containerName: string | null;
+    /**
+     * Structured reason for the current lane state (operator diagnostics).
+     * Optional for backward compatibility with older fixtures; the orchestrator
+     * always populates this field. Consumers should fall back to
+     * {@link deriveMessageLaneReasonFromDetail} when missing.
+     */
+    reason?: MessageLaneReason;
   };
   taskLane: {
     active: boolean;
@@ -48,8 +80,67 @@ export interface GroupQueueDetail {
       startedAt: number;
       runningMs: number;
     } | null;
+    /**
+     * Structured reason for the current lane state (operator diagnostics).
+     * Optional for backward compatibility with older fixtures; the orchestrator
+     * always populates this field. Consumers should fall back to
+     * {@link deriveTaskLaneReasonFromDetail} when missing.
+     */
+    reason?: TaskLaneReason;
   };
   retryCount: number;
+}
+
+/** Resolve a message lane reason from a detail snapshot, deriving if absent. */
+export function deriveMessageLaneReasonFromDetail(
+  detail: GroupQueueDetail,
+): MessageLaneReason {
+  if (detail.messageLane.reason) return detail.messageLane.reason;
+  // Map the legacy active/idle booleans back to the raw lane state.
+  let laneState: 'idle' | 'running' | 'cooldown';
+  if (detail.messageLane.idle) laneState = 'cooldown';
+  else if (detail.messageLane.active) laneState = 'running';
+  else laneState = 'idle';
+  return deriveMessageLaneReason({
+    laneState,
+    pendingCount: detail.messageLane.pendingCount,
+    retryCount: detail.retryCount,
+  });
+}
+
+/** Resolve a task lane reason from a detail snapshot, deriving if absent. */
+export function deriveTaskLaneReasonFromDetail(
+  detail: GroupQueueDetail,
+): TaskLaneReason {
+  if (detail.taskLane.reason) return detail.taskLane.reason;
+  return deriveTaskLaneReason({
+    active: detail.taskLane.active,
+    pendingCount: detail.taskLane.pendingCount,
+  });
+}
+
+/** Derive a structured reason code for a message lane from raw state. */
+export function deriveMessageLaneReason(input: {
+  laneState: 'idle' | 'running' | 'cooldown';
+  pendingCount: number;
+  retryCount: number;
+}): MessageLaneReason {
+  if (input.laneState === 'running') return 'running';
+  if (input.laneState === 'cooldown') return 'cooling-down';
+  // laneState === 'idle' from here on
+  if (input.retryCount > 0) return 'retrying';
+  if (input.pendingCount > 0) return 'back-pressure';
+  return 'no-work';
+}
+
+/** Derive a structured reason code for a task lane from raw state. */
+export function deriveTaskLaneReason(input: {
+  active: boolean;
+  pendingCount: number;
+}): TaskLaneReason {
+  if (input.active) return 'running';
+  if (input.pendingCount > 0) return 'back-pressure';
+  return 'no-work';
 }
 
 interface ActiveTaskInfo {
@@ -838,6 +929,15 @@ export class GroupQueue {
   getDetailedStats(): GroupQueueDetail[] {
     const details: GroupQueueDetail[] = [];
     for (const [folderKey, state] of this.groups) {
+      const messageReason = deriveMessageLaneReason({
+        laneState: state.messageLaneState,
+        pendingCount: state.pendingMessageJids.length,
+        retryCount: state.retryCount,
+      });
+      const taskReason = deriveTaskLaneReason({
+        active: state.taskActive,
+        pendingCount: state.pendingTasks.length,
+      });
       details.push({
         folderKey,
         messageLane: {
@@ -845,6 +945,7 @@ export class GroupQueue {
           idle: state.messageLaneState === 'cooldown',
           pendingCount: state.pendingMessageJids.length,
           containerName: state.messageContainerName,
+          reason: messageReason,
         },
         taskLane: {
           active: state.taskActive,
@@ -858,6 +959,7 @@ export class GroupQueue {
                 runningMs: Date.now() - state.activeTaskInfo.startedAt,
               }
             : null,
+          reason: taskReason,
         },
         retryCount: state.retryCount,
       });

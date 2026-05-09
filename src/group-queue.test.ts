@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 
 import realFs from 'fs';
 
-import { GroupQueue } from './group-queue.js';
+import {
+  GroupQueue,
+  deriveMessageLaneReason,
+  deriveTaskLaneReason,
+} from './group-queue.js';
 
 mock.restore();
 
@@ -973,5 +977,113 @@ describe('GroupQueue', () => {
           originalSetTimeout;
       }
     });
+  });
+});
+
+describe('deriveMessageLaneReason', () => {
+  it("returns 'running' when lane is running regardless of pending/retry", () => {
+    expect(
+      deriveMessageLaneReason({
+        laneState: 'running',
+        pendingCount: 0,
+        retryCount: 0,
+      }),
+    ).toBe('running');
+    expect(
+      deriveMessageLaneReason({
+        laneState: 'running',
+        pendingCount: 5,
+        retryCount: 2,
+      }),
+    ).toBe('running');
+  });
+
+  it("returns 'cooling-down' when lane is in cooldown", () => {
+    expect(
+      deriveMessageLaneReason({
+        laneState: 'cooldown',
+        pendingCount: 0,
+        retryCount: 0,
+      }),
+    ).toBe('cooling-down');
+  });
+
+  it("returns 'retrying' when idle and retryCount > 0", () => {
+    expect(
+      deriveMessageLaneReason({
+        laneState: 'idle',
+        pendingCount: 0,
+        retryCount: 1,
+      }),
+    ).toBe('retrying');
+    // Retry takes precedence over back-pressure when idle
+    expect(
+      deriveMessageLaneReason({
+        laneState: 'idle',
+        pendingCount: 5,
+        retryCount: 2,
+      }),
+    ).toBe('retrying');
+  });
+
+  it("returns 'back-pressure' when idle with pending work and no retry", () => {
+    expect(
+      deriveMessageLaneReason({
+        laneState: 'idle',
+        pendingCount: 3,
+        retryCount: 0,
+      }),
+    ).toBe('back-pressure');
+  });
+
+  it("returns 'no-work' when idle with nothing pending or retrying", () => {
+    expect(
+      deriveMessageLaneReason({
+        laneState: 'idle',
+        pendingCount: 0,
+        retryCount: 0,
+      }),
+    ).toBe('no-work');
+  });
+});
+
+describe('deriveTaskLaneReason', () => {
+  it("returns 'running' when active", () => {
+    expect(deriveTaskLaneReason({ active: true, pendingCount: 0 })).toBe(
+      'running',
+    );
+    expect(deriveTaskLaneReason({ active: true, pendingCount: 4 })).toBe(
+      'running',
+    );
+  });
+
+  it("returns 'back-pressure' when not active but pending tasks exist", () => {
+    expect(deriveTaskLaneReason({ active: false, pendingCount: 2 })).toBe(
+      'back-pressure',
+    );
+  });
+
+  it("returns 'no-work' when not active and no pending tasks", () => {
+    expect(deriveTaskLaneReason({ active: false, pendingCount: 0 })).toBe(
+      'no-work',
+    );
+  });
+});
+
+describe('GroupQueue.getDetailedStats reason codes', () => {
+  it('exposes reason codes for empty queue (no groups)', () => {
+    const fresh = new GroupQueue({
+      dataDir: '/tmp/omniclaw-test-data-reason',
+      maxActiveContainers: 1,
+      maxIdleContainers: 0,
+      maxTaskContainers: 1,
+      fsImpl: {
+        ...realFs,
+        mkdirSync: mock(),
+        writeFileSync: mock(),
+        renameSync: mock(),
+      },
+    });
+    expect(fresh.getDetailedStats()).toEqual([]);
   });
 });

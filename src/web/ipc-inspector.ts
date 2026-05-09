@@ -1,4 +1,8 @@
 import type { WebStateProvider } from './types.js';
+import {
+  deriveMessageLaneReasonFromDetail,
+  deriveTaskLaneReasonFromDetail,
+} from '../group-queue.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 
@@ -19,11 +23,13 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
       const taskInfo = g.taskLane.activeTask
         ? `${escapeHtml(g.taskLane.activeTask.taskId)} (${formatDuration(g.taskLane.activeTask.runningMs)})`
         : '\u2014';
+      const msgReason = deriveMessageLaneReasonFromDetail(g);
+      const taskReason = deriveTaskLaneReasonFromDetail(g);
       return `<tr>
         <td class="folder-key">${escapeHtml(g.folderKey)}</td>
-        <td><span class="lane-badge lane-${msgStatus}">${msgStatus}</span></td>
+        <td><span class="lane-badge lane-${msgStatus}">${msgStatus}</span><span class="lane-reason reason-${msgReason}">${msgReason}</span></td>
         <td>${g.messageLane.pendingCount}</td>
-        <td><span class="lane-badge lane-${taskStatus}">${taskStatus}</span></td>
+        <td><span class="lane-badge lane-${taskStatus}">${taskStatus}</span><span class="lane-reason reason-${taskReason}">${taskReason}</span></td>
         <td>${g.taskLane.pendingCount}</td>
         <td class="task-info">${taskInfo}</td>
         <td>${g.retryCount > 0 ? `<span class="retry-count">${g.retryCount}</span>` : '\u2014'}</td>
