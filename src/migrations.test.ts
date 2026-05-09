@@ -154,4 +154,19 @@ describe('migration versioning', () => {
 
     db.close();
   });
+
+  it('creates factory workflow handoff and claim tables', () => {
+    const db = new Database(':memory:');
+
+    runMigrations(db, allMigrations);
+
+    expect(getSchemaVersion(db)).toBe(BASELINE_VERSION);
+    expect(getColumns(db, 'factory_handoff_records')).toContain('workflow_id');
+    expect(getColumns(db, 'factory_handoff_records')).toContain(
+      'artifacts_json',
+    );
+    expect(getColumns(db, 'factory_workflow_claims')).toContain('expires_at');
+
+    db.close();
+  });
 });

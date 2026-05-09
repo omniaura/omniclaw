@@ -212,6 +212,53 @@ export interface TaskRunPhaseEvent {
   error: string | null;
 }
 
+export type FactoryWorkflowPhase =
+  | 'discovery'
+  | 'spec'
+  | 'impl'
+  | 'review'
+  | 'qa'
+  | 'done';
+
+export interface FactoryWorkflowArtifact {
+  type: 'issue' | 'pr' | 'branch' | 'commit' | 'file' | 'url' | 'note';
+  label: string;
+  url?: string;
+  path?: string;
+}
+
+export interface FactoryHandoffRecord {
+  id: string;
+  workflowId: string;
+  repo: string;
+  sourceIssue?: string;
+  sourcePr?: string;
+  phase: FactoryWorkflowPhase;
+  ownerAgentId: string;
+  driver: string;
+  intent: string;
+  summary: string;
+  body: string;
+  decisions: string[];
+  artifacts: FactoryWorkflowArtifact[];
+  blockers: string[];
+  nextDriver?: string;
+  nextScope?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface FactoryWorkflowClaim {
+  workflowId: string;
+  repo: string;
+  ownerAgentId: string;
+  ownerRunId: string;
+  phase: FactoryWorkflowPhase;
+  claimedAt: string;
+  heartbeatAt: string;
+  expiresAt: string;
+}
+
 // --- Channel abstraction ---
 
 export interface Channel {

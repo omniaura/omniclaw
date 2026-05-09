@@ -6,6 +6,7 @@ import path from 'path';
 import { discordCommandsSchema } from './agent-topology.js';
 import { DATA_DIR, STORE_DIR } from './config.js';
 import { TrustStore } from './discovery/trust-store.js';
+import { FactoryWorkflowStore } from './factory-workflows.js';
 import { logger } from './logger.js';
 import { allMigrations, runMigrations } from './migrations.js';
 import {
@@ -290,6 +291,10 @@ function applyDiscordRequiresTriggerFix(database: Database): void {
 
 export function createTrustStore(): TrustStore {
   return new TrustStore(db);
+}
+
+export function createFactoryWorkflowStore(): FactoryWorkflowStore {
+  return new FactoryWorkflowStore(db);
 }
 
 export function getOrCreateDiscoveryInstanceId(): string {

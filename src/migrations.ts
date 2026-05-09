@@ -16,7 +16,7 @@ export interface Migration {
  * The version that represents the latest schema. Existing databases that
  * predate the migration framework are advanced through every migration to this.
  */
-export const BASELINE_VERSION = 2;
+export const BASELINE_VERSION = 3;
 
 // ---------------------------------------------------------------------------
 // Schema helpers (available for use in migrations)
@@ -503,6 +503,54 @@ const migration2: Migration = {
   },
 };
 
+const migration3: Migration = {
+  version: 3,
+  description: 'Persist factory workflow handoffs and active claims',
+  up: (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS factory_handoff_records (
+        id TEXT PRIMARY KEY,
+        workflow_id TEXT NOT NULL,
+        repo TEXT NOT NULL,
+        source_issue TEXT,
+        source_pr TEXT,
+        phase TEXT NOT NULL,
+        owner_agent_id TEXT NOT NULL,
+        driver TEXT NOT NULL,
+        intent TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        body TEXT NOT NULL,
+        decisions_json TEXT NOT NULL DEFAULT '[]',
+        artifacts_json TEXT NOT NULL DEFAULT '[]',
+        blockers_json TEXT NOT NULL DEFAULT '[]',
+        next_driver TEXT,
+        next_scope TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_factory_handoffs_workflow
+        ON factory_handoff_records(workflow_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_factory_handoffs_repo_issue
+        ON factory_handoff_records(repo, source_issue, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS factory_workflow_claims (
+        workflow_id TEXT PRIMARY KEY,
+        repo TEXT NOT NULL,
+        owner_agent_id TEXT NOT NULL,
+        owner_run_id TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        claimed_at TEXT NOT NULL,
+        heartbeat_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_factory_claims_expires_at
+        ON factory_workflow_claims(expires_at);
+      CREATE INDEX IF NOT EXISTS idx_factory_claims_repo
+        ON factory_workflow_claims(repo);
+    `);
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Migration registry
 // ---------------------------------------------------------------------------
@@ -513,4 +561,4 @@ const migration2: Migration = {
  * can use plain `ALTER TABLE` without try/catch — the version tracker
  * guarantees each migration runs exactly once.
  */
-export const allMigrations: Migration[] = [migration1, migration2];
+export const allMigrations: Migration[] = [migration1, migration2, migration3];
