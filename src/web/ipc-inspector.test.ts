@@ -242,6 +242,34 @@ describe('renderIpcInspector', () => {
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('&lt;script&gt;');
   });
+
+  it('allowlists lane reason codes before rendering class names', () => {
+    const xssDetail: GroupQueueDetail = {
+      folderKey: 'agent-xss',
+      messageLane: {
+        active: false,
+        idle: false,
+        pendingCount: 0,
+        containerName: null,
+        reason: 'no-work"><script>alert(1)</script>' as never,
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work onmouseover=alert(1)' as never,
+      },
+      retryCount: 0,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [xssDetail] }),
+    );
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).not.toContain('onmouseover=alert(1)');
+    expect(html).toContain('reason-unknown');
+    expect(html).toContain('>unknown<');
+  });
 });
 
 describe('IPC Inspector API routes', () => {

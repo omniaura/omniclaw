@@ -2,9 +2,25 @@ import type { WebStateProvider } from './types.js';
 import {
   deriveMessageLaneReasonFromDetail,
   deriveTaskLaneReasonFromDetail,
+  type MessageLaneReason,
+  type TaskLaneReason,
 } from '../group-queue.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
+
+const MESSAGE_REASON_CODES = new Set<MessageLaneReason>([
+  'running',
+  'cooling-down',
+  'back-pressure',
+  'retrying',
+  'no-work',
+]);
+
+const TASK_REASON_CODES = new Set<TaskLaneReason>([
+  'running',
+  'back-pressure',
+  'no-work',
+]);
 
 /** Render IPC inspector content (no shell). */
 export function renderIpcInspectorContent(state: WebStateProvider): string {
@@ -23,13 +39,19 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
       const taskInfo = g.taskLane.activeTask
         ? `${escapeHtml(g.taskLane.activeTask.taskId)} (${formatDuration(g.taskLane.activeTask.runningMs)})`
         : '\u2014';
-      const msgReason = deriveMessageLaneReasonFromDetail(g);
-      const taskReason = deriveTaskLaneReasonFromDetail(g);
+      const msgReason = renderLaneReason(
+        deriveMessageLaneReasonFromDetail(g),
+        MESSAGE_REASON_CODES,
+      );
+      const taskReason = renderLaneReason(
+        deriveTaskLaneReasonFromDetail(g),
+        TASK_REASON_CODES,
+      );
       return `<tr>
         <td class="folder-key">${escapeHtml(g.folderKey)}</td>
-        <td><span class="lane-badge lane-${msgStatus}">${msgStatus}</span><span class="lane-reason reason-${msgReason}">${msgReason}</span></td>
+        <td><span class="lane-badge lane-${msgStatus}">${msgStatus}</span>${msgReason}</td>
         <td>${g.messageLane.pendingCount}</td>
-        <td><span class="lane-badge lane-${taskStatus}">${taskStatus}</span><span class="lane-reason reason-${taskReason}">${taskReason}</span></td>
+        <td><span class="lane-badge lane-${taskStatus}">${taskStatus}</span>${taskReason}</td>
         <td>${g.taskLane.pendingCount}</td>
         <td class="task-info">${taskInfo}</td>
         <td>${g.retryCount > 0 ? `<span class="retry-count">${g.retryCount}</span>` : '\u2014'}</td>
@@ -85,6 +107,14 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
     `</section>` +
     `</div></div>`
   );
+}
+
+function renderLaneReason<T extends string>(
+  reason: T,
+  allowedCodes: ReadonlySet<T>,
+): string {
+  const code = allowedCodes.has(reason) ? reason : 'unknown';
+  return `<span class="lane-reason reason-${code}">${escapeHtml(code)}</span>`;
 }
 
 /** Full IPC inspector page with shell. */
