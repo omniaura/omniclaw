@@ -27,6 +27,7 @@ const sampleQueueDetails: GroupQueueDetail[] = [
       idle: false,
       pendingCount: 2,
       containerName: 'ctr-alpha-msg',
+      reason: 'running',
     },
     taskLane: {
       active: true,
@@ -38,6 +39,7 @@ const sampleQueueDetails: GroupQueueDetail[] = [
         startedAt: Date.now() - 30000,
         runningMs: 30000,
       },
+      reason: 'running',
     },
     retryCount: 0,
   },
@@ -48,12 +50,14 @@ const sampleQueueDetails: GroupQueueDetail[] = [
       idle: true,
       pendingCount: 0,
       containerName: 'ctr-beta-msg',
+      reason: 'cooling-down',
     },
     taskLane: {
       active: false,
       pendingCount: 0,
       containerName: null,
       activeTask: null,
+      reason: 'no-work',
     },
     retryCount: 2,
   },
@@ -149,6 +153,70 @@ describe('renderIpcInspector', () => {
     expect(html).toContain('retry-count');
   });
 
+  it('renders structured reason codes alongside lane badges', () => {
+    const html = renderIpcInspector(makeState());
+    // agent-alpha has running message lane
+    expect(html).toContain('reason-running');
+    // agent-beta has cooling-down message lane and no-work task lane
+    expect(html).toContain('reason-cooling-down');
+    expect(html).toContain('reason-no-work');
+    // Reason text appears
+    expect(html).toContain('>running<');
+    expect(html).toContain('>cooling-down<');
+    expect(html).toContain('>no-work<');
+  });
+
+  it('renders back-pressure reason for queued work without container', () => {
+    const detail: GroupQueueDetail = {
+      folderKey: 'agent-gamma',
+      messageLane: {
+        active: false,
+        idle: false,
+        pendingCount: 3,
+        containerName: null,
+        reason: 'back-pressure',
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 2,
+        containerName: null,
+        activeTask: null,
+        reason: 'back-pressure',
+      },
+      retryCount: 0,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [detail] }),
+    );
+    expect(html).toContain('reason-back-pressure');
+  });
+
+  it('renders retrying reason when retryCount > 0 and lane idle', () => {
+    const detail: GroupQueueDetail = {
+      folderKey: 'agent-delta',
+      messageLane: {
+        active: false,
+        idle: false,
+        pendingCount: 1,
+        containerName: null,
+        reason: 'retrying',
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work',
+      },
+      retryCount: 3,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [detail] }),
+    );
+    expect(html).toContain('reason-retrying');
+    expect(html).toContain('>retrying<');
+  });
+
   it('escapes HTML in group names', () => {
     const xssDetail: GroupQueueDetail = {
       folderKey: '<script>alert(1)</script>',
@@ -157,12 +225,14 @@ describe('renderIpcInspector', () => {
         idle: false,
         pendingCount: 0,
         containerName: null,
+        reason: 'no-work',
       },
       taskLane: {
         active: false,
         pendingCount: 0,
         containerName: null,
         activeTask: null,
+        reason: 'no-work',
       },
       retryCount: 0,
     };
@@ -171,6 +241,34 @@ describe('renderIpcInspector', () => {
     );
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('allowlists lane reason codes before rendering class names', () => {
+    const xssDetail: GroupQueueDetail = {
+      folderKey: 'agent-xss',
+      messageLane: {
+        active: false,
+        idle: false,
+        pendingCount: 0,
+        containerName: null,
+        reason: 'no-work"><script>alert(1)</script>' as never,
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work onmouseover=alert(1)' as never,
+      },
+      retryCount: 0,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [xssDetail] }),
+    );
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).not.toContain('onmouseover=alert(1)');
+    expect(html).toContain('reason-unknown');
+    expect(html).toContain('>unknown<');
   });
 });
 
