@@ -320,6 +320,19 @@ describe('discord command flows', () => {
 
     const rename = session?.options?.find((option) => option.name === 'rename');
     expect(rename?.type).toBe(ApplicationCommandOptionType.Subcommand);
+    const list = session?.options?.find((option) => option.name === 'list');
+    const listOptions =
+      'options' in list!
+        ? (list.options as unknown as ReadonlyArray<{
+            name: string;
+            description: string;
+          }>)
+        : [];
+    expect(
+      listOptions.find((option) => option.name === 'limit')?.description,
+    ).toContain('max 25');
+    const end = session?.options?.find((option) => option.name === 'end');
+    expect(end?.description).toContain('active session');
     const renameOptions =
       'options' in rename!
         ? (rename.options as unknown as ReadonlyArray<{

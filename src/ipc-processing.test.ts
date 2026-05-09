@@ -9,7 +9,9 @@ import {
   setRegisteredGroup,
   expireStaleSessions,
   getSession,
+  getPendingSessionIntent,
   setSession,
+  setPendingSessionIntent,
   getAllSessions,
   setAgent,
   getAgent,
@@ -21,6 +23,7 @@ import {
   getChannelRoute,
   getAllChannelRoutes,
   getRoutesForAgent,
+  clearPendingSessionIntent,
 } from './db.js';
 import { processTaskIpc, IpcDeps } from './ipc.js';
 import {
@@ -817,6 +820,33 @@ describe('expireStaleSessions', () => {
     setSession('group-y', 'session-1');
     setSession('group-y', 'session-2');
     expect(getSession('group-y')).toBe('session-2');
+  });
+
+  it('persists and clears pending session intents', () => {
+    setPendingSessionIntent('group-intent', {
+      forkFrom: 'session-source',
+      name: 'launch triage',
+    });
+
+    expect(getPendingSessionIntent('group-intent')).toEqual({
+      forkFrom: 'session-source',
+      name: 'launch triage',
+    });
+
+    clearPendingSessionIntent('group-intent');
+    expect(getPendingSessionIntent('group-intent')).toBeUndefined();
+  });
+
+  it('clears pending session intents with stale sessions', () => {
+    setSession('old-group', 'session-old');
+    setPendingSessionIntent('old-group', {
+      forkFrom: 'session-old',
+      name: 'old fork',
+    });
+    _backdateSessionForTest('old-group', '2000-01-01T00:00:00.000Z');
+
+    expect(expireStaleSessions(60_000)).toEqual(['old-group']);
+    expect(getPendingSessionIntent('old-group')).toBeUndefined();
   });
 });
 

@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it } from 'bun:test';
 
 import {
   _initTestDatabase,
+  getPendingSessionIntent,
   setChannelSubscription,
+  setSession,
   storeChatMetadata,
 } from './db.js';
 import {
   _createIntermediateStatusStreamer,
+  _handleSessionCommandForTest,
   _getSlashCommandGroupsFromSubscriptions,
   _getEnabledStartupConfirmationTargets,
   _isAgentEnabled,
@@ -17,8 +20,12 @@ import {
   _setChannelSubscriptions,
   _setRegisteredGroups,
   _truncateIntermediateStatusBuffer,
+  _setSessions,
   getAvailableGroups,
 } from './index.js';
+import { DATA_DIR } from './config.js';
+import fs from 'fs';
+import path from 'path';
 import type {
   Agent,
   ChannelSubscription,
@@ -320,6 +327,78 @@ describe('getAvailableGroups', () => {
     );
 
     expect(getAvailableGroups()).toEqual([]);
+  });
+});
+
+describe('Discord session command state', () => {
+  const sessionId = '123e4567-e89b-12d3-a456-426614174000';
+  const group: RegisteredGroup = {
+    name: 'Session Agent',
+    folder: 'session-agent',
+    trigger: '@Session',
+    added_at: '2024-01-01T00:00:00.000Z',
+  };
+  const sessionsDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    '.claude',
+    'projects',
+    '-workspace-group',
+  );
+
+  beforeEach(() => {
+    _initTestDatabase();
+    _setRegisteredGroups({});
+    _setChannelSubscriptions({});
+    _setAgents({});
+    _setSessions({});
+    fs.rmSync(path.join(DATA_DIR, 'sessions', group.folder), {
+      recursive: true,
+      force: true,
+    });
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionsDir, `${sessionId}.jsonl`), '{}\n');
+  });
+
+  it('persists pending fork and name intents for /session new resume_from', () => {
+    const result = _handleSessionCommandForTest('new', 'dc:channel-1', group, {
+      resumeFrom: sessionId,
+      name: 'launch **triage** `branch`',
+    });
+
+    expect(result.message).toContain(`forked from \`${sessionId}\``);
+    expect(getPendingSessionIntent(group.folder)).toEqual({
+      forkFrom: sessionId,
+      name: 'launch triage branch',
+    });
+  });
+
+  it('renders sanitized session names in host responses', () => {
+    const result = _handleSessionCommandForTest(
+      'rename',
+      'dc:channel-1',
+      group,
+      {
+        sessionId,
+        name: 'release `_cut_` **now**',
+      },
+    );
+
+    expect(result.message).toBe(
+      `Session \`${sessionId}\` renamed to "release cut now".`,
+    );
+  });
+
+  it('keeps /session end as an active-session confirmation', () => {
+    setSession(group.folder, sessionId);
+    _setSessions({ [group.folder]: sessionId });
+
+    const result = _handleSessionCommandForTest('end', 'dc:channel-1', group, {
+      sessionId: 'abcdefab-cdef-abcd-efab-cdefabcdefab',
+    });
+
+    expect(result.message).toContain('is not the active session');
   });
 });
 

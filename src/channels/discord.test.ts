@@ -312,6 +312,87 @@ describe('Discord slash flows', () => {
     expect(interaction.followUp).not.toHaveBeenCalled();
   });
 
+  it('forwards /session new resume_from to the host session handler', async () => {
+    let received:
+      | {
+          command: string;
+          resumeFrom?: string;
+          name?: string;
+        }
+      | undefined;
+    const channel = new DiscordChannel({
+      token: 'test-token-not-used',
+      botId: 'PRIMARY',
+      onSessionCommand: (command, _chatJid, _group, options) => {
+        received = {
+          command,
+          resumeFrom: options?.resumeFrom,
+          name: options?.name,
+        };
+        return { message: 'queued' };
+      },
+    });
+
+    setAgent({
+      id: 'clayton-discord',
+      name: 'Clayton',
+      folder: 'clayton-discord',
+      backend: 'apple-container',
+      agentRuntime: 'claude-agent-sdk',
+      isAdmin: false,
+      createdAt: '2026-05-01T00:00:00.000Z',
+    });
+    setChannelSubscription({
+      channelJid: 'dc:1474995286903361772',
+      agentId: 'clayton-discord',
+      trigger: '@Clayton',
+      requiresTrigger: true,
+      priority: 0,
+      isPrimary: true,
+      discordBotId: 'PRIMARY',
+      discordGuildId: '753336633083953213',
+      createdAt: '2026-05-01T00:00:00.000Z',
+    });
+
+    const interaction = {
+      id: '1499999999999999999',
+      commandName: 'session',
+      channelId: '1474995286903361772',
+      guildId: '753336633083953213',
+      inGuild: () => true,
+      memberPermissions: { has: () => true },
+      options: {
+        getSubcommand: () => 'new',
+        getString: (name: string) =>
+          name === 'resume_from'
+            ? '123e4567-e89b-12d3-a456-426614174000'
+            : name === 'name'
+              ? 'launch triage'
+              : null,
+        getInteger: () => null,
+        getBoolean: () => null,
+      },
+      deferReply: mock(async () => {}),
+      editReply: mock(async () => {}),
+      followUp: mock(async () => {}),
+    };
+
+    await (
+      channel as unknown as {
+        handleSlashCommand: (input: typeof interaction) => Promise<void>;
+      }
+    ).handleSlashCommand(interaction);
+
+    expect(received).toEqual({
+      command: 'new',
+      resumeFrom: '123e4567-e89b-12d3-a456-426614174000',
+      name: 'launch triage',
+    });
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: 'queued',
+    });
+  });
+
   it('routes legacy /sessions to /session list with deprecation metadata', async () => {
     let received:
       | {

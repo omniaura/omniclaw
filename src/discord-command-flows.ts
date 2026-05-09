@@ -288,7 +288,8 @@ const BUILTIN_COMMANDS: DiscordFlowDefinition[] = [
         options: [
           {
             name: 'limit',
-            description: 'Maximum number of sessions to show',
+            description:
+              'Maximum number of sessions to show (default 10, max 25)',
             type: 'integer',
           },
         ],
@@ -301,13 +302,13 @@ const BUILTIN_COMMANDS: DiscordFlowDefinition[] = [
       },
       {
         name: 'end',
-        description: 'End the current or specified session',
+        description: 'End the active session, optionally confirming its ID',
         prompt: '',
         system: true,
         options: [
           {
             name: 'session_id',
-            description: 'Specific session ID to end',
+            description: 'Active session ID to confirm before ending',
             type: 'string',
           },
         ],

@@ -117,9 +117,9 @@ Session control is exposed as one Discord-native command group:
 
 - `/session new [name] [resume_from]` starts a fresh session for the next message, optionally forking from an existing session.
 - `/session resume [session_id]` switches this channel to a previous session. Omitting `session_id` lists recent sessions.
-- `/session list [limit]` lists recent sessions for the channel.
+- `/session list [limit]` lists recent sessions for the channel (default 10, max 25).
 - `/session current` shows the active session.
-- `/session end [session_id]` ends the active session, or verifies a specified active session before ending it.
+- `/session end [session_id]` ends the active session, optionally verifying the active session ID before ending it.
 - `/session rename <session_id> <name>` stores a friendly name shown in session lists.
 
 The legacy `/resume` and `/sessions` aliases remain registered for one release and reply with a deprecation notice that points users to `/session resume` and `/session list`.

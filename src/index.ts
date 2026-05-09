@@ -81,6 +81,7 @@ import {
   getMessagesSince,
   getNewMessages,
   getOrCreateDiscoveryInstanceId,
+  getPendingSessionIntent,
   getRouterState,
   getSubscriptionsForAgent,
   getTaskById,
@@ -91,6 +92,7 @@ import {
   setAgentHealth,
   setChannelRoute,
   setChannelSubscription,
+  setPendingSessionIntent,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -212,8 +214,6 @@ async function shutdown(): Promise<void> {
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
-const pendingForkSessions = new Set<string>();
-const pendingSessionNames = new Map<string, string>();
 const resumePositionStore = createResumePositionStore({
   persistentTaskState: PERSISTENT_TASK_STATE,
   initialResumePositions: {},
@@ -264,6 +264,8 @@ const MAX_CHANNEL_AGENT_FANOUT = parseInt(
 const DISPATCH_KEY_SEP = '::agent::';
 const INTERMEDIATE_BUFFER_LIMIT = 1_800;
 const INTERMEDIATE_EDIT_DEBOUNCE_MS = 750;
+const DEFAULT_SESSION_LIST_LIMIT = 10;
+const MAX_SESSION_LIST_LIMIT = 25;
 
 type IntermediateStatusChannel = Pick<Channel, 'sendMessage' | 'editMessage'>;
 
@@ -543,11 +545,13 @@ function handleSessionCommand(
 
     const limit =
       typeof options.limit === 'number' && options.limit > 0
-        ? Math.min(options.limit, 25)
-        : 10;
+        ? Math.min(options.limit, MAX_SESSION_LIST_LIMIT)
+        : DEFAULT_SESSION_LIST_LIMIT;
     const lines = sessionInfos.slice(0, limit).map((s) => {
       const current = s.sessionId === currentSessionId ? ' **(active)**' : '';
-      const name = names[s.sessionId] ? ` — ${names[s.sessionId]}` : '';
+      const name = names[s.sessionId]
+        ? ` — ${formatSessionName(names[s.sessionId])}`
+        : '';
       const sizeKb = Math.round(s.sizeBytes / 1024);
       const age = formatAge(s.modifiedAt);
       return `\`${s.sessionId}\`${name} — ${sizeKb}KB, ${age}${current}`;
@@ -569,7 +573,7 @@ function handleSessionCommand(
     const sessionFile = path.join(sessionsDir, `${currentSessionId}.jsonl`);
     const stat = fs.existsSync(sessionFile) ? fs.statSync(sessionFile) : null;
     const name = names[currentSessionId]
-      ? `\nName: ${names[currentSessionId]}`
+      ? `\nName: ${formatSessionName(names[currentSessionId])}`
       : '';
     const activity = stat ? `\nLast activity: ${formatAge(stat.mtime)}` : '';
     return {
@@ -590,16 +594,13 @@ function handleSessionCommand(
       }
       sessions[runtimeFolder] = resumeFrom;
       setSession(runtimeFolder, resumeFrom);
-      pendingForkSessions.add(runtimeFolder);
     } else {
       delete sessions[runtimeFolder];
       clearSession(runtimeFolder);
-      pendingForkSessions.delete(runtimeFolder);
     }
     resumePositionStore.set(runtimeFolder, '');
     const name = normalizeSessionName(options.name);
-    if (name) pendingSessionNames.set(runtimeFolder, name);
-    else pendingSessionNames.delete(runtimeFolder);
+    setPendingSessionIntent(runtimeFolder, { forkFrom: resumeFrom, name });
     return {
       message: resumeFrom
         ? `Next message in this channel will start a fresh session forked from \`${resumeFrom}\`.`
@@ -618,8 +619,6 @@ function handleSessionCommand(
       delete sessions[runtimeFolder];
       clearSession(runtimeFolder);
       resumePositionStore.set(runtimeFolder, '');
-      pendingForkSessions.delete(runtimeFolder);
-      pendingSessionNames.delete(runtimeFolder);
       return {
         message: `Session \`${sessionId}\` ended for this channel. The next message will start fresh.`,
       };
@@ -647,7 +646,9 @@ function handleSessionCommand(
     const names = readSessionNames(sessionsDir);
     names[sessionId] = name;
     writeSessionNames(sessionsDir, names);
-    return { message: `Session \`${sessionId}\` renamed to "${name}".` };
+    return {
+      message: `Session \`${sessionId}\` renamed to ${formatSessionName(name)}.`,
+    };
   }
 
   const sessionId = options.sessionId?.trim();
@@ -674,7 +675,7 @@ function handleSessionCommand(
   sessions[runtimeFolder] = sessionId;
   setSession(runtimeFolder, sessionId);
   resumePositionStore.set(runtimeFolder, '');
-  pendingForkSessions.delete(runtimeFolder);
+  setPendingSessionIntent(runtimeFolder, {});
 
   return {
     message: `${prefix}Session switched to \`${sessionId}\`. The next message in this channel will resume from that session.`,
@@ -687,9 +688,16 @@ function validateSessionId(sessionId: string): string | null {
 }
 
 function normalizeSessionName(name: string | undefined): string | undefined {
-  const normalized = name?.trim().replace(/\s+/g, ' ');
+  const normalized = name
+    ?.replace(/[`*_~]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ');
   if (!normalized) return undefined;
   return normalized.slice(0, 80);
+}
+
+function formatSessionName(name: string): string {
+  return `"${normalizeSessionName(name) || 'unnamed'}"`;
 }
 
 function sessionNamesFilePath(sessionsDir: string): string {
@@ -741,9 +749,9 @@ function applyPendingSessionName(
   runtimeFolder: string,
   sessionId: string,
 ): void {
-  const name = pendingSessionNames.get(runtimeFolder);
+  const intent = getPendingSessionIntent(runtimeFolder);
+  const name = intent?.name;
   if (!name) return;
-  pendingSessionNames.delete(runtimeFolder);
   const sessionsDir = getRuntimeSessionsDir(runtimeFolder);
   const names = readSessionNames(sessionsDir);
   names[sessionId] = name;
@@ -1683,6 +1691,21 @@ export function _getEnabledStartupConfirmationTargets() {
   return getEnabledStartupConfirmationTargets();
 }
 
+/** @internal - exported for testing */
+export function _setSessions(nextSessions: Record<string, string>): void {
+  sessions = nextSessions;
+}
+
+/** @internal - exported for testing */
+export function _handleSessionCommandForTest(
+  command: 'new' | 'resume' | 'list' | 'current' | 'end' | 'rename',
+  chatJid: string,
+  group: RegisteredGroup,
+  options: SessionCommandOptions = {},
+): { message: string } {
+  return handleSessionCommand(command, chatJid, group, options);
+}
+
 /**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
@@ -2158,7 +2181,21 @@ async function runAgent(
   }
 
   const sessionId = sessions[runtimeGroupFolder];
-  const shouldForkSession = pendingForkSessions.has(runtimeGroupFolder);
+  const pendingSessionIntent = getPendingSessionIntent(runtimeGroupFolder);
+  const shouldForkSession =
+    pendingSessionIntent?.forkFrom != null &&
+    sessionId === pendingSessionIntent.forkFrom;
+  if (pendingSessionIntent?.forkFrom && !shouldForkSession) {
+    logger.warn(
+      {
+        runtimeGroupFolder,
+        expectedSessionId: pendingSessionIntent.forkFrom,
+        actualSessionId: sessionId,
+      },
+      'Discarding stale pending session fork intent because active session drifted',
+    );
+    setPendingSessionIntent(runtimeGroupFolder, {});
+  }
 
   // Update tasks snapshot for container to read (filtered by group)
   writeTasksSnapshot(
@@ -2214,7 +2251,7 @@ async function runAgent(
           sessions[runtimeGroupFolder] = output.newSessionId;
           setSession(runtimeGroupFolder, output.newSessionId);
           applyPendingSessionName(runtimeGroupFolder, output.newSessionId);
-          pendingForkSessions.delete(runtimeGroupFolder);
+          setPendingSessionIntent(runtimeGroupFolder, {});
         }
         if (output.resumeAt) {
           resumePositionStore.set(runtimeGroupFolder, output.resumeAt);
@@ -2319,7 +2356,7 @@ async function runAgent(
       sessions[runtimeGroupFolder] = output.newSessionId;
       setSession(runtimeGroupFolder, output.newSessionId);
       applyPendingSessionName(runtimeGroupFolder, output.newSessionId);
-      pendingForkSessions.delete(runtimeGroupFolder);
+      setPendingSessionIntent(runtimeGroupFolder, {});
     }
     if (output.resumeAt) {
       resumePositionStore.set(runtimeGroupFolder, output.resumeAt);
