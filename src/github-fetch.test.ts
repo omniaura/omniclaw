@@ -221,16 +221,72 @@ describe('github API fetch paths', () => {
       repos: [{ owner: 'omniaura', repo: 'omniclaw' }],
     };
 
-    globalThis.fetch = (() =>
-      Promise.resolve(jsonResponse([]))) as unknown as typeof fetch;
+    globalThis.fetch = ((url) => {
+      const path = new URL(String(url)).pathname;
+
+      if (path.endsWith('/pulls')) {
+        return Promise.resolve(
+          jsonResponse([
+            {
+              number: 12,
+              title: 'Cached PR',
+              user: { login: 'peyton' },
+              head: { ref: 'cached-branch' },
+              base: { ref: 'main' },
+              state: 'open',
+              draft: false,
+              requested_reviewers: [],
+              html_url: 'https://github.com/omniaura/omniclaw/pull/12',
+              body: 'Cached body',
+              created_at: '2026-05-07T00:00:00Z',
+              updated_at: '2026-05-07T00:00:00Z',
+            },
+          ]),
+        );
+      }
+
+      if (path.endsWith('/reviews') || path.endsWith('/comments')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+
+      if (path.endsWith('/check-suites')) {
+        return Promise.resolve(
+          jsonResponse({
+            check_suites: [{ status: 'completed', conclusion: 'success' }],
+          }),
+        );
+      }
+
+      if (path.endsWith('/issues')) {
+        return Promise.resolve(
+          jsonResponse([
+            {
+              number: 7,
+              title: 'Cached issue',
+              user: { login: 'alice' },
+              state: 'open',
+              labels: [{ name: 'bug' }],
+              assignee: null,
+              html_url: 'https://github.com/omniaura/omniclaw/issues/7',
+              body: 'Cached issue body',
+              created_at: '2026-05-07T00:00:00Z',
+              updated_at: '2026-05-07T00:00:00Z',
+            },
+          ]),
+        );
+      }
+
+      throw new Error(`unexpected GitHub path: ${path}`);
+    }) as typeof fetch;
 
     const cached = await github.fetchGitHubContext(watch, 60_000);
-    globalThis.fetch = (() => {
-      throw new Error('offline');
-    }) as unknown as typeof fetch;
+    globalThis.fetch = (() =>
+      Promise.resolve(jsonResponse({}))) as unknown as typeof fetch;
 
     const stale = await github.fetchGitHubContext(watch, -1);
 
+    expect(cached).toContain('PR #12: Cached PR');
+    expect(cached).toContain('**#7**: Cached issue');
     expect(stale).toBe(cached);
   });
 });
