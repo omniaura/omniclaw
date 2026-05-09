@@ -71,7 +71,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # Install local-first crawl tools. gitcrawl also provides the gh shim at
 # /usr/local/bin/gh; unsupported and mutating commands fall back to /usr/bin/gh.
 ARG GITCRAWL_VERSION=v0.2.1
-ARG DISCRAWL_VERSION=v0.6.6
+ARG DISCRAWL_VERSION=v0.7.0
 ENV GITCRAWL_GH_PATH=/usr/bin/gh
 COPY gitcrawl.sh discrawl.sh /tmp/
 RUN chmod +x /tmp/gitcrawl.sh /tmp/discrawl.sh \

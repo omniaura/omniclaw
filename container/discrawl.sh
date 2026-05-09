@@ -4,7 +4,7 @@ set -euo pipefail
 # Installs discrawl into the agent image so agents can query or sync local
 # Discord archives from the same tool surface used by the host.
 
-DISCRAWL_VERSION="${DISCRAWL_VERSION:-v0.6.6}"
+DISCRAWL_VERSION="${DISCRAWL_VERSION:-v0.7.0}"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 tmp_gobin="$(mktemp -d)"
