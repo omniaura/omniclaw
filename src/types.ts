@@ -144,6 +144,16 @@ export interface NewMessage {
    * user is clearly addressing the bot even without an @mention.
    */
   is_reply_to_bot?: boolean;
+  /**
+   * Optional subscription identity for reply routing. When present, only this
+   * agent should be triggered by the reply.
+   */
+  reply_to_agent_id?: string;
+  /**
+   * Optional channel bot identity for reply routing. Telegram stores the
+   * replied-to bot's numeric ID here.
+   */
+  reply_to_bot_id?: string;
 }
 
 /** Attachment type tag for the unified media pipeline. */

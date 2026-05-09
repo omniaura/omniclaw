@@ -11,6 +11,7 @@ import {
   _isAgentEnabled,
   _markChannelSubscriptionsDirty,
   _selectEnabledSubscriptionsForMessage,
+  _selectSubscriptionsForMessage,
   _setAgents,
   _setChannelSubscriptions,
   _setRegisteredGroups,
@@ -58,6 +59,19 @@ const BASE_MESSAGE: NewMessage = {
   content: '@Omni hello',
   timestamp: '2024-01-01T00:01:00.000Z',
 };
+
+const makeMessage = (overrides: Partial<NewMessage> = {}): NewMessage => ({
+  id: 'msg-1',
+  chat_jid: 'tg:-100123',
+  sender: 'telegram:42',
+  sender_name: 'Peyton',
+  content: 'follow up',
+  timestamp: '2026-05-09T18:00:00.000Z',
+  is_from_me: false,
+  sender_platform: 'telegram',
+  sender_user_id: '42',
+  ...overrides,
+});
 
 describe('getAvailableGroups', () => {
   beforeEach(() => {
@@ -317,5 +331,110 @@ describe('agent off-switch routing guards', () => {
     expect(_getEnabledStartupConfirmationTargets()).toEqual([
       { chatJid: 'dc:enabled', trigger: '@Enabled' },
     ]);
+  });
+});
+
+describe('subscription selection', () => {
+  beforeEach(() => {
+    _initTestDatabase();
+    _setRegisteredGroups({});
+    _setChannelSubscriptions({});
+    _setAgents({});
+  });
+
+  it('routes reply-to-agent messages only to the replied-to agent in a shared channel', () => {
+    _setChannelSubscriptions({
+      'tg:-100123': [
+        {
+          ...BASE_SUBSCRIPTION,
+          channelJid: 'tg:-100123',
+          agentId: 'agent-a',
+          trigger: '@AgentA',
+          priority: 0,
+        },
+        {
+          ...BASE_SUBSCRIPTION,
+          channelJid: 'tg:-100123',
+          agentId: 'agent-b',
+          trigger: '@AgentB',
+          priority: 1,
+        },
+      ],
+    });
+
+    const result = _selectSubscriptionsForMessage('tg:-100123', [
+      makeMessage({
+        is_reply_to_bot: true,
+        reply_to_agent_id: 'agent-a',
+      }),
+    ]);
+
+    expect(result.selectedByTrigger).toBe(true);
+    expect(result.selected.map((s) => s.agentId)).toEqual(['agent-a']);
+  });
+
+  it('does not fan out bot replies to legacy shared Telegram subscriptions when only a bot target is known', () => {
+    _setChannelSubscriptions({
+      'tg:-100123': [
+        {
+          ...BASE_SUBSCRIPTION,
+          channelJid: 'tg:-100123',
+          agentId: 'agent-a',
+          trigger: '@AgentA',
+          priority: 0,
+        },
+        {
+          ...BASE_SUBSCRIPTION,
+          channelJid: 'tg:-100123',
+          agentId: 'agent-b',
+          trigger: '@AgentB',
+          priority: 1,
+        },
+      ],
+    });
+
+    const result = _selectSubscriptionsForMessage('tg:-100123', [
+      makeMessage({
+        is_reply_to_bot: true,
+        reply_to_bot_id: 'bot-a',
+      }),
+    ]);
+
+    expect(result.selectedByTrigger).toBe(false);
+    expect(result.selected).toEqual([]);
+  });
+
+  it('matches Telegram replies to the subscription with the scoped replied-to bot id', () => {
+    _setChannelSubscriptions({
+      'tg:bot-a:-100123': [
+        {
+          ...BASE_SUBSCRIPTION,
+          channelJid: 'tg:bot-a:-100123',
+          agentId: 'agent-a',
+          trigger: '@AgentA',
+          priority: 0,
+        },
+      ],
+      'tg:bot-b:-100123': [
+        {
+          ...BASE_SUBSCRIPTION,
+          channelJid: 'tg:bot-b:-100123',
+          agentId: 'agent-b',
+          trigger: '@AgentB',
+          priority: 1,
+        },
+      ],
+    });
+
+    const result = _selectSubscriptionsForMessage('tg:bot-a:-100123', [
+      makeMessage({
+        chat_jid: 'tg:bot-a:-100123',
+        is_reply_to_bot: true,
+        reply_to_bot_id: 'bot-a',
+      }),
+    ]);
+
+    expect(result.selectedByTrigger).toBe(true);
+    expect(result.selected.map((s) => s.agentId)).toEqual(['agent-a']);
   });
 });

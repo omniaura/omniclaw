@@ -256,6 +256,7 @@ export class TelegramChannel implements Channel {
       // Prepend reply context so the agent knows what's being replied to
       const replyTo = ctx.message.reply_to_message;
       const isReplyToBot = this.isReplyToThisBot(replyTo);
+      const replyToBotId = isReplyToBot ? String(replyTo?.from?.id) : undefined;
       if (replyTo && 'text' in replyTo && replyTo.text) {
         const truncated =
           replyTo.text.length > 200
@@ -293,6 +294,7 @@ export class TelegramChannel implements Channel {
         sender_platform: 'telegram',
         sender_user_id: senderUserId,
         is_reply_to_bot: isReplyToBot,
+        reply_to_bot_id: replyToBotId,
       });
 
       logger.info(
@@ -316,6 +318,9 @@ export class TelegramChannel implements Channel {
         ctx.from?.first_name || ctx.from?.username || 'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
       const isReplyToBot = this.isReplyToThisBot(ctx.message.reply_to_message);
+      const replyToBotId = isReplyToBot
+        ? String(ctx.message.reply_to_message?.from?.id)
+        : undefined;
 
       this.opts.onChatMetadata(chatJid, timestamp);
       this.opts.onChatMetadata(legacyChatJid, timestamp);
@@ -330,6 +335,7 @@ export class TelegramChannel implements Channel {
         sender_platform: 'telegram',
         sender_user_id: senderUserId,
         is_reply_to_bot: isReplyToBot,
+        reply_to_bot_id: replyToBotId,
       });
     };
 
@@ -349,6 +355,9 @@ export class TelegramChannel implements Channel {
         ctx.from?.first_name || ctx.from?.username || 'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
       const isReplyToBot = this.isReplyToThisBot(ctx.message.reply_to_message);
+      const replyToBotId = isReplyToBot
+        ? String(ctx.message.reply_to_message?.from?.id)
+        : undefined;
 
       // Telegram sends multiple sizes; pick the largest (last in array)
       const photos = ctx.message.photo;
@@ -384,6 +393,7 @@ export class TelegramChannel implements Channel {
         sender_platform: 'telegram',
         sender_user_id: senderUserId,
         is_reply_to_bot: isReplyToBot,
+        reply_to_bot_id: replyToBotId,
       });
     });
 
@@ -412,6 +422,9 @@ export class TelegramChannel implements Channel {
         ctx.from?.first_name || ctx.from?.username || 'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
       const isReplyToBot = this.isReplyToThisBot(ctx.message.reply_to_message);
+      const replyToBotId = isReplyToBot
+        ? String(ctx.message.reply_to_message?.from?.id)
+        : undefined;
 
       let marker = `[Document: ${fileName}]`;
 
@@ -473,6 +486,7 @@ export class TelegramChannel implements Channel {
         sender_platform: 'telegram',
         sender_user_id: senderUserId,
         is_reply_to_bot: isReplyToBot,
+        reply_to_bot_id: replyToBotId,
       });
 
       logger.info(

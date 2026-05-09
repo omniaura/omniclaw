@@ -2050,6 +2050,28 @@ interface SubscriptionSelection {
   selectedByTrigger: boolean;
 }
 
+function replyTargetMatchesSubscription(
+  sub: ChannelSubscription,
+  message: NewMessage,
+): boolean {
+  if (message.is_reply_to_bot !== true) return false;
+
+  if (message.reply_to_agent_id) {
+    return message.reply_to_agent_id === sub.agentId;
+  }
+
+  if (message.reply_to_bot_id) {
+    if (sub.discordBotId === message.reply_to_bot_id) return true;
+    const subTelegram = parseScopedTelegramJid(sub.channelJid);
+    if (subTelegram?.botId === message.reply_to_bot_id) return true;
+    return false;
+  }
+
+  // Backward compatibility for adapters/tests that predate reply target
+  // metadata. New multi-agent reply paths should provide one of the IDs above.
+  return true;
+}
+
 /**
  * Check if a subscription is targeted by any of the given messages.
  * Returns true if messages contain @allagents, a direct bot mention,
@@ -2062,9 +2084,10 @@ function messagesMatchSubscription(
   if (messages.some((m) => /@allagents/i.test(m.content))) return true;
 
   // Replying to one of the bot's own messages counts as an explicit trigger —
-  // the user is clearly addressing the bot even without an @mention. Channel
-  // adapters set is_reply_to_bot only when the reply targets THIS channel's bot.
-  if (messages.some((m) => m.is_reply_to_bot === true)) return true;
+  // the user is clearly addressing the bot even without an @mention. When the
+  // adapter provides reply target metadata, keep selection scoped to that
+  // subscription so shared-channel agents do not all wake up.
+  if (messages.some((m) => replyTargetMatchesSubscription(sub, m))) return true;
 
   const mentionPatterns = getMentionPatterns(sub);
   if (mentionPatterns.length > 0) {
@@ -2128,6 +2151,14 @@ function selectSubscriptionsForMessage(
     )
     .slice(0, MAX_CHANNEL_AGENT_FANOUT);
   return { selected: sorted, selectedByTrigger };
+}
+
+/** @internal - exported for tests */
+export function _selectSubscriptionsForMessage(
+  chatJid: string,
+  groupMessages: NewMessage[],
+): SubscriptionSelection {
+  return selectSubscriptionsForMessage(chatJid, groupMessages);
 }
 
 async function startMessageLoop(): Promise<void> {
