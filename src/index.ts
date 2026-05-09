@@ -94,6 +94,7 @@ import {
   storeGuildRoster,
   storeMessage,
   updateAgentAvatar,
+  setAgentEnabled,
 } from './db.js';
 import {
   type DiscoveryHandle,
@@ -226,6 +227,17 @@ let messageLoopRunning = false;
 // Maps chatJid → Set of agentIds that are attentive.
 // Consumed (cleared) when the follow-up message is routed.
 const attentiveAgents: Record<string, Set<string>> = {};
+
+function resolveAgentByIdOrFolder(idOrFolder: string): Agent | undefined {
+  return (
+    agents[idOrFolder] ??
+    Object.values(agents).find((agent) => agent.folder === idOrFolder)
+  );
+}
+
+function isAgentEnabled(idOrFolder: string): boolean {
+  return resolveAgentByIdOrFolder(idOrFolder)?.enabled !== false;
+}
 
 // Track consecutive errors per group to prevent infinite error loops.
 // After MAX_CONSECUTIVE_ERRORS, the cursor advances past the failing batch
@@ -1283,6 +1295,11 @@ export function _setChannelSubscriptions(
 }
 
 /** @internal - exported for testing */
+export function _setAgents(nextAgents: Record<string, Agent>): void {
+  agents = nextAgents;
+}
+
+/** @internal - exported for testing */
 export function _markChannelSubscriptionsDirty(): void {
   channelSubscriptionsDirty = true;
 }
@@ -1290,6 +1307,52 @@ export function _markChannelSubscriptionsDirty(): void {
 /** @internal - exported for testing */
 export function _getSlashCommandGroupsFromSubscriptions(): RegisteredGroup[] {
   return buildSlashCommandGroupsFromSubscriptions();
+}
+
+/** @internal - exported for testing */
+export function _isAgentEnabled(idOrFolder: string): boolean {
+  return isAgentEnabled(idOrFolder);
+}
+
+/** @internal - exported for testing */
+export function _selectEnabledSubscriptionsForMessage(
+  chatJid: string,
+  groupMessages: NewMessage[],
+): {
+  selected: ChannelSubscription[];
+  selectedByTrigger: boolean;
+  allTriggerMatchesDisabled: boolean;
+} {
+  const { selected: triggerSelected, selectedByTrigger } =
+    selectSubscriptionsForMessage(chatJid, groupMessages);
+  const selected = triggerSelected.filter((s) => isAgentEnabled(s.agentId));
+  return {
+    selected,
+    selectedByTrigger,
+    allTriggerMatchesDisabled:
+      selectedByTrigger && triggerSelected.length > 0 && selected.length === 0,
+  };
+}
+
+function getEnabledStartupConfirmationTargets() {
+  return buildStartupConfirmationTargets(
+    registeredGroups,
+    channelSubscriptions,
+  ).filter((target) => {
+    const idOrFolder =
+      target.agentId ?? registeredGroups[target.chatJid]?.folder;
+    if (!idOrFolder || isAgentEnabled(idOrFolder)) return true;
+    logger.debug(
+      { chatJid: target.chatJid, idOrFolder },
+      'Startup confirmation skipped — agent is disabled',
+    );
+    return false;
+  });
+}
+
+/** @internal - exported for testing */
+export function _getEnabledStartupConfirmationTargets() {
+  return getEnabledStartupConfirmationTargets();
 }
 
 /**
@@ -2101,9 +2164,16 @@ async function startMessageLoop(): Promise<void> {
         }
 
         for (const [chatJid, groupMessages] of messagesByGroup) {
-          const { selected: triggerSelected, selectedByTrigger } =
-            selectSubscriptionsForMessage(chatJid, groupMessages);
-          let selectedSubs = triggerSelected;
+          const {
+            selected: selectedByEnabledState,
+            selectedByTrigger,
+            allTriggerMatchesDisabled,
+          } = _selectEnabledSubscriptionsForMessage(chatJid, groupMessages);
+          let selectedSubs = selectedByEnabledState;
+          // Distinguish "no subs matched" from "matched subs were all
+          // disabled". The legacy group fallback below should only run when
+          // truly nothing matched — otherwise a disabled agent's trigger
+          // could still dispatch via the chat-level queue key.
 
           // Attentive follow-up: if agents were selected by explicit trigger/mention,
           // mark them attentive so the next human message is routed without a trigger.
@@ -2121,8 +2191,8 @@ async function startMessageLoop(): Promise<void> {
             const attentive = attentiveAgents[chatJid];
             if (attentive && attentive.size > 0) {
               const subs = getSubscriptionsForChannelInMemory(chatJid);
-              const attentiveSubs = subs.filter((s) =>
-                attentive.has(s.agentId),
+              const attentiveSubs = subs.filter(
+                (s) => attentive.has(s.agentId) && isAgentEnabled(s.agentId),
               );
               if (attentiveSubs.length > 0) {
                 // Replace fallback selection with attentive agents — the user is
@@ -2144,8 +2214,26 @@ async function startMessageLoop(): Promise<void> {
 
           // Legacy fallback: one-to-one registered group handling
           if (selectedSubs.length === 0) {
+            // If trigger matched only disabled agents, do not fall through.
+            if (allTriggerMatchesDisabled) {
+              logger.debug(
+                { chatJid },
+                'Trigger matched only disabled agents — dispatch skipped',
+              );
+              continue;
+            }
             const group = getRegisteredGroupForJid(chatJid);
             if (!group) continue;
+
+            // Honor off-switch on the legacy registered-group path too: the
+            // group folder doubles as the agent id when the agent exists.
+            if (!isAgentEnabled(group.folder)) {
+              logger.debug(
+                { chatJid, folder: group.folder },
+                'Legacy fallback skipped — agent is disabled',
+              );
+              continue;
+            }
 
             const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
             const needsTrigger =
@@ -2277,6 +2365,13 @@ async function startMessageLoop(): Promise<void> {
 function recoverPendingMessages(): void {
   for (const [chatJid, subs] of Object.entries(channelSubscriptions)) {
     for (const sub of subs) {
+      if (!isAgentEnabled(sub.agentId)) {
+        logger.debug(
+          { chatJid, agentId: sub.agentId },
+          'Recovery: skipping — agent is disabled',
+        );
+        continue;
+      }
       const dispatchJid = makeDispatchKey(chatJid, sub.agentId);
       const sinceTimestamp = lastAgentTimestamp[dispatchJid] || '';
       const pending = getMessagesSince(chatJid, sinceTimestamp);
@@ -2302,6 +2397,13 @@ function recoverPendingMessages(): void {
 
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     if ((channelSubscriptions[chatJid] || []).length > 0) continue;
+    if (!isAgentEnabled(group.folder)) {
+      logger.debug(
+        { chatJid, folder: group.folder },
+        'Recovery: legacy group skipped — agent is disabled',
+      );
+      continue;
+    }
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp);
     if (pending.length > 0) {
@@ -2330,10 +2432,7 @@ function queueStartupConfirmationMessages(): void {
     return;
   }
 
-  const targets = buildStartupConfirmationTargets(
-    registeredGroups,
-    channelSubscriptions,
-  );
+  const targets = getEnabledStartupConfirmationTargets();
 
   for (const target of targets) {
     const content = target.trigger
@@ -2599,6 +2698,17 @@ async function main(): Promise<void> {
         agents[agentId].avatarSource =
           (source as Agent['avatarSource']) || undefined;
       }
+    },
+    setAgentEnabled: (agentId, enabled) => {
+      if (!agents[agentId]) return false;
+      const ok = setAgentEnabled(agentId, enabled);
+      if (!ok) return false;
+      agents[agentId].enabled = enabled;
+      logger.info(
+        { agentId, enabled },
+        'Agent enabled flag updated via Web UI',
+      );
+      return true;
     },
     sendMessage: (agentId, chatJid, content, senderName) => {
       const msgId = `web-${randomUUID()}`;
@@ -3219,6 +3329,7 @@ async function main(): Promise<void> {
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getGroupForTask,
+    isAgentEnabled,
     getSessions: () => sessions,
     resumePositionStore,
     queue,

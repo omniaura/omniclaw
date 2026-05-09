@@ -104,6 +104,7 @@ function makeState(
     readContextFile: () => null,
     writeContextFile: () => {},
     updateAgentAvatar: () => {},
+    setAgentEnabled: () => true,
     ...overrides,
   };
 }

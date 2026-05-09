@@ -616,6 +616,13 @@ export class FakeState implements WebStateProvider {
     agent.avatarSource = (source as Agent['avatarSource']) ?? undefined;
   }
 
+  setAgentEnabled(agentId: string, enabled: boolean): boolean {
+    const agent = this.agents[agentId];
+    if (!agent) return false;
+    agent.enabled = enabled;
+    return true;
+  }
+
   // ---- Admin mutation methods (called by admin API) ----
 
   addAgent(agent: Partial<Agent> & { id: string }): Agent {

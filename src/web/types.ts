@@ -105,6 +105,14 @@ export interface WebStateProvider {
     url: string | null,
     source: string | null,
   ): void;
+
+  // ---- Agent on/off switch ----
+  /**
+   * Toggle whether the agent is enabled. When disabled, the orchestrator
+   * skips message dispatch and scheduled task execution for this agent.
+   * Returns true if the agent was found and updated.
+   */
+  setAgentEnabled(agentId: string, enabled: boolean): boolean;
   /** Resolve a platform-backed icon for a specific chat/channel JID. */
   resolveChatImage?(chatJid: string): Promise<string | null>;
   /** Resolve a stored agent avatar reference to a fetchable URL. */

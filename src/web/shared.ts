@@ -706,6 +706,8 @@ function shellCSS(): string {
     `.exec-idle{background:rgba(251,191,36,.1);color:var(--yellow)}`,
     `.exec-queued{background:rgba(34,211,238,.1);color:var(--cyan)}`,
     `.exec-offline{background:var(--surface-2);color:var(--text-dim)}`,
+    `.exec-disabled{background:rgba(220,38,38,.12);color:var(--red,#ef4444)}`,
+    `tr[data-disabled="true"] .ap-name{opacity:.55}`,
     `@keyframes exec-pulse{0%,100%{opacity:1}50%{opacity:.6}}`,
     `.ap-empty{padding:2rem;text-align:center;color:var(--text-dim);font-size:12px}`,
 

@@ -108,6 +108,7 @@ function makeState(
     readContextFile: () => null,
     writeContextFile: () => {},
     updateAgentAvatar: () => {},
+    setAgentEnabled: () => true,
     resolveChatImage: async () => null,
     resolveDiscordGuildImage: async () => null,
     ...overrides,

@@ -60,6 +60,7 @@ interface AgentRow {
   roster_role_filters: string | null;
   avatar_url: string | null;
   avatar_source: string | null;
+  enabled: number | null;
 }
 
 interface AgentHealthRow {
@@ -204,6 +205,11 @@ function mapRowToAgent(row: AgentRow): Agent {
     rosterRoleFilters,
     avatarUrl: row.avatar_url || undefined,
     avatarSource: (row.avatar_source as Agent['avatarSource']) || undefined,
+    // Default to enabled when the column is missing (pre-migration row) or null.
+    enabled:
+      row.enabled === null || row.enabled === undefined
+        ? true
+        : row.enabled === 1,
   };
 }
 
@@ -1482,10 +1488,25 @@ export function getAllAgents(): Record<string, Agent> {
 
 /** Insert or replace an agent record. */
 export function setAgent(agent: Agent): void {
+  // When the caller didn't specify `enabled`, preserve the existing row's
+  // value so registration paths (registerGroup, applyDeclarativeAgentTopology)
+  // don't silently re-enable an agent the user disabled in the Web UI.
+  let enabledValue: 0 | 1;
+  if (agent.enabled === false) {
+    enabledValue = 0;
+  } else if (agent.enabled === true) {
+    enabledValue = 1;
+  } else {
+    const existing = db
+      .prepare('SELECT enabled FROM agents WHERE id = ?')
+      .get(agent.id) as { enabled: number | null } | undefined;
+    enabledValue = existing && existing.enabled === 0 ? 0 : 1;
+  }
+
   db.query(
     `
-    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at, agent_context_folder, roster_role_filters, avatar_url, avatar_source)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at, agent_context_folder, roster_role_filters, avatar_url, avatar_source, enabled)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     agent.id,
@@ -1504,7 +1525,19 @@ export function setAgent(agent: Agent): void {
       : agent.rosterRoleFilters.join(','),
     agent.avatarUrl || null,
     agent.avatarSource || null,
+    enabledValue,
   );
+}
+
+/**
+ * Update only the enabled flag for an agent (lightweight, avoids full setAgent).
+ * Returns true on success, false if the agent doesn't exist.
+ */
+export function setAgentEnabled(agentId: string, enabled: boolean): boolean {
+  const result = db
+    .query('UPDATE agents SET enabled = ? WHERE id = ?')
+    .run(enabled ? 1 : 0, agentId);
+  return result.changes > 0;
 }
 
 /** Update only the avatar fields for an agent (lightweight, avoids full setAgent). */

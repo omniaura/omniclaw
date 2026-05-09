@@ -85,6 +85,7 @@ function makeState(tasks: ScheduledTask[] = [makeTask()]): WebStateProvider {
     readContextFile: () => null,
     writeContextFile: () => {},
     updateAgentAvatar: () => {},
+    setAgentEnabled: () => true,
     resolveChatImage: async () => null,
     resolveDiscordGuildImage: async () => null,
   };

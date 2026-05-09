@@ -120,6 +120,7 @@ function makeState(
     readContextFile: () => null,
     writeContextFile: () => {},
     updateAgentAvatar: () => {},
+    setAgentEnabled: () => true,
     resolveChatImage: async () => null,
     resolveDiscordGuildImage: async () => null,
     ...overrides,
@@ -1356,5 +1357,85 @@ describe('conversation export', () => {
     const disposition = res.headers.get('content-disposition') || '';
     expect(disposition).toContain('My_Chat___Special_-export.json');
     expect(disposition).not.toContain('/');
+  });
+});
+
+describe('POST /api/agents/{id}/enabled (off-switch)', () => {
+  it('persists the enabled flag and returns the new value', async () => {
+    const calls: Array<{ id: string; enabled: boolean }> = [];
+    const state = makeState({
+      setAgentEnabled: (id, enabled) => {
+        calls.push({ id, enabled });
+        return true;
+      },
+    });
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/enabled', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: false }),
+      }),
+      state,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ ok: true, agentId: 'agent-1', enabled: false });
+    expect(calls).toEqual([{ id: 'agent-1', enabled: false }]);
+  });
+
+  it('rejects non-boolean enabled values', async () => {
+    const state = makeState();
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/enabled', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: 'yes' }),
+      }),
+      state,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('boolean');
+  });
+
+  it('returns 404 when the agent does not exist', async () => {
+    const state = makeState();
+    const res = await handle(
+      new Request('http://localhost/api/agents/missing/enabled', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true }),
+      }),
+      state,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects invalid JSON', async () => {
+    const state = makeState();
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/enabled', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'not json',
+      }),
+      state,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for malformed agent ID encoding', async () => {
+    const state = makeState();
+    const res = await handle(
+      new Request('http://localhost/api/agents/%E0%A4%A/enabled', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true }),
+      }),
+      state,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('encoding');
   });
 });

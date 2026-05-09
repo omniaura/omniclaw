@@ -18,6 +18,8 @@ export interface AgentDetailData {
   backend: string;
   agentRuntime: string;
   isAdmin: boolean;
+  /** Whether the agent is enabled. Undefined for remote agents. */
+  enabled?: boolean;
   description?: string;
   createdAt: string;
   remoteInstanceId?: string;
@@ -134,6 +136,8 @@ export function buildAgentDetailData(
     backend: agent.backend,
     agentRuntime: agent.agentRuntime,
     isAdmin: agent.isAdmin,
+    // Default missing/undefined to true (agent is enabled unless explicitly off).
+    enabled: agent.enabled !== false,
     remoteInstanceId: undefined,
     remoteInstanceName: undefined,
     remoteHost: undefined,
@@ -272,7 +276,7 @@ export function renderAgentDetailContent(
       ? `<img class="ad-avatar" src="${avatarSrc}" alt="${esc(data.name)}" onerror="this.style.display='none'">`
       : `<div class="ad-avatar-placeholder">${esc(data.name.charAt(0).toUpperCase())}</div>`) +
     `<div class="ad-header-info">` +
-    `<h2 class="ad-name">${esc(data.name)} <span id="ad-exec-status" class="badge badge-sm exec-offline">offline</span></h2>` +
+    `<h2 class="ad-name">${esc(data.name)} <span id="ad-exec-status" class="badge badge-sm ${data.enabled === false ? 'exec-disabled' : 'exec-offline'}">${data.enabled === false ? 'disabled' : 'offline'}</span></h2>` +
     `<div class="ad-meta">` +
     `<span class="badge ${backendBadge}">${esc(data.backend)}</span>` +
     `<span class="badge">${esc(data.agentRuntime)}</span>` +
@@ -280,6 +284,9 @@ export function renderAgentDetailContent(
       ? `<span class="badge badge-remote">${esc(data.remoteInstanceName || data.remoteInstanceId)}</span>`
       : '') +
     (data.isAdmin ? `<span class="badge badge-admin">admin</span>` : '') +
+    (!data.remoteInstanceId
+      ? ` <button class="btn btn-sm" data-agent-toggle="${data.enabled === false ? 'true' : 'false'}" data-agent-id="${esc(data.id)}">${data.enabled === false ? 'enable' : 'disable'}</button>`
+      : '') +
     `</div>` +
     (data.description
       ? `<div class="ad-desc">${esc(data.description)}</div>`

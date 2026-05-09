@@ -7,12 +7,21 @@ import {
 } from './db.js';
 import {
   _getSlashCommandGroupsFromSubscriptions,
+  _getEnabledStartupConfirmationTargets,
+  _isAgentEnabled,
   _markChannelSubscriptionsDirty,
+  _selectEnabledSubscriptionsForMessage,
+  _setAgents,
   _setChannelSubscriptions,
   _setRegisteredGroups,
   getAvailableGroups,
 } from './index.js';
-import type { ChannelSubscription, RegisteredGroup } from './types.js';
+import type {
+  Agent,
+  ChannelSubscription,
+  NewMessage,
+  RegisteredGroup,
+} from './types.js';
 
 const BASE_GROUP: RegisteredGroup = {
   name: 'Test Group',
@@ -31,11 +40,31 @@ const BASE_SUBSCRIPTION: ChannelSubscription = {
   createdAt: '2024-01-01T00:00:00.000Z',
 };
 
+const BASE_AGENT: Agent = {
+  id: 'team-agent',
+  name: 'Team Agent',
+  folder: 'team-folder',
+  backend: 'apple-container',
+  agentRuntime: 'claude-agent-sdk',
+  isAdmin: false,
+  createdAt: '2024-01-01T00:00:00.000Z',
+};
+
+const BASE_MESSAGE: NewMessage = {
+  id: 'msg-1',
+  chat_jid: 'team@g.us',
+  sender: 'user-1',
+  sender_name: 'User One',
+  content: '@Omni hello',
+  timestamp: '2024-01-01T00:01:00.000Z',
+};
+
 describe('getAvailableGroups', () => {
   beforeEach(() => {
     _initTestDatabase();
     _setRegisteredGroups({});
     _setChannelSubscriptions({});
+    _setAgents({});
   });
 
   it('returns supported group chats ordered by most recent activity', () => {
@@ -151,6 +180,7 @@ describe('slash command subscription groups', () => {
     _initTestDatabase();
     _setRegisteredGroups({});
     _setChannelSubscriptions({});
+    _setAgents({});
   });
 
   it('refreshes dirty channel subscriptions before building slash command groups', () => {
@@ -180,6 +210,112 @@ describe('slash command subscription groups', () => {
         discordBotId: 'bot-a',
         discordGuildId: 'guild-1',
       }),
+    ]);
+  });
+});
+
+describe('agent off-switch routing guards', () => {
+  beforeEach(() => {
+    _initTestDatabase();
+    _setRegisteredGroups({});
+    _setChannelSubscriptions({});
+    _setAgents({});
+  });
+
+  it('resolves enabled state by agent id or workspace folder', () => {
+    _setAgents({
+      'agent-id': {
+        ...BASE_AGENT,
+        id: 'agent-id',
+        folder: 'workspace-folder',
+        enabled: false,
+      },
+    });
+
+    expect(_isAgentEnabled('agent-id')).toBe(false);
+    expect(_isAgentEnabled('workspace-folder')).toBe(false);
+    expect(_isAgentEnabled('unknown-legacy-folder')).toBe(true);
+  });
+
+  it('marks trigger-matched disabled subscriptions so legacy fallback stays blocked', () => {
+    _setAgents({
+      'team-agent': {
+        ...BASE_AGENT,
+        id: 'team-agent',
+        enabled: false,
+      },
+    });
+    _setRegisteredGroups({
+      'team@g.us': { ...BASE_GROUP, folder: 'team-folder' },
+    });
+    _setChannelSubscriptions({
+      'team@g.us': [{ ...BASE_SUBSCRIPTION, agentId: 'team-agent' }],
+    });
+
+    const selection = _selectEnabledSubscriptionsForMessage('team@g.us', [
+      BASE_MESSAGE,
+    ]);
+
+    expect(selection.selected).toEqual([]);
+    expect(selection.selectedByTrigger).toBe(true);
+    expect(selection.allTriggerMatchesDisabled).toBe(true);
+  });
+
+  it('filters disabled agents out of startup confirmation targets', () => {
+    _setAgents({
+      'disabled-by-id': {
+        ...BASE_AGENT,
+        id: 'disabled-by-id',
+        folder: 'disabled-sub-folder',
+        enabled: false,
+      },
+      'legacy-id': {
+        ...BASE_AGENT,
+        id: 'legacy-id',
+        folder: 'disabled-legacy-folder',
+        enabled: false,
+      },
+      'enabled-agent': {
+        ...BASE_AGENT,
+        id: 'enabled-agent',
+        folder: 'enabled-folder',
+        enabled: true,
+      },
+    });
+    _setRegisteredGroups({
+      'dc:subscribed': {
+        ...BASE_GROUP,
+        name: 'Subscribed',
+        folder: 'disabled-sub-folder',
+        trigger: '@DisabledSub',
+      },
+      'dc:legacy-disabled': {
+        ...BASE_GROUP,
+        name: 'Legacy Disabled',
+        folder: 'disabled-legacy-folder',
+        trigger: '@LegacyDisabled',
+      },
+      'dc:enabled': {
+        ...BASE_GROUP,
+        name: 'Enabled',
+        folder: 'enabled-folder',
+        trigger: '@Enabled',
+      },
+    });
+    _setChannelSubscriptions({
+      'dc:subscribed': [
+        {
+          ...BASE_SUBSCRIPTION,
+          channelJid: 'dc:subscribed',
+          agentId: 'disabled-by-id',
+          trigger: '@DisabledSub',
+          isPrimary: true,
+        },
+      ],
+    });
+
+    expect(_getEnabledStartupConfirmationTargets()).toEqual([
+      { chatJid: 'dc:enabled', trigger: '@Enabled' },
     ]);
   });
 });
