@@ -20,7 +20,7 @@ describe('agent container crawl tooling', () => {
     const dockerfile = read('container/Dockerfile.base');
 
     expect(dockerfile).toContain('ARG GITCRAWL_VERSION=v0.2.1');
-    expect(dockerfile).toContain('ARG DISCRAWL_VERSION=v0.6.6');
+    expect(dockerfile).toContain('ARG DISCRAWL_VERSION=v0.7.0');
     expect(dockerfile).toContain('COPY gitcrawl.sh discrawl.sh /tmp/');
     expect(dockerfile).toContain('/tmp/gitcrawl.sh');
     expect(dockerfile).toContain('/tmp/discrawl.sh');
