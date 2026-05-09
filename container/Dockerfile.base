@@ -134,7 +134,7 @@ RUN ARCH="$(dpkg --print-architecture)" \
 
 # Install Codex CLI (alternative agent runtime)
 # Pin version to avoid silent CLI contract changes breaking the container runtime.
-ARG CODEX_VERSION=0.128.0
+ARG CODEX_VERSION=0.130.0
 RUN npm install -g "@openai/codex@${CODEX_VERSION}"
 
 # Install Docker CLI (for split-execution mode: agent proxies bash via docker exec).
