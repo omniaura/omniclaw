@@ -9,11 +9,13 @@ import {
   downloadBinaryAttachment,
   downloadTextAttachment,
   ensureMediaDir,
+  formatBinaryFileMarker,
   formatImageMarker,
   formatPlaceholder,
   formatTextFileMarker,
   isImageByTypeOrExtension,
   isTextByExtension,
+  MAX_BINARY_DOWNLOAD_BYTES,
   MAX_TEXT_DOWNLOAD_BYTES,
 } from '../media.js';
 import {
@@ -167,6 +169,19 @@ export class TelegramChannel implements Channel {
   }
 
   /**
+   * True when `replyTo.from.id` matches this bot's own ID — i.e. the user is
+   * replying to one of the bot's messages. Used as an implicit trigger so
+   * the agent activates without an explicit @mention.
+   */
+  private isReplyToThisBot(
+    replyTo: { from?: { id?: string | number | bigint } | null } | undefined,
+  ): boolean {
+    const fromId = replyTo?.from?.id;
+    if (fromId == null) return false;
+    return String(fromId) === this.botId;
+  }
+
+  /**
    * Resolve a Telegram file_id to a download URL via the Bot API.
    * Returns `null` if the file cannot be resolved (bot not connected, no path).
    */
@@ -240,6 +255,8 @@ export class TelegramChannel implements Channel {
 
       // Prepend reply context so the agent knows what's being replied to
       const replyTo = ctx.message.reply_to_message;
+      const isReplyToBot = this.isReplyToThisBot(replyTo);
+      const replyToBotId = isReplyToBot ? String(replyTo?.from?.id) : undefined;
       if (replyTo && 'text' in replyTo && replyTo.text) {
         const truncated =
           replyTo.text.length > 200
@@ -276,10 +293,12 @@ export class TelegramChannel implements Channel {
         is_from_me: false,
         sender_platform: 'telegram',
         sender_user_id: senderUserId,
+        is_reply_to_bot: isReplyToBot,
+        reply_to_bot_id: replyToBotId,
       });
 
       logger.info(
-        { chatJid, chatName, sender: senderName },
+        { chatJid, chatName, sender: senderName, isReplyToBot },
         'Telegram message stored',
       );
     });
@@ -298,6 +317,10 @@ export class TelegramChannel implements Channel {
       const senderName =
         ctx.from?.first_name || ctx.from?.username || 'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+      const isReplyToBot = this.isReplyToThisBot(ctx.message.reply_to_message);
+      const replyToBotId = isReplyToBot
+        ? String(ctx.message.reply_to_message?.from?.id)
+        : undefined;
 
       this.opts.onChatMetadata(chatJid, timestamp);
       this.opts.onChatMetadata(legacyChatJid, timestamp);
@@ -311,6 +334,8 @@ export class TelegramChannel implements Channel {
         is_from_me: false,
         sender_platform: 'telegram',
         sender_user_id: senderUserId,
+        is_reply_to_bot: isReplyToBot,
+        reply_to_bot_id: replyToBotId,
       });
     };
 
@@ -329,6 +354,10 @@ export class TelegramChannel implements Channel {
       const senderName =
         ctx.from?.first_name || ctx.from?.username || 'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+      const isReplyToBot = this.isReplyToThisBot(ctx.message.reply_to_message);
+      const replyToBotId = isReplyToBot
+        ? String(ctx.message.reply_to_message?.from?.id)
+        : undefined;
 
       // Telegram sends multiple sizes; pick the largest (last in array)
       const photos = ctx.message.photo;
@@ -363,6 +392,8 @@ export class TelegramChannel implements Channel {
         is_from_me: false,
         sender_platform: 'telegram',
         sender_user_id: senderUserId,
+        is_reply_to_bot: isReplyToBot,
+        reply_to_bot_id: replyToBotId,
       });
     });
 
@@ -370,7 +401,8 @@ export class TelegramChannel implements Channel {
     this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
 
-    // Documents: download images and text files, placeholder for the rest
+    // Documents: download images, inline small text files, save other binaries
+    // (PDFs, archives, etc.) to the group's media dir so the agent can Read them.
     this.bot.on('message:document', async (ctx) => {
       const chatId = ctx.chat.id;
       const chatJid = `tg:${this.botId}:${chatId}`;
@@ -389,6 +421,10 @@ export class TelegramChannel implements Channel {
       const senderName =
         ctx.from?.first_name || ctx.from?.username || 'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+      const isReplyToBot = this.isReplyToThisBot(ctx.message.reply_to_message);
+      const replyToBotId = isReplyToBot
+        ? String(ctx.message.reply_to_message?.from?.id)
+        : undefined;
 
       let marker = `[Document: ${fileName}]`;
 
@@ -414,7 +450,19 @@ export class TelegramChannel implements Channel {
             const text = await downloadTextAttachment(url);
             marker = formatTextFileMarker(safeName, text);
           }
+        } else if (fileSize <= MAX_BINARY_DOWNLOAD_BYTES) {
+          // Other binary (PDF, archive, etc.) — save to media dir and emit a
+          // path marker so the agent can open it with the Read tool.
+          const url = await this.getTelegramFileUrl(doc!.file_id);
+          if (url) {
+            const mediaDir = ensureMediaDir(group);
+            const filePath = buildSafeMediaPath(mediaDir, msgId, fileName);
+            const bytes = await downloadBinaryAttachment(url);
+            fs.writeFileSync(filePath, bytes);
+            marker = formatBinaryFileMarker(path.basename(filePath), fileName);
+          }
         } else {
+          // Too large to download — fall back to a placeholder.
           marker = formatPlaceholder('file', fileName);
         }
       } catch (err) {
@@ -437,7 +485,14 @@ export class TelegramChannel implements Channel {
         is_from_me: false,
         sender_platform: 'telegram',
         sender_user_id: senderUserId,
+        is_reply_to_bot: isReplyToBot,
+        reply_to_bot_id: replyToBotId,
       });
+
+      logger.info(
+        { chatJid, msgId, fileName, fileSize, isReplyToBot },
+        'Telegram document stored',
+      );
     });
     this.bot.on('message:sticker', (ctx) => {
       const emoji = ctx.message.sticker?.emoji || '';

@@ -6,6 +6,7 @@ import {
   cleanupExpiredMedia,
   downloadBinaryAttachment,
   downloadTextAttachment,
+  formatBinaryFileMarker,
   formatImageMarker,
   formatPlaceholder,
   formatTextFileMarker,
@@ -249,6 +250,26 @@ describe('formatTextFileMarker', () => {
     const marker = formatTextFileMarker('config.json', '{"key": "value"}');
     expect(marker).toBe(
       '[attachment:file name=config.json]\n{"key": "value"}\n[/attachment:file]',
+    );
+  });
+});
+
+describe('formatBinaryFileMarker', () => {
+  it('produces a marker with a path the agent can Read', () => {
+    expect(formatBinaryFileMarker('msg123-doc.pdf')).toBe(
+      '[attachment:file path=media/msg123-doc.pdf name=msg123-doc.pdf]',
+    );
+  });
+
+  it('preserves the original display name when supplied', () => {
+    expect(formatBinaryFileMarker('msg123-doc.pdf', 'Quantum Fund.pdf')).toBe(
+      '[attachment:file path=media/msg123-doc.pdf name=Quantum Fund.pdf]',
+    );
+  });
+
+  it('strips directory components from filename', () => {
+    expect(formatBinaryFileMarker('../../../etc/passwd')).toBe(
+      '[attachment:file path=media/passwd name=passwd]',
     );
   });
 });
