@@ -442,6 +442,10 @@ export async function runCursorSdkRuntime(
       prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
     }
     const pending = drainIpcInput();
+    if (pending.shutdown) {
+      log('Shutdown before initial Cursor run');
+      return;
+    }
     if (pending.messages.length > 0) {
       log(
         `Draining ${pending.messages.length} pending IPC messages into initial prompt`,
