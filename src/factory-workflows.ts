@@ -184,7 +184,7 @@ export class FactoryWorkflowStore {
       .prepare(
         `SELECT * FROM factory_handoff_records
          WHERE workflow_id = ?
-         ORDER BY created_at DESC, id DESC
+         ORDER BY created_at DESC, rowid DESC
          LIMIT 1`,
       )
       .get(workflowId) as HandoffRow | undefined;
@@ -196,7 +196,7 @@ export class FactoryWorkflowStore {
       .prepare(
         `SELECT * FROM factory_handoff_records
          WHERE workflow_id = ?
-         ORDER BY created_at ASC, id ASC`,
+         ORDER BY created_at ASC, rowid ASC`,
       )
       .all(workflowId) as HandoffRow[];
     return rows.map(mapHandoffRow);
@@ -210,7 +210,7 @@ export class FactoryWorkflowStore {
       .prepare(
         `SELECT * FROM factory_handoff_records
          WHERE repo = ? AND source_issue = ?
-         ORDER BY created_at DESC, id DESC
+         ORDER BY created_at DESC, rowid DESC
          LIMIT 1`,
       )
       .get(repo, sourceIssue) as HandoffRow | undefined;
@@ -224,11 +224,6 @@ export class FactoryWorkflowStore {
     const nowIso = now.toISOString();
     const expiresAt = new Date(now.getTime() + input.ttlMs).toISOString();
 
-    this.deleteExpiredClaims(nowIso);
-
-    const existing = this.getClaim(input.workflowId);
-    if (existing) return { acquired: false, conflict: existing };
-
     const claim: FactoryWorkflowClaim = {
       workflowId: input.workflowId,
       repo: input.repo,
@@ -240,25 +235,41 @@ export class FactoryWorkflowStore {
       expiresAt,
     };
 
-    this.db
-      .prepare(
-        `INSERT INTO factory_workflow_claims
-          (workflow_id, repo, owner_agent_id, owner_run_id, phase,
-           claimed_at, heartbeat_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        claim.workflowId,
-        claim.repo,
-        claim.ownerAgentId,
-        claim.ownerRunId,
-        claim.phase,
-        claim.claimedAt,
-        claim.heartbeatAt,
-        claim.expiresAt,
-      );
+    const transaction = this.db.transaction(() => {
+      this.deleteExpiredClaims(nowIso);
 
-    return { acquired: true, claim };
+      const existing = this.getClaim(input.workflowId);
+      if (existing) return existing;
+
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO factory_workflow_claims
+            (workflow_id, repo, owner_agent_id, owner_run_id, phase,
+             claimed_at, heartbeat_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          claim.workflowId,
+          claim.repo,
+          claim.ownerAgentId,
+          claim.ownerRunId,
+          claim.phase,
+          claim.claimedAt,
+          claim.heartbeatAt,
+          claim.expiresAt,
+        );
+
+      return this.getClaim(input.workflowId);
+    });
+
+    const current = transaction() as FactoryWorkflowClaim | undefined;
+    if (current?.ownerRunId === claim.ownerRunId) {
+      return { acquired: true, claim: current };
+    }
+
+    if (current) return { acquired: false, conflict: current };
+
+    throw new Error('Failed to acquire workflow claim');
   }
 
   refreshClaim(

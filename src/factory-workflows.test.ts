@@ -86,6 +86,47 @@ describe('FactoryWorkflowStore handoffs', () => {
     db.close();
   });
 
+  it('uses insertion order to break same-timestamp handoff ties', () => {
+    const { db, store } = makeStore();
+
+    store.createHandoff({
+      id: 'z-handoff',
+      workflowId: 'workflow-1',
+      repo: 'omniaura/omniclaw',
+      sourceIssue: '643',
+      phase: 'spec',
+      ownerAgentId: 'ocpeyton',
+      driver: 'spec-driver',
+      intent: 'First handoff',
+      summary: 'First handoff',
+      body: 'First body',
+      createdAt: '2026-05-04T00:00:00.000Z',
+    });
+    store.createHandoff({
+      id: 'a-handoff',
+      workflowId: 'workflow-1',
+      repo: 'omniaura/omniclaw',
+      sourceIssue: '643',
+      phase: 'impl',
+      ownerAgentId: 'ocpeyton',
+      driver: 'impl-driver',
+      intent: 'Second handoff',
+      summary: 'Second handoff',
+      body: 'Second body',
+      createdAt: '2026-05-04T00:00:00.000Z',
+    });
+
+    expect(store.getLatestHandoff('workflow-1')?.id).toBe('a-handoff');
+    expect(store.findLatestHandoffByIssue('omniaura/omniclaw', '643')?.id).toBe(
+      'a-handoff',
+    );
+    expect(
+      store.listHandoffsForWorkflow('workflow-1').map((row) => row.id),
+    ).toEqual(['z-handoff', 'a-handoff']);
+
+    db.close();
+  });
+
   it('allows same-phase and forward transitions', () => {
     expect(() => validateFactoryPhaseTransition('impl', 'impl')).not.toThrow();
     expect(() => validateFactoryPhaseTransition('impl', 'qa')).not.toThrow();
