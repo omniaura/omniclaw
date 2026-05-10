@@ -47,6 +47,28 @@ function createStream(
   });
 }
 
+function createCancellableStream(chunks: Array<string | Uint8Array>) {
+  const pending = [...chunks];
+  const cancel = mock((_reason?: unknown) => undefined);
+
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const chunk = pending.shift();
+      if (chunk === undefined) {
+        controller.close();
+        return;
+      }
+
+      controller.enqueue(
+        typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk,
+      );
+    },
+    cancel,
+  });
+
+  return { stream, cancel };
+}
+
 // ---------------------------------------------------------------------------
 // readStreamWithByteLimit
 // ---------------------------------------------------------------------------
@@ -64,6 +86,24 @@ describe('readStreamWithByteLimit', () => {
     await expect(
       readStreamWithByteLimit(createStream(['12345', '67890']), 8),
     ).rejects.toThrow('Download exceeded 8 bytes');
+  });
+
+  it('allows streams that exactly match the byte limit', async () => {
+    const bytes = await readStreamWithByteLimit(
+      createStream(['1234', '5678']),
+      8,
+    );
+
+    expect(bytes.toString()).toBe('12345678');
+  });
+
+  it('cancels the reader when streamed bytes exceed the limit', async () => {
+    const { stream, cancel } = createCancellableStream(['12345', '67890']);
+
+    await expect(readStreamWithByteLimit(stream, 8)).rejects.toThrow(
+      'Download exceeded 8 bytes',
+    );
+    expect(cancel).toHaveBeenCalledWith('Download exceeded byte limit');
   });
 
   it('returns empty buffer for null stream', async () => {
@@ -375,6 +415,33 @@ describe('cleanupExpiredMedia', () => {
 
     expect(fs.existsSync(oldFile)).toBe(false);
     expect(fs.existsSync(freshFile)).toBe(true);
+  });
+
+  it('cleans the channel workspace when channelFolder is set', () => {
+    const channelFolder = `${testFolder}-channel`;
+    const channelMediaDir = path.join(GROUPS_DIR, channelFolder, 'media');
+    const baseMediaDir = path.join(GROUPS_DIR, testFolder, 'media');
+    fs.mkdirSync(channelMediaDir, { recursive: true });
+    fs.mkdirSync(baseMediaDir, { recursive: true });
+
+    const oldChannelFile = path.join(channelMediaDir, 'old-channel.png');
+    const oldBaseFile = path.join(baseMediaDir, 'old-base.png');
+    fs.writeFileSync(oldChannelFile, 'old-channel');
+    fs.writeFileSync(oldBaseFile, 'old-base');
+
+    const oldTime = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    fs.utimesSync(oldChannelFile, oldTime, oldTime);
+    fs.utimesSync(oldBaseFile, oldTime, oldTime);
+
+    cleanupExpiredMedia({ folder: testFolder, channelFolder });
+
+    expect(fs.existsSync(oldChannelFile)).toBe(false);
+    expect(fs.existsSync(oldBaseFile)).toBe(true);
+
+    fs.rmSync(path.join(GROUPS_DIR, channelFolder), {
+      recursive: true,
+      force: true,
+    });
   });
 
   it('does nothing when media dir does not exist', () => {
