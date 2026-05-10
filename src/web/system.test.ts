@@ -214,6 +214,18 @@ describe('buildHealthData', () => {
     expect(health.queue.processing_groups).toBe(0);
     expect(health.queue.running_tasks).toBe(0);
     expect(health.queue.retrying_groups).toBe(0);
+    expect(health.queue.message_lane_reasons).toEqual({
+      running: 0,
+      'cooling-down': 0,
+      'back-pressure': 0,
+      retrying: 0,
+      'no-work': 0,
+    });
+    expect(health.queue.task_lane_reasons).toEqual({
+      running: 0,
+      'back-pressure': 0,
+      'no-work': 0,
+    });
   });
 
   it('aggregates queue rollup across all tracked groups', () => {
@@ -279,6 +291,140 @@ describe('buildHealthData', () => {
     expect(health.queue.processing_groups).toBe(2); // g1, g3
     expect(health.queue.running_tasks).toBe(1); // only g1 has activeTask
     expect(health.queue.retrying_groups).toBe(2); // g2, g3
+  });
+
+  it('rolls up message and task lane reason codes', () => {
+    const details: GroupQueueDetail[] = [
+      // running message lane + running task lane (active task)
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'g1-msg',
+        },
+        taskLane: {
+          active: true,
+          pendingCount: 0,
+          containerName: 'g1-task',
+          activeTask: {
+            taskId: 't1',
+            promptPreview: 'p',
+            startedAt: Date.now(),
+            runningMs: 100,
+          },
+        },
+        retryCount: 0,
+      },
+      // cooling-down message lane (idle:true) + back-pressure task lane
+      {
+        folderKey: 'g2',
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 0,
+          containerName: 'g2-msg',
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 2,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+      // retrying message lane + no-work task lane
+      {
+        folderKey: 'g3',
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 0,
+          containerName: null,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 1,
+      },
+      // back-pressure message lane + no-work task lane
+      {
+        folderKey: 'g4',
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 5,
+          containerName: null,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+      // no-work message lane + no-work task lane
+      {
+        folderKey: 'g5',
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 0,
+          containerName: null,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+    ];
+    const health = buildHealthData(makeState([makeAgent()], details), 0);
+    expect(health.queue.message_lane_reasons).toEqual({
+      running: 1,
+      'cooling-down': 1,
+      'back-pressure': 1,
+      retrying: 1,
+      'no-work': 1,
+    });
+    expect(health.queue.task_lane_reasons).toEqual({
+      running: 1,
+      'back-pressure': 1,
+      'no-work': 3,
+    });
+  });
+
+  it('honors explicit lane reason fields when provided', () => {
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 0,
+          containerName: null,
+          reason: 'running',
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+          reason: 'back-pressure',
+        },
+        retryCount: 0,
+      },
+    ];
+    const health = buildHealthData(makeState([makeAgent()], details), 0);
+    expect(health.queue.message_lane_reasons.running).toBe(1);
+    expect(health.queue.task_lane_reasons['back-pressure']).toBe(1);
   });
 });
 
@@ -373,6 +519,51 @@ describe('renderSystemContent', () => {
     // pending message count should appear (7)
     expect(html).toContain(
       '<span class="metric-value" id="sys-queue-pending-messages">7</span>',
+    );
+  });
+
+  it('renders message and task lane reason rollups with stable IDs', () => {
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 2,
+          containerName: 'g1-msg',
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 1,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+    ];
+    const html = renderSystemContent(makeState([makeAgent()], details), 0);
+    expect(html).toContain('message lane reasons');
+    expect(html).toContain('task lane reasons');
+    // Each message lane reason must have a stable ID, even when count is zero.
+    for (const reason of [
+      'running',
+      'cooling-down',
+      'back-pressure',
+      'retrying',
+      'no-work',
+    ]) {
+      expect(html).toContain(`id="sys-queue-msg-reason-${reason}"`);
+    }
+    for (const reason of ['running', 'back-pressure', 'no-work']) {
+      expect(html).toContain(`id="sys-queue-task-reason-${reason}"`);
+    }
+    // The single g1 message lane is running -> count 1.
+    expect(html).toContain(
+      '<span class="breakdown-val" id="sys-queue-msg-reason-running">1</span>',
+    );
+    // The g1 task lane has pending=1, active=false -> back-pressure count 1.
+    expect(html).toContain(
+      '<span class="breakdown-val" id="sys-queue-task-reason-back-pressure">1</span>',
     );
   });
 

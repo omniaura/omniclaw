@@ -2,8 +2,28 @@ import fs from 'fs';
 import os from 'os';
 
 import type { WebStateProvider } from './types.js';
+import {
+  deriveMessageLaneReasonFromDetail,
+  deriveTaskLaneReasonFromDetail,
+  type MessageLaneReason,
+  type TaskLaneReason,
+} from '../group-queue.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
+
+const MESSAGE_LANE_REASONS: readonly MessageLaneReason[] = [
+  'running',
+  'cooling-down',
+  'back-pressure',
+  'retrying',
+  'no-work',
+];
+
+const TASK_LANE_REASONS: readonly TaskLaneReason[] = [
+  'running',
+  'back-pressure',
+  'no-work',
+];
 
 export interface HealthData {
   status: 'healthy';
@@ -61,6 +81,16 @@ export interface HealthData {
     running_tasks: number;
     /** Sum of consecutive retry counts across all group folders. */
     retrying_groups: number;
+    /**
+     * Count of message lanes by structured reason code. Keys are the same
+     * `MessageLaneReason` values exposed on the IPC inspector page.
+     */
+    message_lane_reasons: Record<MessageLaneReason, number>;
+    /**
+     * Count of task lanes by structured reason code. Keys are the same
+     * `TaskLaneReason` values exposed on the IPC inspector page.
+     */
+    task_lane_reasons: Record<TaskLaneReason, number>;
   };
   sse_clients: number;
   started_at: string;
@@ -121,12 +151,26 @@ export function buildHealthData(
   let processingGroups = 0;
   let runningTasks = 0;
   let retryingGroups = 0;
+  const messageLaneReasons: Record<MessageLaneReason, number> = {
+    running: 0,
+    'cooling-down': 0,
+    'back-pressure': 0,
+    retrying: 0,
+    'no-work': 0,
+  };
+  const taskLaneReasons: Record<TaskLaneReason, number> = {
+    running: 0,
+    'back-pressure': 0,
+    'no-work': 0,
+  };
   for (const g of queueDetails) {
     pendingMessages += g.messageLane.pendingCount;
     pendingTasks += g.taskLane.pendingCount;
     if (g.messageLane.active) processingGroups++;
     if (g.taskLane.activeTask) runningTasks++;
     if (g.retryCount > 0) retryingGroups++;
+    messageLaneReasons[deriveMessageLaneReasonFromDetail(g)]++;
+    taskLaneReasons[deriveTaskLaneReasonFromDetail(g)]++;
   }
 
   return {
@@ -179,6 +223,8 @@ export function buildHealthData(
       processing_groups: processingGroups,
       running_tasks: runningTasks,
       retrying_groups: retryingGroups,
+      message_lane_reasons: messageLaneReasons,
+      task_lane_reasons: taskLaneReasons,
     },
     sse_clients: sseClientCount,
     started_at: startedAt,
@@ -225,6 +271,22 @@ function breakdownList(obj: Record<string, number>): string {
         `<div class="breakdown-item">` +
         `<span class="breakdown-key">${escapeHtml(key)}</span>` +
         `<span class="breakdown-val">${count}</span>` +
+        `</div>`,
+    )
+    .join('');
+}
+
+function reasonRollup<T extends string>(
+  obj: Record<T, number>,
+  order: readonly T[],
+  idPrefix: string,
+): string {
+  return order
+    .map(
+      (reason) =>
+        `<div class="breakdown-item">` +
+        `<span class="breakdown-key reason-${reason}">${escapeHtml(reason)}</span>` +
+        `<span class="breakdown-val" id="${idPrefix}-${reason}">${obj[reason] ?? 0}</span>` +
         `</div>`,
     )
     .join('');
@@ -372,6 +434,18 @@ export function renderSystemContent(
           'retrying',
           String(health.queue.retrying_groups),
           'sys-queue-retrying',
+        ) +
+        `<div class="metric-sub">message lane reasons</div>` +
+        reasonRollup(
+          health.queue.message_lane_reasons,
+          MESSAGE_LANE_REASONS,
+          'sys-queue-msg-reason',
+        ) +
+        `<div class="metric-sub">task lane reasons</div>` +
+        reasonRollup(
+          health.queue.task_lane_reasons,
+          TASK_LANE_REASONS,
+          'sys-queue-task-reason',
         ),
     ) +
     `</div>` +
