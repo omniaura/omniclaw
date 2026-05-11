@@ -69,6 +69,18 @@ export interface GroupQueueDetail {
      * {@link deriveMessageLaneReasonFromDetail} when missing.
      */
     reason?: MessageLaneReason;
+    /**
+     * Epoch ms when the current message run started. Null when the lane is
+     * idle (cooldown or no work). Operators use this with {@link runningMs}
+     * to spot stuck or long-running message runs.
+     */
+    startedAt?: number | null;
+    /**
+     * Milliseconds elapsed since the current message run started. Null when
+     * the lane is idle. Derived as `Date.now() - startedAt` in
+     * {@link GroupQueue.getDetailedStats}.
+     */
+    runningMs?: number | null;
   };
   taskLane: {
     active: boolean;
@@ -158,6 +170,8 @@ interface GroupState {
   messageContainerName: string | null;
   messageGroupFolder: string | null;
   messageBackend: AgentBackend | null;
+  /** Epoch ms when the current message run started; null when idle. */
+  messageRunStartedAt: number | null;
   retryCount: number;
 
   // Task lane
@@ -262,6 +276,7 @@ export class GroupQueue {
         messageContainerName: null,
         messageGroupFolder: null,
         messageBackend: null,
+        messageRunStartedAt: null,
         retryCount: 0,
 
         taskActive: false,
@@ -313,6 +328,7 @@ export class GroupQueue {
     }
 
     this.transitionMessageLaneState(groupJid, 'running');
+    state.messageRunStartedAt = Date.now();
     this.dequeuePendingMessage(groupJid);
     this.activeCount++;
     return { started: true, processingCount };
@@ -325,6 +341,7 @@ export class GroupQueue {
     state.messageContainerName = null;
     state.messageGroupFolder = null;
     state.messageBackend = null;
+    state.messageRunStartedAt = null;
     this.activeCount--;
   }
 
@@ -946,6 +963,11 @@ export class GroupQueue {
           pendingCount: state.pendingMessageJids.length,
           containerName: state.messageContainerName,
           reason: messageReason,
+          startedAt: state.messageRunStartedAt,
+          runningMs:
+            state.messageRunStartedAt !== null
+              ? Date.now() - state.messageRunStartedAt
+              : null,
         },
         taskLane: {
           active: state.taskActive,

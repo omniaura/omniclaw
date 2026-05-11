@@ -1087,3 +1087,76 @@ describe('GroupQueue.getDetailedStats reason codes', () => {
     expect(fresh.getDetailedStats()).toEqual([]);
   });
 });
+
+describe('GroupQueue.getDetailedStats message lane run age', () => {
+  const fsStub = {
+    ...realFs,
+    mkdirSync: mock(),
+    writeFileSync: mock(),
+    renameSync: mock(),
+  };
+
+  it('reports startedAt/runningMs while a message run is in flight', async () => {
+    const queue = new GroupQueue({
+      dataDir: '/tmp/omniclaw-test-data-msgage',
+      maxActiveContainers: 1,
+      maxIdleContainers: 0,
+      maxTaskContainers: 1,
+      fsImpl: fsStub,
+    });
+
+    let resolveRun: (() => void) | null = null;
+    queue.setProcessMessagesFn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveRun = () => resolve(true);
+        }),
+    );
+
+    const before = Date.now();
+    queue.enqueueMessageCheck('groupA@g.us');
+    await Bun.sleep(5);
+
+    const inFlight = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupA@g.us');
+    expect(inFlight?.messageLane.active).toBe(true);
+    expect(typeof inFlight?.messageLane.startedAt).toBe('number');
+    expect(inFlight?.messageLane.startedAt).toBeGreaterThanOrEqual(before);
+    expect(typeof inFlight?.messageLane.runningMs).toBe('number');
+    expect(inFlight?.messageLane.runningMs).toBeGreaterThanOrEqual(0);
+
+    resolveRun!();
+    await Bun.sleep(5);
+
+    const after = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupA@g.us');
+    // After the run finishes the lane returns to idle and the timer clears.
+    expect(after?.messageLane.active).toBe(false);
+    expect(after?.messageLane.startedAt).toBeNull();
+    expect(after?.messageLane.runningMs).toBeNull();
+  });
+
+  it('clears startedAt/runningMs after a message run finishes', async () => {
+    const queue = new GroupQueue({
+      dataDir: '/tmp/omniclaw-test-data-msgage-done',
+      maxActiveContainers: 1,
+      maxIdleContainers: 0,
+      maxTaskContainers: 1,
+      fsImpl: fsStub,
+    });
+
+    queue.setProcessMessagesFn(async () => true);
+    queue.enqueueMessageCheck('groupB@g.us');
+    await Bun.sleep(20);
+
+    const detail = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupB@g.us');
+    // After completion the lane should be idle with timers cleared.
+    expect(detail?.messageLane.active).toBe(false);
+    expect(detail?.messageLane.startedAt).toBeNull();
+    expect(detail?.messageLane.runningMs).toBeNull();
+  });
+});
