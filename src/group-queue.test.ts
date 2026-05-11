@@ -1138,6 +1138,75 @@ describe('GroupQueue.getDetailedStats message lane run age', () => {
     expect(after?.messageLane.runningMs).toBeNull();
   });
 
+  it('clears startedAt/runningMs while in cooldown and restamps when sendMessage resumes', async () => {
+    const queue = new GroupQueue({
+      dataDir: '/tmp/omniclaw-test-data-msgage-cooldown',
+      maxActiveContainers: 1,
+      maxIdleContainers: 1,
+      maxTaskContainers: 1,
+      fsImpl: fsStub,
+    });
+
+    let resolveRun: (() => void) | null = null;
+    queue.setProcessMessagesFn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveRun = () => resolve(true);
+        }),
+    );
+
+    const backendSend = mock(() => true);
+    queue.enqueueMessageCheck('groupC@g.us');
+    await Bun.sleep(5);
+    queue.registerProcess(
+      'groupC@g.us',
+      { killed: false } as any,
+      'msg-ctr-c',
+      'groupC-folder',
+      {
+        sendMessage: backendSend,
+        closeStdin: mock(),
+        runAgent: mock(async () => ({
+          status: 'success' as const,
+          result: null,
+        })),
+      } as any,
+      'message',
+    );
+
+    // While running we have an age.
+    const inFlight = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupC@g.us');
+    expect(typeof inFlight?.messageLane.startedAt).toBe('number');
+    expect(typeof inFlight?.messageLane.runningMs).toBe('number');
+
+    // Entering cooldown clears the age so /ipc doesn't grow it while idle.
+    queue.notifyIdle('groupC@g.us');
+    const cooling = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupC@g.us');
+    expect(cooling?.messageLane.idle).toBe(true);
+    expect(cooling?.messageLane.startedAt).toBeNull();
+    expect(cooling?.messageLane.runningMs).toBeNull();
+
+    // Resuming via sendMessage stamps a fresh start time.
+    const beforeResume = Date.now();
+    const sent = await queue.sendMessage('groupC@g.us', 'wake up');
+    expect(sent).toBe(true);
+    const resumed = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupC@g.us');
+    expect(resumed?.messageLane.idle).toBe(false);
+    expect(typeof resumed?.messageLane.startedAt).toBe('number');
+    expect(resumed?.messageLane.startedAt).toBeGreaterThanOrEqual(beforeResume);
+    expect(typeof resumed?.messageLane.runningMs).toBe('number');
+    expect(resumed?.messageLane.runningMs).toBeGreaterThanOrEqual(0);
+
+    resolveRun!();
+    await Bun.sleep(5);
+  });
+
   it('clears startedAt/runningMs after a message run finishes', async () => {
     const queue = new GroupQueue({
       dataDir: '/tmp/omniclaw-test-data-msgage-done',

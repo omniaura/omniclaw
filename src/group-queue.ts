@@ -527,6 +527,9 @@ export class GroupQueue {
     }
 
     this.transitionMessageLaneState(groupJid, 'cooldown');
+    // Clear the run timer when entering cooldown so /ipc doesn't show a
+    // growing "running age" while the lane is actually idle-waiting.
+    state.messageRunStartedAt = null;
 
     // A processing slot just freed up — let waiting messages start.
     this.drainWaitingMessages();
@@ -609,6 +612,9 @@ export class GroupQueue {
     }
     // Container was idle — mark it active again (single-method bookkeeping)
     this.transitionMessageLaneState(chatJid, 'running');
+    // Stamp the start of this resumed run so /ipc reports the age of the
+    // current message run, not the original container-start timer.
+    state.messageRunStartedAt = Date.now();
     const channelJid = toChannelJid(chatJid);
 
     // Use Effect-based queue if available
