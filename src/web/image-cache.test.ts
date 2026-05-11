@@ -37,6 +37,98 @@ describe('describeImageUrl', () => {
 });
 
 describe('serveCachedRemoteImage', () => {
+  it('serves a fresh safe cached image without resolving or fetching', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    try {
+      const cacheHash = createHash('sha256')
+        .update('fresh-cache-key')
+        .digest('hex');
+
+      fs.mkdirSync(testImageCacheDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(testImageCacheDir, `${cacheHash}.bin`),
+        new Uint8Array([1, 2, 3]),
+      );
+      fs.writeFileSync(
+        path.join(testImageCacheDir, `${cacheHash}.json`),
+        JSON.stringify({
+          contentType: 'image/png; charset=binary',
+          fetchedAt: Date.now(),
+        }),
+      );
+
+      const response = await serveCachedRemoteImage(
+        'fresh-cache-key',
+        async () => {
+          throw new Error('fresh cache entry should not resolve upstream URL');
+        },
+        { cacheDir: testImageCacheDir },
+      );
+
+      expect(response).not.toBeNull();
+      expect(response!.headers.get('content-type')).toBe('image/png');
+      expect(response!.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(await response!.arrayBuffer()).toEqual(
+        new Uint8Array([1, 2, 3]).buffer,
+      );
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+    }
+  });
+
+  it('refreshes stale cached images from upstream', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    try {
+      const cacheHash = createHash('sha256')
+        .update('stale-cache-key')
+        .digest('hex');
+
+      fs.mkdirSync(testImageCacheDir, { recursive: true });
+      fs.writeFileSync(path.join(testImageCacheDir, `${cacheHash}.bin`), 'old');
+      fs.writeFileSync(
+        path.join(testImageCacheDir, `${cacheHash}.json`),
+        JSON.stringify({
+          contentType: 'image/png',
+          fetchedAt: Date.now() - 2 * 24 * 60 * 60 * 1000,
+        }),
+      );
+
+      const response = await serveCachedRemoteImage(
+        'stale-cache-key',
+        async () => 'https://93.184.216.34/avatar.png',
+        {
+          cacheDir: testImageCacheDir,
+          fetchImpl: (async () =>
+            new Response(new Uint8Array([9, 8, 7]), {
+              headers: { 'content-type': 'image/webp' },
+            })) as RemoteImageFetch,
+        },
+      );
+
+      expect(response).not.toBeNull();
+      expect(response!.headers.get('content-type')).toBe('image/webp');
+      expect(new Uint8Array(await response!.arrayBuffer())).toEqual(
+        new Uint8Array([9, 8, 7]),
+      );
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+    }
+  });
+
   it('rejects loopback image urls before fetching', async () => {
     const testImageCacheDir = path.join(
       DATA_DIR,
@@ -436,6 +528,19 @@ describe('serveCachedRemoteImage byte cap', () => {
 });
 
 describe('validateRemoteImageUrl', () => {
+  it.each([
+    ['http://0.0.0.0/avatar.png', 'private address is not allowed'],
+    ['http://172.16.0.1/avatar.png', 'private address is not allowed'],
+    ['http://100.64.0.1/avatar.png', 'private address is not allowed'],
+    ['http://240.0.0.1/avatar.png', 'private address is not allowed'],
+    ['http://[fc00::1]/avatar.png', 'private address is not allowed'],
+    ['http://[fe80::1]/avatar.png', 'private address is not allowed'],
+    ['http://[ff02::1]/avatar.png', 'private address is not allowed'],
+    ['http://cdn.localhost/avatar.png', 'loopback host is not allowed'],
+  ])('rejects blocked local address %s', async (url, expected) => {
+    await expect(validateRemoteImageUrl(url)).resolves.toBe(expected);
+  });
+
   it('rejects localhost hosts', async () => {
     await expect(
       validateRemoteImageUrl('http://localhost:3000/avatar.png'),
