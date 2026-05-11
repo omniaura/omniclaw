@@ -13,6 +13,16 @@ const IMAGE_CACHE_DIR = path.join(DATA_DIR, 'image-cache');
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const BROWSER_CACHE_CONTROL = 'private, max-age=86400';
 const REMOTE_IMAGE_FETCH_TIMEOUT_MS = 10_000;
+const ALLOWED_REMOTE_IMAGE_CONTENT_TYPES = new Set([
+  'image/avif',
+  'image/bmp',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/x-icon',
+  'image/vnd.microsoft.icon',
+]);
 
 /** Default maximum bytes to buffer from a remote image fetch (5 MiB). */
 const DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -222,6 +232,17 @@ function readMeta(metaPath: string): CacheMetadata | null {
   }
 }
 
+function normalizeAllowedImageContentType(
+  contentType: string | null,
+): string | null {
+  if (!contentType) return null;
+  const mimeType = contentType.split(';', 1)[0]?.trim().toLowerCase();
+  if (!mimeType || !ALLOWED_REMOTE_IMAGE_CONTENT_TYPES.has(mimeType)) {
+    return null;
+  }
+  return mimeType;
+}
+
 function buildCachedResponse(dataPath: string, contentType: string): Response {
   // Read eagerly so the response body remains valid even if later test cleanup
   // removes the cache directory before the body stream is consumed.
@@ -229,6 +250,7 @@ function buildCachedResponse(dataPath: string, contentType: string): Response {
     headers: {
       'Content-Type': contentType,
       'Cache-Control': BROWSER_CACHE_CONTROL,
+      'X-Content-Type-Options': 'nosniff',
     },
   });
 }
@@ -401,7 +423,17 @@ export async function serveCachedRemoteImage(
     fs.existsSync(dataPath) &&
     Date.now() - meta.fetchedAt < ONE_DAY_MS
   ) {
-    return buildCachedResponse(dataPath, meta.contentType);
+    const cachedContentType = normalizeAllowedImageContentType(
+      meta.contentType,
+    );
+    if (cachedContentType) {
+      return buildCachedResponse(dataPath, cachedContentType);
+    }
+
+    logger.warn(
+      { cacheKey, contentType: meta.contentType },
+      'Ignoring cached remote image with unsafe content type',
+    );
   }
 
   const url = await resolveUrl();
@@ -458,8 +490,20 @@ export async function serveCachedRemoteImage(
       return null;
     }
 
-    const contentType =
-      upstream.headers.get('content-type') || 'application/octet-stream';
+    const contentType = normalizeAllowedImageContentType(
+      upstream.headers.get('content-type'),
+    );
+    if (!contentType) {
+      logger.warn(
+        {
+          cacheKey,
+          imageUrl: describeImageUrl(url),
+          contentType: upstream.headers.get('content-type') || '',
+        },
+        'Rejected remote image with unsafe content type',
+      );
+      return null;
+    }
 
     if (!upstream.body) {
       logger.warn(

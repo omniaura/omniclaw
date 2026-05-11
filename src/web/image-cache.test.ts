@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import fs from 'fs';
 import http from 'node:http';
 import path from 'path';
@@ -56,6 +56,105 @@ describe('serveCachedRemoteImage', () => {
             throw new Error('should not fetch blocked url');
           }) as RemoteImageFetch,
         },
+      );
+
+      expect(response).toBeNull();
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+    }
+  });
+
+  it('rejects active content types from upstream responses', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    try {
+      const response = await serveCachedRemoteImage(
+        'active-content-key',
+        async () => 'https://93.184.216.34/avatar.html',
+        {
+          cacheDir: testImageCacheDir,
+          fetchImpl: (async () =>
+            new Response('<script>alert(1)</script>', {
+              status: 200,
+              headers: { 'content-type': 'text/html; charset=utf-8' },
+            })) as RemoteImageFetch,
+        },
+      );
+
+      expect(response).toBeNull();
+      expect(fs.readdirSync(testImageCacheDir)).toEqual([]);
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+    }
+  });
+
+  it('rejects svg images because they can contain active script content', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    try {
+      const response = await serveCachedRemoteImage(
+        'svg-content-key',
+        async () => 'https://93.184.216.34/avatar.svg',
+        {
+          cacheDir: testImageCacheDir,
+          fetchImpl: (async () =>
+            new Response('<svg><script>alert(1)</script></svg>', {
+              status: 200,
+              headers: { 'content-type': 'image/svg+xml' },
+            })) as RemoteImageFetch,
+        },
+      );
+
+      expect(response).toBeNull();
+      expect(fs.readdirSync(testImageCacheDir)).toEqual([]);
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+    }
+  });
+
+  it('does not replay cached entries with unsafe content types', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    try {
+      const cacheHash = createHash('sha256')
+        .update('unsafe-cache-key')
+        .digest('hex');
+
+      fs.mkdirSync(testImageCacheDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(testImageCacheDir, `${cacheHash}.bin`),
+        '<script>alert(1)</script>',
+      );
+      fs.writeFileSync(
+        path.join(testImageCacheDir, `${cacheHash}.json`),
+        JSON.stringify({
+          contentType: 'text/html',
+          fetchedAt: Date.now(),
+        }),
+      );
+
+      const response = await serveCachedRemoteImage(
+        'unsafe-cache-key',
+        async () => null,
+        { cacheDir: testImageCacheDir },
       );
 
       expect(response).toBeNull();
