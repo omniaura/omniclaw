@@ -941,6 +941,126 @@ describe('GroupQueue', () => {
       await Bun.sleep(10);
     });
 
+    it('captures last error message on caught failure and clears on success', async () => {
+      const scheduled: Array<() => void> = [];
+      const originalSetTimeout = globalThis.setTimeout;
+      let attempts = 0;
+
+      queue.setProcessMessagesFn(
+        mock(async () => {
+          attempts++;
+          if (attempts === 1) {
+            throw new Error('processor blew up');
+          }
+          return true;
+        }),
+      );
+
+      (globalThis as { setTimeout: typeof setTimeout }).setTimeout = ((
+        fn: Parameters<typeof setTimeout>[0],
+      ) => {
+        scheduled.push(fn as () => void);
+        return { id: 'retry' } as unknown as ReturnType<typeof setTimeout>;
+      }) as unknown as typeof setTimeout;
+
+      try {
+        queue.enqueueMessageCheck('group1@g.us');
+        await Bun.sleep(10);
+
+        let detail = queue
+          .getDetailedStats()
+          .find((g) => g.folderKey === 'group1@g.us');
+        expect(detail).toBeDefined();
+        expect(detail!.retryCount).toBe(1);
+        expect(detail!.messageLane.lastError).not.toBeNull();
+        expect(detail!.messageLane.lastError!.message).toBe(
+          'processor blew up',
+        );
+        expect(typeof detail!.messageLane.lastError!.at).toBe('number');
+
+        // Trigger the retry; this time the processor succeeds.
+        scheduled[0]();
+        await Bun.sleep(10);
+
+        detail = queue
+          .getDetailedStats()
+          .find((g) => g.folderKey === 'group1@g.us');
+        expect(detail).toBeDefined();
+        expect(detail!.retryCount).toBe(0);
+        expect(detail!.messageLane.lastError).toBeNull();
+      } finally {
+        (globalThis as { setTimeout: typeof setTimeout }).setTimeout =
+          originalSetTimeout;
+      }
+    });
+
+    it('does not record a lastError when the processor merely returns false', async () => {
+      const scheduled: Array<() => void> = [];
+      const originalSetTimeout = globalThis.setTimeout;
+
+      queue.setProcessMessagesFn(mock(async () => false));
+
+      (globalThis as { setTimeout: typeof setTimeout }).setTimeout = ((
+        fn: Parameters<typeof setTimeout>[0],
+      ) => {
+        scheduled.push(fn as () => void);
+        return { id: 'retry' } as unknown as ReturnType<typeof setTimeout>;
+      }) as unknown as typeof setTimeout;
+
+      try {
+        queue.enqueueMessageCheck('group1@g.us');
+        await Bun.sleep(10);
+
+        const detail = queue
+          .getDetailedStats()
+          .find((g) => g.folderKey === 'group1@g.us');
+        expect(detail).toBeDefined();
+        expect(detail!.retryCount).toBe(1);
+        // A soft failure (success=false) should not synthesize an error message.
+        expect(detail!.messageLane.lastError).toBeNull();
+      } finally {
+        (globalThis as { setTimeout: typeof setTimeout }).setTimeout =
+          originalSetTimeout;
+      }
+    });
+
+    it('truncates very long error messages and collapses whitespace', async () => {
+      const scheduled: Array<() => void> = [];
+      const originalSetTimeout = globalThis.setTimeout;
+      const longMessage = 'x'.repeat(500) + '\n\nmore stuff';
+
+      queue.setProcessMessagesFn(
+        mock(async () => {
+          throw new Error(longMessage);
+        }),
+      );
+
+      (globalThis as { setTimeout: typeof setTimeout }).setTimeout = ((
+        fn: Parameters<typeof setTimeout>[0],
+      ) => {
+        scheduled.push(fn as () => void);
+        return { id: 'retry' } as unknown as ReturnType<typeof setTimeout>;
+      }) as unknown as typeof setTimeout;
+
+      try {
+        queue.enqueueMessageCheck('group1@g.us');
+        await Bun.sleep(10);
+
+        const detail = queue
+          .getDetailedStats()
+          .find((g) => g.folderKey === 'group1@g.us');
+        expect(detail).toBeDefined();
+        const captured = detail!.messageLane.lastError;
+        expect(captured).not.toBeNull();
+        expect(captured!.message.length).toBeLessThanOrEqual(200);
+        expect(captured!.message.endsWith('\u2026')).toBe(true);
+        expect(captured!.message).not.toContain('\n');
+      } finally {
+        (globalThis as { setTimeout: typeof setTimeout }).setTimeout =
+          originalSetTimeout;
+      }
+    });
+
     it('resets active counts before scheduling a retry', async () => {
       const scheduled: Array<() => void> = [];
       const originalSetTimeout = globalThis.setTimeout;
