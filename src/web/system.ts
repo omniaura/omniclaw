@@ -8,6 +8,7 @@ import {
   type MessageLaneReason,
   type TaskLaneReason,
 } from '../group-queue.js';
+import { getAgentExecStatus, type AgentExecStatus } from './agents-page.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 
@@ -23,6 +24,15 @@ const TASK_LANE_REASONS: readonly TaskLaneReason[] = [
   'running',
   'back-pressure',
   'no-work',
+];
+
+const AGENT_EXEC_STATUSES: readonly AgentExecStatus[] = [
+  'executing',
+  'running-task',
+  'idle',
+  'queued',
+  'offline',
+  'disabled',
 ];
 
 export interface HealthData {
@@ -55,6 +65,12 @@ export interface HealthData {
     total: number;
     by_backend: Record<string, number>;
     by_runtime: Record<string, number>;
+    /**
+     * Count of local agents by derived execution status (idle, executing,
+     * running-task, queued, offline, disabled). Mirrors the per-agent badge
+     * shown on the /agents page so /system and /agents agree on the rollup.
+     */
+    by_exec_status: Record<AgentExecStatus, number>;
   };
   containers: {
     active: number;
@@ -132,9 +148,22 @@ export function buildHealthData(
 
   const byBackend: Record<string, number> = {};
   const byRuntime: Record<string, number> = {};
+  const byExecStatus: Record<AgentExecStatus, number> = {
+    executing: 0,
+    'running-task': 0,
+    idle: 0,
+    queued: 0,
+    offline: 0,
+    disabled: 0,
+  };
   for (const agent of agents) {
     byBackend[agent.backend] = (byBackend[agent.backend] || 0) + 1;
     byRuntime[agent.agentRuntime] = (byRuntime[agent.agentRuntime] || 0) + 1;
+    const status: AgentExecStatus =
+      agent.enabled === false
+        ? 'disabled'
+        : getAgentExecStatus(agent.folder, queueDetails);
+    byExecStatus[status]++;
   }
 
   let activeTasks = 0,
@@ -203,6 +232,7 @@ export function buildHealthData(
       total: agents.length,
       by_backend: byBackend,
       by_runtime: byRuntime,
+      by_exec_status: byExecStatus,
     },
     containers: {
       active: Math.max(0, stats.activeContainers - stats.idleContainers),
@@ -280,12 +310,13 @@ function reasonRollup<T extends string>(
   obj: Record<T, number>,
   order: readonly T[],
   idPrefix: string,
+  keyClassPrefix: string = 'reason',
 ): string {
   return order
     .map(
       (reason) =>
         `<div class="breakdown-item">` +
-        `<span class="breakdown-key reason-${reason}">${escapeHtml(reason)}</span>` +
+        `<span class="breakdown-key ${keyClassPrefix}-${reason}">${escapeHtml(reason)}</span>` +
         `<span class="breakdown-val" id="${idPrefix}-${reason}">${obj[reason] ?? 0}</span>` +
         `</div>`,
     )
@@ -389,6 +420,13 @@ export function renderSystemContent(
     metricCard(
       'agents',
       metricRow('total', String(health.agents.total), 'sys-agents-total') +
+        `<div class="metric-sub">by state</div>` +
+        reasonRollup(
+          health.agents.by_exec_status,
+          AGENT_EXEC_STATUSES,
+          'sys-agents-state',
+          'exec',
+        ) +
         `<div class="metric-sub">by backend</div>` +
         breakdownList(health.agents.by_backend) +
         `<div class="metric-sub">by runtime</div>` +

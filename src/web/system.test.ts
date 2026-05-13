@@ -204,6 +204,109 @@ describe('buildHealthData', () => {
     expect(health.agents.total).toBe(0);
     expect(health.agents.by_backend).toEqual({});
     expect(health.agents.by_runtime).toEqual({});
+    expect(health.agents.by_exec_status).toEqual({
+      executing: 0,
+      'running-task': 0,
+      idle: 0,
+      queued: 0,
+      offline: 0,
+      disabled: 0,
+    });
+  });
+
+  it('rolls up agents by derived execution status', () => {
+    const agents = [
+      makeAgent({ id: 'a1', folder: 'g1' }),
+      makeAgent({ id: 'a2', folder: 'g2' }),
+      makeAgent({ id: 'a3', folder: 'g3' }),
+      makeAgent({ id: 'a4', folder: 'g-missing' }),
+      makeAgent({ id: 'a5', folder: 'g5', enabled: false }),
+    ];
+    const details: GroupQueueDetail[] = [
+      // executing: active and not idle
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'g1-msg',
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+      // running-task: task lane active
+      {
+        folderKey: 'g2',
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 0,
+          containerName: 'g2-msg',
+        },
+        taskLane: {
+          active: true,
+          pendingCount: 0,
+          containerName: 'g2-task',
+          activeTask: {
+            taskId: 't',
+            promptPreview: 'p',
+            startedAt: Date.now(),
+            runningMs: 100,
+          },
+        },
+        retryCount: 0,
+      },
+      // idle: container alive but waiting
+      {
+        folderKey: 'g3',
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 0,
+          containerName: 'g3-msg',
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+      // g5 is in queue details but agent is disabled, so should count disabled
+      {
+        folderKey: 'g5',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'g5-msg',
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+    ];
+    const health = buildHealthData(makeState(agents, details), 0);
+    expect(health.agents.total).toBe(5);
+    expect(health.agents.by_exec_status).toEqual({
+      executing: 1, // a1
+      'running-task': 1, // a2
+      idle: 1, // a3
+      queued: 0,
+      offline: 1, // a4 (no queue detail)
+      disabled: 1, // a5 (enabled=false beats queue state)
+    });
   });
 
   it('reports zero queue rollup when no groups are tracked', () => {
@@ -564,6 +667,57 @@ describe('renderSystemContent', () => {
     // The g1 task lane has pending=1, active=false -> back-pressure count 1.
     expect(html).toContain(
       '<span class="breakdown-val" id="sys-queue-task-reason-back-pressure">1</span>',
+    );
+  });
+
+  it('renders agent exec-status rollup with stable IDs and exec-* classes', () => {
+    const agents = [
+      makeAgent({ id: 'a1', folder: 'g1' }),
+      makeAgent({ id: 'a2', folder: 'g-missing' }),
+      makeAgent({ id: 'a3', folder: 'g3', enabled: false }),
+    ];
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'g1-msg',
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+    ];
+    const html = renderSystemContent(makeState(agents, details), 0);
+    expect(html).toContain('by state');
+    for (const status of [
+      'executing',
+      'running-task',
+      'idle',
+      'queued',
+      'offline',
+      'disabled',
+    ]) {
+      expect(html).toContain(`id="sys-agents-state-${status}"`);
+      expect(html).toContain(`exec-${status}`);
+    }
+    // a1 (g1) -> executing
+    expect(html).toContain(
+      '<span class="breakdown-val" id="sys-agents-state-executing">1</span>',
+    );
+    // a2 (g-missing) -> offline
+    expect(html).toContain(
+      '<span class="breakdown-val" id="sys-agents-state-offline">1</span>',
+    );
+    // a3 (enabled=false) -> disabled
+    expect(html).toContain(
+      '<span class="breakdown-val" id="sys-agents-state-disabled">1</span>',
     );
   });
 
