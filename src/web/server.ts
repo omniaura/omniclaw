@@ -48,6 +48,7 @@ import {
   renderAgentsContent,
   renderAgentRow,
   getAgentExecStatus,
+  getAgentExecReason,
 } from './agents-page.js';
 import { buildAgentChannelData } from './agent-channels.js';
 import {
@@ -1159,7 +1160,10 @@ function patchAgentsPage(client: SseClient, state: WebStateProvider): void {
       const status = a.remoteInstanceId
         ? ('offline' as const)
         : getAgentExecStatus(a.folder, queueDetails);
-      return renderAgentRow(a, taskCounts[a.folder] || 0, status);
+      const reason = a.remoteInstanceId
+        ? null
+        : getAgentExecReason(a.folder, queueDetails);
+      return renderAgentRow(a, taskCounts[a.folder] || 0, status, reason);
     })
     .join('\n');
   client.stream.patchElements(rows, {

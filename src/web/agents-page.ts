@@ -6,7 +6,11 @@
 
 import { createHash } from 'crypto';
 
-import type { GroupQueueDetail } from '../group-queue.js';
+import {
+  deriveMessageLaneReasonFromDetail,
+  type GroupQueueDetail,
+  type MessageLaneReason,
+} from '../group-queue.js';
 import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
@@ -23,6 +27,15 @@ export type AgentExecStatus =
   | 'queued'
   | 'offline'
   | 'disabled';
+
+/** Set of reason codes recognized by {@link renderExecStatusBadge}. */
+const KNOWN_MESSAGE_LANE_REASONS: ReadonlySet<MessageLaneReason> = new Set([
+  'running',
+  'cooling-down',
+  'back-pressure',
+  'retrying',
+  'no-work',
+]);
 
 /** Derive an agent's execution status from the group queue details. */
 export function getAgentExecStatus(
@@ -46,6 +59,25 @@ export function getAgentExecStatus(
     return 'queued';
 
   return 'offline';
+}
+
+/**
+ * Derive the underlying message-lane reason code for an agent.
+ *
+ * Returns the structured {@link MessageLaneReason} when the agent has a
+ * queue detail entry (whether or not the lane is currently running). Returns
+ * `null` when there is no detail for the folder (no live or recent state to
+ * report). Operators use this to drill into *why* an idle/queued/offline
+ * agent is in its current state — e.g. `cooling-down` (healthy idle) vs
+ * `retrying` (backing off) vs `back-pressure` (waiting for a slot).
+ */
+export function getAgentExecReason(
+  folder: string,
+  queueDetails: GroupQueueDetail[],
+): MessageLaneReason | null {
+  const detail = queueDetails.find((d) => d.folderKey === folder);
+  if (!detail) return null;
+  return deriveMessageLaneReasonFromDetail(detail);
 }
 
 const EXEC_STATUS_LABELS: Record<AgentExecStatus, string> = {
@@ -85,10 +117,27 @@ function backendBadgeClass(backend: string): string {
 }
 
 /** Render the execution status badge for an agent. */
-export function renderExecStatusBadge(status: AgentExecStatus): string {
+export function renderExecStatusBadge(
+  status: AgentExecStatus,
+  reason: MessageLaneReason | null = null,
+): string {
   const label = EXEC_STATUS_LABELS[status];
   const css = EXEC_STATUS_CSS[status];
-  return `<span class="badge badge-sm ${css}">${escapeHtml(label)}</span>`;
+  const statusBadge = `<span class="badge badge-sm ${css}">${escapeHtml(label)}</span>`;
+  // Only surface the reason for non-active states (executing/running-task
+  // already convey the lane reason via the status label itself). `disabled`
+  // is an operator override and has no underlying lane reason.
+  const shouldShowReason =
+    reason !== null &&
+    KNOWN_MESSAGE_LANE_REASONS.has(reason) &&
+    status !== 'executing' &&
+    status !== 'running-task' &&
+    status !== 'disabled';
+  if (!shouldShowReason) return statusBadge;
+  return (
+    statusBadge +
+    `<span class="lane-reason reason-${reason}" data-exec-reason="${reason}">${escapeHtml(reason as string)}</span>`
+  );
 }
 
 /** Render a single agent row in the agents table. */
@@ -96,6 +145,7 @@ export function renderAgentRow(
   agent: AgentChannelData,
   taskCount: number,
   execStatus: AgentExecStatus = 'offline',
+  execReason: MessageLaneReason | null = null,
 ): string {
   const esc = escapeHtml;
   const avatar = avatarSrc(agent);
@@ -126,7 +176,7 @@ export function renderAgentRow(
     `<span class="ap-avatar-wrap">${avatarHtml}</span>` +
     `<span class="ap-name">${esc(agent.name)}</span>` +
     `</a></td>` +
-    `<td>${renderExecStatusBadge(execStatus)}</td>` +
+    `<td>${renderExecStatusBadge(execStatus, execReason)}</td>` +
     `<td><span class="badge ${backendBadgeClass(agent.backend)}">${esc(agent.backend)}</span></td>` +
     `<td><span class="badge badge-sm">${esc(agent.agentRuntime)}</span></td>` +
     `<td class="td-center">${agent.channels.length}</td>` +
@@ -184,14 +234,16 @@ export function renderAgentsContent(
   const rows = agentData
     .map((a) => {
       let status: AgentExecStatus;
+      let reason: MessageLaneReason | null = null;
       if (a.remoteInstanceId) {
         status = 'offline';
       } else if (localAgents[a.id]?.enabled === false) {
         status = 'disabled';
       } else {
         status = getAgentExecStatus(a.folder, queueDetails);
+        reason = getAgentExecReason(a.folder, queueDetails);
       }
-      return renderAgentRow(a, taskCounts[a.folder] || 0, status);
+      return renderAgentRow(a, taskCounts[a.folder] || 0, status, reason);
     })
     .join('\n');
 
