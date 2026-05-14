@@ -4,6 +4,7 @@ import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 import type { GroupQueueDetail } from '../group-queue.js';
 import { handleRequest } from './routes.js';
 import {
+  getAgentExecReason,
   getAgentExecStatus,
   renderAgentRow,
   renderExecStatusBadge,
@@ -593,6 +594,164 @@ describe('renderExecStatusBadge', () => {
     expect(html).toContain('exec-offline');
     expect(html).toContain('offline');
   });
+
+  it('appends lane-reason badge when reason is provided for idle status', () => {
+    const html = renderExecStatusBadge('idle', 'cooling-down');
+    expect(html).toContain('exec-idle');
+    expect(html).toContain('lane-reason reason-cooling-down');
+    expect(html).toContain('data-exec-reason="cooling-down"');
+    expect(html).toContain('>cooling-down<');
+  });
+
+  it('appends lane-reason badge for offline + no-work', () => {
+    const html = renderExecStatusBadge('offline', 'no-work');
+    expect(html).toContain('exec-offline');
+    expect(html).toContain('lane-reason reason-no-work');
+  });
+
+  it('appends lane-reason badge for queued + back-pressure', () => {
+    const html = renderExecStatusBadge('queued', 'back-pressure');
+    expect(html).toContain('exec-queued');
+    expect(html).toContain('lane-reason reason-back-pressure');
+  });
+
+  it('appends lane-reason badge for offline + retrying', () => {
+    const html = renderExecStatusBadge('offline', 'retrying');
+    expect(html).toContain('lane-reason reason-retrying');
+  });
+
+  it('omits lane-reason badge when status is executing (label already conveys it)', () => {
+    const html = renderExecStatusBadge('executing', 'running');
+    expect(html).toContain('exec-executing');
+    expect(html).not.toContain('lane-reason');
+  });
+
+  it('omits lane-reason badge when status is running-task', () => {
+    const html = renderExecStatusBadge('running-task', 'running');
+    expect(html).not.toContain('lane-reason');
+  });
+
+  it('omits lane-reason badge when status is disabled', () => {
+    const html = renderExecStatusBadge('disabled', 'no-work');
+    expect(html).toContain('exec-disabled');
+    expect(html).not.toContain('lane-reason');
+  });
+
+  it('omits lane-reason badge when reason is null', () => {
+    const html = renderExecStatusBadge('offline', null);
+    expect(html).toContain('exec-offline');
+    expect(html).not.toContain('lane-reason');
+  });
+
+  it('ignores unknown reason codes (defensive)', () => {
+    // Cast through unknown to simulate a corrupt/stale fixture passing an
+    // unrecognized reason. Should silently omit the badge rather than emit
+    // an unstyled span.
+    const html = renderExecStatusBadge(
+      'offline',
+      'mystery' as unknown as 'no-work',
+    );
+    expect(html).not.toContain('lane-reason');
+  });
+});
+
+describe('getAgentExecReason', () => {
+  it('returns null when there is no queue detail for the folder', () => {
+    expect(getAgentExecReason('test-agent', [])).toBeNull();
+  });
+
+  it('returns "running" when message lane is actively processing', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+      }),
+    ];
+    expect(getAgentExecReason('test-agent', details)).toBe('running');
+  });
+
+  it('returns "cooling-down" when message lane is idle-waiting', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: true,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+      }),
+    ];
+    expect(getAgentExecReason('test-agent', details)).toBe('cooling-down');
+  });
+
+  it('returns "back-pressure" when messages are pending but lane is idle', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 4,
+          containerName: null,
+        },
+      }),
+    ];
+    expect(getAgentExecReason('test-agent', details)).toBe('back-pressure');
+  });
+
+  it('returns "retrying" when retryCount > 0 and lane is idle', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 0,
+          containerName: null,
+        },
+        retryCount: 2,
+      }),
+    ];
+    expect(getAgentExecReason('test-agent', details)).toBe('retrying');
+  });
+
+  it('returns "no-work" when nothing is pending or running', () => {
+    const details = [makeQueueDetail()];
+    expect(getAgentExecReason('test-agent', details)).toBe('no-work');
+  });
+
+  it('honors an explicit reason on the detail when present', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 0,
+          containerName: null,
+          reason: 'retrying',
+        },
+      }),
+    ];
+    expect(getAgentExecReason('test-agent', details)).toBe('retrying');
+  });
+
+  it('matches by folder key', () => {
+    const details = [
+      makeQueueDetail({
+        folderKey: 'other-agent',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+      }),
+    ];
+    expect(getAgentExecReason('test-agent', details)).toBeNull();
+    expect(getAgentExecReason('other-agent', details)).toBe('running');
+  });
 });
 
 describe('renderAgentRow with status', () => {
@@ -625,6 +784,38 @@ describe('renderAgentRow with status', () => {
     const html = renderAgentRow(agentData, 0);
     expect(html).toContain('exec-offline');
   });
+
+  it('renders the lane-reason badge when a reason is passed alongside an idle status', () => {
+    const agentData = {
+      id: 'agent-1',
+      name: 'Test Agent',
+      folder: 'test-agent',
+      backend: 'apple-container',
+      agentRuntime: 'claude-agent-sdk',
+      isAdmin: false,
+      channels: [],
+    };
+
+    const html = renderAgentRow(agentData, 0, 'idle', 'cooling-down');
+    expect(html).toContain('exec-idle');
+    expect(html).toContain('lane-reason reason-cooling-down');
+  });
+
+  it('omits the lane-reason badge for executing rows even when a reason is passed', () => {
+    const agentData = {
+      id: 'agent-1',
+      name: 'Test Agent',
+      folder: 'test-agent',
+      backend: 'apple-container',
+      agentRuntime: 'claude-agent-sdk',
+      isAdmin: false,
+      channels: [],
+    };
+
+    const html = renderAgentRow(agentData, 0, 'executing', 'running');
+    expect(html).toContain('exec-executing');
+    expect(html).not.toContain('lane-reason');
+  });
 });
 
 describe('renderAgentsContent with execution status', () => {
@@ -649,6 +840,61 @@ describe('renderAgentsContent with execution status', () => {
 
     const html = renderAgentsContent(state);
     expect(html).toContain('exec-executing');
+
+    state.getQueueDetails = origGetQueueDetails;
+  });
+
+  it('surfaces the underlying lane reason for idle local agents', () => {
+    const state = makeState();
+    const origGetQueueDetails = state.getQueueDetails;
+    state.getQueueDetails = () => [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: true,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+      }),
+    ];
+
+    const html = renderAgentsContent(state);
+    expect(html).toContain('exec-idle');
+    expect(html).toContain('lane-reason reason-cooling-down');
+
+    state.getQueueDetails = origGetQueueDetails;
+  });
+
+  it('surfaces the underlying lane reason for offline-with-retries local agents', () => {
+    const state = makeState();
+    const origGetQueueDetails = state.getQueueDetails;
+    state.getQueueDetails = () => [
+      makeQueueDetail({
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 0,
+          containerName: null,
+        },
+        retryCount: 3,
+      }),
+    ];
+
+    const html = renderAgentsContent(state);
+    expect(html).toContain('exec-offline');
+    expect(html).toContain('lane-reason reason-retrying');
+
+    state.getQueueDetails = origGetQueueDetails;
+  });
+
+  it('does not render a lane-reason badge when no queue detail exists for the agent', () => {
+    const state = makeState();
+    const origGetQueueDetails = state.getQueueDetails;
+    state.getQueueDetails = () => [];
+
+    const html = renderAgentsContent(state);
+    expect(html).toContain('exec-offline');
+    expect(html).not.toContain('lane-reason');
 
     state.getQueueDetails = origGetQueueDetails;
   });
