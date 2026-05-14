@@ -71,6 +71,17 @@ afterEach(() => {
 });
 
 describe('detectDominantPlatform', () => {
+  it('returns the platform with the most matching subscriptions', () => {
+    expect(
+      detectDominantPlatform([
+        { channelJid: 'dc:general' },
+        { channelJid: 'slack:C123' },
+        { channelJid: 'slack:D456' },
+        { channelJid: 'tg:bot-1:-100' },
+      ]),
+    ).toBe('slack');
+  });
+
   it('ignores unknown channel prefixes and returns undefined when none match', () => {
     expect(
       detectDominantPlatform([
@@ -82,6 +93,22 @@ describe('detectDominantPlatform', () => {
 });
 
 describe('buildAvatarCandidates', () => {
+  it('skips subscriptions when no compatible channel can fetch avatars', () => {
+    const candidates = buildAvatarCandidates(
+      [
+        { channelJid: 'dc:123', discordBotId: 'MISSING' },
+        { channelJid: 'tg:bot-1:-100' },
+        { channelJid: 'slack:C123' },
+      ],
+      [
+        { ...makeChannel('discord', 'MISSING'), getAvatarUrl: undefined },
+        makeChannel('telegram', 'other-bot'),
+      ],
+    );
+
+    expect(candidates).toEqual([]);
+  });
+
   it('prefers the matching Discord bot for an agent', () => {
     const candidates = buildAvatarCandidates(
       [
@@ -112,6 +139,38 @@ describe('buildAvatarCandidates', () => {
     expect(candidates[0]?.platform).toBe('telegram');
     expect(candidates[0]?.identity).toBe('bot-1');
     expect(candidates[1]?.platform).toBe('slack');
+  });
+
+  it('uses deterministic platform ranking to break subscription-count ties', () => {
+    const candidates = buildAvatarCandidates(
+      [
+        { channelJid: 'dc:123', discordBotId: 'BOT' },
+        { channelJid: 'slack:C123' },
+        { channelJid: 'tg:bot-1:-100' },
+      ],
+      [
+        makeChannel('discord', 'BOT'),
+        makeChannel('slack'),
+        makeChannel('telegram', 'bot-1'),
+      ],
+    );
+
+    expect(candidates.map((candidate) => candidate.platform)).toEqual([
+      'telegram',
+      'slack',
+      'discord',
+    ]);
+  });
+
+  it('matches legacy Telegram subscriptions to legacy-capable channels', () => {
+    const candidates = buildAvatarCandidates(
+      [{ channelJid: 'tg:-10012345' }],
+      [makeChannel('telegram', 'ignored')],
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.platform).toBe('telegram');
+    expect(candidates[0]?.identity).toBe('legacy');
   });
 });
 
