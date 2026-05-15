@@ -1207,6 +1207,65 @@ describe('GroupQueue.getDetailedStats message lane run age', () => {
     await Bun.sleep(5);
   });
 
+  it('does not reset startedAt on sendMessage when lane is already running', async () => {
+    const queue = new GroupQueue({
+      dataDir: '/tmp/omniclaw-test-data-msgage-running',
+      maxActiveContainers: 1,
+      maxIdleContainers: 0,
+      maxTaskContainers: 1,
+      fsImpl: fsStub,
+    });
+
+    let resolveRun: (() => void) | null = null;
+    queue.setProcessMessagesFn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveRun = () => resolve(true);
+        }),
+    );
+
+    const backendSend = mock(() => true);
+    queue.enqueueMessageCheck('groupD@g.us');
+    await Bun.sleep(5);
+    queue.registerProcess(
+      'groupD@g.us',
+      { killed: false } as any,
+      'msg-ctr-d',
+      'groupD-folder',
+      {
+        sendMessage: backendSend,
+        closeStdin: mock(),
+        runAgent: mock(async () => ({
+          status: 'success' as const,
+          result: null,
+        })),
+      } as any,
+      'message',
+    );
+
+    // Snapshot the initial run start time while the lane is `running`.
+    const inFlight = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupD@g.us');
+    const originalStartedAt = inFlight?.messageLane.startedAt;
+    expect(typeof originalStartedAt).toBe('number');
+
+    // Wait long enough for Date.now() to advance.
+    await Bun.sleep(10);
+
+    // Follow-up sendMessage on an already-running lane must NOT restamp
+    // startedAt — otherwise long-running/stuck runs get underreported on /ipc.
+    const sent = await queue.sendMessage('groupD@g.us', 'follow-up');
+    expect(sent).toBe(true);
+    const afterFollowUp = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupD@g.us');
+    expect(afterFollowUp?.messageLane.startedAt).toBe(originalStartedAt);
+
+    resolveRun!();
+    await Bun.sleep(5);
+  });
+
   it('clears startedAt/runningMs after a message run finishes', async () => {
     const queue = new GroupQueue({
       dataDir: '/tmp/omniclaw-test-data-msgage-done',

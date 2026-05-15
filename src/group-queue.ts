@@ -610,11 +610,15 @@ export class GroupQueue {
     if (state.messageLaneState === 'idle' || !state.messageGroupFolder) {
       return false;
     }
-    // Container was idle — mark it active again (single-method bookkeeping)
-    this.transitionMessageLaneState(chatJid, 'running');
-    // Stamp the start of this resumed run so /ipc reports the age of the
-    // current message run, not the original container-start timer.
-    state.messageRunStartedAt = Date.now();
+    // Container was idle — mark it active again (single-method bookkeeping).
+    // Only restamp the run timer on a real cooldown → running transition;
+    // follow-up sendMessage() calls while already running must NOT reset
+    // messageRunStartedAt, otherwise long-running/stuck runs get underreported
+    // on /ipc every time a new message arrives.
+    const resumed = this.transitionMessageLaneState(chatJid, 'running');
+    if (resumed) {
+      state.messageRunStartedAt = Date.now();
+    }
     const channelJid = toChannelJid(chatJid);
 
     // Use Effect-based queue if available
