@@ -6,6 +6,7 @@ import {
   GroupQueue,
   deriveMessageLaneReason,
   deriveTaskLaneReason,
+  summarizeError,
 } from './group-queue.js';
 
 mock.restore();
@@ -1097,6 +1098,28 @@ describe('GroupQueue', () => {
           originalSetTimeout;
       }
     });
+  });
+});
+
+describe('summarizeError', () => {
+  it('returns a string for undefined without throwing', () => {
+    expect(typeof summarizeError(undefined)).toBe('string');
+  });
+
+  it('returns a string for function inputs without throwing', () => {
+    expect(typeof summarizeError(() => {})).toBe('string');
+  });
+
+  it('returns a string for symbol inputs without throwing', () => {
+    expect(typeof summarizeError(Symbol('x'))).toBe('string');
+  });
+
+  it('preserves Error messages and collapses whitespace', () => {
+    expect(summarizeError(new Error('boom\n  details'))).toBe('boom details');
+  });
+
+  it('passes string inputs through with whitespace collapsing', () => {
+    expect(summarizeError('hello\n  world')).toBe('hello world');
   });
 });
 

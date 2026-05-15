@@ -34,7 +34,7 @@ const MAX_LAST_ERROR_LEN = 200;
  * characters and collapses whitespace so multi-line stack traces don't break
  * the table layout.
  */
-function summarizeError(err: unknown): string {
+export function summarizeError(err: unknown): string {
   const raw =
     err instanceof Error
       ? err.message || err.name || 'Error'
@@ -47,7 +47,12 @@ function summarizeError(err: unknown): string {
               return String(err);
             }
           })();
-  const collapsed = raw.replace(/\s+/g, ' ').trim();
+  // `JSON.stringify` returns `undefined` (without throwing) for
+  // `undefined`, functions, and symbols, so coerce to a safe string
+  // before whitespace collapsing to avoid `undefined.replace(...)`.
+  const collapsed = String(raw ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (collapsed.length <= MAX_LAST_ERROR_LEN) return collapsed;
   return collapsed.slice(0, MAX_LAST_ERROR_LEN - 1) + '\u2026';
 }
