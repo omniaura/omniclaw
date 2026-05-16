@@ -623,6 +623,91 @@ describe('renderSystemContent', () => {
     expect(html).toContain(
       '<span class="metric-value" id="sys-queue-pending-messages">7</span>',
     );
+    // longest running task duration row is present
+    expect(html).toContain('id="sys-queue-longest-running"');
+  });
+
+  it('surfaces the longest running task age across all task lanes', () => {
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 0,
+          containerName: null,
+        },
+        taskLane: {
+          active: true,
+          pendingCount: 0,
+          containerName: 'g1-task',
+          activeTask: {
+            taskId: 't-short',
+            promptPreview: 'p',
+            startedAt: Date.now(),
+            runningMs: 500,
+          },
+        },
+        retryCount: 0,
+      },
+      {
+        folderKey: 'g2',
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 0,
+          containerName: null,
+        },
+        taskLane: {
+          active: true,
+          pendingCount: 0,
+          containerName: 'g2-task',
+          activeTask: {
+            taskId: 't-long',
+            promptPreview: 'p',
+            startedAt: Date.now(),
+            runningMs: 125_000,
+          },
+        },
+        retryCount: 0,
+      },
+    ];
+    const health = buildHealthData(makeState([makeAgent()], details), 0);
+    expect(health.queue.longest_running_task_ms).toBe(125_000);
+    const html = renderSystemContent(makeState([makeAgent()], details), 0);
+    // 125000ms => 2.1m via the IPC inspector's formatter
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-queue-longest-running">2.1m</span>',
+    );
+  });
+
+  it('renders an em-dash for longest running when no tasks are running', () => {
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 0,
+          containerName: null,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+    ];
+    const health = buildHealthData(makeState([makeAgent()], details), 0);
+    expect(health.queue.running_tasks).toBe(0);
+    expect(health.queue.longest_running_task_ms).toBe(0);
+    const html = renderSystemContent(makeState([makeAgent()], details), 0);
+    // em-dash placeholder when no task is running
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-queue-longest-running">\u2014</span>',
+    );
   });
 
   it('renders message and task lane reason rollups with stable IDs', () => {

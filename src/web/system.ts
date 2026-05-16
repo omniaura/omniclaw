@@ -95,6 +95,12 @@ export interface HealthData {
     processing_groups: number;
     /** Number of groups whose task lane has a task running. */
     running_tasks: number;
+    /**
+     * Longest currently-running task age in milliseconds across all task lanes.
+     * Zero when no task is running. Useful for spotting stuck or long-running
+     * tasks without drilling into /ipc.
+     */
+    longest_running_task_ms: number;
     /** Sum of consecutive retry counts across all group folders. */
     retrying_groups: number;
     /**
@@ -179,6 +185,7 @@ export function buildHealthData(
   let pendingTasks = 0;
   let processingGroups = 0;
   let runningTasks = 0;
+  let longestRunningTaskMs = 0;
   let retryingGroups = 0;
   const messageLaneReasons: Record<MessageLaneReason, number> = {
     running: 0,
@@ -196,7 +203,12 @@ export function buildHealthData(
     pendingMessages += g.messageLane.pendingCount;
     pendingTasks += g.taskLane.pendingCount;
     if (g.messageLane.active) processingGroups++;
-    if (g.taskLane.activeTask) runningTasks++;
+    if (g.taskLane.activeTask) {
+      runningTasks++;
+      if (g.taskLane.activeTask.runningMs > longestRunningTaskMs) {
+        longestRunningTaskMs = g.taskLane.activeTask.runningMs;
+      }
+    }
     if (g.retryCount > 0) retryingGroups++;
     messageLaneReasons[deriveMessageLaneReasonFromDetail(g)]++;
     taskLaneReasons[deriveTaskLaneReasonFromDetail(g)]++;
@@ -252,6 +264,7 @@ export function buildHealthData(
       pending_tasks: pendingTasks,
       processing_groups: processingGroups,
       running_tasks: runningTasks,
+      longest_running_task_ms: longestRunningTaskMs,
       retrying_groups: retryingGroups,
       message_lane_reasons: messageLaneReasons,
       task_lane_reasons: taskLaneReasons,
@@ -259,6 +272,17 @@ export function buildHealthData(
     sse_clients: sseClientCount,
     started_at: startedAt,
   };
+}
+
+/**
+ * Format a millisecond duration for human-friendly display in operator surfaces.
+ * Mirrors the helper used by the IPC inspector so the unit progression matches:
+ * `<1s` → ms, `<1m` → seconds (one decimal), otherwise minutes (one decimal).
+ */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60000).toFixed(1)}m`;
 }
 
 function formatUptime(seconds: number): string {
@@ -457,6 +481,13 @@ export function renderSystemContent(
           'running tasks',
           String(health.queue.running_tasks),
           'sys-queue-running-tasks',
+        ) +
+        metricRow(
+          'longest running',
+          health.queue.running_tasks > 0
+            ? formatDuration(health.queue.longest_running_task_ms)
+            : '\u2014',
+          'sys-queue-longest-running',
         ) +
         metricRow(
           'pending msgs',
