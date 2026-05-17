@@ -26,6 +26,36 @@ interface QueuedTask {
 
 const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 5000;
+const MAX_LAST_ERROR_LEN = 200;
+
+/**
+ * Reduce an unknown caught value to a short single-line string suitable for
+ * surfacing inline on the IPC inspector. Truncates to `MAX_LAST_ERROR_LEN`
+ * characters and collapses whitespace so multi-line stack traces don't break
+ * the table layout.
+ */
+export function summarizeError(err: unknown): string {
+  const raw =
+    err instanceof Error
+      ? err.message || err.name || 'Error'
+      : typeof err === 'string'
+        ? err
+        : (() => {
+            try {
+              return JSON.stringify(err);
+            } catch {
+              return String(err);
+            }
+          })();
+  // `JSON.stringify` returns `undefined` (without throwing) for
+  // `undefined`, functions, and symbols, so coerce to a safe string
+  // before whitespace collapsing to avoid `undefined.replace(...)`.
+  const collapsed = String(raw ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (collapsed.length <= MAX_LAST_ERROR_LEN) return collapsed;
+  return collapsed.slice(0, MAX_LAST_ERROR_LEN - 1) + '\u2026';
+}
 
 export type Lane = 'message' | 'task';
 type MessageLaneState = 'idle' | 'running' | 'cooldown';
@@ -81,6 +111,15 @@ export interface GroupQueueDetail {
      * {@link GroupQueue.getDetailedStats}.
      */
     runningMs?: number | null;
+    /**
+     * Most recent failure that caused a retry on this lane, if any. Cleared
+     * after the next successful run. Used by the IPC inspector to surface a
+     * truncated error message inline next to the retry count.
+     */
+    lastError?: {
+      message: string;
+      at: number;
+    } | null;
   };
   taskLane: {
     active: boolean;
@@ -173,6 +212,8 @@ interface GroupState {
   /** Epoch ms when the current message run started; null when idle. */
   messageRunStartedAt: number | null;
   retryCount: number;
+  /** Last error captured on the message lane, cleared after a successful run. */
+  messageLastError: { message: string; at: number } | null;
 
   // Task lane
   taskActive: boolean;
@@ -278,6 +319,7 @@ export class GroupQueue {
         messageBackend: null,
         messageRunStartedAt: null,
         retryCount: 0,
+        messageLastError: null,
 
         taskActive: false,
         pendingTasks: [],
@@ -775,8 +817,18 @@ export class GroupQueue {
     }
   }
 
-  private scheduleRetry(groupJid: string, state: GroupState): void {
+  private scheduleRetry(
+    groupJid: string,
+    state: GroupState,
+    err?: unknown,
+  ): void {
     state.retryCount++;
+    if (err !== undefined) {
+      state.messageLastError = {
+        message: summarizeError(err),
+        at: Date.now(),
+      };
+    }
     if (state.retryCount > MAX_RETRIES) {
       logger.error(
         { groupJid, retryCount: state.retryCount },
@@ -892,13 +944,14 @@ export class GroupQueue {
         const success = await this.processMessagesFn(groupJid);
         if (success) {
           state.retryCount = 0;
+          state.messageLastError = null;
         } else {
           this.scheduleRetry(groupJid, state);
         }
       }
     } catch (err) {
       logger.error({ groupJid, err }, 'Error processing messages for group');
-      this.scheduleRetry(groupJid, state);
+      this.scheduleRetry(groupJid, state, err);
     } finally {
       this.finishMessageRun(groupJid);
       this.drainMessageLane(groupJid);
@@ -978,6 +1031,7 @@ export class GroupQueue {
             state.messageRunStartedAt !== null
               ? Date.now() - state.messageRunStartedAt
               : null,
+          lastError: state.messageLastError,
         },
         taskLane: {
           active: state.taskActive,

@@ -218,6 +218,81 @@ describe('renderIpcInspector', () => {
     expect(html).toContain('>retrying<');
   });
 
+  it('renders a "last error" column header in the queue table', () => {
+    const html = renderIpcInspector(makeState());
+    expect(html).toContain('>last error<');
+  });
+
+  it('renders em-dash placeholder when no lastError is present', () => {
+    const html = renderIpcInspector(makeState());
+    // agent-alpha and agent-beta have no lastError; both rows should render
+    // an em-dash placeholder inside the last-error cell.
+    expect(html).toContain('<td class="last-error">\u2014</td>');
+  });
+
+  it('renders lastError message, age, and logs link when present', () => {
+    const detail: GroupQueueDetail = {
+      folderKey: 'agent-epsilon',
+      messageLane: {
+        active: false,
+        idle: false,
+        pendingCount: 1,
+        containerName: null,
+        reason: 'retrying',
+        lastError: {
+          message: 'connect ECONNREFUSED 127.0.0.1:5432',
+          at: Date.now() - 2_500,
+        },
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work',
+      },
+      retryCount: 1,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [detail] }),
+    );
+    expect(html).toContain('class="last-error-link"');
+    expect(html).toContain('href="/logs"');
+    expect(html).toContain('connect ECONNREFUSED 127.0.0.1:5432');
+    // Age should be rendered in seconds (~2.5s)
+    expect(html).toMatch(/last-error-age">[0-9.]+s<\/span>/);
+  });
+
+  it('HTML-escapes lastError messages to prevent injection', () => {
+    const detail: GroupQueueDetail = {
+      folderKey: 'agent-xss',
+      messageLane: {
+        active: false,
+        idle: false,
+        pendingCount: 1,
+        containerName: null,
+        reason: 'retrying',
+        lastError: {
+          message: '<img src=x onerror=alert(1)>',
+          at: Date.now(),
+        },
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work',
+      },
+      retryCount: 1,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [detail] }),
+    );
+    expect(html).not.toContain('<img src=x onerror=alert(1)>');
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  });
+
   it('escapes HTML in group names', () => {
     const xssDetail: GroupQueueDetail = {
       folderKey: '<script>alert(1)</script>',

@@ -52,6 +52,11 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
         typeof msgRunningMs === 'number' && msgRunningMs >= 0
           ? `<span class="lane-age" title="running for ${escapeHtml(formatDuration(msgRunningMs))}">${escapeHtml(formatDuration(msgRunningMs))}</span>`
           : '';
+      const retryCell =
+        g.retryCount > 0
+          ? `<span class="retry-count">${g.retryCount}</span>`
+          : '\u2014';
+      const lastErrorCell = renderLastError(g.messageLane.lastError);
       return `<tr>
         <td class="folder-key">${escapeHtml(g.folderKey)}</td>
         <td><span class="lane-badge lane-${msgStatus}">${msgStatus}</span>${msgReason}${msgAge}</td>
@@ -59,7 +64,8 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
         <td><span class="lane-badge lane-${taskStatus}">${taskStatus}</span>${taskReason}</td>
         <td>${g.taskLane.pendingCount}</td>
         <td class="task-info">${taskInfo}</td>
-        <td>${g.retryCount > 0 ? `<span class="retry-count">${g.retryCount}</span>` : '\u2014'}</td>
+        <td>${retryCell}</td>
+        <td class="last-error">${lastErrorCell}</td>
       </tr>`;
     })
     .join('\n');
@@ -99,7 +105,7 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
     `<section><h2>group queue state</h2>` +
     (queueDetails.length > 0
       ? `<table id="queue-table"><thead><tr>` +
-        `<th>group</th><th>messages</th><th>msg queue</th><th>tasks</th><th>task queue</th><th>running task</th><th>retries</th>` +
+        `<th>group</th><th>messages</th><th>msg queue</th><th>tasks</th><th>task queue</th><th>running task</th><th>retries</th><th>last error</th>` +
         `</tr></thead><tbody id="queue-body">${groupRows}</tbody></table>`
       : '<div class="ipc-empty">No groups currently tracked.</div>') +
     `</section>` +
@@ -111,6 +117,19 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
       : '<div class="ipc-empty">No IPC events recorded yet.</div>') +
     `</section>` +
     `</div></div>`
+  );
+}
+
+function renderLastError(
+  err: { message: string; at: number } | null | undefined,
+): string {
+  if (!err) return '\u2014';
+  const ageMs = Math.max(0, Date.now() - err.at);
+  return (
+    `<a href="/logs" class="last-error-link" title="${escapeHtml(err.message)}">` +
+    `<span class="last-error-text">${escapeHtml(err.message)}</span>` +
+    `<span class="last-error-age">${formatDuration(ageMs)}</span>` +
+    `</a>`
   );
 }
 
