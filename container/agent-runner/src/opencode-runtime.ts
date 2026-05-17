@@ -26,6 +26,10 @@ import type {
   IpcDrainResult,
   IpcMessage,
 } from '@omniclaw/protocol';
+import {
+  redactActivityOutput,
+  TOOL_OUTPUT_SNIPPET_CHARS,
+} from './activity-format.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -451,13 +455,34 @@ async function runOpenCodePrompt(
           const input =
             stateInput != null ? JSON.stringify(stateInput).slice(0, 120) : '';
           const output =
-            p.state.status === 'completed' ? p.state.output.slice(0, 200) : '';
+            p.state.status === 'completed'
+              ? redactActivityOutput(p.state.output).slice(
+                  0,
+                  TOOL_OUTPUT_SNIPPET_CHARS,
+                )
+              : '';
           if (output) {
-            log(`[tool] ${toolName}(${input}) → ${output}`);
+            const text = `▸ ${toolName}: ${input}\n\`\`\`\n${output}\n\`\`\``;
+            log(`[tool] ${toolName}(${input}) -> ${output}`);
+            writeOutput({
+              status: 'success',
+              result: text,
+              newSessionId: sessionId,
+              intermediate: true,
+              ...(currentChatJid ? { chatJid: currentChatJid } : {}),
+            });
             loggedToolIds.add(id);
             loggedPartCount++;
           } else if (!loggedToolIds.has(`pending:${id}`)) {
+            const text = `▸ ${toolName}: ${input}`;
             log(`[tool] ${toolName}(${input}) ...`);
+            writeOutput({
+              status: 'success',
+              result: text,
+              newSessionId: sessionId,
+              intermediate: true,
+              ...(currentChatJid ? { chatJid: currentChatJid } : {}),
+            });
             loggedToolIds.add(`pending:${id}`);
             loggedPartCount++;
           }

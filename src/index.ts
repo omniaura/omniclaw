@@ -256,6 +256,147 @@ const MAX_CHANNEL_AGENT_FANOUT = parseInt(
   10,
 );
 const DISPATCH_KEY_SEP = '::agent::';
+const INTERMEDIATE_BUFFER_LIMIT = 1_800;
+const INTERMEDIATE_EDIT_DEBOUNCE_MS = 750;
+
+type IntermediateStatusChannel = Pick<Channel, 'sendMessage' | 'editMessage'>;
+
+export function _truncateIntermediateStatusBuffer(
+  text: string,
+  limit = INTERMEDIATE_BUFFER_LIMIT,
+): string {
+  if (text.length <= limit) return text;
+
+  const lines = text.split('\n');
+  const kept: string[] = [];
+  let length = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i] ?? '';
+    const nextLength = length + line.length + (kept.length > 0 ? 1 : 0);
+    if (nextLength > limit - 4) break;
+    kept.unshift(line);
+    length = nextLength;
+  }
+
+  const truncated = ['...', ...kept].join('\n').trimStart();
+  // Once truncation occurs, strip fences from the live buffer so Discord does
+  // not render the rest of the status as a broken code block.
+  return truncated.replace(/```/g, '').slice(-limit);
+}
+
+export function _createIntermediateStatusStreamer(opts: {
+  channel: IntermediateStatusChannel | null;
+  chatJid: string;
+  bufferLimit?: number;
+  editDebounceMs?: number;
+  onDebug?: (err: unknown, message: string) => void;
+}) {
+  const channel = opts.channel;
+  const bufferLimit = opts.bufferLimit ?? INTERMEDIATE_BUFFER_LIMIT;
+  const editDebounceMs = opts.editDebounceMs ?? INTERMEDIATE_EDIT_DEBOUNCE_MS;
+  const onDebug = opts.onDebug ?? (() => undefined);
+  let messageId: string | null = null;
+  let creationPromise: Promise<string | null> | null = null;
+  let buffer = '';
+  let editTimer: ReturnType<typeof setTimeout> | null = null;
+  let editInFlight: Promise<void> | null = null;
+
+  const flushEdit = async (): Promise<void> => {
+    if (!channel?.editMessage || !messageId) return;
+    try {
+      await channel.editMessage(opts.chatJid, messageId, buffer.slice(0, 2000));
+    } catch (err) {
+      onDebug(err, 'Intermediate status edit failed');
+    }
+  };
+
+  const scheduleEdit = (): void => {
+    if (!channel?.editMessage || !messageId) return;
+    if (editTimer) return;
+    editTimer = setTimeout(() => {
+      editTimer = null;
+      editInFlight = flushEdit();
+    }, editDebounceMs);
+  };
+
+  const ensureMessage = async (): Promise<string | null> => {
+    if (!channel) return null;
+    if (messageId) return messageId;
+    if (!creationPromise) {
+      const initialBuffer = buffer;
+      creationPromise = channel
+        .sendMessage(opts.chatJid, initialBuffer.slice(0, 2000))
+        .then((id) => {
+          messageId = typeof id === 'string' ? id : null;
+          if (messageId && buffer !== initialBuffer) scheduleEdit();
+          return messageId;
+        })
+        .catch((err) => {
+          onDebug(err, 'Intermediate status creation failed');
+          return null;
+        });
+    }
+    return creationPromise;
+  };
+
+  return {
+    get messageId(): string | null {
+      return messageId;
+    },
+    get buffer(): string {
+      return buffer;
+    },
+    async append(text: string): Promise<void> {
+      if (!channel) return;
+      const clean = text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      if (!clean) return;
+      buffer = _truncateIntermediateStatusBuffer(
+        `${buffer}${buffer ? '\n' : ''}${clean}`,
+        bufferLimit,
+      );
+      const hadMessage = Boolean(messageId);
+      const id = await ensureMessage();
+      if (id && hadMessage) scheduleEdit();
+    },
+    async editFinal(text: string): Promise<boolean> {
+      if (!channel?.editMessage) return false;
+      if (editTimer) {
+        clearTimeout(editTimer);
+        editTimer = null;
+      }
+      await editInFlight;
+      const id = await ensureMessage();
+      if (!id) return false;
+      if (text.length > 2000) {
+        try {
+          await channel.editMessage(
+            opts.chatJid,
+            id,
+            'Final response follows below.',
+          );
+        } catch (err) {
+          onDebug(err, 'Final status-note edit failed');
+        }
+        return false;
+      }
+      try {
+        await channel.editMessage(opts.chatJid, id, text);
+        return true;
+      } catch (err) {
+        onDebug(err, 'Final intermediate edit failed');
+        return false;
+      }
+    },
+    reset(): void {
+      if (editTimer) clearTimeout(editTimer);
+      editTimer = null;
+      editInFlight = null;
+      creationPromise = null;
+      messageId = null;
+      buffer = '';
+    },
+  };
+}
 
 interface ChannelRosterMemberView {
   userId: string;
@@ -1490,13 +1631,17 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
 
   let hadError = false;
   let outputSentToUser = false;
-  // Edited-message streaming: a single message that gets updated with intermediate tool calls
-  let intermediateMessageId: string | null = null;
+  // Edited-message streaming: a single status message that gets updated with
+  // intermediate tool calls/logs, then replaced by the final reply.
   const intermediateChannel =
-    group.containerConfig?.streamIntermediates && channel?.editMessage
+    group.containerConfig?.streamIntermediates !== false && channel?.editMessage
       ? channel
       : null;
-  const streamIntermediates = !!intermediateChannel;
+  const intermediateStatus = _createIntermediateStatusStreamer({
+    channel: intermediateChannel,
+    chatJid,
+    onDebug: (err, message) => log.debug({ err }, message),
+  });
 
   // Patterns that indicate system/auth errors — never send these to channels
   // Adopted from [Upstream PR #298] - Prevents infinite loops from auth failures
@@ -1560,34 +1705,12 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
         // Adopted from [Upstream PR #243] - Critical stability fix
         try {
           if (result.intermediate) {
-            if (intermediateChannel && result.result) {
+            if (result.result) {
               const raw =
                 typeof result.result === 'string'
                   ? result.result
                   : JSON.stringify(result.result);
-              const text = raw
-                .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-                .trim();
-              if (!text) return;
-              try {
-                if (!intermediateMessageId) {
-                  // First intermediate: send a new standalone message
-                  const id = await intermediateChannel.sendMessage(
-                    chatJid,
-                    text.slice(0, 2000),
-                  );
-                  if (id && typeof id === 'string') intermediateMessageId = id;
-                } else {
-                  // Subsequent intermediates: edit that same status message
-                  await intermediateChannel.editMessage!(
-                    chatJid,
-                    intermediateMessageId,
-                    text.slice(0, 2000),
-                  );
-                }
-              } catch (err) {
-                log.debug({ err }, 'Intermediate streaming failed (non-fatal)');
-              }
+              await intermediateStatus.append(raw);
             }
             return;
           }
@@ -1635,11 +1758,28 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
                   // Don't use triggeringMessageId for cross-channel responses — it belongs to the original chat
                   const replyId =
                     targetJid === chatJid ? replyAnchorMessageId : null;
-                  await targetChannel.sendMessage(
-                    targetJid,
-                    formatted,
-                    replyId || undefined,
-                  );
+                  if (
+                    intermediateStatus.messageId &&
+                    targetJid === chatJid &&
+                    targetChannel === intermediateChannel &&
+                    targetChannel.editMessage
+                  ) {
+                    const edited =
+                      await intermediateStatus.editFinal(formatted);
+                    if (!edited) {
+                      await targetChannel.sendMessage(
+                        targetJid,
+                        formatted,
+                        replyId || undefined,
+                      );
+                    }
+                  } else {
+                    await targetChannel.sendMessage(
+                      targetJid,
+                      formatted,
+                      replyId || undefined,
+                    );
+                  }
                   if (replyAnchorMessageId) replyAnchorMessageId = null;
                   outputSentToUser = true;
                   // Stop typing refresh — prevents the 8s interval from
@@ -1652,7 +1792,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
               }
             }
             // Reset intermediate message so the next user message gets a fresh status message
-            intermediateMessageId = null;
+            intermediateStatus.reset();
             // Only reset idle timer on actual results, not session-update markers (result: null)
             resetIdleTimer();
           }

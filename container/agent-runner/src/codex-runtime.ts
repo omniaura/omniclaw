@@ -27,6 +27,10 @@ import type {
   IpcDrainResult,
   IpcMessage,
 } from '@omniclaw/protocol';
+import {
+  redactActivityOutput,
+  TOOL_OUTPUT_SNIPPET_CHARS,
+} from './activity-format.js';
 
 interface JsonRpcRequest {
   id: string | number;
@@ -144,6 +148,20 @@ function readString(value: unknown, key: string): string | undefined {
   return typeof candidate === 'string' ? candidate : undefined;
 }
 
+function truncate(value: string, maxLength: number): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
+function stringifyCompact(value: unknown, maxLength = 160): string | undefined {
+  if (typeof value === 'string') return truncate(value, maxLength);
+  if (value == null) return undefined;
+  try {
+    return truncate(JSON.stringify(value), maxLength);
+  } catch {
+    return truncate(String(value), maxLength);
+  }
+}
+
 function readBoolean(value: unknown, key: string): boolean | undefined {
   const record = asObject(value);
   if (!record) return undefined;
@@ -239,6 +257,50 @@ export function extractAssistantTextFromItem(item: unknown): string | null {
   return extractTextFromCodexContent(record.content);
 }
 
+export function renderCodexActivity(item: unknown): string | null {
+  const record = asObject(item);
+  if (!record) return null;
+  if (extractAssistantTextFromItem(record)) return null;
+
+  const type = (readString(record, 'type') || 'item').toLowerCase();
+  const command =
+    readString(record, 'command') ??
+    readString(readObject(record, 'command'), 'command') ??
+    readString(readObject(record, 'input'), 'command');
+  const pathValue =
+    readString(record, 'path') ??
+    readString(record, 'filePath') ??
+    readString(record, 'file_path') ??
+    readString(readObject(record, 'input'), 'path') ??
+    readString(readObject(record, 'input'), 'filePath') ??
+    readString(readObject(record, 'input'), 'file_path');
+  const name = readString(record, 'name') ?? readString(record, 'toolName');
+  const output =
+    readString(record, 'output') ??
+    readString(record, 'stdout') ??
+    readString(record, 'stderr') ??
+    extractTextFromCodexContent(record.content);
+
+  let label = name || type.replace(/[_-]+/g, ' ');
+  let summary = command || pathValue;
+  if (!summary) {
+    const input = record.input ?? record.params ?? record.arguments;
+    summary = stringifyCompact(input);
+  }
+  if (!summary && !output) return null;
+
+  label = label.charAt(0).toUpperCase() + label.slice(1);
+  const lines = [`▸ ${label}${summary ? `: ${truncate(summary, 180)}` : ''}`];
+  if (output?.trim()) {
+    lines.push(
+      '```',
+      truncate(redactActivityOutput(output.trim()), TOOL_OUTPUT_SNIPPET_CHARS),
+      '```',
+    );
+  }
+  return lines.join('\n');
+}
+
 function upsertTurnItem(
   turnState: TurnState,
   itemId: string,
@@ -299,6 +361,19 @@ function handleServerRequest(
     request.method === 'execCommandApproval'
   ) {
     log(`Auto-declining unsupported approval request: ${request.method}`);
+    const activity = renderCodexActivity({
+      ...asObject(request.params),
+      type: `${request.method} declined`,
+    });
+    if (activity) {
+      writeOutput({
+        status: 'success',
+        result: activity,
+        newSessionId: session.threadId,
+        intermediate: true,
+        ...(currentChatJid ? { chatJid: currentChatJid } : {}),
+      });
+    }
     writeJsonRpcMessage(session, {
       id: request.id,
       result: {
@@ -372,16 +447,25 @@ function handleNotification(
   }
 
   if (notification.method === 'item/completed') {
+    const item = readObject(notification.params, 'item');
     if (session.turnState && route.itemId) {
-      const text = extractAssistantTextFromItem(
-        readObject(notification.params, 'item'),
-      );
+      const text = extractAssistantTextFromItem(item);
       if (text) {
         const existing = session.turnState.textByItem.get(route.itemId) || '';
         if (!existing.trim()) {
           upsertTurnItem(session.turnState, route.itemId, text, false);
         }
       }
+    }
+    const activity = renderCodexActivity(item);
+    if (activity) {
+      writeOutput({
+        status: 'success',
+        result: activity,
+        newSessionId: session.threadId,
+        intermediate: true,
+        ...(currentChatJid ? { chatJid: currentChatJid } : {}),
+      });
     }
     return;
   }
