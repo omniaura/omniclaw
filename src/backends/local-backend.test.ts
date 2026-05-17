@@ -1,19 +1,13 @@
-import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 
 import { DATA_DIR, GROUPS_DIR } from '../config.js';
 import {
   buildContainerArgs,
-  buildExecInvocationArgs,
-  buildExecutionContainerArgs,
   buildVolumeMounts,
-  ExecBrokerOutputLimitError,
   LocalBackend,
-  parseExecRequest,
-  readExecBrokerText,
   resolveGitHubTokenForContainer,
-  runExecBrokerRequest,
   sharedVmNetworkIsolationError,
   SHARED_VM_NETWORK_ISOLATION_ERROR_CODE,
 } from './local-backend.js';
@@ -235,30 +229,6 @@ describe('LocalBackend', () => {
         expect(fs.existsSync(fixture.agentDir)).toBe(true);
         expect(fs.existsSync(fixture.categoryDir)).toBe(true);
         expect(fs.existsSync(fixture.serverDir)).toBe(true);
-      } finally {
-        fixture.cleanup();
-      }
-    });
-
-    it('creates exec broker directories inside the runtime IPC mount', () => {
-      const fixture = createFixture();
-      try {
-        buildVolumeMounts(
-          { folder: fixture.groupFolder, name: 'Exec Broker Test' } as any,
-          false,
-          false,
-          fixture.runtimeFolder,
-          'claude-agent-sdk',
-          undefined,
-          fixture.pathOverrides,
-        );
-
-        expect(fs.existsSync(path.join(fixture.ipcDir, 'exec-requests'))).toBe(
-          true,
-        );
-        expect(fs.existsSync(path.join(fixture.ipcDir, 'exec-responses'))).toBe(
-          true,
-        );
       } finally {
         fixture.cleanup();
       }
@@ -631,13 +601,10 @@ describe('LocalBackend', () => {
   describe('buildContainerArgs', () => {
     const originalGetuid = process.getuid;
     const originalGetgid = process.getgid;
-    const mutableFs = fs as { statSync: typeof fs.statSync };
-    const originalStatSync = fs.statSync;
 
     afterEach(() => {
       process.getuid = originalGetuid;
       process.getgid = originalGetgid;
-      mutableFs.statSync = originalStatSync;
     });
 
     it('renders readonly and read-write mounts with the expected flags', () => {
@@ -682,265 +649,6 @@ describe('LocalBackend', () => {
       expect(args).toContain('501:20');
       expect(args).toContain('-e');
       expect(args).toContain('HOME=/home/bun');
-    });
-
-    it('adds split-execution env and docker socket group access', () => {
-      mutableFs.statSync = ((target: fs.PathLike) => {
-        if (target === '/var/run/docker.sock') {
-          return { gid: 123 } as fs.Stats;
-        }
-        return originalStatSync(target);
-      }) as typeof fs.statSync;
-
-      const args = buildContainerArgs({
-        mounts: [],
-        containerName: 'exec-args-test',
-        isMain: false,
-        runtime: 'docker',
-        execContainerName: 'exec-sidecar',
-      });
-
-      expect(args).toContain('EXEC_CONTAINER_NAME=exec-sidecar');
-      expect(args).toContain('EXEC_RUNTIME=docker');
-      expect(args).toContain(
-        'EXEC_BROKER_REQUEST_DIR=/workspace/ipc/exec-requests',
-      );
-      expect(args).toContain(
-        'EXEC_BROKER_RESPONSE_DIR=/workspace/ipc/exec-responses',
-      );
-      expect(args).toContain('--group-add');
-      const groupAddIdx = args.indexOf('--group-add');
-      expect(args[groupAddIdx + 1]).toBe('123');
-    });
-
-    it('skips docker socket group access when the socket metadata is unavailable', () => {
-      mutableFs.statSync = (() => {
-        throw new Error('missing docker socket');
-      }) as typeof fs.statSync;
-
-      const args = buildContainerArgs({
-        mounts: [],
-        containerName: 'exec-args-test',
-        isMain: false,
-        runtime: 'docker',
-        execContainerName: 'exec-sidecar',
-      });
-
-      expect(args).toContain('EXEC_CONTAINER_NAME=exec-sidecar');
-      expect(args).toContain('EXEC_RUNTIME=docker');
-      expect(args).not.toContain('--group-add');
-    });
-
-    it('adds Apple split-execution env without docker socket group access', () => {
-      const args = buildContainerArgs({
-        mounts: [],
-        containerName: 'exec-args-test',
-        isMain: false,
-        runtime: 'container',
-        execContainerName: 'exec-sidecar',
-      });
-
-      expect(args).toContain('EXEC_CONTAINER_NAME=exec-sidecar');
-      expect(args).toContain('EXEC_RUNTIME=apple-container');
-      expect(args).toContain(
-        'EXEC_BROKER_REQUEST_DIR=/workspace/ipc/exec-requests',
-      );
-      expect(args).toContain(
-        'EXEC_BROKER_RESPONSE_DIR=/workspace/ipc/exec-responses',
-      );
-      expect(args).not.toContain('--group-add');
-    });
-  });
-
-  describe('buildExecInvocationArgs', () => {
-    const request = {
-      id: 'exec-req-1',
-      cwd: '/workspace/group',
-      args: ['-lc', 'pwd'],
-      env: {
-        HOME: '/home/bun',
-        TZ: 'America/New_York',
-      },
-    };
-
-    it('builds Apple Container exec args', () => {
-      const args = buildExecInvocationArgs(
-        request,
-        'exec-sidecar',
-        'container',
-      );
-
-      expect(args).toEqual([
-        'exec',
-        '-i',
-        '-w',
-        '/workspace/group',
-        '-e',
-        'HOME=/home/bun',
-        '-e',
-        'TZ=America/New_York',
-        'exec-sidecar',
-        '/bin/bash.real',
-        '-lc',
-        'pwd',
-      ]);
-    });
-
-    it('builds Docker exec args', () => {
-      const args = buildExecInvocationArgs(request, 'exec-sidecar', 'docker');
-
-      expect(args).toEqual([
-        'exec',
-        '-i',
-        '-w',
-        '/workspace/group',
-        '-e',
-        'HOME=/home/bun',
-        '-e',
-        'TZ=America/New_York',
-        'exec-sidecar',
-        '/bin/bash.real',
-        '-lc',
-        'pwd',
-      ]);
-    });
-  });
-
-  describe('execution broker parsing', () => {
-    const log = {
-      warn() {},
-    } as any;
-
-    it('rejects oversized execution request files before parsing JSON', () => {
-      const fixture = createFixture();
-      try {
-        fs.mkdirSync(fixture.ipcDir, { recursive: true });
-        const requestPath = path.join(fixture.ipcDir, 'oversized.json');
-        fs.writeFileSync(requestPath, 'x'.repeat(64 * 1024 + 1));
-
-        expect(parseExecRequest(requestPath, log)).toBeNull();
-      } finally {
-        fixture.cleanup();
-      }
-    });
-
-    it('returns null when an execution request file cannot be statted', () => {
-      const fixture = createFixture();
-      try {
-        fs.mkdirSync(fixture.ipcDir, { recursive: true });
-        const requestPath = path.join(fixture.ipcDir, 'missing.json');
-
-        expect(parseExecRequest(requestPath, log)).toBeNull();
-      } finally {
-        fixture.cleanup();
-      }
-    });
-
-    it('limits execution broker stream capture', async () => {
-      const stream = new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(new Uint8Array(1024 * 1024 + 1));
-          controller.close();
-        },
-      });
-
-      await expect(readExecBrokerText(stream, 'stdout')).rejects.toThrow(
-        ExecBrokerOutputLimitError,
-      );
-    });
-
-    it('limits cumulative execution broker stream capture', async () => {
-      const stream = new ReadableStream<Uint8Array>({
-        start(controller) {
-          for (let i = 0; i < 1024; i++) {
-            controller.enqueue(new Uint8Array(1024));
-          }
-          controller.enqueue(new Uint8Array(1));
-          controller.close();
-        },
-      });
-
-      await expect(readExecBrokerText(stream, 'stderr')).rejects.toThrow(
-        ExecBrokerOutputLimitError,
-      );
-    });
-
-    it('writes a synthetic broker response when output exceeds the limit', async () => {
-      const fixture = createFixture();
-      const spawnSpy = spyOn(Bun, 'spawn').mockImplementation((() => ({
-        stdout: new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(new Uint8Array(1024 * 1024 + 1));
-            controller.close();
-          },
-        }),
-        stderr: new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.close();
-          },
-        }),
-        exited: Promise.resolve(0),
-        kill: mock(() => {}),
-      })) as unknown as typeof Bun.spawn);
-
-      try {
-        const responseDir = path.join(fixture.ipcDir, 'exec-responses');
-        fs.mkdirSync(responseDir, { recursive: true });
-
-        await runExecBrokerRequest(
-          {
-            id: 'exec-req-limit',
-            cwd: '/workspace/group',
-            args: ['-lc', 'printf ok'],
-            env: {},
-          },
-          'exec-sidecar',
-          responseDir,
-          { debug() {} } as any,
-        );
-
-        expect(
-          fs.readFileSync(
-            path.join(responseDir, 'exec-req-limit.stdout'),
-            'utf8',
-          ),
-        ).toBe('');
-        expect(
-          fs.readFileSync(
-            path.join(responseDir, 'exec-req-limit.stderr'),
-            'utf8',
-          ),
-        ).toContain('Execution broker stdout exceeded');
-        expect(
-          fs.readFileSync(
-            path.join(responseDir, 'exec-req-limit.exitcode'),
-            'utf8',
-          ),
-        ).toBe('125');
-      } finally {
-        spawnSpy.mockRestore();
-        fixture.cleanup();
-      }
-    });
-  });
-
-  describe('buildExecutionContainerArgs', () => {
-    it('uses a portable long-lived process for Apple sidecars', () => {
-      const args = buildExecutionContainerArgs({
-        mounts: [],
-        execContainerName: 'exec-sidecar',
-        networkMode: 'none',
-        runtime: 'container',
-      });
-
-      expect(args).not.toContain('--rm');
-      expect(args).toContain('--entrypoint');
-      expect(args).toContain('/bin/bash.real');
-      expect(args).toContain('exec-sidecar');
-      expect(args.at(-1)).toContain('while true; do sleep 3600; done');
-      expect(args.at(-1)).not.toContain('exec sleep infinity');
-      expect(args.at(-1)).toContain('export GITHUB_TOKEN="$GH_TOKEN"');
-      expect(args.at(-1)).toContain('export GH_TOKEN="$GITHUB_TOKEN"');
     });
   });
 

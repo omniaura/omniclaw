@@ -66,10 +66,6 @@ const configSchema = z
     LOCAL_RUNTIME: z.string().default('container'),
     CONTAINER_IMAGE: z.string().default('omniclaw-agent:latest'),
     CONTAINER_MEMORY: z.string().default('4G'),
-    SPLIT_EXECUTION: z.preprocess(
-      parseBooleanString,
-      z.boolean().default(false),
-    ),
     SHARED_CLAUDE_VM: z.preprocess(
       parseBooleanString,
       z.boolean().default(false),
@@ -78,7 +74,6 @@ const configSchema = z
       optionalTrimmedString,
       z.string().default('16G'),
     ),
-    EXEC_CONTAINER_MEMORY: z.string().optional(),
     CONTAINER_TIMEOUT: z.preprocess(
       parseIntegerString,
       z.number().int().positive().default(7200000),
@@ -387,11 +382,8 @@ export const LOCAL_RUNTIME = CONFIG.LOCAL_RUNTIME;
 export const STARTUP_CONFIRMATIONS = CONFIG.STARTUP_CONFIRMATIONS;
 export const CONTAINER_IMAGE = CONFIG.CONTAINER_IMAGE;
 export const CONTAINER_MEMORY = CONFIG.CONTAINER_MEMORY;
-export const SPLIT_EXECUTION = CONFIG.SPLIT_EXECUTION;
 export const SHARED_CLAUDE_VM = CONFIG.SHARED_CLAUDE_VM;
 export const SHARED_CLAUDE_VM_MEMORY = CONFIG.SHARED_CLAUDE_VM_MEMORY;
-export const EXEC_CONTAINER_MEMORY =
-  CONFIG.EXEC_CONTAINER_MEMORY || CONTAINER_MEMORY;
 export const CONTAINER_TIMEOUT = CONFIG.CONTAINER_TIMEOUT; // 2h default — inactivity timeout for agent output (tool calls, results, text)
 export const CONTAINER_MAX_OUTPUT_SIZE = CONFIG.CONTAINER_MAX_OUTPUT_SIZE; // 10MB default
 export const IPC_POLL_INTERVAL = 1000;

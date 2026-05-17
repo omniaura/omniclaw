@@ -27,7 +27,7 @@ Last updated: 2026-05-02
 
 | Backend                 | Maturity | Notes                                                              |
 | ----------------------- | -------- | ------------------------------------------------------------------ |
-| Apple Container (local) | Stable   | Default path, startup probing, split execution support             |
+| Apple Container (local) | Stable   | Default path, startup probing                                      |
 | Docker (local)          | Partial  | Supported through the same backend abstraction, less battle-tested |
 
 ### Product Features
@@ -42,7 +42,6 @@ Last updated: 2026-05-02
 | GitHub context injection        | Stable   | Snapshot context, delta digest, linked PR/issue context                                                                                                                                      |
 | Inter-agent messaging           | Stable   | `send_message`, agent registry, IPC snapshots                                                                                                                                                |
 | Browser automation              | Stable   | Agent browser available inside containers                                                                                                                                                    |
-| Container split execution       | Stable   | Separate execution path for local runtime workloads                                                                                                                                          |
 | Startup confirmation on restart | Stable   | Agents wake and announce they are back after orchestrator restart                                                                                                                            |
 | Security hardening              | Stable   | Path traversal guards, mount allowlist, webhook replay defense, external MCP validation, remote image limits, login rate limiting + body caps, DNS rebinding SSRF defense, peer log SSE caps |
 
@@ -174,7 +173,6 @@ Push from "personal assistant with tasks" toward a genuine multi-agent factory.
 
 - DNS rebinding SSRF defense in remote image cache (#588, closes #587)
 - peer log SSE response caps to bound proxied stream growth (#613, closes #595)
-- execution broker payload caps (#622)
 - WhatsApp media size cap shipped (closes #576)
 - Web UI login request body cap (#567, closes #548)
 - discovery LAN trust auth tightening (closes #557)
@@ -199,7 +197,6 @@ Push from "personal assistant with tasks" toward a genuine multi-agent factory.
 
 - SolidStart web UI migration completed (#418) — replaced Datastar SSE with SolidJS reactive components, Tailwind CSS, and SolidStart server endpoints across all 11 pages
 - LAN discovery with mDNS, trust-based pairing, remote peer browsing, and `/network` UI shipped (#277)
-- Apple Container split execution landed (#399)
 - auto-update PR CI backstop landed (#394)
 - external MCP config validation landed (#386)
 - webhook replay handling tightened so deliveries are marked processed only after success (#391)
