@@ -208,6 +208,7 @@ const migration1: Migration = {
         group_folder TEXT NOT NULL,
         chat_jid TEXT NOT NULL,
         prompt TEXT NOT NULL,
+        preprocess_script TEXT,
         schedule_type TEXT NOT NULL,
         schedule_value TEXT NOT NULL,
         next_run TEXT,
@@ -408,6 +409,7 @@ const migration1: Migration = {
       'TEXT',
       "'isolated'",
     );
+    addColumnIfNotExists(db, 'scheduled_tasks', 'preprocess_script', 'TEXT');
     addColumnIfNotExists(db, 'scheduled_tasks', 'executing_since', 'TEXT');
     addColumnIfNotExists(db, 'scheduled_tasks', 'last_outcome_state', 'TEXT');
     addColumnIfNotExists(db, 'scheduled_tasks', 'last_outcome_reason', 'TEXT');

@@ -610,8 +610,30 @@ When a triggered message arrives, the agent receives all messages since its last
 1. **Agent Context**: Tasks run with their group's working directory and memory
 2. **Full Agent Capabilities**: Scheduled tasks have access to all tools
 3. **Context Modes**: `group` (with conversation history) or `isolated` (fresh session)
-4. **Duplicate Prevention**: Active task tracking prevents concurrent duplicate runs
-5. **Idle Preemption**: Idle containers are preempted when a scheduled task needs to run
+4. **Deterministic Preprocessing**: Optional TypeScript workflows can run before the agent to skip no-op runs or prepend deterministic triage output
+5. **Duplicate Prevention**: Active task tracking prevents concurrent duplicate runs
+6. **Idle Preemption**: Idle containers are preempted when a scheduled task needs to run
+
+### Deterministic Preprocessing
+
+Recurring maintenance tasks can attach a `preprocess_script` pointing to a JS/TS file under the owning group workspace's `task-workflows/` directory. From inside the agent container, that is `/workspace/group/task-workflows/`; on the host, it resolves to `groups/<group_folder>/task-workflows/`. `TASK_WORKFLOWS_DIR` can override the directory name or point at an absolute shared workflow directory. The scheduler executes the workflow with Bun before starting the agent container and passes task metadata as JSON on stdin.
+
+The script must write one JSON object to stdout:
+
+```json
+{ "action": "skip", "reason": "no MCP package diff" }
+```
+
+or:
+
+```json
+{
+  "action": "run",
+  "promptPrefix": "MCP changed in packages/mcp. Sync ditto-cli, ditto-hermes, and ditto-clawhub."
+}
+```
+
+Use this for deterministic triage such as checking `git diff`, package versions, or generated manifests before spending agent tokens. Agents should create the workflow file and then schedule the task with both the script path and the natural-language agent prompt.
 
 ### Schedule Types
 

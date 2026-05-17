@@ -684,6 +684,11 @@ export async function processTaskIpc(
           group_folder: targetFolder,
           chat_jid: targetJid,
           prompt: data.prompt,
+          preprocess_script:
+            typeof data.preprocess_script === 'string' &&
+            data.preprocess_script.trim()
+              ? data.preprocess_script.trim()
+              : null,
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
           context_mode: contextMode,
@@ -735,6 +740,7 @@ export async function processTaskIpc(
         Pick<
           typeof task,
           | 'prompt'
+          | 'preprocess_script'
           | 'schedule_type'
           | 'schedule_value'
           | 'next_run'
@@ -743,6 +749,13 @@ export async function processTaskIpc(
         >
       > = {};
       if (data.prompt) updates.prompt = data.prompt;
+      if (data.preprocess_script !== undefined) {
+        updates.preprocess_script =
+          typeof data.preprocess_script === 'string' &&
+          data.preprocess_script.trim()
+            ? data.preprocess_script.trim()
+            : null;
+      }
       if (data.schedule_type)
         updates.schedule_type = data.schedule_type as
           | 'cron'

@@ -103,6 +103,10 @@ const configSchema = z
       parseIntegerString,
       z.number().int().positive().default(900000),
     ),
+    TASK_WORKFLOWS_DIR: z.preprocess(
+      optionalTrimmedString,
+      z.string().default('task-workflows'),
+    ),
     CHANNEL_ROSTER_SCOPE: z.preprocess(
       (value) =>
         typeof value === 'string' ? value.trim().toLowerCase() : value,
@@ -377,6 +381,7 @@ export const MOUNT_ALLOWLIST_PATH = path.join(
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+export const TASK_WORKFLOWS_DIR = CONFIG.TASK_WORKFLOWS_DIR;
 export const MAIN_GROUP_FOLDER = 'main';
 export const AGENTS_CONFIG_PATH = path.resolve(
   PROJECT_ROOT,

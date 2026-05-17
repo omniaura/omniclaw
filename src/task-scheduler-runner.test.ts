@@ -134,6 +134,10 @@ describe('startSchedulerLoop task execution', () => {
         appendTaskRunPhaseEvent: mock(() => {}),
         updateTaskAfterRun: mock(() => {}),
         writeScheduledRunHandoff: mock(() => 'handoff.json'),
+        runTaskPreprocessor: (task: ScheduledTask) => ({
+          action: 'run',
+          prompt: task.prompt,
+        }),
         logger: loggerMock,
       } as any);
 
@@ -273,6 +277,10 @@ describe('startSchedulerLoop task execution', () => {
         appendTaskRunPhaseEvent: appendTaskRunPhaseEventMock,
         updateTaskAfterRun: updateTaskAfterRunMock,
         writeScheduledRunHandoff: writeScheduledRunHandoffMock,
+        runTaskPreprocessor: (task: ScheduledTask) => ({
+          action: 'run',
+          prompt: task.prompt,
+        }),
         logger: loggerMock,
       } as any);
 
@@ -305,6 +313,215 @@ describe('startSchedulerLoop task execution', () => {
       expect(notifyIdleMock).not.toHaveBeenCalled();
       expect(closeStdinMock).not.toHaveBeenCalled();
       expect(timeoutCalls).toEqual([60000]);
+    } finally {
+      (globalThis as { setTimeout: typeof setTimeout }).setTimeout =
+        originalSetTimeout;
+    }
+  });
+
+  it('skips agent dispatch when a deterministic preprocessor returns skip', async () => {
+    const task: ScheduledTask = {
+      id: 'task-skip',
+      group_folder: 'main',
+      chat_jid: 'main@g.us',
+      prompt: 'sync connectors',
+      preprocess_script: 'sync-connectors-if-mcp-changed.ts',
+      schedule_type: 'interval',
+      schedule_value: '300000',
+      context_mode: 'isolated',
+      next_run: '2026-01-01T00:00:00.000Z',
+      last_run: null,
+      last_result: null,
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+      executing_since: null,
+    };
+    const resolveBackendMock = mock(() => ({ runAgent: mock(() => {}) }));
+    const logTaskRunMock = mock(() => {});
+    const updateTaskAfterRunMock = mock(() => {});
+    const clearTaskExecutingMock = mock(() => {});
+    const enqueuedRuns: Array<Promise<void>> = [];
+    const originalSetTimeout = globalThis.setTimeout;
+
+    (globalThis as { setTimeout: typeof setTimeout }).setTimeout = ((
+      _fn: Parameters<typeof setTimeout>[0],
+    ) => ({ id: 'poll' })) as unknown as typeof setTimeout;
+
+    try {
+      const deps: SchedulerDependencies = {
+        registeredGroups: () => ({}),
+        getGroupForTask: () => ({
+          name: 'Main',
+          folder: 'main',
+          trigger: '@Bot',
+          added_at: '2026-01-01T00:00:00.000Z',
+        }),
+        getSessions: () => ({}),
+        resumePositionStore: {
+          get: () => undefined,
+          set: () => {},
+          getAll: () => ({}),
+          clear: () => {},
+        },
+        queue: {
+          enqueueTask: (
+            _jid: string,
+            _taskId: string,
+            run: () => Promise<void>,
+          ) => {
+            enqueuedRuns.push(run());
+          },
+          notifyIdle: mock(() => {}),
+          closeStdin: mock(() => {}),
+        } as unknown as SchedulerDependencies['queue'],
+        onProcess: mock(() => {}),
+        sendMessage: mock(async () => undefined),
+        findChannel: () => undefined,
+      };
+
+      startSchedulerLoop(deps, {
+        calculateNextRun: mock(() => '2026-01-01T00:05:00.000Z'),
+        resolveBackend: resolveBackendMock,
+        writeTasksSnapshot: mock(() => {}),
+        advanceTaskNextRun: mock(() => {}),
+        markTaskExecuting: mock(() => {}),
+        clearTaskExecuting: clearTaskExecutingMock,
+        getStaleExecutingTasks: mock(() => []),
+        getOrphanedOnceTasks: mock(() => []),
+        hasSuccessfulRun: mock(() => false),
+        getAllTasks: mock(() => [task]),
+        getDueTasks: mock(() => [task]),
+        getTaskById: mock((taskId: string) =>
+          taskId === task.id ? task : null,
+        ),
+        logTaskRun: logTaskRunMock,
+        appendTaskRunPhaseEvent: mock(() => {}),
+        updateTaskAfterRun: updateTaskAfterRunMock,
+        writeScheduledRunHandoff: mock(() => 'handoff.json'),
+        runTaskPreprocessor: mock(() => ({
+          action: 'skip',
+          reason: 'no MCP diff',
+        })),
+        logger: createLoggerMock(),
+      } as any);
+
+      await Promise.all(enqueuedRuns);
+
+      expect(resolveBackendMock).not.toHaveBeenCalled();
+      expect(logTaskRunMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          task_id: 'task-skip',
+          status: 'success',
+          result: 'Skipped by preprocessor: no MCP diff',
+          error: null,
+        }),
+      );
+      expect(updateTaskAfterRunMock).toHaveBeenCalledWith(
+        'task-skip',
+        '2026-01-01T00:05:00.000Z',
+        'Skipped by preprocessor: no MCP diff',
+        { state: 'done', reason: 'no MCP diff' },
+      );
+      expect(clearTaskExecutingMock).toHaveBeenCalledWith('task-skip');
+    } finally {
+      (globalThis as { setTimeout: typeof setTimeout }).setTimeout =
+        originalSetTimeout;
+    }
+  });
+
+  it('passes a preprocessed prompt to agent dispatch', async () => {
+    const task: ScheduledTask = {
+      id: 'task-preprocessed',
+      group_folder: 'main',
+      chat_jid: 'main@g.us',
+      prompt: 'sync connectors',
+      preprocess_script: 'sync.ts',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: '2026-01-01T00:00:00.000Z',
+      last_run: null,
+      last_result: null,
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+      executing_since: null,
+    };
+    let backendPrompt: string | undefined;
+    const enqueuedRuns: Array<Promise<void>> = [];
+    const originalSetTimeout = globalThis.setTimeout;
+
+    (globalThis as { setTimeout: typeof setTimeout }).setTimeout = ((
+      _fn: Parameters<typeof setTimeout>[0],
+    ) => ({ id: 'poll' })) as unknown as typeof setTimeout;
+
+    try {
+      const deps: SchedulerDependencies = {
+        registeredGroups: () => ({}),
+        getGroupForTask: () => ({
+          name: 'Main',
+          folder: 'main',
+          trigger: '@Bot',
+          added_at: '2026-01-01T00:00:00.000Z',
+        }),
+        getSessions: () => ({}),
+        resumePositionStore: {
+          get: () => undefined,
+          set: () => {},
+          getAll: () => ({}),
+          clear: () => {},
+        },
+        queue: {
+          enqueueTask: (
+            _jid: string,
+            _taskId: string,
+            run: () => Promise<void>,
+          ) => {
+            enqueuedRuns.push(run());
+          },
+          notifyIdle: mock(() => {}),
+          closeStdin: mock(() => {}),
+        } as unknown as SchedulerDependencies['queue'],
+        onProcess: mock(() => {}),
+        sendMessage: mock(async () => undefined),
+        findChannel: () => undefined,
+      };
+
+      startSchedulerLoop(deps, {
+        calculateNextRun: mock(() => null),
+        resolveBackend: mock(() => ({
+          runAgent: async (_group: unknown, input: Record<string, unknown>) => {
+            backendPrompt = input.prompt as string;
+            return { status: 'success', result: 'done' } as ContainerOutput;
+          },
+        })),
+        writeTasksSnapshot: mock(() => {}),
+        advanceTaskNextRun: mock(() => {}),
+        markTaskExecuting: mock(() => {}),
+        clearTaskExecuting: mock(() => {}),
+        getStaleExecutingTasks: mock(() => []),
+        getOrphanedOnceTasks: mock(() => []),
+        hasSuccessfulRun: mock(() => false),
+        getAllTasks: mock(() => [task]),
+        getDueTasks: mock(() => [task]),
+        getTaskById: mock((taskId: string) =>
+          taskId === task.id ? task : null,
+        ),
+        logTaskRun: mock(() => {}),
+        appendTaskRunPhaseEvent: mock(() => {}),
+        updateTaskAfterRun: mock(() => {}),
+        writeScheduledRunHandoff: mock(() => 'handoff.json'),
+        runTaskPreprocessor: mock(() => ({
+          action: 'run',
+          prompt: 'Deterministic diff summary\n\nsync connectors',
+        })),
+        logger: createLoggerMock(),
+      } as any);
+
+      await Promise.all(enqueuedRuns);
+
+      expect(backendPrompt).toBe(
+        'Deterministic diff summary\n\nsync connectors',
+      );
     } finally {
       (globalThis as { setTimeout: typeof setTimeout }).setTimeout =
         originalSetTimeout;
@@ -391,6 +608,10 @@ describe('startSchedulerLoop task execution', () => {
         updateTaskAfterRun: mock(() => {}),
         writeScheduledRunHandoff: mock(() => {
           throw new Error('disk full');
+        }),
+        runTaskPreprocessor: (task: ScheduledTask) => ({
+          action: 'run',
+          prompt: task.prompt,
         }),
         logger: loggerMock,
       } as any);

@@ -288,6 +288,8 @@ MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It ca
 \u2022 Only send a message when there's something to report (e.g., "notify me if...")
 \u2022 Never send a message (background maintenance tasks)
 
+DETERMINISTIC PREPROCESSING - For recurring maintenance tasks that can be cheaply triaged in code, write a TypeScript workflow file under /workspace/group/task-workflows/ and pass preprocess_script as its relative path. The workflow runs before the agent and can return {"action":"skip","reason":"no diff"} or {"action":"run","promptPrefix":"..."} as JSON on stdout. Use this to avoid spending agent tokens on no-op checks.
+
 IMPORTANT: When MODIFYING an existing task, use update_task — it edits the task in place while preserving its ID and run history. Only use cancel_task to destructively delete a task the user no longer wants. Unlike pausing, the task cannot be restored on deletion.
 
 SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
@@ -299,6 +301,12 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       .string()
       .describe(
         'What the agent should do when the task runs. For isolated mode, include all necessary context here.',
+      ),
+    preprocess_script: z
+      .string()
+      .optional()
+      .describe(
+        'Optional relative path under /workspace/group/task-workflows/ to a JS/TS workflow that runs before the agent and returns JSON to skip or augment the prompt.',
       ),
     schedule_type: z
       .enum(['cron', 'interval', 'once'])
@@ -390,6 +398,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     const data = {
       type: 'schedule_task',
       prompt: args.prompt,
+      preprocess_script: args.preprocess_script,
       schedule_type: args.schedule_type,
       schedule_value: args.schedule_value,
       context_mode: args.context_mode || 'group',
@@ -443,6 +452,7 @@ server.tool(
             id: string;
             groupFolder?: string;
             prompt: string;
+            preprocess_script?: string | null;
             schedule_type: string;
             schedule_value: string;
             status: string;
@@ -453,7 +463,10 @@ server.tool(
               owner === groupFolder ? `${owner} (yours)` : owner;
             const promptPreview =
               t.prompt.length > 50 ? `${t.prompt.slice(0, 50)}...` : t.prompt;
-            return `- [${t.id}] (owner: ${ownerLabel}) ${promptPreview} (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`;
+            const preprocessor = t.preprocess_script
+              ? `, preprocess: ${t.preprocess_script}`
+              : '';
+            return `- [${t.id}] (owner: ${ownerLabel}) ${promptPreview} (${t.schedule_type}: ${t.schedule_value}${preprocessor}) - ${t.status}, next: ${t.next_run || 'N/A'}`;
           },
         )
         .join('\n');
@@ -485,12 +498,20 @@ server.tool(
 
 Examples:
 - update_task({ task_id: "...", prompt: "new instructions" })
+- update_task({ task_id: "...", preprocess_script: "sync-connectors.ts" })
 - update_task({ task_id: "...", schedule_type: "cron", schedule_value: "0 9 * * *" })
 - update_task({ task_id: "...", status: "paused" })
 - update_task({ task_id: "...", status: "active" })`,
   {
     task_id: z.string().describe('ID of the task to update'),
     prompt: z.string().optional().describe('New instructions for the task'),
+    preprocess_script: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        'Set or clear the relative /workspace/group/task-workflows/ script that runs before the agent. Pass null to clear it.',
+      ),
     schedule_type: z.enum(['cron', 'interval', 'once']).optional(),
     schedule_value: z
       .string()
@@ -510,6 +531,7 @@ Examples:
   async (args) => {
     if (
       !args.prompt &&
+      args.preprocess_script === undefined &&
       !args.schedule_type &&
       !args.schedule_value &&
       !args.status &&
@@ -519,7 +541,7 @@ Examples:
         content: [
           {
             type: 'text' as const,
-            text: 'At least one of prompt, schedule_type, schedule_value, or status must be provided.',
+            text: 'At least one of prompt, preprocess_script, schedule_type, schedule_value, status, or context_mode must be provided.',
           },
         ],
         isError: true,
@@ -604,6 +626,7 @@ Examples:
       type: 'edit_task',
       taskId: args.task_id,
       prompt: args.prompt,
+      preprocess_script: args.preprocess_script,
       schedule_type: args.schedule_type,
       schedule_value: args.schedule_value,
       status: args.status,
@@ -617,6 +640,7 @@ Examples:
 
     const changed: string[] = [];
     if (args.prompt) changed.push('prompt');
+    if (args.preprocess_script !== undefined) changed.push('preprocess_script');
     if (args.schedule_type || args.schedule_value) changed.push('schedule');
     if (args.status) changed.push(`status → ${args.status}`);
     if (args.context_mode) changed.push(`context_mode → ${args.context_mode}`);

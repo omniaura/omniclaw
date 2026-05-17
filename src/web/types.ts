@@ -69,7 +69,13 @@ export interface WebStateProvider {
     updates: Partial<
       Pick<
         ScheduledTask,
-        'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
+        | 'prompt'
+        | 'preprocess_script'
+        | 'schedule_type'
+        | 'schedule_value'
+        | 'next_run'
+        | 'status'
+        | 'context_mode'
       >
     >,
   ): void;

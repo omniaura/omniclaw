@@ -181,6 +181,12 @@ export interface ScheduledTask {
   group_folder: string;
   chat_jid: string;
   prompt: string;
+  /**
+   * Optional TypeScript workflow path, relative to TASK_WORKFLOWS_DIR, that runs
+   * before the agent prompt. The workflow can skip a no-op task or modify the
+   * prompt with deterministic triage output.
+   */
+  preprocess_script?: string | null;
   schedule_type: 'cron' | 'interval' | 'once';
   schedule_value: string;
   context_mode: 'group' | 'isolated';
@@ -497,6 +503,7 @@ export interface IpcTaskPayload {
   taskId?: string;
   requestId?: string;
   prompt?: string;
+  preprocess_script?: string | null;
   schedule_type?: string;
   schedule_value?: string;
   context_mode?: string;

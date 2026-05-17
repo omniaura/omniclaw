@@ -33,7 +33,7 @@ import {
   findMainGroupJid,
   isMainGroup,
 } from './group-helpers.js';
-import type { RegisteredGroup } from './types.js';
+import type { RegisteredGroup, ScheduledTask } from './types.js';
 
 // ============================================================
 // schedule-utils: calculateNextRun & validateSchedule
@@ -1011,6 +1011,10 @@ describe('execution lease tracking', () => {
           appendTaskRunPhaseEvent,
           updateTaskAfterRun,
           writeScheduledRunHandoff: () => '',
+          runTaskPreprocessor: (task: ScheduledTask) => ({
+            action: 'run',
+            prompt: task.prompt,
+          }),
           logger: {
             info: () => {},
             warn: () => {},
@@ -1134,6 +1138,10 @@ describe('recoverStaleTasks', () => {
       appendTaskRunPhaseEvent: () => {},
       updateTaskAfterRun,
       writeScheduledRunHandoff: () => '',
+      runTaskPreprocessor: (task: ScheduledTask) => ({
+        action: 'run',
+        prompt: task.prompt,
+      }),
       logger: {
         info: () => {},
         warn: () => {},
@@ -1200,6 +1208,10 @@ describe('recoverStaleTasks', () => {
       appendTaskRunPhaseEvent: () => {},
       updateTaskAfterRun,
       writeScheduledRunHandoff: () => '',
+      runTaskPreprocessor: (task: ScheduledTask) => ({
+        action: 'run',
+        prompt: task.prompt,
+      }),
       logger: {
         info: () => {},
         warn: () => {},
@@ -1256,6 +1268,10 @@ describe('recoverStaleTasks', () => {
       appendTaskRunPhaseEvent: () => {},
       updateTaskAfterRun,
       writeScheduledRunHandoff: () => '',
+      runTaskPreprocessor: (task: ScheduledTask) => ({
+        action: 'run',
+        prompt: task.prompt,
+      }),
       logger: {
         info: () => {},
         warn: () => {},
@@ -1312,6 +1328,10 @@ describe('recoverStaleTasks', () => {
       appendTaskRunPhaseEvent: () => {},
       updateTaskAfterRun,
       writeScheduledRunHandoff: () => '',
+      runTaskPreprocessor: (task: ScheduledTask) => ({
+        action: 'run',
+        prompt: task.prompt,
+      }),
       logger: {
         info: () => {},
         warn: () => {},
@@ -1366,6 +1386,10 @@ describe('recoverStaleTasks', () => {
       appendTaskRunPhaseEvent: () => {},
       updateTaskAfterRun,
       writeScheduledRunHandoff: () => '',
+      runTaskPreprocessor: (task: ScheduledTask) => ({
+        action: 'run',
+        prompt: task.prompt,
+      }),
       logger: {
         info: () => {},
         warn: () => {},
