@@ -317,6 +317,8 @@ describe('buildHealthData', () => {
     expect(health.queue.processing_groups).toBe(0);
     expect(health.queue.running_tasks).toBe(0);
     expect(health.queue.retrying_groups).toBe(0);
+    expect(health.queue.total_retries).toBe(0);
+    expect(health.queue.max_retries).toBe(0);
     expect(health.queue.message_lane_reasons).toEqual({
       running: 0,
       'cooling-down': 0,
@@ -394,6 +396,51 @@ describe('buildHealthData', () => {
     expect(health.queue.processing_groups).toBe(2); // g1, g3
     expect(health.queue.running_tasks).toBe(1); // only g1 has activeTask
     expect(health.queue.retrying_groups).toBe(2); // g2, g3
+    expect(health.queue.total_retries).toBe(3); // 0 + 2 + 1
+    expect(health.queue.max_retries).toBe(2); // g2 leads with 2
+  });
+
+  it('rolls up retry intensity independently of retrying group count', () => {
+    // A single stuck group with many retries should inflate total/max
+    // without inflating retrying_groups beyond 1.
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'stuck',
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 0,
+          containerName: null,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 17,
+      },
+      {
+        folderKey: 'healthy',
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 0,
+          containerName: null,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+    ];
+    const health = buildHealthData(makeState([makeAgent()], details), 0);
+    expect(health.queue.retrying_groups).toBe(1);
+    expect(health.queue.total_retries).toBe(17);
+    expect(health.queue.max_retries).toBe(17);
   });
 
   it('rolls up message and task lane reason codes', () => {
@@ -619,6 +666,15 @@ describe('renderSystemContent', () => {
     expect(html).toContain('id="sys-queue-pending-messages"');
     expect(html).toContain('id="sys-queue-pending-tasks"');
     expect(html).toContain('id="sys-queue-retrying"');
+    expect(html).toContain('id="sys-queue-total-retries"');
+    expect(html).toContain('id="sys-queue-max-retries"');
+    // single group with retryCount=4 → total=4, max=4
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-queue-total-retries">4</span>',
+    );
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-queue-max-retries">4</span>',
+    );
     // pending message count should appear (7)
     expect(html).toContain(
       '<span class="metric-value" id="sys-queue-pending-messages">7</span>',
