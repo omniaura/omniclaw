@@ -16,7 +16,7 @@ export interface Migration {
  * The version that represents the latest schema. Existing databases that
  * predate the migration framework are advanced through every migration to this.
  */
-export const BASELINE_VERSION = 5;
+export const BASELINE_VERSION = 6;
 
 // ---------------------------------------------------------------------------
 // Schema helpers (available for use in migrations)
@@ -270,6 +270,13 @@ const migration1: Migration = {
       CREATE TABLE IF NOT EXISTS sessions (
         group_folder TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS pending_session_intents (
+        group_folder TEXT PRIMARY KEY,
+        fork_from TEXT,
+        name TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
@@ -570,6 +577,21 @@ const migration5: Migration = {
   },
 };
 
+const migration6: Migration = {
+  version: 6,
+  description: 'Persist pending Discord session intents',
+  up: (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pending_session_intents (
+        group_folder TEXT PRIMARY KEY,
+        fork_from TEXT,
+        name TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Migration registry
 // ---------------------------------------------------------------------------
@@ -586,4 +608,5 @@ export const allMigrations: Migration[] = [
   migration3,
   migration4,
   migration5,
+  migration6,
 ];

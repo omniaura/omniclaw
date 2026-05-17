@@ -18,7 +18,10 @@ import {
   buildAgentToChannelsMapFromSubscriptions,
   buildSendToInstruction,
 } from './channel-routes.js';
-import { DiscordChannel } from './channels/discord.js';
+import {
+  DiscordChannel,
+  type SessionCommandOptions,
+} from './channels/discord.js';
 import { SlackChannel } from './channels/slack.js';
 import { TelegramChannel } from './channels/telegram.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
@@ -61,6 +64,7 @@ import { resolveContextLayers } from './context-layers.js';
 import {
   createTrustStore,
   createTask as dbCreateTask,
+  clearSession,
   deleteTask as dbDeleteTask,
   searchMessages as dbSearchMessages,
   updateTask as dbUpdateTask,
@@ -81,6 +85,7 @@ import {
   getMessagesSince,
   getNewMessages,
   getOrCreateDiscoveryInstanceId,
+  getPendingSessionIntent,
   getRouterState,
   getSubscriptionsForAgent,
   getTaskById,
@@ -91,6 +96,7 @@ import {
   setAgentHealth,
   setChannelRoute,
   setChannelSubscription,
+  setPendingSessionIntent,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -262,6 +268,8 @@ const MAX_CHANNEL_AGENT_FANOUT = parseInt(
 const DISPATCH_KEY_SEP = '::agent::';
 const INTERMEDIATE_BUFFER_LIMIT = 1_800;
 const INTERMEDIATE_EDIT_DEBOUNCE_MS = 750;
+const DEFAULT_SESSION_LIST_LIMIT = 10;
+const MAX_SESSION_LIST_LIMIT = 25;
 
 type IntermediateStatusChannel = Pick<Channel, 'sendMessage' | 'editMessage'>;
 
@@ -473,15 +481,15 @@ function getRuntimeGroupFolder(
 }
 
 /**
- * Handle /resume and /sessions Discord slash commands.
+ * Handle Discord session slash commands.
  * These operate on the host's session store directly rather than sending
  * a prompt to the agent.
  */
 function handleSessionCommand(
-  command: 'resume' | 'sessions',
+  command: 'new' | 'resume' | 'list' | 'current' | 'end' | 'rename',
   chatJid: string,
   group: RegisteredGroup,
-  sessionId?: string,
+  options: SessionCommandOptions = {},
 ): { message: string } {
   // Compute the correct runtime folder, accounting for subscription-based
   // multi-agent channels that use makeDispatchKey for session keying.
@@ -502,19 +510,34 @@ function handleSessionCommand(
     'projects',
     '-workspace-group',
   );
+  const prefix = options.deprecatedAlias
+    ? `Deprecated: use \`/session ${options.deprecatedAlias === 'sessions' ? 'list' : 'resume'}\` instead.\n\n`
+    : '';
+  if (options.deprecatedAlias) {
+    logger.warn(
+      {
+        alias: options.deprecatedAlias,
+        replacement: `/session ${options.deprecatedAlias === 'sessions' ? 'list' : 'resume'}`,
+        chatJid,
+        group: group.folder,
+      },
+      'Deprecated Discord session command alias used',
+    );
+  }
 
-  if (command === 'sessions') {
+  if (command === 'list') {
     if (!fs.existsSync(sessionsDir)) {
-      return { message: 'No sessions found for this channel.' };
+      return { message: `${prefix}No sessions found for this channel.` };
     }
     const files = fs
       .readdirSync(sessionsDir)
       .filter((f) => f.endsWith('.jsonl'));
     if (files.length === 0) {
-      return { message: 'No sessions found for this channel.' };
+      return { message: `${prefix}No sessions found for this channel.` };
     }
 
     const currentSessionId = sessions[runtimeFolder];
+    const names = readSessionNames(sessionsDir);
     const sessionInfos = files
       .map((f) => {
         const filePath = path.join(sessionsDir, f);
@@ -524,36 +547,131 @@ function handleSessionCommand(
       })
       .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
 
-    const lines = sessionInfos.map((s) => {
+    const limit =
+      typeof options.limit === 'number' && options.limit > 0
+        ? Math.min(options.limit, MAX_SESSION_LIST_LIMIT)
+        : DEFAULT_SESSION_LIST_LIMIT;
+    const lines = sessionInfos.slice(0, limit).map((s) => {
       const current = s.sessionId === currentSessionId ? ' **(active)**' : '';
+      const name = names[s.sessionId]
+        ? ` — ${formatSessionName(names[s.sessionId])}`
+        : '';
       const sizeKb = Math.round(s.sizeBytes / 1024);
       const age = formatAge(s.modifiedAt);
-      return `\`${s.sessionId}\` — ${sizeKb}KB, ${age}${current}`;
+      return `\`${s.sessionId}\`${name} — ${sizeKb}KB, ${age}${current}`;
     });
 
     return {
-      message: `**Sessions for this channel** (${runtimeFolder}):\n${lines.join('\n')}`,
+      message: `${prefix}**Sessions for this channel** (${runtimeFolder}):\n${lines.join('\n')}`,
     };
   }
 
-  // command === 'resume'
+  if (command === 'current') {
+    const currentSessionId = sessions[runtimeFolder];
+    if (!currentSessionId) {
+      return { message: 'No active session for this channel.' };
+    }
+    const names = fs.existsSync(sessionsDir)
+      ? readSessionNames(sessionsDir)
+      : {};
+    const sessionFile = path.join(sessionsDir, `${currentSessionId}.jsonl`);
+    const stat = fs.existsSync(sessionFile) ? fs.statSync(sessionFile) : null;
+    const name = names[currentSessionId]
+      ? `\nName: ${formatSessionName(names[currentSessionId])}`
+      : '';
+    const activity = stat ? `\nLast activity: ${formatAge(stat.mtime)}` : '';
+    return {
+      message: `**Current session**\nID: \`${currentSessionId}\`${name}${activity}`,
+    };
+  }
+
+  if (command === 'new') {
+    const resumeFrom = options.resumeFrom?.trim();
+    if (resumeFrom) {
+      const validation = validateSessionId(resumeFrom);
+      if (validation) return { message: validation };
+      const sessionFile = path.join(sessionsDir, `${resumeFrom}.jsonl`);
+      if (!fs.existsSync(sessionFile)) {
+        return {
+          message: `Session \`${resumeFrom}\` not found. Use \`/session list\` to list available sessions.`,
+        };
+      }
+      sessions[runtimeFolder] = resumeFrom;
+      setSession(runtimeFolder, resumeFrom);
+    } else {
+      delete sessions[runtimeFolder];
+      clearSession(runtimeFolder);
+    }
+    resumePositionStore.set(runtimeFolder, '');
+    const name = normalizeSessionName(options.name);
+    setPendingSessionIntent(runtimeFolder, { forkFrom: resumeFrom, name });
+    return {
+      message: resumeFrom
+        ? `Next message in this channel will start a fresh session forked from \`${resumeFrom}\`.`
+        : 'Next message in this channel will start a fresh session.',
+    };
+  }
+
+  if (command === 'end') {
+    const sessionId = options.sessionId?.trim() || sessions[runtimeFolder];
+    if (!sessionId) {
+      return { message: 'No active session for this channel.' };
+    }
+    const validation = validateSessionId(sessionId);
+    if (validation) return { message: validation };
+    if (sessions[runtimeFolder] === sessionId) {
+      delete sessions[runtimeFolder];
+      clearSession(runtimeFolder);
+      resumePositionStore.set(runtimeFolder, '');
+      return {
+        message: `Session \`${sessionId}\` ended for this channel. The next message will start fresh.`,
+      };
+    }
+    return {
+      message: `Session \`${sessionId}\` is not the active session for this channel.`,
+    };
+  }
+
+  if (command === 'rename') {
+    const sessionId = options.sessionId?.trim();
+    if (!sessionId) {
+      return { message: 'Session ID is required.' };
+    }
+    const validation = validateSessionId(sessionId);
+    if (validation) return { message: validation };
+    const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+    if (!fs.existsSync(sessionFile)) {
+      return {
+        message: `Session \`${sessionId}\` not found. Use \`/session list\` to list available sessions.`,
+      };
+    }
+    const name = normalizeSessionName(options.name);
+    if (!name) return { message: 'Session name is required.' };
+    const names = readSessionNames(sessionsDir);
+    names[sessionId] = name;
+    writeSessionNames(sessionsDir, names);
+    return {
+      message: `Session \`${sessionId}\` renamed to ${formatSessionName(name)}.`,
+    };
+  }
+
+  const sessionId = options.sessionId?.trim();
   if (!sessionId) {
     // No session ID provided — show sessions instead
-    return handleSessionCommand('sessions', chatJid, group);
+    return handleSessionCommand('list', chatJid, group, {
+      deprecatedAlias: options.deprecatedAlias,
+    });
   }
 
   // Guard against path traversal — session IDs are hex UUIDs
-  if (!/^[a-f0-9-]+$/i.test(sessionId)) {
-    return {
-      message: `Invalid session ID \`${sessionId}\`. Use \`/sessions\` to list available sessions.`,
-    };
-  }
+  const validation = validateSessionId(sessionId);
+  if (validation) return { message: validation };
 
   // Validate session file exists
   const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
   if (!fs.existsSync(sessionFile)) {
     return {
-      message: `Session \`${sessionId}\` not found. Use \`/sessions\` to list available sessions.`,
+      message: `Session \`${sessionId}\` not found. Use \`/session list\` to list available sessions.`,
     };
   }
 
@@ -561,10 +679,87 @@ function handleSessionCommand(
   sessions[runtimeFolder] = sessionId;
   setSession(runtimeFolder, sessionId);
   resumePositionStore.set(runtimeFolder, '');
+  setPendingSessionIntent(runtimeFolder, {});
 
   return {
-    message: `Session switched to \`${sessionId}\`. The next message in this channel will resume from that session.`,
+    message: `${prefix}Session switched to \`${sessionId}\`. The next message in this channel will resume from that session.`,
   };
+}
+
+function validateSessionId(sessionId: string): string | null {
+  if (/^[a-f0-9-]+$/i.test(sessionId)) return null;
+  return `Invalid session ID \`${sessionId}\`. Use \`/session list\` to list available sessions.`;
+}
+
+function normalizeSessionName(name: string | undefined): string | undefined {
+  const normalized = name
+    ?.replace(/[`*_~]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  if (!normalized) return undefined;
+  return normalized.slice(0, 80);
+}
+
+function formatSessionName(name: string): string {
+  return `"${normalizeSessionName(name) || 'unnamed'}"`;
+}
+
+function sessionNamesFilePath(sessionsDir: string): string {
+  const filePath = path.join(sessionsDir, '.omniclaw-session-names.json');
+  assertPathWithin(filePath, sessionsDir, 'session names file');
+  return filePath;
+}
+
+function readSessionNames(sessionsDir: string): Record<string, string> {
+  try {
+    const filePath = sessionNamesFilePath(sessionsDir);
+    if (!fs.existsSync(filePath)) return {};
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as unknown;
+    if (!parsed || typeof parsed !== 'object') return {};
+    const names: Record<string, string> = {};
+    for (const [sessionId, name] of Object.entries(parsed)) {
+      if (/^[a-f0-9-]+$/i.test(sessionId) && typeof name === 'string') {
+        names[sessionId] = normalizeSessionName(name) || '';
+      }
+    }
+    return names;
+  } catch (err) {
+    logger.warn({ err, sessionsDir }, 'Failed to read Discord session names');
+    return {};
+  }
+}
+
+function writeSessionNames(
+  sessionsDir: string,
+  names: Record<string, string>,
+): void {
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  const filePath = sessionNamesFilePath(sessionsDir);
+  fs.writeFileSync(filePath, JSON.stringify(names, null, 2));
+}
+
+function getRuntimeSessionsDir(runtimeFolder: string): string {
+  return path.join(
+    DATA_DIR,
+    'sessions',
+    runtimeFolder,
+    '.claude',
+    'projects',
+    '-workspace-group',
+  );
+}
+
+function applyPendingSessionName(
+  runtimeFolder: string,
+  sessionId: string,
+): void {
+  const intent = getPendingSessionIntent(runtimeFolder);
+  const name = intent?.name;
+  if (!name) return;
+  const sessionsDir = getRuntimeSessionsDir(runtimeFolder);
+  const names = readSessionNames(sessionsDir);
+  names[sessionId] = name;
+  writeSessionNames(sessionsDir, names);
 }
 
 function formatAge(date: Date): string {
@@ -1500,6 +1695,21 @@ export function _getEnabledStartupConfirmationTargets() {
   return getEnabledStartupConfirmationTargets();
 }
 
+/** @internal - exported for testing */
+export function _setSessions(nextSessions: Record<string, string>): void {
+  sessions = nextSessions;
+}
+
+/** @internal - exported for testing */
+export function _handleSessionCommandForTest(
+  command: 'new' | 'resume' | 'list' | 'current' | 'end' | 'rename',
+  chatJid: string,
+  group: RegisteredGroup,
+  options: SessionCommandOptions = {},
+): { message: string } {
+  return handleSessionCommand(command, chatJid, group, options);
+}
+
 /**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
@@ -1975,6 +2185,21 @@ async function runAgent(
   }
 
   const sessionId = sessions[runtimeGroupFolder];
+  const pendingSessionIntent = getPendingSessionIntent(runtimeGroupFolder);
+  const shouldForkSession =
+    pendingSessionIntent?.forkFrom != null &&
+    sessionId === pendingSessionIntent.forkFrom;
+  if (pendingSessionIntent?.forkFrom && !shouldForkSession) {
+    logger.warn(
+      {
+        runtimeGroupFolder,
+        expectedSessionId: pendingSessionIntent.forkFrom,
+        actualSessionId: sessionId,
+      },
+      'Discarding stale pending session fork intent because active session drifted',
+    );
+    setPendingSessionIntent(runtimeGroupFolder, {});
+  }
 
   // Update tasks snapshot for container to read (filtered by group)
   writeTasksSnapshot(
@@ -2029,6 +2254,8 @@ async function runAgent(
         if (output.newSessionId) {
           sessions[runtimeGroupFolder] = output.newSessionId;
           setSession(runtimeGroupFolder, output.newSessionId);
+          applyPendingSessionName(runtimeGroupFolder, output.newSessionId);
+          setPendingSessionIntent(runtimeGroupFolder, {});
         }
         if (output.resumeAt) {
           resumePositionStore.set(runtimeGroupFolder, output.resumeAt);
@@ -2093,7 +2320,9 @@ async function runAgent(
       {
         prompt,
         sessionId,
-        resumeAt: resumePositionStore.get(runtimeGroupFolder),
+        resumeAt: shouldForkSession
+          ? undefined
+          : resumePositionStore.get(runtimeGroupFolder),
         groupFolder: group.folder,
         runtimeFolder: runtimeGroupFolder,
         chatJid,
@@ -2113,6 +2342,7 @@ async function runAgent(
         githubActivityDelta,
         githubLinkedContext,
         mcpServers: group.containerConfig?.mcpServers,
+        ...(shouldForkSession ? { forkSession: true } : {}),
       },
       (proc, containerName) =>
         queue.registerProcess(
@@ -2129,6 +2359,8 @@ async function runAgent(
     if (output.newSessionId) {
       sessions[runtimeGroupFolder] = output.newSessionId;
       setSession(runtimeGroupFolder, output.newSessionId);
+      applyPendingSessionName(runtimeGroupFolder, output.newSessionId);
+      setPendingSessionIntent(runtimeGroupFolder, {});
     }
     if (output.resumeAt) {
       resumePositionStore.set(runtimeGroupFolder, output.resumeAt);

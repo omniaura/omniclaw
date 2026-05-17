@@ -1231,6 +1231,11 @@ export function setSession(groupFolder: string, sessionId: string): void {
   ).run(groupFolder, sessionId);
 }
 
+export function clearSession(groupFolder: string): void {
+  db.query('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
+  clearPendingSessionIntent(groupFolder);
+}
+
 export function getAllSessions(): Record<string, string> {
   const rows = db
     .prepare('SELECT group_folder, session_id FROM sessions')
@@ -1240,6 +1245,49 @@ export function getAllSessions(): Record<string, string> {
     result[row.group_folder] = row.session_id;
   }
   return result;
+}
+
+export interface PendingSessionIntent {
+  forkFrom?: string;
+  name?: string;
+}
+
+export function getPendingSessionIntent(
+  groupFolder: string,
+): PendingSessionIntent | undefined {
+  const row = db
+    .prepare(
+      'SELECT fork_from, name FROM pending_session_intents WHERE group_folder = ?',
+    )
+    .get(groupFolder) as
+    | { fork_from: string | null; name: string | null }
+    | undefined;
+  if (!row) return undefined;
+  return {
+    forkFrom: row.fork_from || undefined,
+    name: row.name || undefined,
+  };
+}
+
+export function setPendingSessionIntent(
+  groupFolder: string,
+  intent: PendingSessionIntent,
+): void {
+  if (!intent.forkFrom && !intent.name) {
+    clearPendingSessionIntent(groupFolder);
+    return;
+  }
+  db.query(
+    `INSERT OR REPLACE INTO pending_session_intents
+      (group_folder, fork_from, name, created_at)
+      VALUES (?, ?, ?, datetime('now'))`,
+  ).run(groupFolder, intent.forkFrom ?? null, intent.name ?? null);
+}
+
+export function clearPendingSessionIntent(groupFolder: string): void {
+  db.query('DELETE FROM pending_session_intents WHERE group_folder = ?').run(
+    groupFolder,
+  );
 }
 
 /**
@@ -1252,6 +1300,12 @@ export function expireStaleSessions(maxAgeMs: number): string[] {
     .all(cutoff) as Array<{ group_folder: string }>;
   if (stale.length > 0) {
     db.query('DELETE FROM sessions WHERE created_at < ?').run(cutoff);
+    const deleteIntent = db.query(
+      'DELETE FROM pending_session_intents WHERE group_folder = ?',
+    );
+    for (const row of stale) {
+      deleteIntent.run(row.group_folder);
+    }
   }
   return stale.map((r) => r.group_folder);
 }

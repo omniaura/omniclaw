@@ -28,6 +28,8 @@ export interface ContainerInput {
   prompt: string;
   sessionId?: string;
   resumeAt?: string;
+  /** When true, resume from sessionId but create a new branched session. */
+  forkSession?: boolean;
   groupFolder: string;
   /** Host-side runtime key for IPC/session isolation (defaults to groupFolder). */
   runtimeFolder?: string;
