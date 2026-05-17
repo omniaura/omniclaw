@@ -231,6 +231,16 @@ describe('renderCodexActivity', () => {
     );
   });
 
+  it('redacts secrets from command output before streaming activity', () => {
+    expect(
+      renderCodexActivity({
+        type: 'command_execution',
+        command: 'printenv GITHUB_TOKEN',
+        stdout: 'GITHUB_TOKEN=ghp_1234567890abcdefghijklmnopqrstuv',
+      }),
+    ).toContain('GITHUB_TOKEN=[GITHUB_TOKEN_REDACTED]');
+  });
+
   it('formats file items without treating them as final assistant text', () => {
     expect(
       renderCodexActivity({

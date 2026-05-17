@@ -6,6 +6,7 @@ import {
   storeChatMetadata,
 } from './db.js';
 import {
+  _createIntermediateStatusStreamer,
   _getSlashCommandGroupsFromSubscriptions,
   _getEnabledStartupConfirmationTargets,
   _isAgentEnabled,
@@ -15,6 +16,7 @@ import {
   _setAgents,
   _setChannelSubscriptions,
   _setRegisteredGroups,
+  _truncateIntermediateStatusBuffer,
   getAvailableGroups,
 } from './index.js';
 import type {
@@ -71,6 +73,138 @@ const makeMessage = (overrides: Partial<NewMessage> = {}): NewMessage => ({
   sender_platform: 'telegram',
   sender_user_id: '42',
   ...overrides,
+});
+
+function tick(ms = 5): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+describe('intermediate status streaming', () => {
+  it('creates a status message for the first intermediate and edits it for subsequent updates', async () => {
+    const sends: Array<{ jid: string; text: string }> = [];
+    const edits: Array<{ jid: string; id: string; text: string }> = [];
+    const streamer = _createIntermediateStatusStreamer({
+      channel: {
+        sendMessage: async (jid, text) => {
+          sends.push({ jid, text });
+          return 'status-1';
+        },
+        editMessage: async (jid, id, text) => {
+          edits.push({ jid, id, text });
+        },
+      },
+      chatJid: 'dc:chan',
+      editDebounceMs: 1,
+    });
+
+    await streamer.append('first');
+    await streamer.append('second');
+    await tick();
+
+    expect(sends).toEqual([{ jid: 'dc:chan', text: 'first' }]);
+    expect(edits.at(-1)).toEqual({
+      jid: 'dc:chan',
+      id: 'status-1',
+      text: 'first\nsecond',
+    });
+  });
+
+  it('coalesces concurrent first intermediates into one status message', async () => {
+    let resolveSend: (value: string) => void = () => undefined;
+    const sends: string[] = [];
+    const edits: string[] = [];
+    const streamer = _createIntermediateStatusStreamer({
+      channel: {
+        sendMessage: async (_jid, text) => {
+          sends.push(text);
+          return new Promise<string>((resolve) => {
+            resolveSend = resolve;
+          });
+        },
+        editMessage: async (_jid, _id, text) => {
+          edits.push(text);
+        },
+      },
+      chatJid: 'dc:chan',
+      editDebounceMs: 1,
+    });
+
+    const first = streamer.append('first');
+    const second = streamer.append('second');
+    resolveSend('status-1');
+    await Promise.all([first, second]);
+    await tick();
+
+    expect(sends).toEqual(['first']);
+    expect(edits.at(-1)).toBe('first\nsecond');
+  });
+
+  it('edits the final reply into the status message', async () => {
+    const edits: string[] = [];
+    const streamer = _createIntermediateStatusStreamer({
+      channel: {
+        sendMessage: async () => 'status-1',
+        editMessage: async (_jid, _id, text) => {
+          edits.push(text);
+        },
+      },
+      chatJid: 'dc:chan',
+      editDebounceMs: 1,
+    });
+
+    await streamer.append('working');
+    const edited = await streamer.editFinal('final answer');
+
+    expect(edited).toBe(true);
+    expect(edits.at(-1)).toBe('final answer');
+  });
+
+  it('returns false when final edit fails so callers can fall back to sendMessage', async () => {
+    const streamer = _createIntermediateStatusStreamer({
+      channel: {
+        sendMessage: async () => 'status-1',
+        editMessage: async () => {
+          throw new Error('rate limited');
+        },
+      },
+      chatJid: 'dc:chan',
+      editDebounceMs: 1,
+    });
+
+    await streamer.append('working');
+
+    expect(await streamer.editFinal('final answer')).toBe(false);
+  });
+
+  it('does not silently truncate final replies over the edit limit', async () => {
+    const edits: string[] = [];
+    const streamer = _createIntermediateStatusStreamer({
+      channel: {
+        sendMessage: async () => 'status-1',
+        editMessage: async (_jid, _id, text) => {
+          edits.push(text);
+        },
+      },
+      chatJid: 'dc:chan',
+      editDebounceMs: 1,
+    });
+
+    await streamer.append('working');
+    const edited = await streamer.editFinal('x'.repeat(2001));
+
+    expect(edited).toBe(false);
+    expect(edits.at(-1)).toBe('Final response follows below.');
+  });
+
+  it('truncates live buffers on line boundaries and strips broken fences', () => {
+    const text = ['before', '```', 'secret output', '```', 'after'].join('\n');
+
+    const truncated = _truncateIntermediateStatusBuffer(text, 22);
+
+    expect(truncated).not.toContain('```');
+    expect(truncated.startsWith('...')).toBe(true);
+    expect(truncated.length).toBeLessThanOrEqual(22);
+  });
 });
 
 describe('getAvailableGroups', () => {

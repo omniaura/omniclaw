@@ -368,8 +368,13 @@ containerConfig: {
   ],
   timeout: 600000,
   memory: 4096,  // MB
+  // Channels that implement editMessage stream live agent activity into one
+  // edited status message by default. Set false to keep only final replies.
+  streamIntermediates: false,
 }
 ```
+
+`streamIntermediates` defaults to enabled when the channel adapter supports `editMessage`; currently Discord implements editable messages. Adapters without edit support fall back to final replies only.
 
 ---
 
@@ -394,6 +399,7 @@ interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   createThread?(jid: string, messageId: string, name: string): Promise<any>;
   sendToThread?(thread: any, text: string): Promise<void>;
+  editMessage?(jid: string, messageId: string, text: string): Promise<void>;
   addReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
   removeReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
   prefixAssistantName?: boolean;
@@ -402,12 +408,12 @@ interface Channel {
 
 ### Supported Channels
 
-| Channel  | Library     | JID Format                                       | Features                                            |
-| -------- | ----------- | ------------------------------------------------ | --------------------------------------------------- |
-| WhatsApp | baileys     | `123@s.whatsapp.net`, `123@g.us`                 | Messages, reactions, typing, groups                 |
-| Discord  | discord.js  | `dc:channel_id`                                  | Messages, reactions, typing, threads, guild context |
-| Telegram | grammy      | `tg:bot_id:chat_id` (legacy `tg:chat_id` compat) | Messages, reactions, typing, groups, DMs            |
-| Slack    | @slack/bolt | `slack:channel_id`                               | Messages, typing, Socket Mode, threads              |
+| Channel  | Library     | JID Format                                       | Features                                                   |
+| -------- | ----------- | ------------------------------------------------ | ---------------------------------------------------------- |
+| WhatsApp | baileys     | `123@s.whatsapp.net`, `123@g.us`                 | Messages, reactions, typing, groups                        |
+| Discord  | discord.js  | `dc:channel_id`                                  | Messages, edits, reactions, typing, threads, guild context |
+| Telegram | grammy      | `tg:bot_id:chat_id` (legacy `tg:chat_id` compat) | Messages, reactions, typing, groups, DMs                   |
+| Slack    | @slack/bolt | `slack:channel_id`                               | Messages, typing, Socket Mode, threads                     |
 
 ### Trigger Behavior
 

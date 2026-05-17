@@ -27,6 +27,10 @@ import type {
   IpcDrainResult,
   IpcMessage,
 } from '@omniclaw/protocol';
+import {
+  redactActivityOutput,
+  TOOL_OUTPUT_SNIPPET_CHARS,
+} from './activity-format.js';
 
 interface JsonRpcRequest {
   id: string | number;
@@ -288,7 +292,11 @@ export function renderCodexActivity(item: unknown): string | null {
   label = label.charAt(0).toUpperCase() + label.slice(1);
   const lines = [`▸ ${label}${summary ? `: ${truncate(summary, 180)}` : ''}`];
   if (output?.trim()) {
-    lines.push('```', truncate(output.trim(), 600), '```');
+    lines.push(
+      '```',
+      truncate(redactActivityOutput(output.trim()), TOOL_OUTPUT_SNIPPET_CHARS),
+      '```',
+    );
   }
   return lines.join('\n');
 }
@@ -353,7 +361,10 @@ function handleServerRequest(
     request.method === 'execCommandApproval'
   ) {
     log(`Auto-declining unsupported approval request: ${request.method}`);
-    const activity = renderCodexActivity(request.params);
+    const activity = renderCodexActivity({
+      ...asObject(request.params),
+      type: `${request.method} declined`,
+    });
     if (activity) {
       writeOutput({
         status: 'success',
