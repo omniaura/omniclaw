@@ -1230,7 +1230,7 @@ function renderAgentRows(state: WebStateProvider): string {
       return `<tr>
         <td>${escapeHtml(agent.id)}</td>
         <td>${escapeHtml(agent.name)}</td>
-        <td><span class="badge ${agent.backend === 'apple-container' ? 'badge-apple-container' : agent.backend === 'docker' ? 'badge-docker' : ''}">${escapeHtml(agent.backend)}</span></td>
+        <td><span class="badge ${agent.backend === 'apple-container' ? 'badge-apple-container' : agent.backend === 'docker' ? 'badge-docker' : agent.backend === 'cursor-sdk' ? 'badge-cursor-sdk' : ''}">${escapeHtml(agent.backend)}</span></td>
         <td>${escapeHtml(agent.agentRuntime)}</td>
         <td>${agent.isAdmin ? '<span class="badge badge-admin">admin</span>' : ''}</td>
         <td class="channels">${channels.join('<br>') || '—'}</td>

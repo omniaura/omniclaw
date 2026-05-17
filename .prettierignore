@@ -12,6 +12,9 @@ data/
 logs/
 *.db
 
+# Local Claude Code worktrees (not part of the repo)
+.claude/worktrees/
+
 # Temporary PR/triage working files (not shipped)
 pr-body*.md
 pr-comment*.md

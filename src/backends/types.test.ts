@@ -137,6 +137,9 @@ describe('backends/types.ts', () => {
         'apple-container',
       );
       expect(getBackendType(makeAgent({ backend: 'docker' }))).toBe('docker');
+      expect(getBackendType(makeAgent({ backend: 'cursor-sdk' }))).toBe(
+        'cursor-sdk',
+      );
     });
 
     it('returns each backend type correctly for RegisteredGroup', () => {
@@ -144,6 +147,9 @@ describe('backends/types.ts', () => {
         'apple-container',
       );
       expect(getBackendType(makeGroup({ backend: 'docker' }))).toBe('docker');
+      expect(getBackendType(makeGroup({ backend: 'cursor-sdk' }))).toBe(
+        'cursor-sdk',
+      );
     });
   });
 
@@ -162,6 +168,36 @@ describe('backends/types.ts', () => {
 
     it('defaults RegisteredGroups to the Claude Agent SDK runtime', () => {
       expect(getAgentRuntime(makeGroup({ agentRuntime: undefined }))).toBe(
+        'claude-agent-sdk',
+      );
+    });
+
+    it('forces cursor-sdk runtime when backend is cursor-sdk', () => {
+      expect(
+        getAgentRuntime(
+          makeAgent({
+            backend: 'cursor-sdk',
+            agentRuntime: 'claude-agent-sdk',
+          }),
+        ),
+      ).toBe('cursor-sdk');
+      expect(
+        getAgentRuntime(
+          makeGroup({
+            backend: 'cursor-sdk',
+            agentRuntime: undefined,
+          }),
+        ),
+      ).toBe('cursor-sdk');
+    });
+
+    it('uses explicit runtime when backend is not cursor-sdk', () => {
+      expect(
+        getAgentRuntime(
+          makeAgent({ backend: 'docker', agentRuntime: 'codex' }),
+        ),
+      ).toBe('codex');
+      expect(getAgentRuntime(makeGroup({ backend: 'docker' }))).toBe(
         'claude-agent-sdk',
       );
     });

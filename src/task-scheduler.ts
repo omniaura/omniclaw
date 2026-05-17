@@ -10,7 +10,11 @@ import {
 } from './config.js';
 import { calculateNextRun } from './schedule-utils.js';
 import { resolveBackend } from './backends/index.js';
-import type { AgentBackend, ContainerOutput } from './backends/types.js';
+import {
+  getAgentRuntime,
+  type AgentBackend,
+  type ContainerOutput,
+} from './backends/types.js';
 import { writeTasksSnapshot } from './ipc-snapshots.js';
 import {
   advanceTaskNextRun,
@@ -417,7 +421,7 @@ async function runTask(
           isScheduledTask: true,
           discordGuildId: group.discordGuildId,
           serverFolder: group.serverFolder,
-          agentRuntime: group.agentRuntime,
+          agentRuntime: getAgentRuntime(group),
           agentName: group.name,
           discordBotId: group.discordBotId,
           agentTrigger: group.trigger,

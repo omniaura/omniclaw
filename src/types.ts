@@ -47,7 +47,7 @@ export interface ContainerConfig {
   streamIntermediates?: boolean;
 }
 
-export type BackendType = 'apple-container' | 'docker';
+export type BackendType = 'apple-container' | 'docker' | 'cursor-sdk';
 
 import type {
   AgentRuntime as _AgentRuntime,
@@ -425,7 +425,9 @@ export function registeredGroupToAgent(
     description: group.description,
     folder: group.folder,
     backend: backendType,
-    agentRuntime: group.agentRuntime || 'claude-agent-sdk',
+    agentRuntime:
+      group.agentRuntime ||
+      (backendType === 'cursor-sdk' ? 'cursor-sdk' : 'claude-agent-sdk'),
     containerConfig: group.containerConfig,
     isAdmin: isMainGroup,
     serverFolder: group.serverFolder,

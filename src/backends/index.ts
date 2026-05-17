@@ -3,6 +3,7 @@
  * Routes groups to the appropriate backend based on configuration.
  */
 
+import { LOCAL_RUNTIME } from '../config.js';
 import { logger } from '../logger.js';
 import { Agent, RegisteredGroup } from '../types.js';
 import { LocalBackend } from './local-backend.js';
@@ -19,6 +20,12 @@ const backends = new Map<BackendType, AgentBackend>();
 
 /** Get a backend instance by type. Lazily creates singletons. */
 export function getBackend(type: BackendType): AgentBackend {
+  if (type === 'cursor-sdk') {
+    const containerKey =
+      LOCAL_RUNTIME === 'docker' ? 'docker' : 'apple-container';
+    return getBackend(containerKey);
+  }
+
   let backend = backends.get(type);
   if (backend) return backend;
 
@@ -53,7 +60,10 @@ export async function initializeBackends(
   const neededTypes = new Set<BackendType>();
 
   for (const entity of Object.values(entities)) {
-    const type = getBackendType(entity);
+    let type = getBackendType(entity);
+    if (type === 'cursor-sdk') {
+      type = LOCAL_RUNTIME === 'docker' ? 'docker' : 'apple-container';
+    }
     neededTypes.add(type);
   }
 

@@ -113,6 +113,7 @@ function avatarSrc(agent: AgentChannelData): string | null {
 function backendBadgeClass(backend: string): string {
   if (backend === 'apple-container') return 'badge-apple-container';
   if (backend === 'docker') return 'badge-docker';
+  if (backend === 'cursor-sdk') return 'badge-cursor-sdk';
   return '';
 }
 

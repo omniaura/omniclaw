@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
+import { LOCAL_RUNTIME } from '../config.js';
 import { logger } from '../logger.js';
 import { getBackend, initializeBackends, shutdownBackends } from './index.js';
 import { LocalBackend } from './local-backend.js';
@@ -26,6 +27,15 @@ describe('backends/index', () => {
     it('returns a LocalBackend for docker', () => {
       const backend = getBackend('docker');
       expect(backend).toBeInstanceOf(LocalBackend);
+    });
+
+    it('delegates cursor-sdk to the active container backend singleton', () => {
+      const cursor = getBackend('cursor-sdk');
+      const container = getBackend(
+        LOCAL_RUNTIME === 'docker' ? 'docker' : 'apple-container',
+      );
+      expect(cursor).toBe(container);
+      expect(cursor).toBeInstanceOf(LocalBackend);
     });
 
     it('returns the same singleton for repeated calls', () => {
