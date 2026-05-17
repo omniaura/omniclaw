@@ -1087,3 +1087,204 @@ describe('GroupQueue.getDetailedStats reason codes', () => {
     expect(fresh.getDetailedStats()).toEqual([]);
   });
 });
+
+describe('GroupQueue.getDetailedStats message lane run age', () => {
+  const fsStub = {
+    ...realFs,
+    mkdirSync: mock(),
+    writeFileSync: mock(),
+    renameSync: mock(),
+  };
+
+  it('reports startedAt/runningMs while a message run is in flight', async () => {
+    const queue = new GroupQueue({
+      dataDir: '/tmp/omniclaw-test-data-msgage',
+      maxActiveContainers: 1,
+      maxIdleContainers: 0,
+      maxTaskContainers: 1,
+      fsImpl: fsStub,
+    });
+
+    let resolveRun: (() => void) | null = null;
+    queue.setProcessMessagesFn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveRun = () => resolve(true);
+        }),
+    );
+
+    const before = Date.now();
+    queue.enqueueMessageCheck('groupA@g.us');
+    await Bun.sleep(5);
+
+    const inFlight = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupA@g.us');
+    expect(inFlight?.messageLane.active).toBe(true);
+    expect(typeof inFlight?.messageLane.startedAt).toBe('number');
+    expect(inFlight?.messageLane.startedAt).toBeGreaterThanOrEqual(before);
+    expect(typeof inFlight?.messageLane.runningMs).toBe('number');
+    expect(inFlight?.messageLane.runningMs).toBeGreaterThanOrEqual(0);
+
+    resolveRun!();
+    await Bun.sleep(5);
+
+    const after = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupA@g.us');
+    // After the run finishes the lane returns to idle and the timer clears.
+    expect(after?.messageLane.active).toBe(false);
+    expect(after?.messageLane.startedAt).toBeNull();
+    expect(after?.messageLane.runningMs).toBeNull();
+  });
+
+  it('clears startedAt/runningMs while in cooldown and restamps when sendMessage resumes', async () => {
+    const queue = new GroupQueue({
+      dataDir: '/tmp/omniclaw-test-data-msgage-cooldown',
+      maxActiveContainers: 1,
+      maxIdleContainers: 1,
+      maxTaskContainers: 1,
+      fsImpl: fsStub,
+    });
+
+    let resolveRun: (() => void) | null = null;
+    queue.setProcessMessagesFn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveRun = () => resolve(true);
+        }),
+    );
+
+    const backendSend = mock(() => true);
+    queue.enqueueMessageCheck('groupC@g.us');
+    await Bun.sleep(5);
+    queue.registerProcess(
+      'groupC@g.us',
+      { killed: false } as any,
+      'msg-ctr-c',
+      'groupC-folder',
+      {
+        sendMessage: backendSend,
+        closeStdin: mock(),
+        runAgent: mock(async () => ({
+          status: 'success' as const,
+          result: null,
+        })),
+      } as any,
+      'message',
+    );
+
+    // While running we have an age.
+    const inFlight = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupC@g.us');
+    expect(typeof inFlight?.messageLane.startedAt).toBe('number');
+    expect(typeof inFlight?.messageLane.runningMs).toBe('number');
+
+    // Entering cooldown clears the age so /ipc doesn't grow it while idle.
+    queue.notifyIdle('groupC@g.us');
+    const cooling = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupC@g.us');
+    expect(cooling?.messageLane.idle).toBe(true);
+    expect(cooling?.messageLane.startedAt).toBeNull();
+    expect(cooling?.messageLane.runningMs).toBeNull();
+
+    // Resuming via sendMessage stamps a fresh start time.
+    const beforeResume = Date.now();
+    const sent = await queue.sendMessage('groupC@g.us', 'wake up');
+    expect(sent).toBe(true);
+    const resumed = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupC@g.us');
+    expect(resumed?.messageLane.idle).toBe(false);
+    expect(typeof resumed?.messageLane.startedAt).toBe('number');
+    expect(resumed?.messageLane.startedAt).toBeGreaterThanOrEqual(beforeResume);
+    expect(typeof resumed?.messageLane.runningMs).toBe('number');
+    expect(resumed?.messageLane.runningMs).toBeGreaterThanOrEqual(0);
+
+    resolveRun!();
+    await Bun.sleep(5);
+  });
+
+  it('does not reset startedAt on sendMessage when lane is already running', async () => {
+    const queue = new GroupQueue({
+      dataDir: '/tmp/omniclaw-test-data-msgage-running',
+      maxActiveContainers: 1,
+      maxIdleContainers: 0,
+      maxTaskContainers: 1,
+      fsImpl: fsStub,
+    });
+
+    let resolveRun: (() => void) | null = null;
+    queue.setProcessMessagesFn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveRun = () => resolve(true);
+        }),
+    );
+
+    const backendSend = mock(() => true);
+    queue.enqueueMessageCheck('groupD@g.us');
+    await Bun.sleep(5);
+    queue.registerProcess(
+      'groupD@g.us',
+      { killed: false } as any,
+      'msg-ctr-d',
+      'groupD-folder',
+      {
+        sendMessage: backendSend,
+        closeStdin: mock(),
+        runAgent: mock(async () => ({
+          status: 'success' as const,
+          result: null,
+        })),
+      } as any,
+      'message',
+    );
+
+    // Snapshot the initial run start time while the lane is `running`.
+    const inFlight = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupD@g.us');
+    const originalStartedAt = inFlight?.messageLane.startedAt;
+    expect(typeof originalStartedAt).toBe('number');
+
+    // Wait long enough for Date.now() to advance.
+    await Bun.sleep(10);
+
+    // Follow-up sendMessage on an already-running lane must NOT restamp
+    // startedAt — otherwise long-running/stuck runs get underreported on /ipc.
+    const sent = await queue.sendMessage('groupD@g.us', 'follow-up');
+    expect(sent).toBe(true);
+    const afterFollowUp = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupD@g.us');
+    expect(afterFollowUp?.messageLane.startedAt).toBe(originalStartedAt);
+
+    resolveRun!();
+    await Bun.sleep(5);
+  });
+
+  it('clears startedAt/runningMs after a message run finishes', async () => {
+    const queue = new GroupQueue({
+      dataDir: '/tmp/omniclaw-test-data-msgage-done',
+      maxActiveContainers: 1,
+      maxIdleContainers: 0,
+      maxTaskContainers: 1,
+      fsImpl: fsStub,
+    });
+
+    queue.setProcessMessagesFn(async () => true);
+    queue.enqueueMessageCheck('groupB@g.us');
+    await Bun.sleep(20);
+
+    const detail = queue
+      .getDetailedStats()
+      .find((d) => d.folderKey === 'groupB@g.us');
+    // After completion the lane should be idle with timers cleared.
+    expect(detail?.messageLane.active).toBe(false);
+    expect(detail?.messageLane.startedAt).toBeNull();
+    expect(detail?.messageLane.runningMs).toBeNull();
+  });
+});

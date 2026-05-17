@@ -69,6 +69,18 @@ export interface GroupQueueDetail {
      * {@link deriveMessageLaneReasonFromDetail} when missing.
      */
     reason?: MessageLaneReason;
+    /**
+     * Epoch ms when the current message run started. Null when the lane is
+     * idle (cooldown or no work). Operators use this with {@link runningMs}
+     * to spot stuck or long-running message runs.
+     */
+    startedAt?: number | null;
+    /**
+     * Milliseconds elapsed since the current message run started. Null when
+     * the lane is idle. Derived as `Date.now() - startedAt` in
+     * {@link GroupQueue.getDetailedStats}.
+     */
+    runningMs?: number | null;
   };
   taskLane: {
     active: boolean;
@@ -158,6 +170,8 @@ interface GroupState {
   messageContainerName: string | null;
   messageGroupFolder: string | null;
   messageBackend: AgentBackend | null;
+  /** Epoch ms when the current message run started; null when idle. */
+  messageRunStartedAt: number | null;
   retryCount: number;
 
   // Task lane
@@ -262,6 +276,7 @@ export class GroupQueue {
         messageContainerName: null,
         messageGroupFolder: null,
         messageBackend: null,
+        messageRunStartedAt: null,
         retryCount: 0,
 
         taskActive: false,
@@ -313,6 +328,7 @@ export class GroupQueue {
     }
 
     this.transitionMessageLaneState(groupJid, 'running');
+    state.messageRunStartedAt = Date.now();
     this.dequeuePendingMessage(groupJid);
     this.activeCount++;
     return { started: true, processingCount };
@@ -325,6 +341,7 @@ export class GroupQueue {
     state.messageContainerName = null;
     state.messageGroupFolder = null;
     state.messageBackend = null;
+    state.messageRunStartedAt = null;
     this.activeCount--;
   }
 
@@ -510,6 +527,9 @@ export class GroupQueue {
     }
 
     this.transitionMessageLaneState(groupJid, 'cooldown');
+    // Clear the run timer when entering cooldown so /ipc doesn't show a
+    // growing "running age" while the lane is actually idle-waiting.
+    state.messageRunStartedAt = null;
 
     // A processing slot just freed up — let waiting messages start.
     this.drainWaitingMessages();
@@ -590,8 +610,15 @@ export class GroupQueue {
     if (state.messageLaneState === 'idle' || !state.messageGroupFolder) {
       return false;
     }
-    // Container was idle — mark it active again (single-method bookkeeping)
-    this.transitionMessageLaneState(chatJid, 'running');
+    // Container was idle — mark it active again (single-method bookkeeping).
+    // Only restamp the run timer on a real cooldown → running transition;
+    // follow-up sendMessage() calls while already running must NOT reset
+    // messageRunStartedAt, otherwise long-running/stuck runs get underreported
+    // on /ipc every time a new message arrives.
+    const resumed = this.transitionMessageLaneState(chatJid, 'running');
+    if (resumed) {
+      state.messageRunStartedAt = Date.now();
+    }
     const channelJid = toChannelJid(chatJid);
 
     // Use Effect-based queue if available
@@ -946,6 +973,11 @@ export class GroupQueue {
           pendingCount: state.pendingMessageJids.length,
           containerName: state.messageContainerName,
           reason: messageReason,
+          startedAt: state.messageRunStartedAt,
+          runningMs:
+            state.messageRunStartedAt !== null
+              ? Date.now() - state.messageRunStartedAt
+              : null,
         },
         taskLane: {
           active: state.taskActive,

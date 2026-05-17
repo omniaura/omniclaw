@@ -566,6 +566,7 @@ function shellCSS(): string {
     `.folder-key{font-size:11px}`,
     `.task-info{font-size:10px;color:var(--text-dim);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}`,
     `.retry-count{color:var(--yellow);font-weight:600}`,
+    `.lane-age{display:inline-block;font-size:9px;font-weight:500;padding:1px 5px;margin-left:4px;border-radius:3px;color:var(--text-dim);background:rgba(99,106,126,.08);font-variant-numeric:tabular-nums}`,
     `.event-time{font-size:10px;color:var(--text-dim);white-space:nowrap}`,
     `.event-source{font-size:11px;color:var(--blue)}`,
     `.event-summary{font-size:11px;max-width:500px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}`,

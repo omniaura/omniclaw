@@ -47,9 +47,14 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
         deriveTaskLaneReasonFromDetail(g),
         TASK_REASON_CODES,
       );
+      const msgRunningMs = g.messageLane.runningMs;
+      const msgAge =
+        typeof msgRunningMs === 'number' && msgRunningMs >= 0
+          ? `<span class="lane-age" title="running for ${escapeHtml(formatDuration(msgRunningMs))}">${escapeHtml(formatDuration(msgRunningMs))}</span>`
+          : '';
       return `<tr>
         <td class="folder-key">${escapeHtml(g.folderKey)}</td>
-        <td><span class="lane-badge lane-${msgStatus}">${msgStatus}</span>${msgReason}</td>
+        <td><span class="lane-badge lane-${msgStatus}">${msgStatus}</span>${msgReason}${msgAge}</td>
         <td>${g.messageLane.pendingCount}</td>
         <td><span class="lane-badge lane-${taskStatus}">${taskStatus}</span>${taskReason}</td>
         <td>${g.taskLane.pendingCount}</td>

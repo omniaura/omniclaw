@@ -244,6 +244,64 @@ describe('renderIpcInspector', () => {
     expect(html).toContain('&lt;script&gt;');
   });
 
+  it('renders message lane running age when runningMs is provided', () => {
+    const detail: GroupQueueDetail = {
+      folderKey: 'agent-epsilon',
+      messageLane: {
+        active: true,
+        idle: false,
+        pendingCount: 0,
+        containerName: 'ctr-eps-msg',
+        reason: 'running',
+        startedAt: Date.now() - 45000,
+        runningMs: 45000,
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work',
+      },
+      retryCount: 0,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [detail] }),
+    );
+    expect(html).toContain('lane-age');
+    // 45000 ms formats as 45.0s
+    expect(html).toContain('45.0s');
+  });
+
+  it('omits message lane age when runningMs is null/undefined', () => {
+    const detail: GroupQueueDetail = {
+      folderKey: 'agent-zeta',
+      messageLane: {
+        active: false,
+        idle: false,
+        pendingCount: 0,
+        containerName: null,
+        reason: 'no-work',
+        startedAt: null,
+        runningMs: null,
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work',
+      },
+      retryCount: 0,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [detail] }),
+    );
+    // The CSS rule for .lane-age is bundled in the shell, so only assert that
+    // no element with class="lane-age" is emitted in the rendered markup.
+    expect(html).not.toContain('class="lane-age"');
+  });
+
   it('allowlists lane reason codes before rendering class names', () => {
     const xssDetail: GroupQueueDetail = {
       folderKey: 'agent-xss',
