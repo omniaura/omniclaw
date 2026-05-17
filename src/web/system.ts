@@ -101,8 +101,21 @@ export interface HealthData {
      * tasks without drilling into /ipc.
      */
     longest_running_task_ms: number;
-    /** Sum of consecutive retry counts across all group folders. */
+    /** Number of group folders whose consecutive retry count is greater than zero. */
     retrying_groups: number;
+    /**
+     * Sum of consecutive retry counts across all group folders. A single
+     * group stuck retrying many times will inflate this without changing
+     * `retrying_groups`, so the two together describe both the breadth
+     * and the intensity of retry pressure.
+     */
+    total_retries: number;
+    /**
+     * Highest consecutive retry count observed across all group folders.
+     * Useful for spotting a single stuck group at a glance, since
+     * `retrying_groups` only counts groups but not their individual depth.
+     */
+    max_retries: number;
     /**
      * Count of message lanes by structured reason code. Keys are the same
      * `MessageLaneReason` values exposed on the IPC inspector page.
@@ -187,6 +200,8 @@ export function buildHealthData(
   let runningTasks = 0;
   let longestRunningTaskMs = 0;
   let retryingGroups = 0;
+  let totalRetries = 0;
+  let maxRetries = 0;
   const messageLaneReasons: Record<MessageLaneReason, number> = {
     running: 0,
     'cooling-down': 0,
@@ -210,6 +225,8 @@ export function buildHealthData(
       }
     }
     if (g.retryCount > 0) retryingGroups++;
+    totalRetries += g.retryCount;
+    if (g.retryCount > maxRetries) maxRetries = g.retryCount;
     messageLaneReasons[deriveMessageLaneReasonFromDetail(g)]++;
     taskLaneReasons[deriveTaskLaneReasonFromDetail(g)]++;
   }
@@ -266,6 +283,8 @@ export function buildHealthData(
       running_tasks: runningTasks,
       longest_running_task_ms: longestRunningTaskMs,
       retrying_groups: retryingGroups,
+      total_retries: totalRetries,
+      max_retries: maxRetries,
       message_lane_reasons: messageLaneReasons,
       task_lane_reasons: taskLaneReasons,
     },
@@ -503,6 +522,16 @@ export function renderSystemContent(
           'retrying',
           String(health.queue.retrying_groups),
           'sys-queue-retrying',
+        ) +
+        metricRow(
+          'total retries',
+          String(health.queue.total_retries),
+          'sys-queue-total-retries',
+        ) +
+        metricRow(
+          'max retries',
+          String(health.queue.max_retries),
+          'sys-queue-max-retries',
         ) +
         `<div class="metric-sub">message lane reasons</div>` +
         reasonRollup(
