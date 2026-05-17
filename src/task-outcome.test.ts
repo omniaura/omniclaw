@@ -105,4 +105,16 @@ describe('inferOutcome', () => {
       reason: 'All steps completed',
     });
   });
+
+  it('explicit skipped signal passes through reason', () => {
+    const output: ContainerOutput = {
+      status: 'success',
+      result: 'Skipped by preprocessor: no diff',
+      outcome: { state: 'skipped', reason: 'No relevant diff' },
+    };
+    expect(inferOutcome(output, null, false)).toEqual({
+      state: 'skipped',
+      reason: 'No relevant diff',
+    });
+  });
 });

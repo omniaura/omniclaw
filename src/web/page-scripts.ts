@@ -1181,7 +1181,7 @@ function openRunHistory(taskId){
       if(detail.length>80)detail=detail.slice(0,77)+"\\u2026";
       var outcomeHtml="";
       if(r.outcome_state){
-        var oClr=r.outcome_state==="done"?"var(--green)":r.outcome_state==="blocked"?"var(--yellow)":"var(--red)";
+        var oClr=r.outcome_state==="done"?"var(--green)":r.outcome_state==="skipped"?"var(--text-dim)":r.outcome_state==="blocked"?"var(--yellow)":"var(--red)";
         outcomeHtml='<span style="background:color-mix(in srgb,'+oClr+' 20%,transparent);color:'+oClr+';padding:1px 6px;border-radius:3px;font-size:10px">'+window.__esc(r.outcome_state)+'</span>';
       }
       html+='<tr style="cursor:pointer" data-run-idx="'+idx+'" data-run-at="'+window.__esc(r.run_at)+'" data-task-id="'+window.__esc(taskId)+'">';

@@ -420,7 +420,7 @@ describe('startSchedulerLoop task execution', () => {
         'task-skip',
         '2026-01-01T00:05:00.000Z',
         'Skipped by preprocessor: no MCP diff',
-        { state: 'done', reason: 'no MCP diff' },
+        { state: 'skipped', reason: 'no MCP diff' },
       );
       expect(clearTaskExecutingMock).toHaveBeenCalledWith('task-skip');
     } finally {

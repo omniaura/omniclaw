@@ -83,6 +83,10 @@ const configSchema = z
       parseIntegerString,
       z.number().int().positive().default(7200000),
     ),
+    TASK_PREPROCESS_TIMEOUT_MS: z.preprocess(
+      parseIntegerString,
+      z.number().int().positive().default(60000),
+    ),
     CONTAINER_MAX_OUTPUT_SIZE: z.preprocess(
       parseIntegerString,
       z.number().int().positive().default(10485760),
@@ -398,6 +402,7 @@ export const SHARED_CLAUDE_VM_MEMORY = CONFIG.SHARED_CLAUDE_VM_MEMORY;
 export const EXEC_CONTAINER_MEMORY =
   CONFIG.EXEC_CONTAINER_MEMORY || CONTAINER_MEMORY;
 export const CONTAINER_TIMEOUT = CONFIG.CONTAINER_TIMEOUT; // 2h default — inactivity timeout for agent output (tool calls, results, text)
+export const TASK_PREPROCESS_TIMEOUT_MS = CONFIG.TASK_PREPROCESS_TIMEOUT_MS; // 60s default — deterministic scheduled task preprocessor timeout
 export const CONTAINER_MAX_OUTPUT_SIZE = CONFIG.CONTAINER_MAX_OUTPUT_SIZE; // 10MB default
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = CONFIG.IDLE_TIMEOUT; // 2h default — how long to keep container alive after last result

@@ -80,7 +80,26 @@ Messages and task operations are verified against group identity:
 | View all tasks              | ✓          | Own only       |
 | Manage other groups         | ✓          | ✗              |
 
-### 6. Credential Handling
+### 6. Scheduled Task Preprocessors
+
+Scheduled tasks may configure a deterministic JS/TS `preprocess_script` that
+runs on the host before the agent container starts. This is intentionally a
+privileged host-side extension point, so it is constrained separately from
+container execution:
+
+- Workflow paths are relative to the owning group workspace's
+  `task-workflows/` directory by default.
+- Absolute paths and `..` traversal segments are rejected.
+- Only `.ts`, `.tsx`, `.js`, `.mjs`, and `.cjs` workflow files are accepted.
+- The subprocess receives an explicit minimal environment allowlist
+  (`PATH`, temp/home/locale/timezone values, plus OmniClaw task metadata).
+  Host credentials such as `GITHUB_TOKEN`, Anthropic/OpenAI keys, B2 keys, and
+  runtime auth variables are not inherited.
+- Stderr and execution errors are sanitized and truncated before being stored in
+  run logs, handoffs, or web API responses.
+- Timeouts are controlled by `TASK_PREPROCESS_TIMEOUT_MS`.
+
+### 7. Credential Handling
 
 **Mounted Credentials:**
 

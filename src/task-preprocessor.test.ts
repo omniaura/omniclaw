@@ -68,6 +68,134 @@ it('lets a workflow skip no-op scheduled task runs', () => {
   });
 });
 
+it('parses the last JSON line when workflow stdout has log noise', () => {
+  fs.writeFileSync(
+    path.join(workflowsDir, 'workflow.ts'),
+    `
+console.log("checking git diff...");
+console.log(JSON.stringify({ action: "skip", reason: "no package diff" }));
+`,
+  );
+
+  expect(runTaskPreprocessor(task(), { workflowsDir })).toEqual({
+    action: 'skip',
+    reason: 'no package diff',
+  });
+});
+
+it('parses sentinel-prefixed JSON even when later stdout has log noise', () => {
+  fs.writeFileSync(
+    path.join(workflowsDir, 'workflow.ts'),
+    `
+console.log('OMNICLAW_TASK_PREPROCESSOR_RESULT=' + JSON.stringify({
+  action: "run",
+  prompt: "deterministic prompt"
+}));
+console.log("done");
+`,
+  );
+
+  expect(runTaskPreprocessor(task(), { workflowsDir })).toEqual({
+    action: 'run',
+    prompt: 'deterministic prompt',
+  });
+});
+
+it('does not leak host secrets into workflow environment', () => {
+  const original = process.env.GITHUB_TOKEN;
+  process.env.GITHUB_TOKEN = 'secret-token';
+  fs.writeFileSync(
+    path.join(workflowsDir, 'workflow.ts'),
+    `
+console.log(JSON.stringify({
+  action: "run",
+  promptPrefix: process.env.GITHUB_TOKEN ? "leaked" : "missing"
+}));
+`,
+  );
+
+  try {
+    expect(runTaskPreprocessor(task(), { workflowsDir })).toEqual({
+      action: 'run',
+      prompt: 'missing\n\nsync connector packages',
+    });
+  } finally {
+    if (original === undefined) {
+      delete process.env.GITHUB_TOKEN;
+    } else {
+      process.env.GITHUB_TOKEN = original;
+    }
+  }
+});
+
+it('returns a sanitized error when workflow times out', () => {
+  fs.writeFileSync(
+    path.join(workflowsDir, 'workflow.ts'),
+    'await Bun.sleep(1000);',
+  );
+
+  const result = runTaskPreprocessor(task(), {
+    workflowsDir,
+    timeoutMs: 10,
+  });
+
+  expect(result.action).toBe('error');
+  if (result.action !== 'error') throw new Error('expected error result');
+  expect(result.error).toContain('timed out');
+  expect(result.error.length).toBeLessThanOrEqual(512);
+});
+
+it('returns a sanitized error when workflow output exceeds maxBuffer', () => {
+  fs.writeFileSync(
+    path.join(workflowsDir, 'workflow.ts'),
+    'console.log("x".repeat(1000));',
+  );
+
+  const result = runTaskPreprocessor(task(), {
+    workflowsDir,
+    maxOutputBytes: 16,
+  });
+
+  expect(result.action).toBe('error');
+  if (result.action !== 'error') throw new Error('expected error result');
+  expect(result.error.length).toBeLessThanOrEqual(512);
+});
+
+it('caps promptPrefix length before augmenting the prompt', () => {
+  fs.writeFileSync(
+    path.join(workflowsDir, 'workflow.ts'),
+    `
+console.log(JSON.stringify({
+  action: "run",
+  promptPrefix: "a".repeat(20)
+}));
+`,
+  );
+
+  const result = runTaskPreprocessor(task(), {
+    workflowsDir,
+    maxPromptFragmentChars: 5,
+  });
+
+  expect(result).toEqual({
+    action: 'run',
+    prompt:
+      'aaaaa\n\n[preprocessor promptPrefix truncated to 5 characters]\n\nsync connector packages',
+  });
+});
+
+it('supports explicit workflow error actions', () => {
+  fs.writeFileSync(
+    path.join(workflowsDir, 'workflow.ts'),
+    'console.log(JSON.stringify({ action: "error", message: "git diff failed" }));',
+  );
+
+  expect(runTaskPreprocessor(task(), { workflowsDir })).toEqual({
+    action: 'error',
+    error: 'git diff failed',
+  });
+});
+
 it('rejects workflow paths outside the workflows directory', () => {
   const result = runTaskPreprocessor(task({ preprocess_script: '../x.ts' }), {
     workflowsDir,

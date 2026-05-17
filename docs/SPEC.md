@@ -618,7 +618,30 @@ When a triggered message arrives, the agent receives all messages since its last
 
 Recurring maintenance tasks can attach a `preprocess_script` pointing to a JS/TS file under the owning group workspace's `task-workflows/` directory. From inside the agent container, that is `/workspace/group/task-workflows/`; on the host, it resolves to `groups/<group_folder>/task-workflows/`. `TASK_WORKFLOWS_DIR` can override the directory name or point at an absolute shared workflow directory. The scheduler executes the workflow with Bun before starting the agent container and passes task metadata as JSON on stdin.
 
-The script must write one JSON object to stdout:
+The workflow receives one JSON object on stdin:
+
+```json
+{
+  "task": {
+    "id": "task-abc123",
+    "group_folder": "omniclaw",
+    "chat_jid": "dc:123456789",
+    "prompt": "Sync connector packages when MCP changes.",
+    "schedule_type": "cron",
+    "schedule_value": "0 9 * * *",
+    "context_mode": "isolated",
+    "last_run": "2026-05-16T09:00:00.000Z",
+    "last_result": "Skipped by preprocessor: no MCP package diff",
+    "last_outcome_state": "skipped",
+    "last_outcome_reason": "no MCP package diff"
+  },
+  "repoRoot": "/srv/omniclaw",
+  "workflowsDir": "/srv/omniclaw/groups/omniclaw/task-workflows",
+  "now": "2026-05-17T15:08:04.123Z"
+}
+```
+
+The script should write one JSON object as the last stdout line. For noisy scripts, prefix the result line with `OMNICLAW_TASK_PREPROCESSOR_RESULT=`. Supported actions:
 
 ```json
 { "action": "skip", "reason": "no MCP package diff" }
@@ -632,6 +655,14 @@ or:
   "promptPrefix": "MCP changed in packages/mcp. Sync ditto-cli, ditto-hermes, and ditto-clawhub."
 }
 ```
+
+or:
+
+```json
+{ "action": "error", "message": "Failed to read git diff" }
+```
+
+If the preprocessor script fails, times out, exits non-zero, or emits invalid JSON, the scheduler records the task run as blocked, does not start the agent container, and stores a sanitized/truncated error in task run history.
 
 Use this for deterministic triage such as checking `git diff`, package versions, or generated manifests before spending agent tokens. Agents should create the workflow file and then schedule the task with both the script path and the natural-language agent prompt.
 

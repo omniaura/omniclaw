@@ -34,6 +34,7 @@ import {
   IpcTaskPayload,
   RegisteredGroup,
 } from './types.js';
+import { normalizePreprocessScriptPath } from './task-preprocessor.js';
 import type { IpcEventKind } from './web/ipc-events.js';
 
 export interface IpcDeps {
@@ -679,16 +680,22 @@ export async function processTaskIpc(
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
             : 'isolated';
+        const preprocessScript = normalizePreprocessScriptPath(
+          data.preprocess_script,
+        );
+        if (!preprocessScript.ok) {
+          logger.warn(
+            { sourceGroup, targetFolder, error: preprocessScript.error },
+            'Invalid task preprocess_script rejected',
+          );
+          break;
+        }
         createTask({
           id: taskId,
           group_folder: targetFolder,
           chat_jid: targetJid,
           prompt: data.prompt,
-          preprocess_script:
-            typeof data.preprocess_script === 'string' &&
-            data.preprocess_script.trim()
-              ? data.preprocess_script.trim()
-              : null,
+          preprocess_script: preprocessScript.path,
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
           context_mode: contextMode,
@@ -750,11 +757,21 @@ export async function processTaskIpc(
       > = {};
       if (data.prompt) updates.prompt = data.prompt;
       if (data.preprocess_script !== undefined) {
-        updates.preprocess_script =
-          typeof data.preprocess_script === 'string' &&
-          data.preprocess_script.trim()
-            ? data.preprocess_script.trim()
-            : null;
+        const preprocessScript = normalizePreprocessScriptPath(
+          data.preprocess_script,
+        );
+        if (!preprocessScript.ok) {
+          logger.warn(
+            {
+              taskId: data.taskId,
+              sourceGroup,
+              error: preprocessScript.error,
+            },
+            'Invalid task preprocess_script rejected',
+          );
+          break;
+        }
+        updates.preprocess_script = preprocessScript.path;
       }
       if (data.schedule_type)
         updates.schedule_type = data.schedule_type as

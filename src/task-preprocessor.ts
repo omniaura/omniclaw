@@ -1,14 +1,19 @@
 import { spawnSync } from 'child_process';
 import path from 'path';
 
-import { GROUPS_DIR, TASK_WORKFLOWS_DIR } from './config.js';
+import {
+  GROUPS_DIR,
+  TASK_PREPROCESS_TIMEOUT_MS,
+  TASK_WORKFLOWS_DIR,
+} from './config.js';
 import { logger } from './logger.js';
 import { assertPathWithin, rejectTraversalSegments } from './path-security.js';
 import type { ScheduledTask } from './types.js';
 
 export type TaskPreprocessDecision =
   | { action: 'run'; prompt?: string; promptPrefix?: string }
-  | { action: 'skip'; reason?: string };
+  | { action: 'skip'; reason?: string }
+  | { action: 'error'; message?: string };
 
 export type TaskPreprocessResult =
   | { action: 'run'; prompt: string }
@@ -38,18 +43,72 @@ export interface TaskPreprocessInput {
 export interface TaskPreprocessorOptions {
   workflowsDir?: string;
   timeoutMs?: number;
+  maxOutputBytes?: number;
+  maxPromptFragmentChars?: number;
   now?: () => Date;
 }
 
-const DEFAULT_TIMEOUT_MS = 60_000;
+export const TASK_PREPROCESS_RESULT_PREFIX =
+  'OMNICLAW_TASK_PREPROCESSOR_RESULT=';
+
+const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
+const DEFAULT_MAX_PROMPT_FRAGMENT_CHARS = 8_000;
+const MAX_ERROR_CHARS = 512;
+const ALLOWED_WORKFLOW_EXTENSIONS = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.mjs',
+  '.cjs',
+]);
+
+export function normalizePreprocessScriptPath(
+  value: unknown,
+): { ok: true; path: string | null } | { ok: false; error: string } {
+  if (value === undefined || value === null) return { ok: true, path: null };
+  if (typeof value !== 'string') {
+    return { ok: false, error: 'preprocess_script must be a string or null' };
+  }
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: true, path: null };
+  try {
+    rejectTraversalSegments(trimmed, 'task preprocess_script');
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+  if (!ALLOWED_WORKFLOW_EXTENSIONS.has(path.extname(trimmed))) {
+    return {
+      ok: false,
+      error: 'preprocess_script must point to a JS or TypeScript file',
+    };
+  }
+  return { ok: true, path: trimmed };
+}
+
+function sanitizePreprocessorMessage(value: string): string {
+  const stripped = value
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped.length > MAX_ERROR_CHARS
+    ? `${stripped.slice(0, MAX_ERROR_CHARS - 1)}…`
+    : stripped;
+}
 
 function resolveWorkflowPath(scriptPath: string, workflowsDir: string): string {
-  rejectTraversalSegments(scriptPath, 'task preprocess_script');
+  const normalized = normalizePreprocessScriptPath(scriptPath);
+  if (!normalized.ok) {
+    throw new Error(normalized.error);
+  }
+  if (!normalized.path) {
+    throw new Error('preprocess_script must be a non-empty path');
+  }
   const resolved = path.resolve(workflowsDir, scriptPath);
   assertPathWithin(resolved, workflowsDir, 'task preprocess_script');
-  if (!/\.(?:ts|tsx|js|mjs|cjs)$/.test(resolved)) {
-    throw new Error('preprocess_script must point to a JS or TypeScript file');
-  }
   return resolved;
 }
 
@@ -64,7 +123,16 @@ function defaultWorkflowsDir(task: ScheduledTask): string {
 }
 
 function parseDecision(stdout: string): TaskPreprocessDecision {
-  const trimmed = stdout.trim();
+  const lines = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const sentinelLine = lines
+    .filter((line) => line.startsWith(TASK_PREPROCESS_RESULT_PREFIX))
+    .at(-1);
+  const trimmed = sentinelLine
+    ? sentinelLine.slice(TASK_PREPROCESS_RESULT_PREFIX.length).trim()
+    : (lines.at(-1) ?? '');
   if (!trimmed) return { action: 'run' };
   const parsed = JSON.parse(trimmed) as unknown;
 
@@ -82,6 +150,15 @@ function parseDecision(stdout: string): TaskPreprocessDecision {
           : undefined,
     };
   }
+  if (decision.action === 'error') {
+    return {
+      action: 'error',
+      message:
+        typeof decision.message === 'string' && decision.message.trim()
+          ? decision.message.trim()
+          : undefined,
+    };
+  }
   if (decision.action === undefined || decision.action === 'run') {
     return {
       action: 'run',
@@ -93,7 +170,34 @@ function parseDecision(stdout: string): TaskPreprocessDecision {
     };
   }
 
-  throw new Error('preprocessor action must be "run" or "skip"');
+  throw new Error('preprocessor action must be "run", "skip", or "error"');
+}
+
+function capPromptFragment(
+  value: string,
+  label: string,
+  maxChars: number,
+): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n\n[${label} truncated to ${maxChars} characters]`;
+}
+
+function buildPreprocessorEnv(): NodeJS.ProcessEnv {
+  const allowedKeys = [
+    'PATH',
+    'HOME',
+    'TMPDIR',
+    'TEMP',
+    'TMP',
+    'TZ',
+    'LANG',
+    'LC_ALL',
+  ];
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of allowedKeys) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  return env;
 }
 
 export function runTaskPreprocessor(
@@ -136,41 +240,74 @@ export function runTaskPreprocessor(
     now: (options.now ?? (() => new Date()))().toISOString(),
   };
 
-  const child = spawnSync(process.execPath, ['run', workflowPath], {
+  const timeoutMs = options.timeoutMs ?? TASK_PREPROCESS_TIMEOUT_MS;
+  const child = spawnSync('bun', ['run', workflowPath], {
     cwd: process.cwd(),
     input: JSON.stringify(input),
     encoding: 'utf8',
     env: {
-      ...process.env,
+      ...buildPreprocessorEnv(),
       OMNICLAW_TASK_PREPROCESSOR: '1',
       OMNICLAW_TASK_ID: task.id,
     },
-    timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    maxBuffer: 1024 * 1024,
+    timeout: timeoutMs,
+    maxBuffer: options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
   });
 
   if (child.error) {
-    return { action: 'error', error: child.error.message };
+    const errorWithCode = child.error as Error & { code?: string };
+    return {
+      action: 'error',
+      error: sanitizePreprocessorMessage(
+        errorWithCode.code === 'ETIMEDOUT'
+          ? `preprocessor timed out after ${timeoutMs}ms`
+          : child.error.message,
+      ),
+    };
   }
   if (child.status !== 0) {
     return {
       action: 'error',
-      error:
+      error: sanitizePreprocessorMessage(
         child.stderr?.trim() ||
-        `preprocessor exited with status ${child.status ?? 'unknown'}`,
+          `preprocessor exited with status ${child.status ?? 'unknown'}`,
+      ),
     };
   }
 
   try {
     const decision = parseDecision(child.stdout ?? '');
     if (decision.action === 'skip') {
-      return { action: 'skip', reason: decision.reason ?? 'no work' };
+      return {
+        action: 'skip',
+        reason: sanitizePreprocessorMessage(decision.reason ?? 'no work'),
+      };
     }
-    const prompt = decision.prompt ?? task.prompt;
+    if (decision.action === 'error') {
+      return {
+        action: 'error',
+        error: sanitizePreprocessorMessage(
+          decision.message ?? 'workflow error',
+        ),
+      };
+    }
+    const maxFragmentChars =
+      options.maxPromptFragmentChars ?? DEFAULT_MAX_PROMPT_FRAGMENT_CHARS;
+    const prompt = decision.prompt
+      ? capPromptFragment(
+          decision.prompt,
+          'preprocessor prompt',
+          maxFragmentChars,
+        )
+      : task.prompt;
     return {
       action: 'run',
       prompt: decision.promptPrefix
-        ? `${decision.promptPrefix.trim()}\n\n${prompt}`
+        ? `${capPromptFragment(
+            decision.promptPrefix.trim(),
+            'preprocessor promptPrefix',
+            maxFragmentChars,
+          )}\n\n${prompt}`
         : prompt,
     };
   } catch (err) {
@@ -180,7 +317,9 @@ export function runTaskPreprocessor(
     );
     return {
       action: 'error',
-      error: err instanceof Error ? err.message : String(err),
+      error: sanitizePreprocessorMessage(
+        err instanceof Error ? err.message : String(err),
+      ),
     };
   }
 }

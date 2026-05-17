@@ -759,6 +759,35 @@ describe('versioned migration framework', () => {
     db.close();
   });
 
+  it('adds preprocess_script to databases already stamped at version 4', () => {
+    const db = new Database(':memory:');
+    runMigrations(
+      db,
+      allMigrations.filter((migration) => migration.version <= 4),
+    );
+    db.exec('ALTER TABLE scheduled_tasks DROP COLUMN preprocess_script');
+    expect(getSchemaVersion(db)).toBe(4);
+
+    const beforeCols = db
+      .query('PRAGMA table_info(scheduled_tasks)')
+      .all() as Array<{
+      name: string;
+    }>;
+    expect(beforeCols.map((c) => c.name)).not.toContain('preprocess_script');
+
+    runMigrations(db, allMigrations);
+
+    const afterCols = db
+      .query('PRAGMA table_info(scheduled_tasks)')
+      .all() as Array<{
+      name: string;
+    }>;
+    expect(getSchemaVersion(db)).toBe(BASELINE_VERSION);
+    expect(afterCols.map((c) => c.name)).toContain('preprocess_script');
+
+    db.close();
+  });
+
   it('is idempotent — running twice is safe', () => {
     const db = new Database(':memory:');
     runMigrations(db, allMigrations);

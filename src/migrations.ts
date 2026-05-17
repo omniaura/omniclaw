@@ -16,7 +16,7 @@ export interface Migration {
  * The version that represents the latest schema. Existing databases that
  * predate the migration framework are advanced through every migration to this.
  */
-export const BASELINE_VERSION = 4;
+export const BASELINE_VERSION = 5;
 
 // ---------------------------------------------------------------------------
 // Schema helpers (available for use in migrations)
@@ -562,6 +562,14 @@ const migration4: Migration = {
   },
 };
 
+const migration5: Migration = {
+  version: 5,
+  description: 'Add deterministic scheduled task preprocessor path',
+  up: (db) => {
+    addColumnIfNotExists(db, 'scheduled_tasks', 'preprocess_script', 'TEXT');
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Migration registry
 // ---------------------------------------------------------------------------
@@ -577,4 +585,5 @@ export const allMigrations: Migration[] = [
   migration2,
   migration3,
   migration4,
+  migration5,
 ];

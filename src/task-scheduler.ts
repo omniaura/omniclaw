@@ -6,6 +6,7 @@ import {
   MAIN_GROUP_FOLDER,
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
+  TASK_WORKFLOWS_DIR,
 } from './config.js';
 import { calculateNextRun } from './schedule-utils.js';
 import { resolveBackend } from './backends/index.js';
@@ -47,6 +48,7 @@ const VALID_OUTCOME_STATES = new Set<TaskOutcomeState>([
   'done',
   'blocked',
   'abandoned',
+  'skipped',
 ]);
 
 /**
@@ -273,7 +275,7 @@ async function runTask(
         status: 'success',
         result,
         error: null,
-        outcome_state: 'done',
+        outcome_state: 'skipped',
         outcome_reason: preprocessResult.reason,
       });
       const nextRun =
@@ -281,7 +283,7 @@ async function runTask(
           ? null
           : runtime.calculateNextRun(task.schedule_type, task.schedule_value);
       runtime.updateTaskAfterRun(task.id, nextRun, result, {
-        state: 'done',
+        state: 'skipped',
         reason: preprocessResult.reason,
       });
       appendPhaseEvent('run_finalized', 'ok', false);
@@ -296,7 +298,7 @@ async function runTask(
         next_run: nextRun,
         result,
         error: null,
-        outcome_state: 'done',
+        outcome_state: 'skipped',
         outcome_reason: preprocessResult.reason,
       });
       return;
@@ -423,6 +425,7 @@ async function runTask(
           categoryFolder: group.categoryFolder,
           agentContextFolder: group.agentContextFolder,
           mcpServers: group.containerConfig?.mcpServers,
+          taskWorkflowsDir: TASK_WORKFLOWS_DIR,
         },
         (proc, containerName) =>
           deps.onProcess(

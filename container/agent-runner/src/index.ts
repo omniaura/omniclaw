@@ -1251,6 +1251,9 @@ async function runQuery(
             OMNICLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
             OMNICLAW_IPC_DIR: PATHS.ipc,
             OMNICLAW_CURRENT_CHAT_FILE: CURRENT_CHAT_FILE,
+            ...(containerInput.taskWorkflowsDir
+              ? { OMNICLAW_TASK_WORKFLOWS_DIR: containerInput.taskWorkflowsDir }
+              : {}),
             ...(containerInput.discordGuildId
               ? { OMNICLAW_DISCORD_GUILD_ID: containerInput.discordGuildId }
               : {}),

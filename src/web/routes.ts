@@ -40,6 +40,7 @@ import {
 } from './agents-page.js';
 import { sanitizeTelegramAvatarUrl } from '../telegram-avatar.js';
 import { readJsonBody, RequestBodyTooLargeError } from '../request-body.js';
+import { normalizePreprocessScriptPath } from '../task-preprocessor.js';
 
 /** Optional discovery context — set by the orchestrator when discovery is enabled. */
 let discoveryContext: DiscoveryRouteContext | null = null;
@@ -530,6 +531,12 @@ async function handleCreateTask(
   }
 
   const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const preprocessScript = normalizePreprocessScriptPath(
+    body.preprocess_script,
+  );
+  if (!preprocessScript.ok) {
+    return json({ error: preprocessScript.error }, 400);
+  }
   const task: Omit<
     ScheduledTask,
     | 'last_run'
@@ -542,11 +549,7 @@ async function handleCreateTask(
     group_folder: group_folder as string,
     chat_jid: chat_jid as string,
     prompt: prompt as string,
-    preprocess_script:
-      typeof body.preprocess_script === 'string' &&
-      body.preprocess_script.trim()
-        ? body.preprocess_script.trim()
-        : null,
+    preprocess_script: preprocessScript.path,
     schedule_type: schedule_type as 'cron' | 'interval' | 'once',
     schedule_value: schedule_value as string,
     context_mode: validContextMode,
@@ -610,20 +613,13 @@ async function handleUpdateTask(
     updates.prompt = body.prompt;
   }
   if (body.preprocess_script !== undefined) {
-    if (body.preprocess_script !== null) {
-      if (
-        typeof body.preprocess_script !== 'string' ||
-        body.preprocess_script.trim().length === 0
-      ) {
-        return json(
-          { error: '"preprocess_script" must be a non-empty string or null' },
-          400,
-        );
-      }
-      updates.preprocess_script = body.preprocess_script.trim();
-    } else {
-      updates.preprocess_script = null;
+    const preprocessScript = normalizePreprocessScriptPath(
+      body.preprocess_script,
+    );
+    if (!preprocessScript.ok) {
+      return json({ error: preprocessScript.error }, 400);
     }
+    updates.preprocess_script = preprocessScript.path;
   }
   if (body.schedule_type !== undefined) {
     if (!['cron', 'interval', 'once'].includes(body.schedule_type as string)) {

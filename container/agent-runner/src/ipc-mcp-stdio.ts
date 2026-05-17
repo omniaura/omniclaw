@@ -16,6 +16,9 @@ const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const RESPONSES_DIR = path.join(IPC_DIR, 'responses');
 const USER_REGISTRY_PATH = path.join(IPC_DIR, 'user_registry.json');
+const taskWorkflowsDir =
+  process.env.OMNICLAW_TASK_WORKFLOWS_DIR || 'task-workflows';
+const taskWorkflowsPath = `/workspace/group/${taskWorkflowsDir.replace(/^\/+/, '').replace(/\/+$/, '')}/`;
 
 // Context from environment variables (set by the agent runner)
 const initialChatJid = process.env.OMNICLAW_CHAT_JID!;
@@ -288,7 +291,7 @@ MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It ca
 \u2022 Only send a message when there's something to report (e.g., "notify me if...")
 \u2022 Never send a message (background maintenance tasks)
 
-DETERMINISTIC PREPROCESSING - For recurring maintenance tasks that can be cheaply triaged in code, write a TypeScript workflow file under /workspace/group/task-workflows/ and pass preprocess_script as its relative path. The workflow runs before the agent and can return {"action":"skip","reason":"no diff"} or {"action":"run","promptPrefix":"..."} as JSON on stdout. Use this to avoid spending agent tokens on no-op checks.
+DETERMINISTIC PREPROCESSING - For recurring maintenance tasks that can be cheaply triaged in code, write a TypeScript workflow file under ${taskWorkflowsPath} and pass preprocess_script as its relative path. The script receives JSON on stdin: { task, repoRoot, workflowsDir, now }. It runs with Bun on the host using a minimal env, so it should not rely on API tokens. Write one JSON result as the last stdout line or prefixed with OMNICLAW_TASK_PREPROCESSOR_RESULT=: {"action":"skip","reason":"no diff"}, {"action":"run","promptPrefix":"..."}, or {"action":"error","message":"..."}. Use this to avoid spending agent tokens on no-op checks.
 
 IMPORTANT: When MODIFYING an existing task, use update_task — it edits the task in place while preserving its ID and run history. Only use cancel_task to destructively delete a task the user no longer wants. Unlike pausing, the task cannot be restored on deletion.
 
@@ -306,7 +309,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       .string()
       .optional()
       .describe(
-        'Optional relative path under /workspace/group/task-workflows/ to a JS/TS workflow that runs before the agent and returns JSON to skip or augment the prompt.',
+        `Optional relative path under ${taskWorkflowsPath} to a JS/TS workflow that runs before the agent and returns JSON to skip or augment the prompt.`,
       ),
     schedule_type: z
       .enum(['cron', 'interval', 'once'])
@@ -510,7 +513,7 @@ Examples:
       .nullable()
       .optional()
       .describe(
-        'Set or clear the relative /workspace/group/task-workflows/ script that runs before the agent. Pass null to clear it.',
+        `Set or clear the relative ${taskWorkflowsPath} script that runs before the agent. Pass null to clear it.`,
       ),
     schedule_type: z.enum(['cron', 'interval', 'once']).optional(),
     schedule_value: z
