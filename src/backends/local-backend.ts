@@ -17,12 +17,10 @@ import {
   CONTAINER_STARTUP_TIMEOUT,
   CONTAINER_TIMEOUT,
   DATA_DIR,
-  EXEC_CONTAINER_MEMORY,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   LOCAL_RUNTIME,
   SHARED_CLAUDE_VM,
-  SPLIT_EXECUTION,
   TIMEZONE,
 } from '../config.js';
 import { logger } from '../logger.js';
@@ -394,8 +392,6 @@ export function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input-task'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'exec-requests'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'exec-responses'), { recursive: true });
 
   // Mount the full IPC directory. The agent-runner inside the container
   // selects the correct input subdirectory (input/ vs input-task/) based
@@ -570,23 +566,7 @@ interface ContainerArgsOpts {
   isMain: boolean;
   networkMode?: 'full' | 'none';
   runtime?: string;
-  execContainerName?: string;
 }
-
-export interface ExecRequest {
-  id: string;
-  cwd: string;
-  args: string[];
-  env: Record<string, string>;
-}
-
-const EXEC_BROKER_REQUEST_DIR = '/workspace/ipc/exec-requests';
-const EXEC_BROKER_RESPONSE_DIR = '/workspace/ipc/exec-responses';
-const EXEC_BROKER_POLL_INTERVAL_MS = 50;
-const MAX_EXEC_BROKER_REQUEST_BYTES = 64 * 1024;
-const MAX_EXEC_BROKER_OUTPUT_BYTES = 1024 * 1024;
-const SAFE_EXEC_REQUEST_ID = /^[A-Za-z0-9_-]+$/;
-const SAFE_ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** @internal Exported for testing */
 export function buildContainerArgs({
@@ -595,7 +575,6 @@ export function buildContainerArgs({
   isMain,
   networkMode,
   runtime,
-  execContainerName,
 }: ContainerArgsOpts): string[] {
   const isDocker = (runtime ?? LOCAL_RUNTIME) === 'docker';
   const args: string[] = [
@@ -624,28 +603,6 @@ export function buildContainerArgs({
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Split-execution: tell the agent container which sidecar to exec into
-  if (execContainerName) {
-    args.push('-e', `EXEC_CONTAINER_NAME=${execContainerName}`);
-    args.push('-e', `EXEC_RUNTIME=${isDocker ? 'docker' : 'apple-container'}`);
-    args.push('-e', `EXEC_BROKER_REQUEST_DIR=${EXEC_BROKER_REQUEST_DIR}`);
-    args.push('-e', `EXEC_BROKER_RESPONSE_DIR=${EXEC_BROKER_RESPONSE_DIR}`);
-
-    if (isDocker) {
-      // Add docker group so the bun user can access the Docker socket
-      const dockerGid = (() => {
-        try {
-          return String(fs.statSync('/var/run/docker.sock').gid);
-        } catch {
-          return null;
-        }
-      })();
-      if (dockerGid && /^\d+$/.test(dockerGid)) {
-        args.push('--group-add', dockerGid);
-      }
-    }
-  }
-
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's bun user (uid 1000),
   // or when getuid is unavailable (native Windows without WSL).
@@ -669,459 +626,6 @@ export function buildContainerArgs({
 
   args.push(CONTAINER_IMAGE);
   return args;
-}
-
-export function buildExecInvocationArgs(
-  request: ExecRequest,
-  execContainerName: string,
-  runtime: string = LOCAL_RUNTIME,
-): string[] {
-  if (runtime !== 'docker' && runtime !== 'container') {
-    throw new Error(
-      `Unsupported local runtime for exec invocation: ${runtime}`,
-    );
-  }
-  const args = ['exec', '-i', '-w', request.cwd];
-  for (const [key, value] of Object.entries(request.env)) {
-    args.push('-e', `${key}=${value}`);
-  }
-  args.push(execContainerName, '/bin/bash.real', ...request.args);
-  return args;
-}
-
-interface ExecutionContainerOpts {
-  mounts: VolumeMount[];
-  execContainerName: string;
-  networkMode: 'full' | 'none';
-  runtime?: string;
-}
-
-export function buildExecutionContainerArgs({
-  mounts,
-  execContainerName,
-  networkMode,
-  runtime,
-}: ExecutionContainerOpts): string[] {
-  const selectedRuntime = runtime ?? LOCAL_RUNTIME;
-  const isDocker = selectedRuntime === 'docker';
-  const args: string[] = [
-    'run',
-    '-d',
-    '--memory',
-    EXEC_CONTAINER_MEMORY,
-    '--name',
-    execContainerName,
-  ];
-
-  if (isDocker) {
-    args.push('--rm');
-    args.push('--pids-limit', '512');
-    args.push('--security-opt', 'no-new-privileges:true');
-    if (networkMode === 'none') {
-      args.push('--network', 'none');
-    }
-  }
-
-  args.push('-e', `TZ=${TIMEZONE}`);
-
-  // Match agent container's user mapping
-  const hostUid = process.getuid?.();
-  const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
-    args.push('--user', `${hostUid}:${hostGid}`);
-    args.push('-e', 'HOME=/home/bun');
-  }
-
-  for (const mount of mounts) {
-    if (mount.readonly) {
-      args.push(
-        '--mount',
-        `type=bind,source=${mount.hostPath},target=${mount.containerPath},readonly`,
-      );
-    } else {
-      args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
-    }
-  }
-
-  // Source env (git config, tokens, etc.) then sleep forever.
-  // The entrypoint sources /workspace/env-dir/env and configures git/ssh.
-  // We reuse the same entrypoint but override the final command to sleep
-  // instead of running the agent runner.
-  args.push(
-    '--entrypoint',
-    '/bin/bash.real',
-    CONTAINER_IMAGE,
-    '-c',
-    [
-      'if [ -f /workspace/env-dir/env ]; then',
-      '  while IFS= read -r line || [ -n "$line" ]; do',
-      '    [[ "$line" =~ ^[[:space:]]*$ ]] && continue',
-      '    [[ "$line" =~ ^[[:space:]]*# ]] && continue',
-      '    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue',
-      '    export "$line"',
-      '  done < /workspace/env-dir/env',
-      'fi',
-      'if [ -n "$GH_TOKEN" ] && [ -z "$GITHUB_TOKEN" ]; then',
-      '  export GITHUB_TOKEN="$GH_TOKEN"',
-      'elif [ -n "$GITHUB_TOKEN" ] && [ -z "$GH_TOKEN" ]; then',
-      '  export GH_TOKEN="$GITHUB_TOKEN"',
-      'fi',
-      'if [ -n "$GITHUB_TOKEN" ]; then',
-      '  gh auth setup-git 2>/dev/null || true',
-      'fi',
-      'while true; do sleep 3600; done',
-    ].join('\n'),
-  );
-
-  return args;
-}
-
-// ---------------------------------------------------------------------------
-// Split-execution: sidecar container for heavy workloads
-// ---------------------------------------------------------------------------
-
-function makeExecContainerName(agentContainerName: string): string {
-  return `${agentContainerName}-exec`;
-}
-
-function isSplitExecutionEnabled(): boolean {
-  return SPLIT_EXECUTION || process.env.SPLIT_EXECUTION === 'true';
-}
-
-/** Filter mounts to only include workspace/ipc paths needed by the exec container. */
-function filterMountsForExecContainer(mounts: VolumeMount[]): VolumeMount[] {
-  return mounts.filter(
-    (m) =>
-      m.containerPath.startsWith('/workspace/') ||
-      m.containerPath === '/app/src',
-  );
-}
-
-async function spawnExecutionContainer(
-  mounts: VolumeMount[],
-  agentContainerName: string,
-  isMain: boolean,
-  networkMode: 'full' | 'none',
-): Promise<{ name: string; cleanup: () => Promise<void> }> {
-  const execName = makeExecContainerName(agentContainerName);
-  const execMounts = filterMountsForExecContainer(mounts);
-  const args = buildExecutionContainerArgs({
-    mounts: execMounts,
-    execContainerName: execName,
-    networkMode,
-  });
-
-  const log = logger.child({ op: 'execContainer', name: execName });
-
-  const proc = Bun.spawn([LOCAL_RUNTIME, ...args], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text();
-    throw new Error(`Failed to start execution container: ${stderr}`);
-  }
-
-  log.info('Execution sidecar started');
-
-  return {
-    name: execName,
-    cleanup: async () => {
-      log.debug('Stopping execution sidecar');
-      if (LOCAL_RUNTIME === 'docker') {
-        const stop = Bun.spawn(['docker', 'stop', '-t', '5', execName], {
-          stdout: 'ignore',
-          stderr: 'ignore',
-        });
-        await stop.exited;
-        return;
-      }
-
-      const stop = Bun.spawn([LOCAL_RUNTIME, 'stop', execName], {
-        stdout: 'ignore',
-        stderr: 'ignore',
-      });
-      await stop.exited;
-
-      const remove = Bun.spawn([LOCAL_RUNTIME, 'rm', execName], {
-        stdout: 'ignore',
-        stderr: 'ignore',
-      });
-      await remove.exited;
-    },
-  };
-}
-
-export class ExecBrokerOutputLimitError extends Error {
-  constructor(label: string) {
-    super(
-      `Execution broker ${label} exceeded ${MAX_EXEC_BROKER_OUTPUT_BYTES} bytes`,
-    );
-    this.name = 'ExecBrokerOutputLimitError';
-  }
-}
-
-export async function readExecBrokerText(
-  stream: ReadableStream<Uint8Array> | number | null | undefined,
-  label: string,
-): Promise<string> {
-  if (typeof stream === 'number' || !stream) return '';
-
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let bytes = 0;
-  let text = '';
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      bytes += value.byteLength;
-      if (bytes > MAX_EXEC_BROKER_OUTPUT_BYTES) {
-        throw new ExecBrokerOutputLimitError(label);
-      }
-      text += decoder.decode(value, { stream: true });
-    }
-    text += decoder.decode();
-    return text;
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-export function parseExecRequest(
-  requestPath: string,
-  log: typeof logger,
-): ExecRequest | null {
-  let size: number;
-  try {
-    size = fs.statSync(requestPath).size;
-  } catch (err) {
-    log.warn({ requestPath, err }, 'Rejected unreadable execution request');
-    return null;
-  }
-  if (size > MAX_EXEC_BROKER_REQUEST_BYTES) {
-    log.warn(
-      { requestPath, size, maxBytes: MAX_EXEC_BROKER_REQUEST_BYTES },
-      'Rejected oversized execution request',
-    );
-    return null;
-  }
-
-  const raw = fs.readFileSync(requestPath, 'utf-8');
-  const parsed = JSON.parse(raw) as Partial<ExecRequest>;
-
-  if (
-    typeof parsed.id !== 'string' ||
-    !SAFE_EXEC_REQUEST_ID.test(parsed.id) ||
-    typeof parsed.cwd !== 'string' ||
-    !parsed.cwd.startsWith('/') ||
-    !Array.isArray(parsed.args) ||
-    !parsed.args.every((arg) => typeof arg === 'string') ||
-    !parsed.env ||
-    typeof parsed.env !== 'object'
-  ) {
-    log.warn({ requestPath }, 'Rejected malformed execution request');
-    return null;
-  }
-
-  if (
-    !(
-      parsed.cwd.startsWith('/workspace/') ||
-      parsed.cwd === '/workspace' ||
-      parsed.cwd === '/home/bun' ||
-      parsed.cwd.startsWith('/home/bun/')
-    )
-  ) {
-    log.warn(
-      { cwd: parsed.cwd },
-      'Rejected execution request with invalid cwd',
-    );
-    return null;
-  }
-
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(parsed.env)) {
-    if (!SAFE_ENV_KEY.test(key) || typeof value !== 'string') {
-      log.warn({ key }, 'Rejected execution request with invalid env key');
-      return null;
-    }
-    env[key] = value;
-  }
-
-  return {
-    id: parsed.id,
-    cwd: parsed.cwd,
-    args: parsed.args,
-    env,
-  };
-}
-
-function writeExecBrokerResponse(
-  responseDir: string,
-  requestId: string,
-  result: { stdout: string; stderr: string; exitCode: number },
-): void {
-  const stdoutPath = path.join(responseDir, `${requestId}.stdout`);
-  const stderrPath = path.join(responseDir, `${requestId}.stderr`);
-  const exitCodePath = path.join(responseDir, `${requestId}.exitcode`);
-
-  fs.writeFileSync(`${stdoutPath}.tmp`, result.stdout);
-  fs.renameSync(`${stdoutPath}.tmp`, stdoutPath);
-  fs.writeFileSync(`${stderrPath}.tmp`, result.stderr);
-  fs.renameSync(`${stderrPath}.tmp`, stderrPath);
-  fs.writeFileSync(`${exitCodePath}.tmp`, String(result.exitCode));
-  fs.renameSync(`${exitCodePath}.tmp`, exitCodePath);
-}
-
-export async function runExecBrokerRequest(
-  request: ExecRequest,
-  execContainerName: string,
-  responseDir: string,
-  log: typeof logger,
-): Promise<void> {
-  const proc = Bun.spawn(
-    [
-      LOCAL_RUNTIME,
-      ...buildExecInvocationArgs(request, execContainerName, LOCAL_RUNTIME),
-    ],
-    {
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    },
-  );
-
-  let stdout = '';
-  let stderr = '';
-  // 125 means the broker synthesized a response before the child returned one.
-  let exitCode = 125;
-  try {
-    [stdout, stderr, exitCode] = await Promise.all([
-      readExecBrokerText(proc.stdout, 'stdout'),
-      readExecBrokerText(proc.stderr, 'stderr'),
-      proc.exited,
-    ]);
-  } catch (err) {
-    proc.kill();
-    const exitedAfterTerm = await Promise.race([
-      proc.exited.then(
-        () => true,
-        () => true,
-      ),
-      Bun.sleep(1000).then(() => false),
-    ]);
-    if (!exitedAfterTerm) {
-      proc.kill('SIGKILL');
-      await proc.exited.catch(() => undefined);
-    }
-    writeExecBrokerResponse(responseDir, request.id, {
-      stdout: '',
-      stderr: err instanceof Error ? err.message : 'Execution broker failed',
-      exitCode,
-    });
-    return;
-  }
-
-  writeExecBrokerResponse(responseDir, request.id, {
-    stdout,
-    stderr,
-    exitCode,
-  });
-  log.debug(
-    {
-      requestId: request.id,
-      exitCode,
-      cwd: request.cwd,
-      argCount: request.args.length,
-    },
-    'Execution broker request completed',
-  );
-}
-
-function startExecBroker(
-  runtimeFolder: string,
-  execContainerName: string,
-  log: typeof logger,
-): { stop: () => void; done: Promise<void> } {
-  const ipcDir = path.join(DATA_DIR, 'ipc', runtimeFolder);
-  const requestDir = path.join(ipcDir, 'exec-requests');
-  const responseDir = path.join(ipcDir, 'exec-responses');
-  fs.mkdirSync(requestDir, { recursive: true });
-  fs.mkdirSync(responseDir, { recursive: true });
-
-  let stopped = false;
-  const done = (async () => {
-    while (!stopped) {
-      const requestFiles = fs
-        .readdirSync(requestDir, { withFileTypes: true })
-        .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-        .map((entry) => entry.name)
-        .sort();
-
-      let processed = false;
-      for (const file of requestFiles) {
-        if (stopped) break;
-        const requestPath = path.join(requestDir, file);
-        const processingPath = `${requestPath}.processing`;
-        try {
-          fs.renameSync(requestPath, processingPath);
-        } catch {
-          continue;
-        }
-
-        processed = true;
-        try {
-          const request = parseExecRequest(processingPath, log);
-          if (!request) {
-            const fallbackId = path.basename(file, '.json');
-            if (SAFE_EXEC_REQUEST_ID.test(fallbackId)) {
-              writeExecBrokerResponse(responseDir, fallbackId, {
-                stdout: '',
-                stderr: 'Malformed execution request',
-                exitCode: 125,
-              });
-            }
-            continue;
-          }
-          await runExecBrokerRequest(
-            request,
-            execContainerName,
-            responseDir,
-            log,
-          );
-        } catch (err) {
-          log.warn(
-            { err, file, execContainerName },
-            'Execution broker request failed',
-          );
-          const fallbackId = path.basename(file, '.json');
-          if (SAFE_EXEC_REQUEST_ID.test(fallbackId)) {
-            writeExecBrokerResponse(responseDir, fallbackId, {
-              stdout: '',
-              stderr:
-                err instanceof Error ? err.message : 'Execution broker failed',
-              exitCode: 125,
-            });
-          }
-        } finally {
-          fs.rmSync(processingPath, { force: true });
-        }
-      }
-
-      if (!processed) {
-        await Bun.sleep(EXEC_BROKER_POLL_INTERVAL_MS);
-      }
-    }
-  })();
-
-  return {
-    stop: () => {
-      stopped = true;
-    },
-    done,
-  };
 }
 
 function isSharedVmEnabled(): boolean {
@@ -1180,45 +684,12 @@ export class LocalBackend implements AgentBackend {
     const containerName = makeContainerName(folder, runtimeFolder);
     const effectiveNetwork =
       containerCfg?.networkMode ?? (input.isMain ? 'full' : 'none');
-    const splitExecutionEnabled = isSplitExecutionEnabled();
-    // Split-execution: spawn sidecar and wire it into the agent container
-    let execContainer: { name: string; cleanup: () => Promise<void> } | null =
-      null;
-    if (splitExecutionEnabled) {
-      try {
-        execContainer = await spawnExecutionContainer(
-          mounts,
-          containerName,
-          input.isMain,
-          effectiveNetwork,
-        );
-        if (LOCAL_RUNTIME === 'docker') {
-          // Mount Docker socket so agent can `docker exec` into the sidecar
-          mounts.push({
-            hostPath: '/var/run/docker.sock',
-            containerPath: '/var/run/docker.sock',
-            readonly: false,
-          });
-        }
-      } catch (err) {
-        logger.warn(
-          {
-            err,
-            group: groupName,
-            container: containerName,
-            backend: this.name,
-          },
-          'Failed to start execution sidecar, falling back to single container',
-        );
-      }
-    }
 
     const containerArgs = buildContainerArgs({
       mounts,
       containerName,
       isMain: input.isMain,
       networkMode: effectiveNetwork,
-      execContainerName: execContainer?.name,
     });
     const configTimeout = containerCfg?.timeout || CONTAINER_TIMEOUT;
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
@@ -1229,7 +700,6 @@ export class LocalBackend implements AgentBackend {
       container: containerName,
       backend: this.name,
       mountCount: mounts.length,
-      splitExecutionEnabled,
     });
 
     log.debug(
@@ -1249,10 +719,6 @@ export class LocalBackend implements AgentBackend {
     fs.mkdirSync(logsDir, { recursive: true });
 
     let container: ReturnType<typeof Bun.spawn>;
-    const execBroker =
-      execContainer && LOCAL_RUNTIME !== 'docker'
-        ? startExecBroker(runtimeFolder, execContainer.name, log)
-        : null;
     try {
       container = Bun.spawn([LOCAL_RUNTIME, ...containerArgs], {
         stdin: 'pipe',
@@ -1261,8 +727,6 @@ export class LocalBackend implements AgentBackend {
       });
     } catch (err) {
       log.error({ err }, 'Container spawn error');
-      execBroker?.stop();
-      if (execContainer) execContainer.cleanup().catch(() => {});
       return {
         status: 'error',
         result: null,
@@ -1286,11 +750,6 @@ export class LocalBackend implements AgentBackend {
 
     const killOnTimeout = () => {
       log.error('Container timeout, stopping gracefully');
-      // Also stop the execution sidecar on timeout
-      execBroker?.stop();
-      if (execContainer) {
-        execContainer.cleanup().catch(() => {});
-      }
       const stopProc = Bun.spawn([LOCAL_RUNTIME, 'stop', containerName]);
       const killTimer = setTimeout(() => container.kill(9), 15000);
       stopProc.exited
@@ -1359,19 +818,6 @@ export class LocalBackend implements AgentBackend {
     const exitCode = await container.exited;
     await stderrPromise;
     parser.cleanup();
-
-    // Clean up execution sidecar (fire-and-forget to not delay response)
-    execBroker?.stop();
-    if (execBroker) {
-      await execBroker.done.catch((err) => {
-        log.warn({ err }, 'Execution broker shutdown failed');
-      });
-    }
-    if (execContainer) {
-      execContainer.cleanup().catch((err) => {
-        log.warn({ err }, 'Failed to stop execution sidecar');
-      });
-    }
 
     const duration = Date.now() - startTime;
     const state = parser.getState();
@@ -1575,28 +1021,6 @@ export class LocalBackend implements AgentBackend {
       );
       return sharedVmNetworkIsolationError(groupName);
     }
-    const splitExecutionEnabled = isSplitExecutionEnabled();
-
-    // Exec container stays per-agent (unchanged from per-VM mode)
-    let execContainer: { name: string; cleanup: () => Promise<void> } | null =
-      null;
-    const agentContainerName = makeContainerName(folder, runtimeFolder);
-    if (splitExecutionEnabled) {
-      try {
-        execContainer = await spawnExecutionContainer(
-          mounts,
-          agentContainerName,
-          input.isMain,
-          effectiveNetwork,
-        );
-      } catch (err) {
-        logger.warn(
-          { err, group: groupName, backend: this.name },
-          'Failed to start execution sidecar, falling back to single container',
-        );
-      }
-    }
-
     // Ensure shared VM is running
     const vmName = await this.sharedVm.ensureRunning();
 
@@ -1641,20 +1065,6 @@ export class LocalBackend implements AgentBackend {
       execArgs.push('-e', `AGENT_SERVER_DIR=/workspace/groups/${srvFolder}`);
     }
 
-    // Exec container env vars
-    if (execContainer) {
-      execArgs.push(
-        '-e',
-        `EXEC_CONTAINER_NAME=${execContainer.name}`,
-        '-e',
-        `EXEC_RUNTIME=apple-container`,
-        '-e',
-        `EXEC_BROKER_REQUEST_DIR=/data/ipc/${runtimeFolder}/exec-requests`,
-        '-e',
-        `EXEC_BROKER_RESPONSE_DIR=/data/ipc/${runtimeFolder}/exec-responses`,
-      );
-    }
-
     execArgs.push(vmName, '/app/agent-exec.sh');
 
     const configTimeout = containerCfg?.timeout || CONTAINER_TIMEOUT;
@@ -1665,7 +1075,6 @@ export class LocalBackend implements AgentBackend {
       group: groupName,
       sharedVm: vmName,
       backend: this.name,
-      splitExecutionEnabled,
     });
 
     log.info({ isMain: input.isMain }, 'Exec-ing agent in shared Claude VM');
@@ -1674,9 +1083,6 @@ export class LocalBackend implements AgentBackend {
     fs.mkdirSync(logsDir, { recursive: true });
 
     let container: ReturnType<typeof Bun.spawn>;
-    const execBroker = execContainer
-      ? startExecBroker(runtimeFolder, execContainer.name, log)
-      : null;
     try {
       container = Bun.spawn([LOCAL_RUNTIME, ...execArgs], {
         stdin: 'pipe',
@@ -1685,8 +1091,6 @@ export class LocalBackend implements AgentBackend {
       });
     } catch (err) {
       log.error({ err }, 'Container exec spawn error');
-      execBroker?.stop();
-      if (execContainer) execContainer.cleanup().catch(() => {});
       return {
         status: 'error',
         result: null,
@@ -1710,8 +1114,6 @@ export class LocalBackend implements AgentBackend {
 
     const killOnTimeout = () => {
       log.error('Agent exec timeout, killing process');
-      execBroker?.stop();
-      if (execContainer) execContainer.cleanup().catch(() => {});
       container.kill(9);
     };
 
@@ -1765,19 +1167,6 @@ export class LocalBackend implements AgentBackend {
     const exitCode = await container.exited;
     await stderrPromise;
     parser.cleanup();
-
-    // Clean up execution sidecar
-    execBroker?.stop();
-    if (execBroker) {
-      await execBroker.done.catch((err) => {
-        log.warn({ err }, 'Execution broker shutdown failed');
-      });
-    }
-    if (execContainer) {
-      execContainer.cleanup().catch((err) => {
-        log.warn({ err }, 'Failed to stop execution sidecar');
-      });
-    }
 
     const duration = Date.now() - startTime;
     const state = parser.getState();

@@ -1,4 +1,4 @@
-#!/bin/bash.real
+#!/bin/bash
 set -e
 
 # Shared Claude VM entrypoint — minimal setup, sleeps forever.

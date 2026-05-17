@@ -1,4 +1,4 @@
-#!/bin/bash.real
+#!/bin/bash
 set -e
 
 # Per-agent exec wrapper for shared Claude VM.

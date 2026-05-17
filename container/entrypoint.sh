@@ -1,4 +1,4 @@
-#!/bin/bash.real
+#!/bin/bash
 set -e
 
 export HOME=/home/bun
