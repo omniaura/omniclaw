@@ -1490,13 +1490,40 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
 
   let hadError = false;
   let outputSentToUser = false;
-  // Edited-message streaming: a single message that gets updated with intermediate tool calls
+  // Edited-message streaming: a single status message that gets updated with
+  // intermediate tool calls/logs, then replaced by the final reply.
   let intermediateMessageId: string | null = null;
+  let intermediateBuffer = '';
   const intermediateChannel =
-    group.containerConfig?.streamIntermediates && channel?.editMessage
+    group.containerConfig?.streamIntermediates !== false && channel?.editMessage
       ? channel
       : null;
-  const streamIntermediates = !!intermediateChannel;
+  const appendIntermediateText = async (text: string): Promise<void> => {
+    if (!intermediateChannel) return;
+    const clean = text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+    if (!clean) return;
+    intermediateBuffer = `${intermediateBuffer}${intermediateBuffer ? '\n' : ''}${clean}`;
+    if (intermediateBuffer.length > 1800) {
+      intermediateBuffer = intermediateBuffer.slice(-1800).trimStart();
+    }
+    try {
+      if (!intermediateMessageId) {
+        const id = await intermediateChannel.sendMessage(
+          chatJid,
+          intermediateBuffer.slice(0, 2000),
+        );
+        if (id && typeof id === 'string') intermediateMessageId = id;
+      } else {
+        await intermediateChannel.editMessage!(
+          chatJid,
+          intermediateMessageId,
+          intermediateBuffer.slice(0, 2000),
+        );
+      }
+    } catch (err) {
+      log.debug({ err }, 'Intermediate streaming failed (non-fatal)');
+    }
+  };
 
   // Patterns that indicate system/auth errors — never send these to channels
   // Adopted from [Upstream PR #298] - Prevents infinite loops from auth failures
@@ -1560,34 +1587,12 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
         // Adopted from [Upstream PR #243] - Critical stability fix
         try {
           if (result.intermediate) {
-            if (intermediateChannel && result.result) {
+            if (result.result) {
               const raw =
                 typeof result.result === 'string'
                   ? result.result
                   : JSON.stringify(result.result);
-              const text = raw
-                .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-                .trim();
-              if (!text) return;
-              try {
-                if (!intermediateMessageId) {
-                  // First intermediate: send a new standalone message
-                  const id = await intermediateChannel.sendMessage(
-                    chatJid,
-                    text.slice(0, 2000),
-                  );
-                  if (id && typeof id === 'string') intermediateMessageId = id;
-                } else {
-                  // Subsequent intermediates: edit that same status message
-                  await intermediateChannel.editMessage!(
-                    chatJid,
-                    intermediateMessageId,
-                    text.slice(0, 2000),
-                  );
-                }
-              } catch (err) {
-                log.debug({ err }, 'Intermediate streaming failed (non-fatal)');
-              }
+              await appendIntermediateText(raw);
             }
             return;
           }
@@ -1635,11 +1640,36 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
                   // Don't use triggeringMessageId for cross-channel responses — it belongs to the original chat
                   const replyId =
                     targetJid === chatJid ? replyAnchorMessageId : null;
-                  await targetChannel.sendMessage(
-                    targetJid,
-                    formatted,
-                    replyId || undefined,
-                  );
+                  if (
+                    intermediateMessageId &&
+                    targetJid === chatJid &&
+                    targetChannel === intermediateChannel &&
+                    targetChannel.editMessage
+                  ) {
+                    try {
+                      await targetChannel.editMessage(
+                        targetJid,
+                        intermediateMessageId,
+                        formatted.slice(0, 2000),
+                      );
+                    } catch (err) {
+                      log.debug(
+                        { err },
+                        'Final intermediate edit failed, falling back to send',
+                      );
+                      await targetChannel.sendMessage(
+                        targetJid,
+                        formatted,
+                        replyId || undefined,
+                      );
+                    }
+                  } else {
+                    await targetChannel.sendMessage(
+                      targetJid,
+                      formatted,
+                      replyId || undefined,
+                    );
+                  }
                   if (replyAnchorMessageId) replyAnchorMessageId = null;
                   outputSentToUser = true;
                   // Stop typing refresh — prevents the 8s interval from
@@ -1653,6 +1683,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
             }
             // Reset intermediate message so the next user message gets a fresh status message
             intermediateMessageId = null;
+            intermediateBuffer = '';
             // Only reset idle timer on actual results, not session-update markers (result: null)
             resetIdleTimer();
           }

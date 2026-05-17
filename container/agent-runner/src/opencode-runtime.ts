@@ -453,11 +453,27 @@ async function runOpenCodePrompt(
           const output =
             p.state.status === 'completed' ? p.state.output.slice(0, 200) : '';
           if (output) {
-            log(`[tool] ${toolName}(${input}) → ${output}`);
+            const text = `▸ ${toolName}: ${input}\n\`\`\`\n${output}\n\`\`\``;
+            log(`[tool] ${toolName}(${input}) -> ${output}`);
+            writeOutput({
+              status: 'success',
+              result: text,
+              newSessionId: sessionId,
+              intermediate: true,
+              ...(currentChatJid ? { chatJid: currentChatJid } : {}),
+            });
             loggedToolIds.add(id);
             loggedPartCount++;
           } else if (!loggedToolIds.has(`pending:${id}`)) {
+            const text = `▸ ${toolName}: ${input}`;
             log(`[tool] ${toolName}(${input}) ...`);
+            writeOutput({
+              status: 'success',
+              result: text,
+              newSessionId: sessionId,
+              intermediate: true,
+              ...(currentChatJid ? { chatJid: currentChatJid } : {}),
+            });
             loggedToolIds.add(`pending:${id}`);
             loggedPartCount++;
           }

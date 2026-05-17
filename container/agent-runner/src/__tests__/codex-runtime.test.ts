@@ -9,6 +9,7 @@ import {
   extractAssistantTextFromItem,
   extractTextFromCodexContent,
   isRecoverableThreadResumeError,
+  renderCodexActivity,
 } from '../codex-runtime.js';
 
 const ORIGINAL_ENV = { ...process.env };
@@ -44,6 +45,7 @@ describe('buildCodexEnv', () => {
 
   it('preserves github auth for Codex shell commands', () => {
     process.env.GITHUB_TOKEN = 'gh-token';
+    delete process.env.GH_TOKEN;
 
     const env = buildCodexEnv({} as any);
 
@@ -211,6 +213,38 @@ describe('extractAssistantTextFromItem', () => {
       extractAssistantTextFromItem({
         type: 'command_execution',
         text: 'ls -la',
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('renderCodexActivity', () => {
+  it('formats command execution items for live status updates', () => {
+    expect(
+      renderCodexActivity({
+        type: 'command_execution',
+        command: "rg 'EXEC_BROKER' src/",
+        stdout: 'src/index.ts:123:EXEC_BROKER',
+      }),
+    ).toBe(
+      "▸ Command execution: rg 'EXEC_BROKER' src/\n```\nsrc/index.ts:123:EXEC_BROKER\n```",
+    );
+  });
+
+  it('formats file items without treating them as final assistant text', () => {
+    expect(
+      renderCodexActivity({
+        type: 'file_read',
+        path: 'src/backends/local-backend.ts',
+      }),
+    ).toBe('▸ File read: src/backends/local-backend.ts');
+  });
+
+  it('ignores assistant items so final text is not duplicated as activity', () => {
+    expect(
+      renderCodexActivity({
+        type: 'assistant_message',
+        text: 'final answer',
       }),
     ).toBeNull();
   });
