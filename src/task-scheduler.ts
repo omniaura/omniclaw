@@ -6,6 +6,7 @@ import {
   MAIN_GROUP_FOLDER,
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
+  TASK_WORKFLOWS_DIR,
 } from './config.js';
 import { calculateNextRun } from './schedule-utils.js';
 import { resolveBackend } from './backends/index.js';
@@ -32,6 +33,7 @@ import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
 import { ResumePositionStore } from './resume-position-store.js';
 import { writeScheduledRunHandoff } from './task-handoffs.js';
+import { runTaskPreprocessor } from './task-preprocessor.js';
 import type {
   Channel,
   ContainerProcess,
@@ -46,6 +48,7 @@ const VALID_OUTCOME_STATES = new Set<TaskOutcomeState>([
   'done',
   'blocked',
   'abandoned',
+  'skipped',
 ]);
 
 /**
@@ -88,6 +91,7 @@ interface SchedulerRuntime {
   appendTaskRunPhaseEvent: typeof appendTaskRunPhaseEvent;
   updateTaskAfterRun: typeof updateTaskAfterRun;
   writeScheduledRunHandoff: typeof writeScheduledRunHandoff;
+  runTaskPreprocessor: typeof runTaskPreprocessor;
   logger: typeof logger;
 }
 
@@ -108,6 +112,7 @@ const defaultSchedulerRuntime: SchedulerRuntime = {
   appendTaskRunPhaseEvent,
   updateTaskAfterRun,
   writeScheduledRunHandoff,
+  runTaskPreprocessor,
   logger,
 };
 
@@ -259,12 +264,91 @@ async function runTask(
 
     appendPhaseEvent('group_resolved', 'ok', false);
 
+    const preprocessResult = runtime.runTaskPreprocessor(task);
+    if (preprocessResult.action === 'skip') {
+      const durationMs = Date.now() - startTime;
+      const result = `Skipped by preprocessor: ${preprocessResult.reason}`;
+      runtime.logTaskRun({
+        task_id: task.id,
+        run_at: runAt,
+        duration_ms: durationMs,
+        status: 'success',
+        result,
+        error: null,
+        outcome_state: 'skipped',
+        outcome_reason: preprocessResult.reason,
+      });
+      const nextRun =
+        task.schedule_type === 'once'
+          ? null
+          : runtime.calculateNextRun(task.schedule_type, task.schedule_value);
+      runtime.updateTaskAfterRun(task.id, nextRun, result, {
+        state: 'skipped',
+        reason: preprocessResult.reason,
+      });
+      appendPhaseEvent('run_finalized', 'ok', false);
+      tryWriteHandoff({
+        task_id: task.id,
+        chat_jid: task.chat_jid,
+        group_folder: task.group_folder,
+        context_mode: task.context_mode,
+        run_at: runAt,
+        status: 'success',
+        duration_ms: durationMs,
+        next_run: nextRun,
+        result,
+        error: null,
+        outcome_state: 'skipped',
+        outcome_reason: preprocessResult.reason,
+      });
+      return;
+    }
+
+    if (preprocessResult.action === 'error') {
+      const durationMs = Date.now() - startTime;
+      const error = `Preprocessor failed: ${preprocessResult.error}`;
+      runtime.logTaskRun({
+        task_id: task.id,
+        run_at: runAt,
+        duration_ms: durationMs,
+        status: 'error',
+        result: null,
+        error,
+        outcome_state: 'blocked',
+        outcome_reason: error,
+      });
+      const nextRun =
+        task.schedule_type === 'once'
+          ? null
+          : runtime.calculateNextRun(task.schedule_type, task.schedule_value);
+      runtime.updateTaskAfterRun(task.id, nextRun, error, {
+        state: 'blocked',
+        reason: error,
+      });
+      appendPhaseEvent('run_finalized', 'error', false, error);
+      tryWriteHandoff({
+        task_id: task.id,
+        chat_jid: task.chat_jid,
+        group_folder: task.group_folder,
+        context_mode: task.context_mode,
+        run_at: runAt,
+        status: 'error',
+        duration_ms: durationMs,
+        next_run: nextRun,
+        result: null,
+        error,
+        outcome_state: 'blocked',
+        outcome_reason: error,
+      });
+      return;
+    }
+
     // Set execution lease only after preflight validation succeeds so
     // missing-group failures do not leave the task stuck in a running state.
     runtime.markTaskExecuting(task.id);
     appendPhaseEvent('lease_acquired', 'ok', false);
 
-    const prompt = task.prompt;
+    const prompt = preprocessResult.prompt;
 
     // Update tasks snapshot for container to read (filtered by group)
     const isMain = task.group_folder === MAIN_GROUP_FOLDER;
@@ -276,6 +360,7 @@ async function runTask(
         id: t.id,
         groupFolder: t.group_folder,
         prompt: t.prompt,
+        preprocess_script: t.preprocess_script,
         schedule_type: t.schedule_type,
         schedule_value: t.schedule_value,
         status: t.status,
@@ -340,6 +425,7 @@ async function runTask(
           categoryFolder: group.categoryFolder,
           agentContextFolder: group.agentContextFolder,
           mcpServers: group.containerConfig?.mcpServers,
+          taskWorkflowsDir: TASK_WORKFLOWS_DIR,
         },
         (proc, containerName) =>
           deps.onProcess(

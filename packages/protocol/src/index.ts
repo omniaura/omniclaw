@@ -74,6 +74,8 @@ export interface ContainerInput {
   githubLinkedContext?: string;
   /** Extra MCP servers to inject into the agent runtime alongside the built-in omniclaw server. */
   mcpServers?: Record<string, Record<string, unknown>>;
+  /** Relative task workflow directory name shown to agents for deterministic scheduled task preprocessors. */
+  taskWorkflowsDir?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,7 +83,7 @@ export interface ContainerInput {
 // ---------------------------------------------------------------------------
 
 /** Explicit agent outcome state for scheduled task runs. */
-export type TaskOutcomeState = 'done' | 'blocked' | 'abandoned';
+export type TaskOutcomeState = 'done' | 'blocked' | 'abandoned' | 'skipped';
 
 /** Signal from the agent indicating how a task run concluded. */
 export interface TaskOutcomeSignal {
@@ -106,7 +108,7 @@ export interface ContainerOutput {
   intermediate?: boolean;
   /** The chat JID this output should be routed to (multi-channel agents). */
   chatJid?: string;
-  /** Explicit agent outcome signal (done/blocked/abandoned). */
+  /** Explicit agent outcome signal (done/blocked/abandoned/skipped). */
   outcome?: TaskOutcomeSignal;
 }
 

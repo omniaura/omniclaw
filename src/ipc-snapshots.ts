@@ -26,6 +26,7 @@ export function mapTasksForSnapshot(tasks: ScheduledTask[]) {
     id: t.id,
     groupFolder: t.group_folder,
     prompt: t.prompt,
+    preprocess_script: t.preprocess_script,
     schedule_type: t.schedule_type,
     schedule_value: t.schedule_value,
     status: t.status,
@@ -42,6 +43,7 @@ export function writeTasksSnapshot(
     id: string;
     groupFolder: string;
     prompt: string;
+    preprocess_script?: string | null;
     schedule_type: string;
     schedule_value: string;
     status: string;

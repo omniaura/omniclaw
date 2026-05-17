@@ -514,6 +514,28 @@ describe('web routes unit tests', () => {
     expect(body.context_mode).toBe('isolated');
   });
 
+  it('rejects invalid preprocess_script extensions on task creation', async () => {
+    const res = await handle(
+      new Request('http://localhost/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          group_folder: 'agent-one',
+          chat_jid: 'dc:123',
+          prompt: 'Bad preprocessor',
+          preprocess_script: 'workflow.txt',
+          schedule_type: 'interval',
+          schedule_value: '60000',
+        }),
+      }),
+      makeState(),
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await jsonBody(res)) as { error: string };
+    expect(body.error).toContain('JS or TypeScript file');
+  });
+
   it('keeps once tasks next_run unchanged when resumed', async () => {
     let calculateCalls = 0;
     const state = makeState({

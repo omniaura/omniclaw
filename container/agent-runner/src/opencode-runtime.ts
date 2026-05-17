@@ -675,6 +675,8 @@ export async function runOpenCodeRuntime(
     OMNICLAW_IPC_DIR: ipcInputDir.replace(/\/input-task$|\/input$/, ''),
     OMNICLAW_CURRENT_CHAT_FILE: currentChatFile,
   };
+  if (containerInput.taskWorkflowsDir)
+    mcpEnv.OMNICLAW_TASK_WORKFLOWS_DIR = containerInput.taskWorkflowsDir;
   if (containerInput.discordGuildId)
     mcpEnv.OMNICLAW_DISCORD_GUILD_ID = containerInput.discordGuildId;
   if (containerInput.serverFolder)

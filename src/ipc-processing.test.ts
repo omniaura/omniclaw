@@ -653,6 +653,29 @@ describe('processTaskIpc: task mutation behavior', () => {
     ]);
   });
 
+  it('stores deterministic preprocessor script when scheduling a task', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'Sync connectors if MCP package changed',
+        preprocess_script: 'sync-connectors-if-mcp-changed.ts',
+        schedule_type: 'interval',
+        schedule_value: '60000',
+        targetJid: 'other@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    const tasks = getAllTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({
+      prompt: 'Sync connectors if MCP package changed',
+      preprocess_script: 'sync-connectors-if-mcp-changed.ts',
+    });
+  });
+
   it('blocks a non-main group from scheduling tasks for another group', async () => {
     await processTaskIpc(
       {

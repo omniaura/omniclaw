@@ -72,6 +72,7 @@ describe('ipc-snapshots', () => {
         id: 'task-1',
         groupFolder: 'test-group',
         prompt: 'Do something',
+        preprocess_script: undefined,
         schedule_type: 'interval',
         schedule_value: '60000',
         status: 'active',

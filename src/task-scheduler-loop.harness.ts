@@ -156,6 +156,10 @@ describe('startSchedulerLoop harness', () => {
         appendTaskRunPhaseEvent: appendTaskRunPhaseEventMock,
         updateTaskAfterRun: updateTaskAfterRunMock,
         writeScheduledRunHandoff: writeScheduledRunHandoffMock,
+        runTaskPreprocessor: (task: ScheduledTask) => ({
+          action: 'run',
+          prompt: task.prompt,
+        }),
         logger: loggerMock,
       };
 

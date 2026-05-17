@@ -667,6 +667,7 @@ describe('task CRUD', () => {
       group_folder: 'main',
       chat_jid: 'group@g.us',
       prompt: 'do something',
+      preprocess_script: 'sync-connectors.ts',
       schedule_type: 'once',
       schedule_value: '2024-06-01T00:00:00.000Z',
       context_mode: 'isolated',
@@ -678,6 +679,7 @@ describe('task CRUD', () => {
     const task = getTaskById('task-1');
     expect(task).toBeDefined();
     expect(task!.prompt).toBe('do something');
+    expect(task!.preprocess_script).toBe('sync-connectors.ts');
     expect(task!.status).toBe('active');
   });
 
@@ -697,6 +699,28 @@ describe('task CRUD', () => {
 
     updateTask('task-2', { status: 'paused' });
     expect(getTaskById('task-2')!.status).toBe('paused');
+  });
+
+  it('updates task preprocessor script', () => {
+    createTask({
+      id: 'task-preprocess',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'test',
+      preprocess_script: 'old.ts',
+      schedule_type: 'once',
+      schedule_value: '2024-06-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: null,
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    updateTask('task-preprocess', { preprocess_script: 'new.ts' });
+    expect(getTaskById('task-preprocess')!.preprocess_script).toBe('new.ts');
+
+    updateTask('task-preprocess', { preprocess_script: null });
+    expect(getTaskById('task-preprocess')!.preprocess_script).toBeNull();
   });
 
   it('deletes a task and its run logs', () => {
