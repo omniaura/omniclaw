@@ -125,6 +125,36 @@ describe('backends/index', () => {
       expect(appleInitSpy).toHaveBeenCalledTimes(1);
       expect(dockerInitSpy).toHaveBeenCalledTimes(1);
     });
+
+    it('maps cursor-sdk entities to the active local runtime backend', async () => {
+      const localType =
+        LOCAL_RUNTIME === 'docker' ? 'docker' : 'apple-container';
+      const localBackend = getBackend(localType);
+      const otherBackend = getBackend(
+        localType === 'docker' ? 'apple-container' : 'docker',
+      );
+      const localInitSpy = spyOn(
+        localBackend,
+        'initialize',
+      ).mockResolvedValue();
+      const otherInitSpy = spyOn(
+        otherBackend,
+        'initialize',
+      ).mockResolvedValue();
+
+      await initializeBackends({
+        cursor: {
+          name: 'Cursor Agent',
+          folder: 'cursor-agent',
+          trigger: '@Cursor',
+          added_at: new Date().toISOString(),
+          backend: 'cursor-sdk',
+        },
+      });
+
+      expect(localInitSpy).toHaveBeenCalledTimes(1);
+      expect(otherInitSpy).not.toHaveBeenCalled();
+    });
   });
 
   describe('shutdownBackends', () => {

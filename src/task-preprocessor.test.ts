@@ -3,7 +3,10 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { runTaskPreprocessor } from './task-preprocessor.js';
+import {
+  normalizePreprocessScriptPath,
+  runTaskPreprocessor,
+} from './task-preprocessor.js';
 import type { ScheduledTask } from './types.js';
 
 let workflowsDir: string;
@@ -184,6 +187,28 @@ console.log(JSON.stringify({
   });
 });
 
+it('caps replacement prompt length from workflow output', () => {
+  fs.writeFileSync(
+    path.join(workflowsDir, 'workflow.ts'),
+    `
+console.log(JSON.stringify({
+  action: "run",
+  prompt: "b".repeat(20)
+}));
+`,
+  );
+
+  expect(
+    runTaskPreprocessor(task(), {
+      workflowsDir,
+      maxPromptFragmentChars: 5,
+    }),
+  ).toEqual({
+    action: 'run',
+    prompt: 'bbbbb\n\n[preprocessor prompt truncated to 5 characters]',
+  });
+});
+
 it('supports explicit workflow error actions', () => {
   fs.writeFileSync(
     path.join(workflowsDir, 'workflow.ts'),
@@ -196,6 +221,45 @@ it('supports explicit workflow error actions', () => {
   });
 });
 
+it('returns a sanitized error when workflow exits nonzero with stderr', () => {
+  fs.writeFileSync(
+    path.join(workflowsDir, 'workflow.ts'),
+    `
+console.error("\u001b[31m" + "x".repeat(600) + "\u0007" + "\u001b[0m");
+process.exit(2);
+`,
+  );
+
+  const result = runTaskPreprocessor(task(), { workflowsDir });
+
+  expect(result.action).toBe('error');
+  if (result.action !== 'error') throw new Error('expected error result');
+  expect(result.error).not.toContain('\u001b');
+  expect(result.error).not.toContain('\u0007');
+  expect(result.error.length).toBeLessThanOrEqual(512);
+});
+
+it('falls back to exit status when nonzero workflow has no stderr', () => {
+  fs.writeFileSync(path.join(workflowsDir, 'workflow.ts'), 'process.exit(7);');
+
+  expect(runTaskPreprocessor(task(), { workflowsDir })).toEqual({
+    action: 'error',
+    error: 'preprocessor exited with status 7',
+  });
+});
+
+it('rejects invalid workflow decision actions', () => {
+  fs.writeFileSync(
+    path.join(workflowsDir, 'workflow.ts'),
+    'console.log(JSON.stringify({ action: "pause" }));',
+  );
+
+  expect(runTaskPreprocessor(task(), { workflowsDir })).toEqual({
+    action: 'error',
+    error: 'preprocessor action must be "run", "skip", or "error"',
+  });
+});
+
 it('rejects workflow paths outside the workflows directory', () => {
   const result = runTaskPreprocessor(task({ preprocess_script: '../x.ts' }), {
     workflowsDir,
@@ -204,6 +268,38 @@ it('rejects workflow paths outside the workflows directory', () => {
   expect(result.action).toBe('error');
   if (result.action !== 'error') throw new Error('expected error result');
   expect(result.error).toContain('Path traversal detected');
+});
+
+it('normalizes preprocess_script input validation deterministically', () => {
+  expect(normalizePreprocessScriptPath(undefined)).toEqual({
+    ok: true,
+    path: null,
+  });
+  expect(normalizePreprocessScriptPath(null)).toEqual({
+    ok: true,
+    path: null,
+  });
+  expect(normalizePreprocessScriptPath('   ')).toEqual({
+    ok: true,
+    path: null,
+  });
+  expect(normalizePreprocessScriptPath('jobs/check.ts')).toEqual({
+    ok: true,
+    path: 'jobs/check.ts',
+  });
+
+  expect(normalizePreprocessScriptPath(42)).toEqual({
+    ok: false,
+    error: 'preprocess_script must be a string or null',
+  });
+  expect(normalizePreprocessScriptPath('jobs/check.sh')).toEqual({
+    ok: false,
+    error: 'preprocess_script must point to a JS or TypeScript file',
+  });
+  const traversal = normalizePreprocessScriptPath('../check.ts');
+  expect(traversal.ok).toBe(false);
+  if (traversal.ok) throw new Error('expected traversal rejection');
+  expect(traversal.error).toContain('Path traversal detected');
 });
 
 it('does nothing when no preprocessor is configured', () => {
