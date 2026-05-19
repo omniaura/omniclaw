@@ -443,13 +443,27 @@ export async function processMessageIpc(
       if (targetGroup && !isSelf) {
         deps.notifyGroup(msgChatJid, msgText, sourceGroup);
       }
-      logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
+      logger.info(
+        {
+          chatJid: data.chatJid,
+          originChatJid: data.originChatJid,
+          currentChatJid: data.currentChatJid,
+          targetWasExplicit: data.targetWasExplicit,
+          sourceGroup,
+        },
+        'IPC message sent',
+      );
       safeEmitIpcEvent(
         deps,
         'message_sent',
         sourceGroup,
         `Message sent to ${msgChatJid}`,
-        { chatJid: msgChatJid },
+        {
+          chatJid: msgChatJid,
+          originChatJid: data.originChatJid,
+          currentChatJid: data.currentChatJid,
+          targetWasExplicit: data.targetWasExplicit,
+        },
       );
       return { action: 'handled' };
     } else {

@@ -2326,6 +2326,7 @@ async function runAgent(
         groupFolder: group.folder,
         runtimeFolder: runtimeGroupFolder,
         chatJid,
+        originChatJid: chatJid,
         isMain,
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,

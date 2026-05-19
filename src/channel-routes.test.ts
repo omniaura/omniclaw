@@ -182,7 +182,7 @@ describe('buildSendToInstruction', () => {
     expect(
       buildSendToInstruction(['dc:agentflow', 'dc:omniclaw'], '@Clayton', true),
     ).toBe(
-      'text must start with "@Clayton "; omit target_jid to use the current chat when available, otherwise choose the correct target_jid from this agent\'s jids list',
+      'text must start with "@Clayton "; omit target_jid to reply in the channel that started this turn, otherwise choose the correct target_jid from this agent\'s jids list for explicit delegation',
     );
   });
 
@@ -194,7 +194,7 @@ describe('buildSendToInstruction', () => {
         false,
       ),
     ).toBe(
-      "omit target_jid to use the current chat when available, otherwise choose the correct target_jid from this agent's jids list",
+      "omit target_jid to reply in the channel that started this turn, otherwise choose the correct target_jid from this agent's jids list for explicit delegation",
     );
   });
 });

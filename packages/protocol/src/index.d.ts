@@ -34,6 +34,8 @@ export interface ContainerInput {
   /** Host-side runtime key for IPC/session isolation (defaults to groupFolder). */
   runtimeFolder?: string;
   chatJid: string;
+  /** Chat JID that started this agent turn. Used as the default outbound target. */
+  originChatJid?: string;
   isMain: boolean;
   /** Effective container network policy after backend defaults/overrides are applied. */
   networkMode?: 'full' | 'none';

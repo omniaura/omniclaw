@@ -1147,7 +1147,7 @@ async function runQuery(
       const marker = ch.jid === containerInput.chatJid ? ' **(current)**' : '';
       return `- **${ch.name}** (\`${ch.jid}\`)${marker}`;
     });
-    const channelBlock = `\n\n## Channel Context\nYou are subscribed to multiple channels:\n${channelLines.join('\n')}\n\nThe \`send_message\` tool defaults to the current channel. To send to a different channel, specify the target channel ID.`;
+    const channelBlock = `\n\n## Channel Context\nYou are subscribed to multiple channels:\n${channelLines.join('\n')}\n\nStay in this channel unless explicitly delegating cross-channel work. The \`send_message\` tool defaults to the channel that started this turn. To send to a different channel, specify the target channel ID.`;
     globalClaudeMd = globalClaudeMd
       ? globalClaudeMd + channelBlock
       : channelBlock.trim();
@@ -1242,6 +1242,8 @@ async function runQuery(
           args: [mcpServerPath],
           env: {
             OMNICLAW_CHAT_JID: containerInput.chatJid,
+            OMNICLAW_ORIGIN_CHAT_JID:
+              containerInput.originChatJid || containerInput.chatJid,
             OMNICLAW_GROUP_FOLDER: containerInput.groupFolder,
             OMNICLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
             OMNICLAW_IPC_DIR: PATHS.ipc,
