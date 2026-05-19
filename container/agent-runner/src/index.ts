@@ -22,6 +22,7 @@ import {
   PreCompactHookInput,
   PreToolUseHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 
 // Shared protocol types — import type only (erased at runtime, no module needed in container).
 import type {
@@ -29,6 +30,7 @@ import type {
   ChannelInfo,
   ContainerInput,
   ContainerOutput,
+  IpcDrainResult,
   IpcMessage,
 } from '@omniclaw/protocol';
 
@@ -347,19 +349,11 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
-type ContentBlock =
-  | { type: 'text'; text: string }
-  | {
-      type: 'image';
-      source: { type: 'base64'; media_type: string; data: string };
-    };
-
-interface SDKUserMessage {
-  type: 'user';
-  message: { role: 'user'; content: string | ContentBlock[] };
-  parent_tool_use_id: null;
-  session_id: string;
-}
+type ContentBlock = Exclude<
+  SDKUserMessage['message']['content'],
+  string
+>[number];
+type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
 
 // Defaults to the message lane; reassigned to input-task/ after stdin is parsed
 // when containerInput.isScheduledTask is true.
@@ -467,7 +461,7 @@ function stopHeartbeat(): void {
 
 const IMAGE_MARKER_RE = /\[attachment:image file=([^\]]+)\]/g;
 
-const EXT_TO_MEDIA_TYPE: Record<string, string> = {
+const EXT_TO_MEDIA_TYPE: Record<string, ImageMediaType> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -1691,9 +1685,15 @@ Please review these changes to understand your new capabilities and fixes.
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
   const pending = drainIpcInput();
-  if (pending.length > 0) {
-    log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + formatIpcMessages(pending);
+  if (pending.shutdown) {
+    log('Shutdown before initial Claude run');
+    return;
+  }
+  if (pending.messages.length > 0) {
+    log(
+      `Draining ${pending.messages.length} pending IPC messages into initial prompt`,
+    );
+    prompt += '\n' + formatIpcMessages(pending.messages);
   }
 
   // Prepend update notification if present
