@@ -45,6 +45,14 @@ jobs:
       - run: bun install
       - run: npx tsc --noEmit
 
+  agent-runner-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: cd container/agent-runner && bun install
+      - run: cd container/agent-runner && bunx tsc --noEmit
+
   test:
     runs-on: ubuntu-latest
     steps:

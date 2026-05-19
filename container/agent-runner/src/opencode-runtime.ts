@@ -780,9 +780,15 @@ export async function runOpenCodeRuntime(
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
   const pending = drainIpcInput();
-  if (pending.length > 0) {
-    log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + formatIpcMessages(pending);
+  if (pending.shutdown) {
+    log('Shutdown before initial OpenCode run');
+    return;
+  }
+  if (pending.messages.length > 0) {
+    log(
+      `Draining ${pending.messages.length} pending IPC messages into initial prompt`,
+    );
+    prompt += '\n' + formatIpcMessages(pending.messages);
   }
 
   // Default timeout from container config

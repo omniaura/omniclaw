@@ -10,7 +10,7 @@
     "declaration": true,
     "types": ["bun-types"],
     "paths": {
-      "@omniclaw/protocol": ["../../packages/protocol/src/index.ts"]
+      "@omniclaw/protocol": ["../../packages/protocol/src/index.d.ts"]
     }
   },
   "include": ["src/**/*"],
