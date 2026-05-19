@@ -3,7 +3,13 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, DISPATCH_RUNTIME_SEP, IPC_POLL_INTERVAL } from './config.js';
-import { startIpcWatcher, type IpcDeps } from './ipc.js';
+import {
+  MAX_IPC_FILES_PER_POLL,
+  MAX_IPC_FILES_PER_SOURCE_PER_POLL,
+  resetIpcWatcherForTests,
+  startIpcWatcher,
+  type IpcDeps,
+} from './ipc.js';
 import type { RegisteredGroup } from './types.js';
 
 const IPC_BASE_DIR = path.join(DATA_DIR, 'ipc');
@@ -25,9 +31,24 @@ describe('startIpcWatcher', () => {
   const originalSetTimeout = globalThis.setTimeout;
   let staleRuntimeFolder: string | undefined;
   let rogueErrorDir: string | undefined;
+  const cleanupDirs: string[] = [];
+
+  const waitFor = async (
+    predicate: () => boolean,
+    timeoutMs = 1000,
+  ): Promise<void> => {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+      if (Date.now() > deadline) {
+        throw new Error('Timed out waiting for IPC watcher test condition');
+      }
+      await new Promise((resolve) => originalSetTimeout(resolve, 0));
+    }
+  };
 
   afterEach(() => {
     globalThis.setTimeout = originalSetTimeout;
+    resetIpcWatcherForTests();
     if (staleRuntimeFolder) {
       fs.rmSync(path.join(IPC_BASE_DIR, staleRuntimeFolder), {
         recursive: true,
@@ -39,11 +60,18 @@ describe('startIpcWatcher', () => {
       fs.rmSync(rogueErrorDir, { recursive: true, force: true });
       rogueErrorDir = undefined;
     }
+    for (const dir of cleanupDirs.splice(0)) {
+      fs.rmSync(path.join(IPC_BASE_DIR, dir), {
+        recursive: true,
+        force: true,
+      });
+    }
   });
 
   it('maps runtime folders to owners, cleans stale dispatch dirs, and quarantines rogue sources', async () => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
     const ownerFolder = `runtime-owner-${id}`;
+    cleanupDirs.push('main');
     staleRuntimeFolder = `${ownerFolder}${DISPATCH_RUNTIME_SEP}0123456789abcdef`;
     const rogueFolder = `rogue-source-${id}`;
     const malformedRuntimeFolder = `${ownerFolder}${DISPATCH_RUNTIME_SEP}not-a-digest`;
@@ -253,5 +281,193 @@ describe('startIpcWatcher', () => {
         fs.rmSync(path.join(IPC_BASE_DIR, 'errors', file), { force: true });
       }
     }
+  });
+
+  it('caps valid IPC files per source and leaves overflow for a later poll', async () => {
+    const id = `budget-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+    const sourceFolder = `${id}-source`;
+    cleanupDirs.push(sourceFolder);
+    const messagesDir = path.join(IPC_BASE_DIR, sourceFolder, 'messages');
+    fs.mkdirSync(messagesDir, { recursive: true });
+
+    const targetJid = `${id}@g.us`;
+    const fileCount = MAX_IPC_FILES_PER_SOURCE_PER_POLL + 1;
+    for (let i = 0; i < fileCount; i += 1) {
+      const filePath = path.join(
+        messagesDir,
+        `${String(i).padStart(3, '0')}.json`,
+      );
+      fs.writeFileSync(
+        filePath,
+        JSON.stringify({
+          type: 'message',
+          chatJid: targetJid,
+          text: `message-${i}`,
+        }),
+      );
+      const mtime = new Date(1_700_000_000_000 + i);
+      fs.utimesSync(filePath, mtime, mtime);
+    }
+
+    const sentTexts: string[] = [];
+    const events: Array<{
+      kind: string;
+      sourceGroup: string;
+      details?: Record<string, unknown>;
+    }> = [];
+
+    globalThis.setTimeout = ((
+      _fn: Parameters<typeof setTimeout>[0],
+      _delay?: number,
+      ..._args: unknown[]
+    ) => 1 as unknown as ReturnType<typeof setTimeout>) as typeof setTimeout;
+
+    const deps: IpcDeps = {
+      sendMessage: async (_jid, text) => {
+        sentTexts.push(text);
+      },
+      notifyGroup: () => {},
+      registeredGroups: () => ({
+        [targetJid]: {
+          name: 'Budget Source',
+          folder: sourceFolder,
+          trigger: 'always',
+          added_at: '2024-01-01T00:00:00.000Z',
+        },
+      }),
+      registerGroup: () => {},
+      updateGroup: () => {},
+      syncGroupMetadata: async () => {},
+      getAvailableGroups: () => [],
+      writeGroupsSnapshot: () => {},
+      onIpcEvent: (kind, sourceGroup, _summary, details) => {
+        events.push({ kind, sourceGroup, details });
+      },
+    };
+
+    startIpcWatcher(deps);
+    await waitFor(() => sentTexts.length === MAX_IPC_FILES_PER_SOURCE_PER_POLL);
+    await flushMicrotasks();
+
+    expect(sentTexts).toHaveLength(MAX_IPC_FILES_PER_SOURCE_PER_POLL);
+    expect(sentTexts.at(0)).toBe('message-0');
+    expect(sentTexts.at(-1)).toBe(
+      `message-${MAX_IPC_FILES_PER_SOURCE_PER_POLL - 1}`,
+    );
+    expect(fs.readdirSync(messagesDir).sort()).toEqual([
+      `${String(MAX_IPC_FILES_PER_SOURCE_PER_POLL).padStart(3, '0')}.json`,
+    ]);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: 'ipc_error',
+        sourceGroup: sourceFolder,
+        details: expect.objectContaining({
+          reason: 'ipc_backpressure',
+          sourceKind: 'messages',
+          deferredCount: 1,
+          perSourceLimit: MAX_IPC_FILES_PER_SOURCE_PER_POLL,
+        }),
+      }),
+    );
+  });
+
+  it('applies source caps fairly before the global poll cap', async () => {
+    const id = `global-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+    const sourceFolders = Array.from(
+      {
+        length: MAX_IPC_FILES_PER_POLL / MAX_IPC_FILES_PER_SOURCE_PER_POLL + 1,
+      },
+      (_, index) => `${id}-source-${String(index).padStart(2, '0')}`,
+    );
+    cleanupDirs.push(...sourceFolders);
+
+    const groups: Record<string, RegisteredGroup> = {};
+    for (const [sourceIndex, sourceFolder] of sourceFolders.entries()) {
+      const targetJid = `${sourceFolder}@g.us`;
+      groups[targetJid] = {
+        name: sourceFolder,
+        folder: sourceFolder,
+        trigger: 'always',
+        added_at: '2024-01-01T00:00:00.000Z',
+      };
+      const messagesDir = path.join(IPC_BASE_DIR, sourceFolder, 'messages');
+      fs.mkdirSync(messagesDir, { recursive: true });
+      for (let i = 0; i < MAX_IPC_FILES_PER_SOURCE_PER_POLL; i += 1) {
+        const filePath = path.join(
+          messagesDir,
+          `${String(i).padStart(3, '0')}.json`,
+        );
+        fs.writeFileSync(
+          filePath,
+          JSON.stringify({
+            type: 'message',
+            chatJid: targetJid,
+            text: `${sourceFolder}-message-${i}`,
+          }),
+        );
+        const mtime = new Date(1_700_000_100_000 + sourceIndex * 1000 + i);
+        fs.utimesSync(filePath, mtime, mtime);
+      }
+    }
+
+    const sentBySource = new Map<string, number>();
+    const events: Array<{ kind: string; sourceGroup: string }> = [];
+
+    globalThis.setTimeout = ((
+      _fn: Parameters<typeof setTimeout>[0],
+      _delay?: number,
+      ..._args: unknown[]
+    ) => 1 as unknown as ReturnType<typeof setTimeout>) as typeof setTimeout;
+
+    const deps: IpcDeps = {
+      sendMessage: async (jid) => {
+        const folder = groups[jid]!.folder;
+        sentBySource.set(folder, (sentBySource.get(folder) ?? 0) + 1);
+      },
+      notifyGroup: () => {},
+      registeredGroups: () => groups,
+      registerGroup: () => {},
+      updateGroup: () => {},
+      syncGroupMetadata: async () => {},
+      getAvailableGroups: () => [],
+      writeGroupsSnapshot: () => {},
+      onIpcEvent: (kind, sourceGroup) => {
+        events.push({ kind, sourceGroup });
+      },
+    };
+
+    startIpcWatcher(deps);
+    await waitFor(() => {
+      const processedTotal = Array.from(sentBySource.values()).reduce(
+        (sum, count) => sum + count,
+        0,
+      );
+      return processedTotal === MAX_IPC_FILES_PER_POLL;
+    });
+    await flushMicrotasks();
+
+    const processedTotal = Array.from(sentBySource.values()).reduce(
+      (sum, count) => sum + count,
+      0,
+    );
+    expect(processedTotal).toBe(MAX_IPC_FILES_PER_POLL);
+    for (const sourceFolder of sourceFolders.slice(0, -1)) {
+      expect(sentBySource.get(sourceFolder)).toBe(
+        MAX_IPC_FILES_PER_SOURCE_PER_POLL,
+      );
+      expect(
+        fs.readdirSync(path.join(IPC_BASE_DIR, sourceFolder, 'messages')),
+      ).toHaveLength(0);
+    }
+
+    const deferredSource = sourceFolders.at(-1)!;
+    expect(sentBySource.get(deferredSource)).toBeUndefined();
+    expect(
+      fs.readdirSync(path.join(IPC_BASE_DIR, deferredSource, 'messages')),
+    ).toHaveLength(MAX_IPC_FILES_PER_SOURCE_PER_POLL);
+    expect(events).toContainEqual({
+      kind: 'ipc_error',
+      sourceGroup: deferredSource,
+    });
   });
 });
