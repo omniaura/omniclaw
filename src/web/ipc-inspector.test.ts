@@ -131,6 +131,29 @@ describe('renderIpcInspector', () => {
     expect(html).toContain('>2<');
   });
 
+  it('shows aggregate pending messages stat card', () => {
+    // alpha has 2 pending msgs, beta has 0 → total 2
+    const html = renderIpcInspector(makeState());
+    expect(html).toContain('id="stat-pending-messages">2<');
+  });
+
+  it('shows aggregate pending tasks stat card', () => {
+    // alpha has 1 pending task, beta has 0 → total 1
+    const html = renderIpcInspector(makeState());
+    expect(html).toContain('id="stat-pending-tasks">1<');
+  });
+
+  it('shows aggregate retrying stat card with retry depth', () => {
+    // beta has retryCount=2 → 1 retrying group, 2 total retries
+    const html = renderIpcInspector(makeState());
+    expect(html).toContain('id="stat-retrying">1 (2)<');
+  });
+
+  it('shows zero retrying when no groups are retrying', () => {
+    const html = renderIpcInspector(makeState({ getQueueDetails: () => [] }));
+    expect(html).toContain('id="stat-retrying">0<');
+  });
+
   it('shows empty state when no groups', () => {
     const html = renderIpcInspector(makeState({ getQueueDetails: () => [] }));
     expect(html).toContain('No groups currently tracked');

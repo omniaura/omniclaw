@@ -28,6 +28,17 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
   const queueDetails = state.getQueueDetails();
   const events = state.getIpcEvents(50);
 
+  let pendingMessages = 0;
+  let pendingTasks = 0;
+  let retryingGroups = 0;
+  let totalRetries = 0;
+  for (const g of queueDetails) {
+    pendingMessages += g.messageLane.pendingCount;
+    pendingTasks += g.taskLane.pendingCount;
+    if (g.retryCount > 0) retryingGroups++;
+    totalRetries += g.retryCount;
+  }
+
   const groupRows = queueDetails
     .map((g) => {
       const msgStatus = g.messageLane.idle
@@ -100,6 +111,9 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
     `<div class="stat-card"><div class="label">processing</div><div class="value" id="stat-processing">${Math.max(0, stats.activeContainers - stats.idleContainers)}/${stats.maxActive}</div></div>` +
     `<div class="stat-card"><div class="label">idle</div><div class="value" id="stat-ipc-idle">${stats.idleContainers}/${stats.maxIdle}</div></div>` +
     `<div class="stat-card"><div class="label">groups tracked</div><div class="value" id="stat-groups">${queueDetails.length}</div></div>` +
+    `<div class="stat-card"><div class="label">pending msgs</div><div class="value" id="stat-pending-messages">${pendingMessages}</div></div>` +
+    `<div class="stat-card"><div class="label">pending tasks</div><div class="value" id="stat-pending-tasks">${pendingTasks}</div></div>` +
+    `<div class="stat-card"><div class="label">retrying</div><div class="value" id="stat-retrying">${retryingGroups > 0 ? `${retryingGroups} (${totalRetries})` : '0'}</div></div>` +
     `<div class="stat-card"><div class="label">recent events</div><div class="value" id="stat-events">${events.length}</div></div>` +
     `</div>` +
     `<section><h2>group queue state</h2>` +
