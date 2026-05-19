@@ -13,6 +13,7 @@ import { CronExpressionParser } from 'cron-parser';
 import {
   buildChannelMaps,
   buildSendMessageChannelDescription,
+  getCurrentChatJid,
   resolveSendMessageTarget,
 } from './send-message-routing.js';
 
@@ -47,6 +48,13 @@ const channels: ChannelInfo[] = channelsEnv
     })()
   : [];
 const isMultiChannel = channels.length > 1;
+
+const routingContext = {
+  channels,
+  currentChatFile,
+  initialChatJid,
+  originChatJid,
+};
 
 const { channelByJid } = buildChannelMaps(channels);
 
@@ -212,12 +220,7 @@ Recommended: omit target_jid to reply in the channel that started this turn. Onl
   async (args) => {
     const rawTarget = args.target_jid;
     const { targetJid, currentChatJid, targetWasExplicit } =
-      resolveSendMessageTarget(rawTarget, {
-        channels,
-        currentChatFile,
-        initialChatJid,
-        originChatJid,
-      });
+      resolveSendMessageTarget(rawTarget, routingContext);
 
     const data: Record<string, string | boolean | undefined> = {
       type: 'message',
@@ -376,7 +379,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     const targetJid =
       isMain && args.target_group_jid
         ? args.target_group_jid
-        : getCurrentChatJid();
+        : getCurrentChatJid(routingContext);
 
     const data = {
       type: 'schedule_task',
@@ -891,7 +894,7 @@ if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
       const requestId = `reaction-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       writeIpcFile(MESSAGES_DIR, {
         type: 'react_to_message',
-        chatJid: getCurrentChatJid(),
+        chatJid: getCurrentChatJid(routingContext),
         messageId: args.message_id,
         emoji: args.emoji,
         remove: args.remove || false,
