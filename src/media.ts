@@ -12,6 +12,11 @@ import { GROUPS_DIR } from './config.js';
 import { logger } from './logger.js';
 import { assertPathWithin } from './path-security.js';
 import type { MediaAttachment, MediaAttachmentType } from './types.js';
+import {
+  fetchWithPinnedDns,
+  resolveAndValidateRemoteImageUrl,
+  type PinnedRemoteImageFetch,
+} from './web/image-cache.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -125,15 +130,49 @@ export async function fetchWithTimeout(
   });
 }
 
+export interface AttachmentDownloadOptions {
+  maxBytes?: number;
+  timeoutMs?: number;
+  /** Validate and DNS-pin untrusted remote URLs before fetching. */
+  validateRemoteUrl?: boolean;
+  /** Override DNS resolution (primarily for tests). */
+  lookupHostAddresses?: (hostname: string) => Promise<string[]>;
+  /** Override pinned DNS fetch (primarily for tests). */
+  fetchWithPinnedDnsImpl?: PinnedRemoteImageFetch;
+}
+
+async function fetchAttachment(
+  url: string,
+  options?: AttachmentDownloadOptions,
+): Promise<Response> {
+  if (!options?.validateRemoteUrl) return fetchWithTimeout(url, options);
+
+  const validation = await resolveAndValidateRemoteImageUrl(url, {
+    lookupHostAddresses: options.lookupHostAddresses,
+  });
+  if (validation.error) {
+    throw new Error(`Remote attachment URL rejected: ${validation.error}`);
+  }
+
+  const pinnedAddress = validation.resolvedAddresses[0];
+  if (!pinnedAddress) return fetchWithTimeout(url, options);
+
+  return (options.fetchWithPinnedDnsImpl ?? fetchWithPinnedDns)(
+    url,
+    pinnedAddress,
+    options.timeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS,
+  );
+}
+
 /**
  * Download a binary attachment (image, video, audio) and return its bytes.
  * Enforces `maxBytes` (default: 10 MiB).
  */
 export async function downloadBinaryAttachment(
   url: string,
-  options?: { maxBytes?: number; timeoutMs?: number },
+  options?: AttachmentDownloadOptions,
 ): Promise<Buffer> {
-  const response = await fetchWithTimeout(url, options);
+  const response = await fetchAttachment(url, options);
   if (!response.ok) {
     throw new Error(`Download failed with status ${response.status}`);
   }
