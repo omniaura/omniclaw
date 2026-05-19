@@ -13,6 +13,7 @@ import { CronExpressionParser } from 'cron-parser';
 import {
   buildChannelMaps,
   buildSendMessageChannelDescription,
+  getCurrentChatJid,
   resolveSendMessageTarget,
 } from './send-message-routing.js';
 
@@ -52,6 +53,14 @@ const { channelByJid } = buildChannelMaps(channels);
 
 // For backwards compatibility, chatJid is a getter
 const chatJid = initialChatJid;
+
+function readCurrentChatJid(): string {
+  return getCurrentChatJid({
+    channels,
+    currentChatFile,
+    initialChatJid,
+  });
+}
 
 // User registry for mention formatting (Issue #66)
 interface UserInfo {
@@ -376,7 +385,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     const targetJid =
       isMain && args.target_group_jid
         ? args.target_group_jid
-        : getCurrentChatJid();
+        : readCurrentChatJid();
 
     const data = {
       type: 'schedule_task',
@@ -891,7 +900,7 @@ if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
       const requestId = `reaction-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       writeIpcFile(MESSAGES_DIR, {
         type: 'react_to_message',
-        chatJid: getCurrentChatJid(),
+        chatJid: readCurrentChatJid(),
         messageId: args.message_id,
         emoji: args.emoji,
         remove: args.remove || false,
