@@ -782,6 +782,26 @@ function getSubscriptionsForChannelInMemory(
   return [];
 }
 
+function buildMessagePollJids(): string[] {
+  const jids = new Set([
+    ...Object.keys(registeredGroups),
+    ...Object.keys(channelSubscriptions),
+  ]);
+
+  // Telegram messages are stored under scoped JIDs (`tg:<botId>:<chatId>`) so
+  // multiple Telegram bots can coexist. Older registrations still use the
+  // legacy `tg:<chatId>` form; include matching scoped chats in the poll set so
+  // those legacy private/group registrations keep receiving messages.
+  for (const chat of getAllChats()) {
+    const legacyJid = toLegacyTelegramJid(chat.jid);
+    if (legacyJid && jids.has(legacyJid)) {
+      jids.add(chat.jid);
+    }
+  }
+
+  return Array.from(jids);
+}
+
 function buildRegisteredGroupFromSubscription(
   channelJid: string,
   sub: ChannelSubscription,
@@ -2550,12 +2570,7 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       refreshChannelSubscriptions();
-      const jids = Array.from(
-        new Set([
-          ...Object.keys(registeredGroups),
-          ...Object.keys(channelSubscriptions),
-        ]),
-      );
+      const jids = buildMessagePollJids();
       const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp);
 
       if (messages.length > 0) {
