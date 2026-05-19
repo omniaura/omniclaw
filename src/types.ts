@@ -488,6 +488,9 @@ export interface GitHubChannelWatch {
 export interface IpcMessagePayload {
   type: string;
   chatJid?: string;
+  originChatJid?: string;
+  currentChatJid?: string;
+  targetWasExplicit?: boolean;
   text?: string;
   messageId?: string;
   emoji?: string;

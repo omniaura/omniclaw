@@ -360,6 +360,8 @@ export async function runCursorSdkRuntime(
     args: [mcpServerPath],
     env: {
       OMNICLAW_CHAT_JID: containerInput.chatJid,
+      OMNICLAW_ORIGIN_CHAT_JID:
+        containerInput.originChatJid || containerInput.chatJid,
       OMNICLAW_GROUP_FOLDER: containerInput.groupFolder,
       OMNICLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
       OMNICLAW_IPC_DIR: ipcRoot,

@@ -25,7 +25,7 @@ import {
   getRoutesForAgent,
   clearPendingSessionIntent,
 } from './db.js';
-import { processTaskIpc, IpcDeps } from './ipc.js';
+import { processMessageIpc, processTaskIpc, IpcDeps } from './ipc.js';
 import {
   RegisteredGroup,
   Agent,
@@ -68,6 +68,11 @@ let groupSnapshots: Array<{
   registeredJids: string[];
 }>;
 let subscriptionChangedCalls: number;
+let ipcEvents: Array<{
+  kind: string;
+  sourceGroup: string;
+  details?: Record<string, unknown>;
+}>;
 let deps: IpcDeps;
 
 beforeEach(() => {
@@ -85,6 +90,7 @@ beforeEach(() => {
   taskSnapshots = [];
   groupSnapshots = [];
   subscriptionChangedCalls = 0;
+  ipcEvents = [];
 
   setRegisteredGroup('main@g.us', MAIN_GROUP);
   setRegisteredGroup('other@g.us', OTHER_GROUP);
@@ -130,7 +136,77 @@ beforeEach(() => {
     onSubscriptionChanged: () => {
       subscriptionChangedCalls += 1;
     },
+    onIpcEvent: (kind, sourceGroup, _summary, details) => {
+      ipcEvents.push({ kind, sourceGroup, details });
+    },
   };
+});
+
+describe('processMessageIpc: send_message routing audit', () => {
+  it('sends omitted-target messages to origin chat and records origin/current audit fields', async () => {
+    const result = await processMessageIpc(
+      {
+        type: 'message',
+        chatJid: 'dc:origin',
+        originChatJid: 'dc:origin',
+        currentChatJid: 'dc:sibling',
+        targetWasExplicit: false,
+        text: 'reply to origin',
+      },
+      'other-group',
+      false,
+      '/tmp/omniclaw-ipc-test',
+      {
+        ...groups,
+        'dc:origin': OTHER_GROUP,
+      },
+      deps,
+    );
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(sentMessages).toEqual([
+      { jid: 'dc:origin', text: 'reply to origin' },
+    ]);
+    expect(ipcEvents).toContainEqual({
+      kind: 'message_sent',
+      sourceGroup: 'other-group',
+      details: {
+        chatJid: 'dc:origin',
+        originChatJid: 'dc:origin',
+        currentChatJid: 'dc:sibling',
+        targetWasExplicit: false,
+      },
+    });
+  });
+
+  it('preserves explicit target routing while recording audit fields', async () => {
+    const result = await processMessageIpc(
+      {
+        type: 'message',
+        chatJid: 'dc:sibling',
+        originChatJid: 'dc:origin',
+        currentChatJid: 'dc:sibling',
+        targetWasExplicit: true,
+        text: 'delegate to sibling',
+      },
+      'main',
+      true,
+      '/tmp/omniclaw-ipc-test',
+      groups,
+      deps,
+    );
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(sentMessages).toEqual([
+      { jid: 'dc:sibling', text: 'delegate to sibling' },
+    ]);
+    expect(ipcEvents[0]?.details).toMatchObject({
+      chatJid: 'dc:sibling',
+      originChatJid: 'dc:origin',
+      currentChatJid: 'dc:sibling',
+      targetWasExplicit: true,
+    });
+  });
 });
 
 // =============================================================================

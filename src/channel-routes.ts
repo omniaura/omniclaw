@@ -72,8 +72,8 @@ export function buildAgentToChannelsMapFromSubscriptions(
  *
  * For single-channel agents we can safely hardcode target_jid. For multi-channel
  * agents, hardcoding one JID misroutes messages from the other shared channels,
- * so the caller should prefer the current chat and only pick a target_jid when
- * they intentionally need a different channel.
+ * so the caller should omit target_jid by default and only pick a target_jid
+ * when they intentionally need a different channel.
  */
 export function buildSendToInstruction(
   jids: string[],
@@ -92,6 +92,6 @@ export function buildSendToInstruction(
   }
 
   return requiresTrigger
-    ? `text must start with "${trigger} "; omit target_jid to use the current chat when available, otherwise choose the correct target_jid from this agent's jids list`
-    : "omit target_jid to use the current chat when available, otherwise choose the correct target_jid from this agent's jids list";
+    ? `text must start with "${trigger} "; omit target_jid to reply in the channel that started this turn, otherwise choose the correct target_jid from this agent's jids list for explicit delegation`
+    : "omit target_jid to reply in the channel that started this turn, otherwise choose the correct target_jid from this agent's jids list for explicit delegation";
 }

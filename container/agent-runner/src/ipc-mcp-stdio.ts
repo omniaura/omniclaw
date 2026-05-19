@@ -10,6 +10,11 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
+import {
+  buildChannelMaps,
+  buildSendMessageChannelDescription,
+  resolveSendMessageTarget,
+} from './send-message-routing.js';
 
 const IPC_DIR = process.env.OMNICLAW_IPC_DIR || '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -22,6 +27,7 @@ const taskWorkflowsPath = `/workspace/group/${taskWorkflowsDir.replace(/^\/+/, '
 
 // Context from environment variables (set by the agent runner)
 const initialChatJid = process.env.OMNICLAW_CHAT_JID!;
+const originChatJid = process.env.OMNICLAW_ORIGIN_CHAT_JID || initialChatJid;
 const groupFolder = process.env.OMNICLAW_GROUP_FOLDER!;
 const isMain = process.env.OMNICLAW_IS_MAIN === '1';
 const currentChatFile =
@@ -42,46 +48,7 @@ const channels: ChannelInfo[] = channelsEnv
   : [];
 const isMultiChannel = channels.length > 1;
 
-// Build lookup maps for channel resolution
-const channelById = new Map<string, ChannelInfo>();
-const channelByJid = new Map<string, ChannelInfo>();
-const channelByName = new Map<string, ChannelInfo>();
-for (const ch of channels) {
-  channelById.set(ch.id, ch);
-  channelByJid.set(ch.jid, ch);
-  channelByName.set(ch.name.toLowerCase(), ch);
-}
-
-/**
- * Resolve a target to a JID. Accepts:
- * - Channel ID ("1", "2")
- * - Channel name ("DM", "Group Chat")
- * - Full JID ("tg:1991174535")
- */
-function resolveTargetJid(target: string): string {
-  const byId = channelById.get(target);
-  if (byId) return byId.jid;
-  const byName = channelByName.get(target.toLowerCase());
-  if (byName) return byName.jid;
-  return target; // Assume it's already a JID
-}
-
-/**
- * Get the current chat JID. For multi-channel agents, reads the
- * dynamic value written by the agent-runner as messages arrive.
- * Falls back to the initial chatJid from container input.
- */
-function getCurrentChatJid(): string {
-  if (isMultiChannel) {
-    try {
-      const current = fs.readFileSync(currentChatFile, 'utf-8').trim();
-      if (current) return current;
-    } catch {
-      /* ignore */
-    }
-  }
-  return initialChatJid;
-}
+const { channelByJid } = buildChannelMaps(channels);
 
 // For backwards compatibility, chatJid is a getter
 const chatJid = initialChatJid;
@@ -213,7 +180,7 @@ const server = new McpServer({
 
 // Build send_message description with channel info for multi-channel agents
 const channelListDesc = isMultiChannel
-  ? `\n\nThis agent has multiple channels:\n${channels.map((ch) => `  • "${ch.name}" (ID: ${ch.id}, JID: ${ch.jid})`).join('\n')}\nYou can use channel name, ID, or full JID as target_jid. Default: the most recently active chat.`
+  ? buildSendMessageChannelDescription(channels)
   : '';
 
 server.tool(
@@ -222,7 +189,9 @@ server.tool(
 
 IMPORTANT: Your final text response is ALSO sent to the user automatically. If send_message already contains your complete response, stay silent afterwards — wrap any remaining acknowledgment (e.g. "Done!", "Sent!") in <internal> tags so it isn't delivered as a duplicate message.
 
-Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.${channelListDesc}`,
+Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.
+
+Recommended: omit target_jid to reply in the channel that started this turn. Only set target_jid when intentionally delegating to another channel or agent.${channelListDesc}`,
   {
     text: z.string().describe('The message text to send'),
     sender: z
@@ -236,19 +205,26 @@ Note: when running as a scheduled task, your final output is NOT sent to the use
       .optional()
       .describe(
         isMultiChannel
-          ? 'Target channel or agent. Accepts channel name, channel ID, or full JID. Defaults to the most recently active chat.'
-          : 'Send to a different group/agent by JID. Check /workspace/ipc/agent_registry.json for available targets. Defaults to current group.',
+          ? 'Target channel or agent. Accepts channel name, channel ID, or full JID. Omit to reply in the channel that started this turn.'
+          : 'Send to a different group/agent by JID. Check /workspace/ipc/agent_registry.json for available targets. Omit to reply in the channel that started this turn.',
       ),
   },
   async (args) => {
     const rawTarget = args.target_jid;
-    const targetJid = rawTarget
-      ? resolveTargetJid(rawTarget)
-      : getCurrentChatJid();
+    const { targetJid, currentChatJid, targetWasExplicit } =
+      resolveSendMessageTarget(rawTarget, {
+        channels,
+        currentChatFile,
+        initialChatJid,
+        originChatJid,
+      });
 
-    const data: Record<string, string | undefined> = {
+    const data: Record<string, string | boolean | undefined> = {
       type: 'message',
       chatJid: targetJid,
+      originChatJid,
+      currentChatJid,
+      targetWasExplicit,
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,
@@ -256,11 +232,15 @@ Note: when running as a scheduled task, your final output is NOT sent to the use
       timestamp: new Date().toISOString(),
     };
 
+    console.error(
+      `[omniclaw] send_message target=${targetJid} origin=${originChatJid} current=${currentChatJid} explicit=${targetWasExplicit}`,
+    );
+
     writeIpcFile(MESSAGES_DIR, data);
 
     const channelName = channelByJid.get(targetJid)?.name;
     const targetDesc =
-      channelName || (targetJid !== getCurrentChatJid() ? targetJid : '');
+      channelName || (targetJid !== originChatJid ? targetJid : '');
     return {
       content: [
         {
