@@ -37,6 +37,9 @@ import {
 import { normalizePreprocessScriptPath } from './task-preprocessor.js';
 import type { IpcEventKind } from './web/ipc-events.js';
 
+export const MAX_IPC_FILES_PER_SOURCE_PER_POLL = 50;
+export const MAX_IPC_FILES_PER_POLL = 200;
+
 export interface IpcDeps {
   sendMessage: (
     jid: string,
@@ -127,6 +130,72 @@ function safeEmitIpcEvent(
       );
     }
   });
+}
+
+type IpcSourceKind = 'messages' | 'tasks';
+
+interface BudgetedIpcFiles {
+  files: string[];
+  deferredCount: number;
+}
+
+function selectIpcFilesForPoll(
+  dirPath: string,
+  sourceGroup: string,
+  sourceKind: IpcSourceKind,
+  deps: IpcDeps,
+  remainingGlobalBudget: number,
+): BudgetedIpcFiles {
+  const allFiles = listIpcJsonFiles(dirPath)
+    .map((file) => {
+      const filePath = path.join(dirPath, file);
+      try {
+        return { file, mtimeMs: fs.statSync(filePath).mtimeMs };
+      } catch {
+        return { file, mtimeMs: 0 };
+      }
+    })
+    .sort((a, b) => a.mtimeMs - b.mtimeMs || a.file.localeCompare(b.file))
+    .map((entry) => entry.file);
+
+  const sourceLimit = Math.min(
+    MAX_IPC_FILES_PER_SOURCE_PER_POLL,
+    Math.max(remainingGlobalBudget, 0),
+  );
+  const files = allFiles.slice(0, sourceLimit);
+  const deferredCount = allFiles.length - files.length;
+
+  if (deferredCount > 0) {
+    logger.warn(
+      {
+        sourceGroup,
+        sourceKind,
+        fileCount: allFiles.length,
+        processedCount: files.length,
+        deferredCount,
+        perSourceLimit: MAX_IPC_FILES_PER_SOURCE_PER_POLL,
+        globalRemaining: remainingGlobalBudget,
+      },
+      'IPC source exceeded per-poll file budget; deferring overflow',
+    );
+    safeEmitIpcEvent(
+      deps,
+      'ipc_error',
+      sourceGroup,
+      `IPC ${sourceKind} backpressure: deferred ${deferredCount} file${deferredCount === 1 ? '' : 's'}`,
+      {
+        reason: 'ipc_backpressure',
+        sourceKind,
+        fileCount: allFiles.length,
+        processedCount: files.length,
+        deferredCount,
+        perSourceLimit: MAX_IPC_FILES_PER_SOURCE_PER_POLL,
+        globalRemaining: remainingGlobalBudget,
+      },
+    );
+  }
+
+  return { files, deferredCount };
 }
 
 /** Result of processing an IPC message. */
@@ -404,6 +473,10 @@ export async function processMessageIpc(
 
 let ipcWatcherRunning = false;
 
+export function resetIpcWatcherForTests(): void {
+  ipcWatcherRunning = false;
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -421,7 +494,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
       groupFolders = fs
         .readdirSync(ipcBaseDir, { withFileTypes: true })
         .filter((e) => e.isDirectory() && e.name !== 'errors')
-        .map((e) => e.name);
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b));
     } catch (err) {
       logger.error({ err }, 'Error reading IPC base directory');
       setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
@@ -432,6 +506,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
     const runtimeFolders = deps.activeRuntimeFolders?.();
     const agentFolders = deps.agentFolders?.();
+    let remainingPollBudget = MAX_IPC_FILES_PER_POLL;
     for (const sourceGroup of groupFolders) {
       const ownerGroup = resolveOwnerGroupFolder(
         sourceGroup,
@@ -470,11 +545,21 @@ export function startIpcWatcher(deps: IpcDeps): void {
       const isMain = ownerGroup === MAIN_GROUP_FOLDER;
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
+      let sourceHadDeferredFiles = false;
 
       // Process messages from this group's IPC directory
       try {
         if (fs.existsSync(messagesDir)) {
-          const messageFiles = listIpcJsonFiles(messagesDir);
+          const messageSelection = selectIpcFilesForPoll(
+            messagesDir,
+            ownerGroup,
+            'messages',
+            deps,
+            remainingPollBudget,
+          );
+          const messageFiles = messageSelection.files;
+          sourceHadDeferredFiles ||= messageSelection.deferredCount > 0;
+          remainingPollBudget -= messageFiles.length;
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
             try {
@@ -521,7 +606,16 @@ export function startIpcWatcher(deps: IpcDeps): void {
       // Process tasks from this group's IPC directory
       try {
         if (fs.existsSync(tasksDir)) {
-          const taskFiles = listIpcJsonFiles(tasksDir);
+          const taskSelection = selectIpcFilesForPoll(
+            tasksDir,
+            ownerGroup,
+            'tasks',
+            deps,
+            remainingPollBudget,
+          );
+          const taskFiles = taskSelection.files;
+          sourceHadDeferredFiles ||= taskSelection.deferredCount > 0;
+          remainingPollBudget -= taskFiles.length;
           for (const file of taskFiles) {
             const filePath = path.join(tasksDir, file);
             const taskResult = readIpcJsonFile(filePath);
@@ -559,7 +653,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
       // Clean up stale dispatch IPC folder after processing any remaining files.
       // This avoids a race where the container exits, activeRuntimeFolders is
       // updated, and the watcher finds the orphaned directory on the next poll.
-      if (isStaleDispatch) {
+      if (isStaleDispatch && !sourceHadDeferredFiles) {
         const staleDir = path.join(ipcBaseDir, sourceGroup);
         try {
           fs.rmSync(staleDir, { recursive: true, force: true });
