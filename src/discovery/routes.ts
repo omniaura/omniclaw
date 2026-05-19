@@ -626,15 +626,15 @@ export async function fetchTrustedRemoteAgents(
   return Promise.all(
     peers.map(async (peer): Promise<RemotePeerAgents> => {
       try {
-        const client = getPeerClient(peer.instanceId, ctx);
-        if (!client) throw new Error('Peer not trusted or unreachable');
+        const result = getPeerClientResult(peer.instanceId, ctx);
+        if (!result.client) throw new Error(result.error);
         return {
           instanceId: peer.instanceId,
           instanceName: peer.name,
           online: true,
           host: peer.host,
           port: peer.port,
-          agents: await client.getAgents(),
+          agents: await result.client.getAgents(),
         };
       } catch (err) {
         logger.warn(
@@ -860,24 +860,15 @@ function getPeerClientResult(
   };
 }
 
-/** @deprecated Use getPeerClientResult for better error context */
-function getPeerClient(
-  instanceId: string,
-  ctx: DiscoveryRouteContext,
-): PeerClientLike | null {
-  const result = getPeerClientResult(instanceId, ctx);
-  return result.client ?? null;
-}
-
 async function handleProxyAgents(
   instanceId: string,
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
-  const client = getPeerClient(instanceId, ctx);
-  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+  const result = getPeerClientResult(instanceId, ctx);
+  if (!result.client) return json({ error: result.error }, 403);
 
   try {
-    const agents = await client.getAgents();
+    const agents = await result.client.getAgents();
     return json(agents);
   } catch (err) {
     return json(
@@ -894,18 +885,18 @@ async function handleProxyAgentAvatar(
   agentId: string,
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
-  const client = getPeerClient(instanceId, ctx);
-  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
-  if (!client.getAgentAvatarImage) {
+  const result = getPeerClientResult(instanceId, ctx);
+  if (!result.client) return json({ error: result.error }, 403);
+  if (!result.client.getAgentAvatarImage) {
     return json({ error: 'Peer avatar proxy unavailable' }, 501);
   }
 
   try {
-    const result = await client.getAgentAvatarImage(agentId);
-    if (!result) return new Response(null, { status: 404 });
-    return new Response(result.data, {
+    const avatar = await result.client.getAgentAvatarImage(agentId);
+    if (!avatar) return new Response(null, { status: 404 });
+    return new Response(avatar.data, {
       headers: {
-        'Content-Type': result.contentType,
+        'Content-Type': avatar.contentType,
         'Cache-Control': 'public, max-age=3600',
       },
     });
@@ -924,18 +915,18 @@ async function handleProxyChatIcon(
   jid: string,
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
-  const client = getPeerClient(instanceId, ctx);
-  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
-  if (!client.getChatIcon) {
+  const result = getPeerClientResult(instanceId, ctx);
+  if (!result.client) return json({ error: result.error }, 403);
+  if (!result.client.getChatIcon) {
     return json({ error: 'Peer chat icon proxy unavailable' }, 501);
   }
 
   try {
-    const result = await client.getChatIcon(jid);
-    if (!result) return new Response(null, { status: 404 });
-    return new Response(result.data, {
+    const icon = await result.client.getChatIcon(jid);
+    if (!icon) return new Response(null, { status: 404 });
+    return new Response(icon.data, {
       headers: {
-        'Content-Type': result.contentType,
+        'Content-Type': icon.contentType,
         'Cache-Control': 'public, max-age=3600',
       },
     });
@@ -953,11 +944,11 @@ async function handleProxyStats(
   instanceId: string,
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
-  const client = getPeerClient(instanceId, ctx);
-  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+  const result = getPeerClientResult(instanceId, ctx);
+  if (!result.client) return json({ error: result.error }, 403);
 
   try {
-    const stats = await client.getStats();
+    const stats = await result.client.getStats();
     return json(stats);
   } catch (err) {
     return json(
@@ -1132,14 +1123,14 @@ async function handleContextCompare(
   instanceId: string,
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
-  const client = getPeerClient(instanceId, ctx);
-  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+  const result = getPeerClientResult(instanceId, ctx);
+  if (!result.client) return json({ error: result.error }, 403);
 
   try {
     // Get local files directly, fetch remote in parallel
     const [localFiles, remoteFiles] = await Promise.all([
       Promise.resolve(listLocalContextFiles()),
-      client.listContextFiles(),
+      result.client.listContextFiles(),
     ]);
 
     const localMap = new Map(localFiles.map((f) => [f.path, f]));
@@ -1187,8 +1178,8 @@ async function handleContextPush(
   req: Request,
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
-  const client = getPeerClient(instanceId, ctx);
-  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+  const result = getPeerClientResult(instanceId, ctx);
+  if (!result.client) return json({ error: result.error }, 403);
 
   let body: { path: string };
   try {
@@ -1216,7 +1207,7 @@ async function handleContextPush(
   }
 
   try {
-    await client.writeContextFile(layerPath, content);
+    await result.client.writeContextFile(layerPath, content);
     logger.info({ instanceId, path: body.path }, 'Context file pushed to peer');
     return json({ ok: true, direction: 'push', path: body.path });
   } catch (err) {
@@ -1234,8 +1225,8 @@ async function handleContextPull(
   req: Request,
   ctx: DiscoveryRouteContext,
 ): Promise<Response> {
-  const client = getPeerClient(instanceId, ctx);
-  if (!client) return json({ error: 'Peer not trusted or unreachable' }, 403);
+  const result = getPeerClientResult(instanceId, ctx);
+  if (!result.client) return json({ error: result.error }, 403);
 
   let body: { path: string };
   try {
@@ -1257,7 +1248,7 @@ async function handleContextPull(
 
   try {
     // Fetch content from remote via their context layers API
-    const layers = (await client.getContextLayers({
+    const layers = (await result.client.getContextLayers({
       folder: toLayerPath(body.path),
     })) as Record<
       string,
