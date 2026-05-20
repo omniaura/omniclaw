@@ -22,7 +22,7 @@ If old NanoClaw/early OmniClaw was "Claude in WhatsApp with containers," current
 
 Most agent systems force a bad tradeoff:
 
-- toy bots are easy to run but have no isolation, observability, or operational control
+- toy bots are easy to run but have no isolation, [observability](docs/observability.md), or operational control
 - enterprise frameworks add layers of queues, services, dashboards, and abstractions until nobody can reason about them end to end
 
 OmniClaw aims for the middle path:
