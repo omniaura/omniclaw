@@ -180,6 +180,94 @@ describe('renderTaskTableRows', () => {
       globalThis.Date = RealDate;
     }
   });
+
+  it('formats hour-level relative times with deterministic current time', () => {
+    const RealDate = Date;
+    const fixedNow = new RealDate('2026-05-08T12:00:00.000Z');
+
+    class FixedDate extends RealDate {
+      constructor(value?: string | number | Date) {
+        super(value ?? fixedNow.getTime());
+      }
+
+      static now() {
+        return fixedNow.getTime();
+      }
+    }
+
+    globalThis.Date = FixedDate as DateConstructor;
+    try {
+      const html = renderTaskTableRows([
+        makeTask({
+          id: 'task-hour-relative',
+          next_run: '2026-05-08T14:00:00.000Z',
+          last_run: '2026-05-08T09:00:00.000Z',
+          last_result: 'success',
+        }),
+      ]);
+
+      expect(html).toContain('>in 2h</td>');
+      expect(html).toContain('class="td-time run-success"');
+      expect(html).toContain('>3h ago</td>');
+    } finally {
+      globalThis.Date = RealDate;
+    }
+  });
+
+  it('falls back to raw one-shot schedule values when Date construction fails', () => {
+    const RealDate = Date;
+
+    class ThrowingDate extends RealDate {
+      constructor(value?: string | number | Date) {
+        if (value === 'throw-once') {
+          throw new Error('date unavailable');
+        }
+        super(value);
+      }
+    }
+
+    globalThis.Date = ThrowingDate as DateConstructor;
+    try {
+      const html = renderTaskTableRows([
+        makeTask({
+          id: 'task-once-fallback',
+          schedule_type: 'once',
+          schedule_value: 'throw-once',
+        }),
+      ]);
+
+      expect(html).toContain('<span class="sched-label">throw-once</span>');
+    } finally {
+      globalThis.Date = RealDate;
+    }
+  });
+
+  it('falls back to raw run timestamps when Date construction fails', () => {
+    const RealDate = Date;
+
+    class ThrowingDate extends RealDate {
+      constructor(value?: string | number | Date) {
+        if (value === 'throw-relative') {
+          throw new Error('date unavailable');
+        }
+        super(value);
+      }
+    }
+
+    globalThis.Date = ThrowingDate as DateConstructor;
+    try {
+      const html = renderTaskTableRows([
+        makeTask({
+          id: 'task-relative-fallback',
+          next_run: 'throw-relative',
+        }),
+      ]);
+
+      expect(html).toContain('>throw-relative</td>');
+    } finally {
+      globalThis.Date = RealDate;
+    }
+  });
 });
 
 describe('renderTasksContent', () => {
