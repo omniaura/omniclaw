@@ -129,7 +129,9 @@ Continue removing weight while the architecture settles.
 
 #### Observability and Operator UX
 
-Logs and web pages exist, but the operator story is still incomplete.
+Logs and web pages exist, but the operator story is still incomplete. The
+[observability reference](./observability.md) documents what is already exposed
+on `/system` and `/ipc` today; the items below extend it.
 
 - better surfacing of active runs, queue state, peer health, and task outcomes
 - lightweight diagnostics for why an agent is idle, blocked, retrying, or offline
