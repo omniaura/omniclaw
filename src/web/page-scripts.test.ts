@@ -130,6 +130,17 @@ describe('conversations page script', () => {
     expect(script).toContain('msg-md');
   });
 
+  it('sanitizes markdown output to block javascript: links and raw HTML', () => {
+    const script = allPageScripts().conversations;
+    // After markdown parsing, the result must pass through the existing
+    // allowlist sanitizer so anchors with javascript: hrefs are stripped.
+    expect(script).toContain(
+      'window.__sanitizeHtml?window.__sanitizeHtml(html):html',
+    );
+    // Pre-markdown escape must still happen to keep raw HTML out of marked.
+    expect(script).toContain('marked.parse(window.__esc(text))');
+  });
+
   it('subscribes to SSE for live message updates', () => {
     const script = allPageScripts().conversations;
     expect(script).toContain('function startLiveSse(){');

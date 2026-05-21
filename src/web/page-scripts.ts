@@ -1345,10 +1345,12 @@ function conversationsScript(): string {
     '}',
     'loadMarked();',
     '',
-    // Render markdown safely: escape HTML first, then parse markdown
+    // Render markdown safely: escape HTML first, parse markdown,
+    // then sanitize parsed HTML to strip unsafe attributes (e.g. javascript: hrefs)
     'function renderMd(text){',
     '  if(!markedReady)return window.__esc(text);',
-    '  return marked.parse(window.__esc(text));',
+    '  var html=marked.parse(window.__esc(text));',
+    '  return window.__sanitizeHtml?window.__sanitizeHtml(html):html;',
     '}',
     '',
     // Tab switching
