@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, mock } from 'bun:test';
 
 import {
   checkPeerAuth,
+  fetchTrustedRemoteAgents,
   handleDiscoveryRequest,
   type DiscoveryRouteContext,
 } from './routes.js';
@@ -79,6 +80,293 @@ afterEach(() => {
 });
 
 describe('handleDiscoveryRequest', () => {
+  it('merges discovered and stored peers while omitting revoked stored-only peers', async () => {
+    const discoveredPeers = new Map([
+      [
+        'trusted-online',
+        {
+          instanceId: 'trusted-online',
+          name: 'Trusted Online',
+          host: '10.0.0.10',
+          port: 6100,
+          addresses: ['10.0.0.10'],
+          version: '1.0.0',
+          firstSeen: '2026-05-21T00:00:00.000Z',
+        },
+      ],
+      [
+        'new-peer',
+        {
+          instanceId: 'new-peer',
+          name: 'New Peer',
+          host: '10.0.0.11',
+          port: 6101,
+          addresses: ['10.0.0.11'],
+          version: '1.0.0',
+          firstSeen: '2026-05-21T00:00:00.000Z',
+        },
+      ],
+    ]);
+
+    const req = new Request('http://localhost/api/discovery/peers', {
+      method: 'GET',
+    });
+    const ctx = makeContext({
+      discovery: { getPeers: () => discoveredPeers, stop: () => {} },
+      trustStore: {
+        getAllPeers: () => [
+          {
+            instanceId: 'trusted-online',
+            name: 'Stored Trusted Name',
+            sharedSecret: 'secret',
+            status: 'trusted',
+            host: '192.0.2.10',
+            port: 6200,
+            approvedAt: '2026-05-20T00:00:00.000Z',
+            lastSeen: '2026-05-20T01:00:00.000Z',
+            createdAt: '2026-05-19T00:00:00.000Z',
+          },
+          {
+            instanceId: 'trusted-offline',
+            name: 'Trusted Offline',
+            sharedSecret: 'secret',
+            status: 'trusted',
+            host: '192.0.2.20',
+            port: 6201,
+            approvedAt: '2026-05-20T00:00:00.000Z',
+            lastSeen: null,
+            createdAt: '2026-05-19T00:00:00.000Z',
+          },
+          {
+            instanceId: 'revoked-offline',
+            name: 'Revoked Offline',
+            sharedSecret: null,
+            status: 'revoked',
+            host: '192.0.2.30',
+            port: 6202,
+            approvedAt: null,
+            lastSeen: null,
+            createdAt: '2026-05-19T00:00:00.000Z',
+          },
+        ],
+      } as any,
+    });
+
+    const res = await handleDiscoveryRequest(req, new URL(req.url), ctx);
+    expect(res).not.toBeNull();
+    expect(await (res as Response).json()).toEqual([
+      {
+        instanceId: 'trusted-online',
+        name: 'Trusted Online',
+        host: '10.0.0.10',
+        port: 6100,
+        addresses: ['10.0.0.10'],
+        status: 'trusted',
+        online: true,
+        approvedAt: '2026-05-20T00:00:00.000Z',
+        lastSeen: '2026-05-20T01:00:00.000Z',
+      },
+      {
+        instanceId: 'new-peer',
+        name: 'New Peer',
+        host: '10.0.0.11',
+        port: 6101,
+        addresses: ['10.0.0.11'],
+        status: 'discovered',
+        online: true,
+        approvedAt: null,
+        lastSeen: null,
+      },
+      {
+        instanceId: 'trusted-offline',
+        name: 'Trusted Offline',
+        host: '192.0.2.20',
+        port: 6201,
+        addresses: [],
+        status: 'trusted',
+        online: false,
+        approvedAt: '2026-05-20T00:00:00.000Z',
+        lastSeen: null,
+      },
+    ]);
+  });
+
+  it('fetches agents only from online trusted peers and reports fetch failures offline', async () => {
+    const clientInputs: Array<{
+      instanceId: string;
+      host: string | null;
+      port: number | null;
+      sharedSecret: string | null;
+    }> = [];
+    const lastSeenUpdates: string[] = [];
+    const storedPeers = [
+      {
+        instanceId: 'trusted-online',
+        name: 'Trusted Online',
+        sharedSecret: 'secret-a',
+        status: 'trusted',
+        host: '192.0.2.10',
+        port: 6200,
+        approvedAt: '2026-05-20T00:00:00.000Z',
+        lastSeen: null,
+        createdAt: '2026-05-19T00:00:00.000Z',
+      },
+      {
+        instanceId: 'trusted-failing',
+        name: 'Trusted Failing',
+        sharedSecret: 'secret-b',
+        status: 'trusted',
+        host: '192.0.2.11',
+        port: 6201,
+        approvedAt: '2026-05-20T00:00:00.000Z',
+        lastSeen: null,
+        createdAt: '2026-05-19T00:00:00.000Z',
+      },
+      {
+        instanceId: 'trusted-offline',
+        name: 'Trusted Offline',
+        sharedSecret: 'secret-c',
+        status: 'trusted',
+        host: '192.0.2.12',
+        port: 6202,
+        approvedAt: '2026-05-20T00:00:00.000Z',
+        lastSeen: null,
+        createdAt: '2026-05-19T00:00:00.000Z',
+      },
+      {
+        instanceId: 'pending-online',
+        name: 'Pending Online',
+        sharedSecret: null,
+        status: 'pending',
+        host: '192.0.2.13',
+        port: 6203,
+        approvedAt: null,
+        lastSeen: null,
+        createdAt: '2026-05-19T00:00:00.000Z',
+      },
+    ];
+    const discoveredPeers = new Map([
+      [
+        'trusted-online',
+        {
+          instanceId: 'trusted-online',
+          name: 'Trusted Online',
+          host: '10.0.0.10',
+          port: 6100,
+          addresses: ['10.0.0.10'],
+          version: '1.0.0',
+          firstSeen: '2026-05-21T00:00:00.000Z',
+        },
+      ],
+      [
+        'trusted-failing',
+        {
+          instanceId: 'trusted-failing',
+          name: 'Trusted Failing',
+          host: '10.0.0.11',
+          port: 6101,
+          addresses: ['10.0.0.11'],
+          version: '1.0.0',
+          firstSeen: '2026-05-21T00:00:00.000Z',
+        },
+      ],
+      [
+        'pending-online',
+        {
+          instanceId: 'pending-online',
+          name: 'Pending Online',
+          host: '10.0.0.13',
+          port: 6103,
+          addresses: ['10.0.0.13'],
+          version: '1.0.0',
+          firstSeen: '2026-05-21T00:00:00.000Z',
+        },
+      ],
+    ]);
+
+    const ctx = makeContext({
+      discovery: { getPeers: () => discoveredPeers, stop: () => {} },
+      trustStore: {
+        getAllPeers: () => storedPeers,
+        getPeer: (instanceId: string) =>
+          storedPeers.find((peer) => peer.instanceId === instanceId) ?? null,
+        updatePeerLastSeen: (instanceId: string) => {
+          lastSeenUpdates.push(instanceId);
+        },
+      } as any,
+      createPeerClient: (peer) => {
+        clientInputs.push(peer);
+        return {
+          getAgents: async () => {
+            if (peer.instanceId === 'trusted-failing') {
+              throw new Error('remote unavailable');
+            }
+            return [
+              {
+                id: 'remote-agent',
+                name: 'Remote Agent',
+                folder: 'remote-agent',
+                backend: 'docker',
+                agentRuntime: 'opencode',
+                channels: [],
+              },
+            ];
+          },
+          getStats: async () => ({}),
+          streamLogs: async () => new Response(''),
+          getContextLayers: async () => ({}),
+          listContextFiles: async () => [],
+          writeContextFile: async () => ({ ok: true }),
+        };
+      },
+    });
+
+    const result = await fetchTrustedRemoteAgents(ctx);
+
+    expect(clientInputs).toEqual([
+      {
+        instanceId: 'trusted-online',
+        host: '10.0.0.10',
+        port: 6100,
+        sharedSecret: 'secret-a',
+      },
+      {
+        instanceId: 'trusted-failing',
+        host: '10.0.0.11',
+        port: 6101,
+        sharedSecret: 'secret-b',
+      },
+    ]);
+    expect(lastSeenUpdates).toEqual(['trusted-online', 'trusted-failing']);
+    expect(result).toEqual([
+      {
+        instanceId: 'trusted-online',
+        instanceName: 'Trusted Online',
+        online: true,
+        host: '10.0.0.10',
+        port: 6100,
+        agents: [
+          {
+            id: 'remote-agent',
+            name: 'Remote Agent',
+            folder: 'remote-agent',
+            backend: 'docker',
+            agentRuntime: 'opencode',
+            channels: [],
+          },
+        ],
+      },
+      {
+        instanceId: 'trusted-failing',
+        instanceName: 'Trusted Failing',
+        online: false,
+        host: '10.0.0.11',
+        port: 6101,
+        agents: [],
+      },
+    ]);
+  });
+
   it('does not replay stored secrets when a trusted peer re-pairs', async () => {
     const fetchSpy = mock(() => {
       throw new Error('should not be called');
