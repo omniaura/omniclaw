@@ -23,6 +23,31 @@ Run `./.claude/skills/setup/scripts/01-check-environment.sh` and parse the statu
 
 Install brew/nvm first if needed. Re-run environment check after to confirm NODE_OK=true.
 
+## 1b. Mac Server-Mode Check (macOS only)
+
+If `PLATFORM=macos` from the previous step, run `./.claude/skills/setup/scripts/00-check-mac-server-mode.sh` and parse the status block.
+
+This check matters most for **Mac mini** deployments (where `IS_MAC_MINI=true`), but applies to any macOS host that needs to stay up 24/7. The Mac needs:
+
+- `SLEEP=0` (system never sleeps)
+- `AUTORESTART=1` (auto-restart after power failure)
+- `SSH_OK=true` (Remote Login enabled, so you can administer the box)
+- `AUTOLOGIN_OK=true` (user auto-logs in after reboot — required for the launchd user agent to start without manual login)
+
+**If `NEEDS_FIXUP=true`:** AskUserQuestion whether to apply the server-mode fixup.
+
+If yes, tell the user to open a new terminal tab and run (the fixup needs `sudo`, which won't work from this shell):
+
+```bash
+sudo bash <FIXUP_SCRIPT>
+```
+
+…where `<FIXUP_SCRIPT>` is the path emitted in the status block (`.agents/skills/setup/scripts/mac-server-mode.sh`). The script is idempotent and prints pmset state before/after, prompts to enable SSH, and tells the user how to enable auto-login (it does not script auto-login because macOS stores the password obfuscated-not-encrypted — leave that step to the user via System Settings > Users & Groups > Automatic Login).
+
+After the user reports back that the script finished, re-run `00-check-mac-server-mode.sh` to confirm `NEEDS_FIXUP=false`. If the user declines, note it and proceed — they can run the fixup later.
+
+**Note:** sleep prevention is intentionally handled at the OS layer (via `pmset`), not by wrapping the launchd command in `caffeinate`. The OS knows how to do this correctly; app-level caffeinate also forced the display awake on headless servers, which was wasteful.
+
 ## 2. Install Dependencies
 
 Run `./.claude/skills/setup/scripts/02-install-deps.sh` and parse the status block.
