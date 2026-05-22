@@ -19,6 +19,7 @@ description: Run initial OmniClaw setup. Use when user wants to install dependen
 | add agent to channel, subscribe agent, register agent in chat, new channel for agent                                          | → read [guides/agents-and-context.md](guides/agents-and-context.md) (see "Adding an existing agent to a new channel" or "Adding a new agent to an existing channel") |
 | agent identity, context, workspace mounts, agent-to-agent routing, triggers, wrong identity, sender identity, channel context | → read [guides/agents-and-context.md](guides/agents-and-context.md)                                                                                                  |
 | linger, ssh disconnect, service dies, agents go offline                                                                       | → [Linger fix](#linger-fix) below                                                                                                                                    |
+| mac mini, mac server mode, force-shutdown, pmset, sleep, autorestart, auto-login, mac wakes up                                | → [Mac server-mode fix](#mac-server-mode-fix) below                                                                                                                  |
 | broken, not working, error, troubleshoot                                                                                      | → read [guides/troubleshooting.md](guides/troubleshooting.md)                                                                                                        |
 
 ---
@@ -107,6 +108,28 @@ loginctl show-user $(whoami) | grep Linger
 ```
 
 Without linger, systemd tears down all user services when the last session ends. This is also handled automatically by step 10 (`08-setup-service.sh`) during fresh install.
+
+---
+
+## Mac server-mode fix
+
+**macOS only.** If user reports the Mac (especially a Mac mini) requiring force-shutdowns, going to sleep, or not coming back after a power blip:
+
+```bash
+./.claude/skills/setup/scripts/00-check-mac-server-mode.sh
+```
+
+Parse the status block. If `NEEDS_FIXUP=true`, AskUserQuestion whether to apply the fixup. If yes, tell the user to open a new terminal tab and run:
+
+```bash
+sudo bash .agents/skills/setup/scripts/mac-server-mode.sh
+```
+
+The fixup is sudo-only and interactive (it prompts to enable SSH), so it cannot run from this shell. The script sets `pmset sleep=0`, `autorestart=1`, `tcpkeepalive=1`, `womp=1`, and `disksleep=0`, and prompts the user to enable Remote Login. It does not script auto-login (macOS stores the password obfuscated-not-encrypted) — the user must enable it via System Settings > Users & Groups > Automatic Login.
+
+After the user reports done, re-run `00-check-mac-server-mode.sh` to confirm.
+
+**Note:** sleep prevention lives at the OS layer (`pmset`), not in app code. Earlier versions wrapped the launchd `ProgramArguments` with `caffeinate -dimsu`; that was removed in favor of this OS-level config, which also avoids forcing the display awake on headless servers.
 
 ---
 
