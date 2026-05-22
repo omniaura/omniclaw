@@ -222,7 +222,11 @@ describe('renderTaskTableRows', () => {
         if (value === 'throw-once') {
           throw new Error('date unavailable');
         }
-        super(value);
+        if (value === undefined) {
+          super();
+        } else {
+          super(value);
+        }
       }
     }
 
@@ -250,7 +254,11 @@ describe('renderTaskTableRows', () => {
         if (value === 'throw-relative') {
           throw new Error('date unavailable');
         }
-        super(value);
+        if (value === undefined) {
+          super();
+        } else {
+          super(value);
+        }
       }
     }
 
