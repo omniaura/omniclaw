@@ -1,7 +1,9 @@
 /**
  * Cross-backend file transfer for OmniClaw.
- * Copies files between agents running on different backends
- * (e.g., between Apple Container and Docker instances).
+ * Copies files between agents running on different backends.
+ *
+ * Today there's effectively only one backend (Docker / OrbStack), but the
+ * abstraction is preserved so a future remote/cursor backend can plug in.
  */
 
 import path from 'path';

@@ -20,7 +20,7 @@ The entire codebase should be something you can read and understand. One Node.js
 
 ### Security Through True Isolation
 
-Instead of application-level permission systems trying to prevent agents from accessing things, agents run in actual Linux containers (Apple Container). The isolation is at the OS level. Agents can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your Mac.
+Instead of application-level permission systems trying to prevent agents from accessing things, agents run in actual Linux containers (Docker, with OrbStack on macOS). The isolation is at the OS level. Agents can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your Mac.
 
 ### Built for One User
 
@@ -69,7 +69,7 @@ A personal Claude assistant accessible via WhatsApp, Discord, Telegram, or Slack
 **Core components:**
 
 - **Claude Agent SDK** as the core agent
-- **Multiple backends** for isolated agent execution (Apple Container, Docker)
+- **Container backend** for isolated agent execution (Docker, with OrbStack on macOS)
 - **Multi-channel I/O** — WhatsApp, Discord, Telegram, Slack
 - **Persistent memory** per conversation and globally
 - **Scheduled tasks** that run Claude and can message back
@@ -109,7 +109,7 @@ A personal Claude assistant accessible via WhatsApp, Discord, Telegram, or Slack
 ### Container Isolation
 
 - All agents run inside isolated containers via a pluggable backend system
-- Supported backends: Apple Container (macOS), Docker
+- Supported backend: Docker (OrbStack on macOS, native docker on Linux). The legacy `'apple-container'` BackendType value is retained as an alias for backwards compatibility with DB rows written before the OrbStack migration.
 - Each agent invocation spawns a container with mounted directories
 - Containers provide filesystem isolation - agents can only see mounted paths
 - Bash access is safe because commands run inside the container, not on the host
@@ -206,7 +206,7 @@ A personal Claude assistant accessible via WhatsApp, Discord, Telegram, or Slack
 
 ### Deployment
 
-- **Local**: Runs on Mac via launchd (Apple Container backend)
+- **Local**: Runs on Mac via launchd (Docker via OrbStack)
 - **Docker**: Cross-platform deployment via Docker containers
 - Single Bun process handles routing and orchestration
 

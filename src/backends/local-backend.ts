@@ -1,7 +1,11 @@
 /**
  * Local Backend for OmniClaw
- * Runs agents in Apple Container (or Docker) on the local machine.
+ * Runs agents in Docker (via OrbStack on macOS) on the local machine.
  * Extracted from container-runner.ts.
+ *
+ * Apple Container was removed in May 2026 — it caused kernel panics on
+ * macOS 26 and was a maintenance burden. OrbStack provides the same
+ * Docker-compatible CLI with a much more reliable runtime.
  */
 
 import { $ } from 'bun';
@@ -211,11 +215,10 @@ export function buildVolumeMounts(
     // Mask .env inside the container to prevent secret leakage.
     // The project root mount above exposes .env to the agent (even read-only).
     // Secrets should only flow through the filtered env-dir mount (allowedVars).
-    // Docker: bind-mount /dev/null over .env (file-to-file mounts work in Docker).
-    // Apple Container: only supports directory mounts — rely on hook-level protections instead.
+    // Docker file-to-file bind mounts: bind /dev/null over .env.
     // (Upstream PR #419, Issue #40)
     const projectEnvFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(projectEnvFile) && LOCAL_RUNTIME === 'docker') {
+    if (fs.existsSync(projectEnvFile)) {
       mounts.push({
         hostPath: '/dev/null',
         containerPath: '/workspace/project/.env',
@@ -573,6 +576,7 @@ interface ContainerArgsOpts {
   containerName: string;
   isMain: boolean;
   networkMode?: 'full' | 'none';
+  /** @deprecated Runtime is always docker — kept for backwards-compat with tests. */
   runtime?: string;
 }
 
@@ -582,9 +586,7 @@ export function buildContainerArgs({
   containerName,
   isMain,
   networkMode,
-  runtime,
 }: ContainerArgsOpts): string[] {
-  const isDocker = (runtime ?? LOCAL_RUNTIME) === 'docker';
   const args: string[] = [
     'run',
     '-i',
@@ -595,17 +597,15 @@ export function buildContainerArgs({
     containerName,
   ];
 
-  if (isDocker) {
-    args.push('--pids-limit', '256');
-    args.push('--security-opt', 'no-new-privileges:true');
+  args.push('--pids-limit', '256');
+  args.push('--security-opt', 'no-new-privileges:true');
 
-    // Network isolation: non-main containers have no network access by default.
-    // Main containers retain full network (needed for WebFetch/WebSearch).
-    // Per-group override via containerConfig.networkMode.
-    const effectiveNetwork = networkMode ?? (isMain ? 'full' : 'none');
-    if (effectiveNetwork === 'none') {
-      args.push('--network', 'none');
-    }
+  // Network isolation: non-main containers have no network access by default.
+  // Main containers retain full network (needed for WebFetch/WebSearch).
+  // Per-group override via containerConfig.networkMode.
+  const effectiveNetwork = networkMode ?? (isMain ? 'full' : 'none');
+  if (effectiveNetwork === 'none') {
+    args.push('--network', 'none');
   }
 
   // Pass host timezone so container's local time matches the user's
@@ -654,7 +654,7 @@ export function sharedVmNetworkIsolationError(
 }
 
 export class LocalBackend implements AgentBackend {
-  readonly name = LOCAL_RUNTIME === 'docker' ? 'docker' : 'apple-container';
+  readonly name = 'docker';
   private sharedVm = new SharedVmManager();
 
   async runAgent(
@@ -980,7 +980,11 @@ export class LocalBackend implements AgentBackend {
   }
 
   /**
-   * Run agent in the shared Claude VM via `container exec`.
+   * Run agent in the shared Claude VM via `docker exec`.
+   *
+   * Note: shared-VM mode is currently disabled because it was Apple-Container-
+   * only (see `isSharedVmEnabled`). Kept here for a possible future revival on
+   * docker — not on the live code path.
    * The shared VM is long-running with broad parent mounts;
    * each agent gets its own stdin/stdout pipe and isolated workspace paths.
    */
@@ -1032,7 +1036,7 @@ export class LocalBackend implements AgentBackend {
     // Ensure shared VM is running
     const vmName = await this.sharedVm.ensureRunning();
 
-    // Build `container exec` args with per-agent env vars
+    // Build `docker exec` args with per-agent env vars
     const workspaceFolder = input.channelFolder || folder;
     const execArgs: string[] = [
       'exec',
@@ -1375,28 +1379,9 @@ export class LocalBackend implements AgentBackend {
   }
 
   async initialize(): Promise<void> {
-    const isDocker = LOCAL_RUNTIME === 'docker';
-
-    if (!isDocker) {
-      // Kill any orphaned OmniClaw containers from a previous run (Apple Container only)
-      await $`pkill -f 'container run.*omniclaw-'`.quiet().nothrow();
-
-      // Idempotent start — fast no-op if already running
-      logger.info('Starting Apple Container system...');
-      const start = await $`container system start`.quiet().nothrow();
-      if (start.exitCode !== 0) {
-        logger.error(
-          { stderr: start.stderr.toString() },
-          'Failed to start Apple Container system',
-        );
-        this.printContainerSystemError();
-        throw new Error(
-          'Apple Container system is required but failed to start',
-        );
-      }
-    }
-
-    // Probe to verify containers actually work
+    // Probe to verify Docker is reachable and the image exists.
+    // On macOS, the user must launch OrbStack.app once after install; after that
+    // the docker daemon runs as a background service.
     const probeProc = Bun.spawn(
       [
         LOCAL_RUNTIME,
@@ -1413,108 +1398,48 @@ export class LocalBackend implements AgentBackend {
       },
     );
     const probeStdout = await new Response(probeProc.stdout).text();
+    const probeStderr = await new Response(probeProc.stderr).text();
     const probeExitCode = await probeProc.exited;
-    const probe = { exitCode: probeExitCode, text: () => probeStdout };
-    if (probe.exitCode === 0 && probe.text().trim() === 'ok') {
-      logger.info('Container system ready (probe passed)');
+
+    if (probeExitCode === 0 && probeStdout.trim() === 'ok') {
+      logger.info('Docker runtime ready (probe passed)');
       await this.cleanupOrphanedContainers();
       return;
     }
 
-    if (isDocker) {
-      // Docker daemon is always running; a failed probe is a hard error
-      logger.error(
-        { exitCode: probe.exitCode, output: probe.text().trim() },
-        'Docker container probe failed',
-      );
-      throw new Error(
-        'Docker container probe failed — check that the image exists and Docker is running',
-      );
-    }
-
-    // Probe failed — fall back to full stop/sleep/start cycle (Apple Container only)
-    logger.warn(
-      { exitCode: probe.exitCode, output: probe.text().trim() },
-      'Container probe failed, performing full restart cycle...',
-    );
-    await $`container system stop`.quiet().nothrow();
-    await Bun.sleep(3000);
-
-    const retry = await $`container system start`.quiet().nothrow();
-    if (retry.exitCode !== 0) {
-      logger.error(
-        { stderr: retry.stderr.toString() },
-        'Failed to start Apple Container system on retry',
-      );
-      this.printContainerSystemError();
-      throw new Error('Apple Container system failed to start on retry');
-    }
-
-    const probe2Proc = Bun.spawn(
-      [
-        LOCAL_RUNTIME,
-        'run',
-        '--rm',
-        '--entrypoint',
-        '/bin/echo',
-        CONTAINER_IMAGE,
-        'ok',
-      ],
+    logger.error(
       {
-        stdout: 'pipe',
-        stderr: 'pipe',
+        exitCode: probeExitCode,
+        stdout: probeStdout.trim(),
+        stderr: probeStderr.trim(),
       },
+      'Docker container probe failed',
     );
-    const probe2Stdout = await new Response(probe2Proc.stdout).text();
-    const probe2ExitCode = await probe2Proc.exited;
-    const probe2 = { exitCode: probe2ExitCode, text: () => probe2Stdout };
-    if (probe2.exitCode !== 0 || probe2.text().trim() !== 'ok') {
-      logger.error('Container probe still failing after full restart');
-      this.printContainerSystemError();
-      throw new Error('Container system probe failed after restart');
-    } else {
-      logger.info('Container probe succeeded after full restart');
-    }
-
-    await this.cleanupOrphanedContainers();
-
-    // Start shared Claude VM if enabled
-    if (isSharedVmEnabled()) {
-      await this.sharedVm.cleanupOrphans();
-      await this.sharedVm.ensureRunning();
-      logger.info('Shared Claude VM mode enabled');
-    }
+    this.printDockerError();
+    throw new Error(
+      'Docker container probe failed — check that OrbStack/Docker is running and the omniclaw-agent image is built',
+    );
   }
 
-  private printContainerSystemError(): void {
+  private printDockerError(): void {
     logger.error(
-      'FATAL: Container system failed to start. Run `container system start` and restart the application. See the project README for installation instructions.',
+      'FATAL: Docker (via OrbStack on macOS) is required but not reachable. ' +
+        'On macOS, open OrbStack.app once after install; after that docker works ' +
+        'forever as a background service. On Linux, ensure the docker daemon is ' +
+        'running (`sudo systemctl start docker`). Then rebuild the agent image ' +
+        'with `bash container/build.sh` and restart OmniClaw.',
     );
   }
 
   private async cleanupOrphanedContainers(): Promise<void> {
     try {
-      let orphans: string[];
-      if (LOCAL_RUNTIME === 'docker') {
-        const lsResult =
-          await $`docker ps --filter name=omniclaw- --format {{.Names}}`.quiet();
-        orphans = lsResult
-          .text()
-          .split('\n')
-          .map((s) => s.trim())
-          .filter(Boolean);
-      } else {
-        const lsResult = await $`container ls --format json`.quiet();
-        const containers: { status: string; configuration: { id: string } }[] =
-          JSON.parse(lsResult.text() || '[]');
-        orphans = containers
-          .filter(
-            (c) =>
-              c.status === 'running' &&
-              c.configuration.id.startsWith('omniclaw-'),
-          )
-          .map((c) => c.configuration.id);
-      }
+      const lsResult =
+        await $`docker ps --filter name=omniclaw- --format {{.Names}}`.quiet();
+      const orphans = lsResult
+        .text()
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
       // Validate container names before passing to Bun.spawn.
       // Names come from runtime output — reject any that don't match the
       // expected omniclaw-<safeName>-<hex/timestamp> format to prevent

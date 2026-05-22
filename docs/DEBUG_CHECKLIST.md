@@ -25,9 +25,8 @@ systemctl --user status omniclaw                  # Linux
 loginctl show-user $(whoami) | grep Linger
 # Linger=no → service dies on SSH disconnect. Fix: loginctl enable-linger $(whoami)
 
-# 2. Any running agent containers?
-docker ps --filter name=omniclaw 2>/dev/null                              # Docker
-launchctl list 2>/dev/null | grep 'container-runtime-linux.omniclaw'      # Apple Container
+# 2. Any running agent containers? (Docker via OrbStack on macOS, native docker on Linux)
+docker ps --filter name=omniclaw 2>/dev/null
 
 # 3. Recent errors in service log?
 grep -E '"level":"error"' logs/omniclaw.log | tail -20

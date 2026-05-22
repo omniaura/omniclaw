@@ -205,11 +205,11 @@ Change build context from `container/` to project root (required to access `.cla
 
 ```bash
 # Find:
-container build -t "${IMAGE_NAME}:${TAG}" .
+docker build -t "${IMAGE_NAME}:${TAG}" .
 
 # Replace with:
 cd "$SCRIPT_DIR/.."
-container build -t "${IMAGE_NAME}:${TAG}" -f container/Dockerfile .
+docker build -t "${IMAGE_NAME}:${TAG}" -f container/Dockerfile .
 ```
 
 ---
@@ -412,7 +412,7 @@ If MCP tools not found in container:
 ./container/build.sh 2>&1 | grep -i skill
 
 # Check container has the file
-container run omniclaw-agent ls -la /app/src/skills/
+docker run --rm omniclaw-agent ls -la /app/src/skills/
 ```
 
 ## Security

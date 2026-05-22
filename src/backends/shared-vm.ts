@@ -1,9 +1,14 @@
 /**
- * SharedVmManager — manages a single long-running Apple Container VM
- * that hosts multiple Claude agent-runner processes via `container exec`.
+ * SharedVmManager — manages a single long-running container that hosts
+ * multiple Claude agent-runner processes via `docker exec`.
  *
  * The shared VM is started with broad parent mounts (groups/, data/)
  * so it doesn't need to be recreated when agents register/unregister.
+ *
+ * NOTE: Shared-VM mode is currently disabled. It only ever worked on Apple
+ * Container; after the OrbStack migration the docker `cleanupOrphans` path
+ * uses a different format than this manager expects. This module is kept for
+ * test stability and a possible docker-native revival.
  */
 
 import fs from 'fs';

@@ -4,7 +4,7 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Bun process that connects to WhatsApp, routes messages to Claude Agent SDK running in Apple Container (Linux VMs). Each group has isolated filesystem and memory.
+Single Bun process that connects to WhatsApp, routes messages to Claude Agent SDK running in Docker containers (OrbStack on macOS). Each group has isolated filesystem and memory.
 
 ## Key Files
 
@@ -15,7 +15,7 @@ Single Bun process that connects to WhatsApp, routes messages to Claude Agent SD
 | `src/ipc.ts`                        | IPC watcher and task processing                            |
 | `src/router.ts`                     | Message formatting and outbound routing                    |
 | `src/config.ts`                     | Trigger pattern, paths, intervals                          |
-| `src/backends/`                     | Backend system (Apple Container, Docker)                   |
+| `src/backends/`                     | Backend system (Docker / OrbStack)                         |
 | `src/ipc-snapshots.ts`              | Task and group snapshot utilities for IPC                  |
 | `src/task-scheduler.ts`             | Runs scheduled tasks                                       |
 | `src/db.ts`                         | SQLite operations                                          |
@@ -55,16 +55,14 @@ launchctl unload ~/Library/LaunchAgents/com.omniclaw.plist
 
 ## Container Build Cache
 
-Apple Container's buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild:
+If a rebuild is silently picking up stale `COPY` content, flush docker's builder cache:
 
 ```bash
-container builder stop && container builder rm && container builder start
+docker builder prune -f
 ./container/build.sh
 ```
 
-Always verify after rebuild: `container run -i --rm --entrypoint wc omniclaw-agent:latest -l /app/src/index.ts`
-
-**Always flush the builder cache** before rebuilding if you changed `container/agent-runner/` source files — buildkit caches `COPY` steps aggressively and will silently keep stale files otherwise.
+Always verify after rebuild: `docker run -i --rm --entrypoint wc omniclaw-agent:latest -l /app/src/index.ts`
 
 ## Git Remotes & Pull Requests
 

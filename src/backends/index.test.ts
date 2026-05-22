@@ -69,7 +69,7 @@ describe('backends/index', () => {
   });
 
   describe('initializeBackends', () => {
-    it('initializes only the default backend when no entities are provided', async () => {
+    it('initializes only the default backend (docker) when no entities are provided', async () => {
       const appleBackend = getBackend('apple-container');
       const dockerBackend = getBackend('docker');
       const appleInitSpy = spyOn(
@@ -83,8 +83,9 @@ describe('backends/index', () => {
 
       await initializeBackends({});
 
-      expect(appleInitSpy).toHaveBeenCalledTimes(1);
-      expect(dockerInitSpy).not.toHaveBeenCalled();
+      // Default is now 'docker' (Apple Container removed in OrbStack migration).
+      expect(dockerInitSpy).toHaveBeenCalledTimes(1);
+      expect(appleInitSpy).not.toHaveBeenCalled();
     });
 
     it('deduplicates backend initialization across entities', async () => {

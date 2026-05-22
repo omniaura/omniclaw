@@ -25,10 +25,9 @@ Last updated: 2026-05-02
 
 ### Backends
 
-| Backend                 | Maturity | Notes                                                              |
-| ----------------------- | -------- | ------------------------------------------------------------------ |
-| Apple Container (local) | Stable   | Default path, startup probing                                      |
-| Docker (local)          | Partial  | Supported through the same backend abstraction, less battle-tested |
+| Backend                          | Maturity | Notes                                                                    |
+| -------------------------------- | -------- | ------------------------------------------------------------------------ |
+| Docker (local, OrbStack on macOS) | Stable   | Sole supported backend since the OrbStack migration (replaced Apple Container) |
 
 ### Product Features
 

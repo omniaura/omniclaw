@@ -14,7 +14,7 @@ Run `./.claude/skills/setup/scripts/01-check-environment.sh` and parse the statu
 
 - If HAS_AUTH=true → note that WhatsApp auth exists, offer to skip step 5
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
-- Record PLATFORM, APPLE_CONTAINER, and DOCKER values for step 3
+- Record PLATFORM, DOCKER, and ORBSTACK values for step 3
 
 **If NODE_OK=false:** Ask user if they'd like you to install it:
 
@@ -62,25 +62,35 @@ Run `./.claude/skills/setup/scripts/02-install-deps.sh` and parse the status blo
 
 Schema + migrations run automatically on service startup via `initDatabase()`. No action needed — just ensure `bun run build` succeeds. If startup fails with DB errors, check `logs/omniclaw.error.log`.
 
-## 3. Container Runtime
+## 3. Container Runtime (Docker via OrbStack on macOS)
+
+OmniClaw runs agents in Docker. On macOS the recommended (and tested) Docker
+implementation is [OrbStack](https://orbstack.dev) — it's Apple-Silicon native,
+launches in seconds, and uses a fraction of the resources of Docker Desktop.
+Apple's `container` framework was removed because it caused kernel panics on
+macOS 26 and stored hundreds of GB of stale snapshots.
 
 Use environment check results:
 
-- PLATFORM=linux → Docker. If source references Apple Container, run `/convert-to-docker` first.
-- PLATFORM=macos + APPLE_CONTAINER=installed → apple-container
-- PLATFORM=macos + DOCKER=running + APPLE_CONTAINER=not_found → Docker, run `/convert-to-docker` if needed
-- PLATFORM=macos + DOCKER=installed_not_running → `open -a Docker`, wait 15s, re-check
-- Neither → AskUserQuestion: Apple Container (recommended for macOS) vs Docker?
-  - Docker: install then run `/convert-to-docker`
-  - Apple Container: download from https://github.com/apple/container/releases
+- **PLATFORM=linux:** Docker is required. Install with the distro's package
+  manager or `curl -fsSL https://get.docker.com | sh`, then `sudo systemctl start docker`.
+- **PLATFORM=macos + DOCKER=running:** Ready — proceed to the build step.
+- **PLATFORM=macos + DOCKER=installed_not_running:** On macOS the daemon is
+  provided by OrbStack.app (or Docker Desktop). Open OrbStack.app, wait ~5 s
+  for the menu-bar icon to settle, then re-run `01-check-environment.sh`.
+- **PLATFORM=macos + DOCKER=not_found:** Install OrbStack via `brew install --cask orbstack`,
+  then tell the user to **open OrbStack.app once** (the CLI cannot launch the GUI
+  for them on first install). After that, `docker` will be on PATH and the
+  background daemon stays running. Re-run `01-check-environment.sh` to confirm
+  DOCKER=running.
 
-Run `./.claude/skills/setup/scripts/03-setup-container.sh --runtime <chosen>` and parse.
+Run `./.claude/skills/setup/scripts/03-setup-container.sh` and parse.
 
 **If BUILD_OK=false:** Check `logs/setup.log`.
 
-- Cache issue: `container builder stop && container builder rm && container builder start` (Apple) or `docker builder prune -f` (Docker), retry.
+- Cache issue: `docker builder prune -f`, retry.
 
-**If TEST_OK=false but BUILD_OK=true:** Runtime not fully started. Wait and retry.
+**If TEST_OK=false but BUILD_OK=true:** OrbStack/Docker daemon may not be fully up. Wait 5–10 s and retry.
 
 ## 4. Claude Authentication
 

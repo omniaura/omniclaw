@@ -1,9 +1,12 @@
 /**
  * Backend factory and resolution for OmniClaw.
  * Routes groups to the appropriate backend based on configuration.
+ *
+ * Note: 'apple-container' is retained as a backwards-compat alias for 'docker'.
+ * Existing DB rows still say 'apple-container' — we route them to LocalBackend
+ * (which now uses docker/OrbStack only). Apple Container the runtime is gone.
  */
 
-import { LOCAL_RUNTIME } from '../config.js';
 import { logger } from '../logger.js';
 import { Agent, RegisteredGroup } from '../types.js';
 import { LocalBackend } from './local-backend.js';
@@ -14,22 +17,22 @@ import {
   getBackendType,
 } from './types.js';
 
-const DEFAULT_BACKEND: BackendType = 'apple-container';
+const DEFAULT_BACKEND: BackendType = 'docker';
 
 const backends = new Map<BackendType, AgentBackend>();
 
 /** Get a backend instance by type. Lazily creates singletons. */
 export function getBackend(type: BackendType): AgentBackend {
   if (type === 'cursor-sdk') {
-    const containerKey =
-      LOCAL_RUNTIME === 'docker' ? 'docker' : 'apple-container';
-    return getBackend(containerKey);
+    return getBackend('docker');
   }
 
   let backend = backends.get(type);
   if (backend) return backend;
 
   switch (type) {
+    // 'apple-container' is a legacy alias kept for DB rows written before the
+    // OrbStack migration. It maps to the same LocalBackend singleton as 'docker'.
     case 'apple-container':
     case 'docker':
       backend = new LocalBackend();
@@ -62,7 +65,7 @@ export async function initializeBackends(
   for (const entity of Object.values(entities)) {
     let type = getBackendType(entity);
     if (type === 'cursor-sdk') {
-      type = LOCAL_RUNTIME === 'docker' ? 'docker' : 'apple-container';
+      type = 'docker';
     }
     neededTypes.add(type);
   }

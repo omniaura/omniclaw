@@ -10,7 +10,7 @@ This guide covers debugging the containerized agent execution system.
 ## Architecture Overview
 
 ```
-Host (macOS / Linux)                  Container (Linux VM / Docker)
+Host (macOS / Linux)                  Container (Docker / OrbStack)
 ─────────────────────────────────────────────────────────────────
 src/backends/local-backend.ts          container/agent-runner/
     │                                      │
@@ -95,15 +95,8 @@ The system extracts only authentication variables (`CLAUDE_CODE_OAUTH_TOKEN`, `A
 To verify env vars are reaching the container:
 
 ```bash
-# Docker
 docker run --rm \
   -v $(pwd)/data/env:/workspace/env-dir:ro \
-  --entrypoint /bin/bash omniclaw-agent:latest \
-  -c 'export $(cat /workspace/env-dir/env | xargs); echo "OAuth: ${#CLAUDE_CODE_OAUTH_TOKEN} chars, API: ${#ANTHROPIC_API_KEY} chars"'
-
-# Apple Container
-echo '{}' | container run -i \
-  --mount type=bind,source=$(pwd)/data/env,target=/workspace/env-dir,readonly \
   --entrypoint /bin/bash omniclaw-agent:latest \
   -c 'export $(cat /workspace/env-dir/env | xargs); echo "OAuth: ${#CLAUDE_CODE_OAUTH_TOKEN} chars, API: ${#ANTHROPIC_API_KEY} chars"'
 ```
@@ -113,11 +106,7 @@ echo '{}' | container run -i \
 To check what's mounted inside a container:
 
 ```bash
-# Docker
 docker run --rm --entrypoint /bin/bash omniclaw-agent:latest -c 'ls -la /workspace/'
-
-# Apple Container (quirks: only mounts directories, -v doesn't support :ro)
-container run --rm --entrypoint /bin/bash omniclaw-agent:latest -c 'ls -la /workspace/'
 ```
 
 Expected structure:
@@ -267,8 +256,7 @@ systemctl --user stop omniclaw                                # Linux
 tail -f logs/omniclaw.log
 
 # Check running agent containers
-docker ps --filter name=omniclaw                  # Docker
-launchctl list | grep 'container-runtime-linux.omniclaw'  # Apple Container
+docker ps --filter name=omniclaw
 
 # Rebuild after code changes
 bun run build
@@ -295,8 +283,7 @@ echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isMai
 ### Interactive shell in container:
 
 ```bash
-docker run --rm -it --entrypoint /bin/bash omniclaw-agent:latest   # Docker
-container run --rm -it --entrypoint /bin/bash omniclaw-agent:latest  # Apple Container
+docker run --rm -it --entrypoint /bin/bash omniclaw-agent:latest
 ```
 
 ## SDK Options Reference
@@ -328,12 +315,8 @@ bun run build
 # Rebuild container
 ./container/build.sh
 
-# Force clean rebuild (Docker)
+# Force clean rebuild
 docker builder prune -f && ./container/build.sh
-
-# Force clean rebuild (Apple Container — flush builder cache)
-container builder stop && container builder rm && container builder start
-./container/build.sh
 ```
 
 ## Session Persistence
@@ -425,16 +408,13 @@ echo -e "\n2. Authentication configured?"
 
 echo -e "\n3. Container runtime?"
 if command -v docker &>/dev/null; then
-  docker info &>/dev/null && echo "OK (Docker)" || echo "Docker installed but not running"
-elif command -v container &>/dev/null; then
-  container system status &>/dev/null && echo "OK (Apple Container)" || echo "Apple Container not running"
+  docker info &>/dev/null && echo "OK (Docker)" || echo "Docker installed but not running — open OrbStack/Docker Desktop on macOS, sudo systemctl start docker on Linux"
 else
-  echo "No container runtime found"
+  echo "No docker runtime found. On macOS: brew install --cask orbstack, then open OrbStack.app once."
 fi
 
 echo -e "\n4. Container image?"
 docker images omniclaw-agent:latest --format "OK ({{.Size}})" 2>/dev/null || \
-  (echo '{}' | container run -i --entrypoint /bin/echo omniclaw-agent:latest "OK" 2>/dev/null) || \
   echo "MISSING — run ./container/build.sh"
 
 echo -e "\n5. Recent errors?"

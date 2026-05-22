@@ -36,16 +36,7 @@ else
   log "Node not found"
 fi
 
-# Check Apple Container
-APPLE_CONTAINER="not_found"
-if command -v container >/dev/null 2>&1; then
-  APPLE_CONTAINER="installed"
-  log "Apple Container: installed ($(which container))"
-else
-  log "Apple Container: not found"
-fi
-
-# Check Docker
+# Check Docker (via OrbStack on macOS). Apple Container is no longer supported.
 DOCKER="not_found"
 if command -v docker >/dev/null 2>&1; then
   if docker info >/dev/null 2>&1; then
@@ -57,6 +48,17 @@ if command -v docker >/dev/null 2>&1; then
   fi
 else
   log "Docker: not found"
+fi
+
+# Detect OrbStack specifically on macOS (so we can give better install advice).
+ORBSTACK="not_installed"
+if [ "$PLATFORM" = "macos" ]; then
+  if [ -d "/Applications/OrbStack.app" ]; then
+    ORBSTACK="installed"
+    log "OrbStack: installed"
+  else
+    log "OrbStack: not installed"
+  fi
 fi
 
 # Check existing config
@@ -92,8 +94,8 @@ cat <<EOF
 PLATFORM: $PLATFORM
 NODE_VERSION: $NODE_VERSION
 NODE_OK: $NODE_OK
-APPLE_CONTAINER: $APPLE_CONTAINER
 DOCKER: $DOCKER
+ORBSTACK: $ORBSTACK
 HAS_ENV: $HAS_ENV
 HAS_AUTH: $HAS_AUTH
 HAS_REGISTERED_GROUPS: $HAS_REGISTERED_GROUPS
