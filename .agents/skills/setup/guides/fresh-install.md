@@ -44,6 +44,8 @@ sudo bash <FIXUP_SCRIPT>
 
 …where `<FIXUP_SCRIPT>` is the path emitted in the status block (`.agents/skills/setup/scripts/mac-server-mode.sh`). The script is idempotent and prints pmset state before/after, prompts to enable SSH, and tells the user how to enable auto-login (it does not script auto-login because macOS stores the password obfuscated-not-encrypted — leave that step to the user via System Settings > Users & Groups > Automatic Login).
 
+**FileVault note:** If `FILEVAULT_ON=true` and `AUTOLOGIN_NOTE=filevault_blocks_autologin` in the status block, the user cannot enable Automatic Login through System Settings — macOS blocks it because FileVault derives the disk-decryption key from the login password. The check does not flag this as `NEEDS_FIXUP` on its own. Recommend **keeping FileVault on and accepting a one-time manual login after reboot** (`pmset autorestart=1` still gets the Mac back to the FileVault prompt automatically; the user logs in via Screen Sharing or in person). Alternatives — disable FileVault for true zero-touch reboot, or use `sudo fdesetup authrestart` for planned reboots only — are documented in `SKILL.md` under _Mac server-mode fix → FileVault and auto-login_. Do not script any change to FileVault state.
+
 After the user reports back that the script finished, re-run `00-check-mac-server-mode.sh` to confirm `NEEDS_FIXUP=false`. If the user declines, note it and proceed — they can run the fixup later.
 
 **Note:** sleep prevention is intentionally handled at the OS layer (via `pmset`), not by wrapping the launchd command in `caffeinate`. The OS knows how to do this correctly; app-level caffeinate also forced the display awake on headless servers, which was wasteful.

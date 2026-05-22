@@ -76,11 +76,35 @@ AUTOLOGIN_USER="$(defaults read /Library/Preferences/com.apple.loginwindow autoL
 AUTOLOGIN_OK="false"
 if [ -n "$AUTOLOGIN_USER" ]; then AUTOLOGIN_OK="true"; fi
 
-log "sleep=$SLEEP_VALUE ok=$SLEEP_OK autorestart=$AUTORESTART_VALUE ok=$AUTORESTART_OK ssh_ok=$SSH_OK autologin_ok=$AUTOLOGIN_OK"
+# FileVault — informational only. macOS blocks auto-login while FileVault is on
+# because the login password derives the disk-decryption key. We do NOT script
+# any change to FileVault state; this is purely so the orchestrator can surface
+# the trade-off to the user instead of nagging them to enable auto-login.
+FILEVAULT_RAW="$(fdesetup status 2>/dev/null || true)"
+case "$FILEVAULT_RAW" in
+  *"FileVault is On."*)  FILEVAULT_ON="true" ;;
+  *"FileVault is Off."*) FILEVAULT_ON="false" ;;
+  *)                     FILEVAULT_ON="unknown" ;;
+esac
 
-# Overall status
+# Soft note: FileVault on + auto-login off is expected, not a failure.
+# Surface a hint so the orchestrator can explain the trade-off rather than
+# repeating "no auto-login configured" at the user.
+AUTOLOGIN_NOTE=""
+if [ "$AUTOLOGIN_OK" != "true" ] && [ "$FILEVAULT_ON" = "true" ]; then
+  AUTOLOGIN_NOTE="filevault_blocks_autologin"
+fi
+
+log "sleep=$SLEEP_VALUE ok=$SLEEP_OK autorestart=$AUTORESTART_VALUE ok=$AUTORESTART_OK ssh_ok=$SSH_OK autologin_ok=$AUTOLOGIN_OK filevault_on=$FILEVAULT_ON note=${AUTOLOGIN_NOTE:-none}"
+
+# Overall status. FileVault-on + auto-login-off is a deliberate user choice
+# (Apple won't allow auto-login with FileVault), so don't flag it as needing
+# fixup on that ground alone — the other pmset/SSH settings still might.
 NEEDS_FIXUP="false"
-if [ "$SLEEP_OK" != "true" ] || [ "$AUTORESTART_OK" != "true" ] || [ "$SSH_OK" != "true" ] || [ "$AUTOLOGIN_OK" != "true" ]; then
+if [ "$SLEEP_OK" != "true" ] || [ "$AUTORESTART_OK" != "true" ] || [ "$SSH_OK" != "true" ]; then
+  NEEDS_FIXUP="true"
+fi
+if [ "$AUTOLOGIN_OK" != "true" ] && [ "$FILEVAULT_ON" != "true" ]; then
   NEEDS_FIXUP="true"
 fi
 
@@ -98,6 +122,8 @@ AUTORESTART_OK: $AUTORESTART_OK
 SSH_OK: $SSH_OK
 AUTOLOGIN_USER: ${AUTOLOGIN_USER:-not_set}
 AUTOLOGIN_OK: $AUTOLOGIN_OK
+FILEVAULT_ON: $FILEVAULT_ON
+AUTOLOGIN_NOTE: ${AUTOLOGIN_NOTE:-none}
 NEEDS_FIXUP: $NEEDS_FIXUP
 FIXUP_SCRIPT: $FIXUP_SCRIPT
 STATUS: success
