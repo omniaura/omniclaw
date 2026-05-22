@@ -1,28 +1,27 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 /**
- * Tests for network isolation in container args.
+ * Tests for network configuration in container args.
  *
- * [Upstream PR #460] Non-main containers run with --network none by default
- * to prevent data exfiltration. Main containers keep full network for
- * WebFetch/WebSearch. Per-group override via containerConfig.networkMode.
+ * Default behavior: containers run with full network access so agents can
+ * reach the LLM API (api.anthropic.com) and use WebFetch / WebSearch tools.
+ * Per-group override via containerConfig.networkMode = 'none' opts back
+ * into outbound network isolation.
  */
 
 const { buildContainerArgs } = await import('./local-backend.js');
 
 mock.restore();
 
-describe('buildContainerArgs network isolation', () => {
-  it('non-main containers get --network none by default', () => {
+describe('buildContainerArgs network configuration', () => {
+  it('non-main containers get full network by default', () => {
     const args = buildContainerArgs({
       mounts: [],
       containerName: 'test-container',
       isMain: false,
       runtime: 'docker',
     });
-    expect(args).toContain('--network');
-    const networkIdx = args.indexOf('--network');
-    expect(args[networkIdx + 1]).toBe('none');
+    expect(args).not.toContain('--network');
   });
 
   it('main containers get full network by default (no --network flag)', () => {
@@ -33,6 +32,19 @@ describe('buildContainerArgs network isolation', () => {
       runtime: 'docker',
     });
     expect(args).not.toContain('--network');
+  });
+
+  it('explicit networkMode=none still isolates', () => {
+    const args = buildContainerArgs({
+      mounts: [],
+      containerName: 'test-container',
+      isMain: false,
+      networkMode: 'none',
+      runtime: 'docker',
+    });
+    expect(args).toContain('--network');
+    const networkIdx = args.indexOf('--network');
+    expect(args[networkIdx + 1]).toBe('none');
   });
 
   it('non-main containers can override to full network via networkMode', () => {
