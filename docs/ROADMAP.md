@@ -25,8 +25,8 @@ Last updated: 2026-05-02
 
 ### Backends
 
-| Backend                          | Maturity | Notes                                                                    |
-| -------------------------------- | -------- | ------------------------------------------------------------------------ |
+| Backend                           | Maturity | Notes                                                                          |
+| --------------------------------- | -------- | ------------------------------------------------------------------------------ |
 | Docker (local, OrbStack on macOS) | Stable   | Sole supported backend since the OrbStack migration (replaced Apple Container) |
 
 ### Product Features

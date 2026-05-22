@@ -443,9 +443,9 @@ interface Backend {
 
 ### Supported Backends
 
-| Backend | Type     | Environment                          | Use Case                       |
-| ------- | -------- | ------------------------------------ | ------------------------------ |
-| Docker  | `docker` | Any (OrbStack on macOS, Linux docker) | Local agent execution          |
+| Backend | Type     | Environment                           | Use Case              |
+| ------- | -------- | ------------------------------------- | --------------------- |
+| Docker  | `docker` | Any (OrbStack on macOS, Linux docker) | Local agent execution |
 
 The legacy `'apple-container'` BackendType value is retained as a backwards-compat
 alias for DB rows written before the OrbStack migration; it routes to the same
