@@ -131,6 +131,14 @@ After the user reports done, re-run `00-check-mac-server-mode.sh` to confirm.
 
 **Note:** sleep prevention lives at the OS layer (`pmset`), not in app code. Earlier versions wrapped the launchd `ProgramArguments` with `caffeinate -dimsu`; that was removed in favor of this OS-level config, which also avoids forcing the display awake on headless servers.
 
+### FileVault and auto-login (known trade-off)
+
+If the user tries to enable Automatic Login and macOS replies *"Automatic login can't be turned on because FileVault is enabled,"* that's working as designed — FileVault derives the disk-decryption key from the login password, so auto-login would defeat full-disk encryption. The status block reports `FILEVAULT_ON` and sets `AUTOLOGIN_NOTE=filevault_blocks_autologin` when it sees this combo. Surface the three options below; **do not script any change to FileVault state** — that's a security decision for the user.
+
+- **Option 1 — Disable FileVault.** Gets true zero-touch headless reboot: after a panic plus `pmset autorestart=1` the Mac comes back to a logged-in session and omniclaw is online again with no human in the loop. Trade-off: full-disk encryption is gone, so anyone with physical access to the machine has access to the data. Only acceptable if the Mac mini lives somewhere physically secure (locked office, home server closet). Not the default recommendation.
+- **Option 2 — Keep FileVault, accept manual login on reboot (recommended).** `pmset autorestart=1` still gets the Mac back to the FileVault password prompt automatically; the user logs in once via Screen Sharing or in person and omniclaw resumes. Best balance of security and recovery for most setups, and panics should be rare now that we're off Apple's `container` framework.
+- **Option 3 — `sudo fdesetup authrestart` for planned reboots.** Stashes the FileVault key in EFI for the *next* boot only, so a user-initiated reboot (e.g. macOS update) comes back fully unattended. Does not help with surprise panics — Apple deliberately closes that path for security reasons.
+
 ---
 
 ## Verify
