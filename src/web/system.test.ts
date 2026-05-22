@@ -576,6 +576,84 @@ describe('buildHealthData', () => {
     expect(health.queue.message_lane_reasons.running).toBe(1);
     expect(health.queue.task_lane_reasons['back-pressure']).toBe(1);
   });
+
+  it('defaults recent task outcomes to zeroes when provider lacks getRecentTaskOutcomes', () => {
+    const health = buildHealthData(makeState(), 0);
+    expect(health.recent_task_outcomes.total).toBe(0);
+    expect(health.recent_task_outcomes.success).toBe(0);
+    expect(health.recent_task_outcomes.error).toBe(0);
+    expect(health.recent_task_outcomes.by_outcome_state).toEqual({
+      done: 0,
+      blocked: 0,
+      abandoned: 0,
+      unknown: 0,
+    });
+    expect(health.recent_task_outcomes.window_ms).toBeGreaterThan(0);
+  });
+
+  it('surfaces recent task outcomes from the provider', () => {
+    const base = makeState();
+    let calledWithSince: string | null = null;
+    const state: WebStateProvider = {
+      ...base,
+      getRecentTaskOutcomes: (sinceIso) => {
+        calledWithSince = sinceIso;
+        return {
+          total: 5,
+          success: 3,
+          error: 2,
+          by_outcome_state: {
+            done: 2,
+            blocked: 1,
+            abandoned: 1,
+            unknown: 1,
+          },
+        };
+      },
+    };
+    const health = buildHealthData(state, 0);
+    const since = calledWithSince as string | null;
+    expect(since).not.toBeNull();
+    // Provider receives a valid ISO timestamp in the recent past.
+    expect(new Date(since!).toISOString()).toBe(since!);
+    expect(Date.now() - new Date(since!).getTime()).toBeGreaterThan(0);
+    expect(health.recent_task_outcomes.total).toBe(5);
+    expect(health.recent_task_outcomes.success).toBe(3);
+    expect(health.recent_task_outcomes.error).toBe(2);
+    expect(health.recent_task_outcomes.by_outcome_state).toEqual({
+      done: 2,
+      blocked: 1,
+      abandoned: 1,
+      unknown: 1,
+    });
+  });
+
+  it('renders the recent task outcomes tile on /system', () => {
+    const base = makeState();
+    const state: WebStateProvider = {
+      ...base,
+      getRecentTaskOutcomes: () => ({
+        total: 7,
+        success: 4,
+        error: 3,
+        by_outcome_state: {
+          done: 3,
+          blocked: 2,
+          abandoned: 1,
+          unknown: 1,
+        },
+      }),
+    };
+    const html = renderSystemContent(state, 0);
+    expect(html).toContain('recent task outcomes');
+    expect(html).toContain('sys-recent-total');
+    expect(html).toContain('sys-recent-success');
+    expect(html).toContain('sys-recent-error');
+    expect(html).toContain('sys-recent-outcome-done');
+    expect(html).toContain('sys-recent-outcome-blocked');
+    expect(html).toContain('sys-recent-outcome-abandoned');
+    expect(html).toContain('sys-recent-outcome-unknown');
+  });
 });
 
 describe('GET /api/health route', () => {

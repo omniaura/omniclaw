@@ -1145,6 +1145,63 @@ export function hasSuccessfulRun(taskId: string): boolean {
   return row !== undefined && row !== null;
 }
 
+/**
+ * Aggregate task run outcomes since the given ISO timestamp. Returns total
+ * counts plus a status (success/error) split and a by-outcome-state breakdown
+ * (done / blocked / abandoned / unknown). Used by the /system page to surface
+ * "recent task outcomes" without requiring a per-task drill-down.
+ */
+export function getRecentTaskOutcomeStats(sinceIso: string): {
+  total: number;
+  success: number;
+  error: number;
+  by_outcome_state: {
+    done: number;
+    blocked: number;
+    abandoned: number;
+    unknown: number;
+  };
+} {
+  const rows = db
+    .prepare(
+      `SELECT status, outcome_state, COUNT(*) AS count
+       FROM task_run_logs
+       WHERE run_at >= ?
+       GROUP BY status, outcome_state`,
+    )
+    .all(sinceIso) as Array<{
+    status: string;
+    outcome_state: string | null;
+    count: number;
+  }>;
+
+  const result = {
+    total: 0,
+    success: 0,
+    error: 0,
+    by_outcome_state: {
+      done: 0,
+      blocked: 0,
+      abandoned: 0,
+      unknown: 0,
+    },
+  };
+
+  for (const row of rows) {
+    const n = row.count;
+    result.total += n;
+    if (row.status === 'success') result.success += n;
+    else if (row.status === 'error') result.error += n;
+    const state = row.outcome_state;
+    if (state === 'done') result.by_outcome_state.done += n;
+    else if (state === 'blocked') result.by_outcome_state.blocked += n;
+    else if (state === 'abandoned') result.by_outcome_state.abandoned += n;
+    else result.by_outcome_state.unknown += n;
+  }
+
+  return result;
+}
+
 // --- Router state accessors ---
 
 export function getRouterState(key: string): string | undefined {
