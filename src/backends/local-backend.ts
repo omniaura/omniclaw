@@ -600,10 +600,11 @@ export function buildContainerArgs({
   args.push('--pids-limit', '256');
   args.push('--security-opt', 'no-new-privileges:true');
 
-  // Network isolation: non-main containers have no network access by default.
-  // Main containers retain full network (needed for WebFetch/WebSearch).
-  // Per-group override via containerConfig.networkMode.
-  const effectiveNetwork = networkMode ?? (isMain ? 'full' : 'none');
+  // Network access: default to 'full' for both main and non-main containers.
+  // Agents need outbound network for the LLM API (api.anthropic.com) and for
+  // tool calls like WebFetch / WebSearch. Per-group override via
+  // containerConfig.networkMode = 'none' opts back into isolation.
+  const effectiveNetwork = networkMode ?? 'full';
   if (effectiveNetwork === 'none') {
     args.push('--network', 'none');
   }
@@ -649,7 +650,7 @@ export function sharedVmNetworkIsolationError(
   return {
     status: 'error',
     result: null,
-    error: `${SHARED_VM_NETWORK_ISOLATION_ERROR_CODE}: Shared-VM mode does not enforce per-agent network isolation. Disable shared-VM mode for ${groupName} or set containerConfig.networkMode to 'full' explicitly.`,
+    error: `${SHARED_VM_NETWORK_ISOLATION_ERROR_CODE}: Shared-VM mode does not enforce per-agent network isolation. Disable shared-VM mode for ${groupName} or remove containerConfig.networkMode='none' (default is 'full').`,
   };
 }
 
@@ -690,8 +691,7 @@ export class LocalBackend implements AgentBackend {
       { allowGcpCredentials: !!containerCfg?.allowGcpCredentials },
     );
     const containerName = makeContainerName(folder, runtimeFolder);
-    const effectiveNetwork =
-      containerCfg?.networkMode ?? (input.isMain ? 'full' : 'none');
+    const effectiveNetwork = containerCfg?.networkMode ?? 'full';
 
     const containerArgs = buildContainerArgs({
       mounts,
@@ -1019,8 +1019,7 @@ export class LocalBackend implements AgentBackend {
       { allowGcpCredentials: !!containerCfg?.allowGcpCredentials },
     );
 
-    const effectiveNetwork =
-      containerCfg?.networkMode ?? (input.isMain ? 'full' : 'none');
+    const effectiveNetwork = containerCfg?.networkMode ?? 'full';
     if (effectiveNetwork === 'none') {
       logger.error(
         {

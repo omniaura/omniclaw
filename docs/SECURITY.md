@@ -17,7 +17,7 @@ Agents execute in Docker containers (OrbStack on macOS, native docker on Linux),
 
 - **Process isolation** - Container processes cannot affect the host
 - **Filesystem isolation** - Only explicitly mounted directories are visible
-- **Network isolation** - Non-main containers run with `--network none`, preventing data exfiltration. Main containers retain full network access for WebFetch/WebSearch tools. Per-group override via `containerConfig.networkMode: 'full' | 'none'`
+- **Network access** - Containers default to full network so agents can reach the LLM API (`api.anthropic.com`) and use WebFetch/WebSearch tools. Per-group opt-in to outbound network isolation via `containerConfig.networkMode: 'none'`
 - **Non-root execution** - Runs as unprivileged `bun` user (uid 1000)
 - **Ephemeral containers** - Fresh environment per invocation (`--rm`)
 - **Resource limits** - `--pids-limit 256` (fork bomb prevention), `--no-new-privileges` (privilege escalation prevention)

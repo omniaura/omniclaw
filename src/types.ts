@@ -38,7 +38,7 @@ export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
   memory?: number; // Container memory in MB. Default: 4096
-  networkMode?: 'full' | 'none'; // Default: 'none' for non-main, 'full' for main
+  networkMode?: 'full' | 'none'; // Default: 'full'. Set to 'none' for outbound network isolation.
   /** Extra MCP servers to inject into the agent runtime (SSE/HTTP). Keyed by server name. */
   mcpServers?: Record<string, Record<string, unknown>>;
   /** Explicitly allow Firebase/GCP credentials to flow into the local backend env mount. */
