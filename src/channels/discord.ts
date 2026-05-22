@@ -1075,7 +1075,9 @@ export class DiscordChannel implements Channel {
             safeName,
             'embed',
           );
-          const bytes = await downloadBinaryAttachment(imageUrl);
+          const bytes = await downloadBinaryAttachment(imageUrl, {
+            validateRemoteUrl: true,
+          });
           fs.writeFileSync(filePath, bytes);
           embedParts.push(formatImageMarker(path.basename(filePath)));
         } catch (err) {
