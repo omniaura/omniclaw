@@ -121,9 +121,13 @@ export async function readStreamWithByteLimit(
  */
 export async function fetchWithTimeout(
   url: string,
-  options?: { timeoutMs?: number },
+  options?: {
+    timeoutMs?: number;
+    redirect?: NonNullable<RequestInit['redirect']>;
+  },
 ): Promise<Response> {
   return fetch(url, {
+    redirect: options?.redirect,
     signal: AbortSignal.timeout(
       options?.timeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS,
     ),
@@ -133,6 +137,7 @@ export async function fetchWithTimeout(
 export interface AttachmentDownloadOptions {
   maxBytes?: number;
   timeoutMs?: number;
+  redirect?: NonNullable<RequestInit['redirect']>;
   /** Validate and DNS-pin untrusted remote URLs before fetching. */
   validateRemoteUrl?: boolean;
   /** Override DNS resolution (primarily for tests). */
@@ -155,7 +160,9 @@ async function fetchAttachment(
   }
 
   const pinnedAddress = validation.resolvedAddresses[0];
-  if (!pinnedAddress) return fetchWithTimeout(url, options);
+  if (!pinnedAddress) {
+    return fetchWithTimeout(url, { ...options, redirect: 'manual' });
+  }
 
   return (options.fetchWithPinnedDnsImpl ?? fetchWithPinnedDns)(
     url,

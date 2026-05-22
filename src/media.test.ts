@@ -186,6 +186,38 @@ describe('downloadBinaryAttachment', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('does not follow redirects for validated direct-IP URLs', async () => {
+    const fetchMock = mock(
+      (_url: string | URL | Request, init?: RequestInit) => {
+        if (init?.redirect !== 'manual') {
+          return Promise.resolve(
+            new Response(createStream(['redirected-private-bytes'])),
+          );
+        }
+
+        return Promise.resolve(
+          new Response(null, {
+            status: 302,
+            headers: { Location: 'http://127.0.0.1/private.png' },
+          }),
+        );
+      },
+    ) as unknown as typeof globalThis.fetch;
+    globalThis.fetch = fetchMock;
+
+    await expect(
+      downloadBinaryAttachment('http://93.184.216.34/public.png', {
+        validateRemoteUrl: true,
+      }),
+    ).rejects.toThrow('Download failed with status 302');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://93.184.216.34/public.png',
+      expect.objectContaining({ redirect: 'manual' }),
+    );
+  });
+
   it('enforces default max bytes (10 MiB)', () => {
     expect(MAX_BINARY_DOWNLOAD_BYTES).toBe(10 * 1024 * 1024);
   });
