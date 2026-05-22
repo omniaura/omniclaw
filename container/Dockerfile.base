@@ -147,10 +147,10 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/server /workspace/ext
 # Pre-create /home/bun/.local so Docker bind mounts (e.g. opencode data at
 # /home/bun/.local/share/opencode) don't create it as root, which blocks
 # OpenCode from writing to /home/bun/.local/state/.
-# Apple Container may run with the host uid/gid rather than the image's bun
-# group, so these home directories must be writable by that mapped uid. Dynamic
-# passwd entries are handled with nss_wrapper at runtime, so /etc/passwd stays
-# root-owned and non-writable.
+# When the host runs the container as the host uid/gid (--user $UID:$GID)
+# rather than the image's bun user, these home directories must be writable by
+# that mapped uid. Dynamic passwd entries are handled with nss_wrapper at
+# runtime, so /etc/passwd stays root-owned and non-writable.
 RUN chown -R bun:bun /workspace && chmod 1777 /home/bun \
     && mkdir -p /home/bun/.local/state /home/bun/.local/share \
     && chown -R bun:bun /home/bun/.local \

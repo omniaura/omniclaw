@@ -25,15 +25,15 @@ git pull
 The old `nanoclaw-agent:latest` image won't work — IPC markers changed from `NANOCLAW_OUTPUT_START/END` to `OMNICLAW_OUTPUT_START/END`. You must rebuild.
 
 ```bash
-# Full cache bust (required — buildkit caches stale files)
-container builder stop && container builder rm && container builder start
+# Full cache bust if a previous rebuild silently kept stale COPY layers
+docker builder prune -f
 ./container/build.sh
 ```
 
 Verify the new image:
 
 ```bash
-container run -i --rm --entrypoint wc omniclaw-agent:latest -l /app/src/index.ts
+docker run -i --rm --entrypoint wc omniclaw-agent:latest -l /app/src/index.ts
 ```
 
 ### 3. Migrate Config Directory
@@ -108,7 +108,7 @@ GitHub auto-redirects old URLs, so this isn't urgent but keeps things clean.
 
 ```bash
 # Remove old container image
-container rmi nanoclaw-agent:latest 2>/dev/null || true
+docker rmi nanoclaw-agent:latest 2>/dev/null || true
 
 # Remove old config directory (after confirming omniclaw config works)
 rm -rf ~/.config/nanoclaw

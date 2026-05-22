@@ -135,7 +135,7 @@ if [ -f "docker-compose.yml" ]; then
 elif [ -f "container/build.sh" ]; then
     bash container/build.sh
 else
-    log "No container build method found, skipping container rebuild"
+    log "No docker build method found, skipping container rebuild"
 fi
 
 # Wait for agents to be idle before restarting

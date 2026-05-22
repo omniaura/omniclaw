@@ -20,7 +20,7 @@ Graphite CLI enables stacked pull requests workflow, making it easier to manage 
 ## Prerequisites
 
 - GitHub token must be configured (`GITHUB_TOKEN` in `.env`)
-- Container runtime must be available (Docker or Apple Container)
+- Docker runtime must be available (OrbStack on macOS, native docker on Linux)
 
 ## Usage
 

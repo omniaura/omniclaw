@@ -24,12 +24,13 @@ If `loginctl enable-linger` fails with a permissions error, it may need sudo or 
 
 ## Container agent fails ("Claude Code process exited with code 1")
 
-Ensure container runtime is running:
+Ensure Docker is running:
 
-- Apple Container: `container system start`
-- Docker: `open -a Docker`
+- macOS (OrbStack): `open -a OrbStack` (or just launch OrbStack from the Dock)
+- macOS (Docker Desktop): `open -a Docker`
+- Linux: `sudo systemctl start docker`
 
-Check container logs: `groups/main/logs/container-*.log`
+Verify with `docker info`. Then check container logs: `groups/main/logs/container-*.log`
 
 ## No response to messages
 

@@ -2,8 +2,10 @@
 # macOS: launchctl plist in ~/Library/LaunchAgents/com.omniclaw.plist
 # Linux: systemd user unit (systemctl --user)
 
-# Cross-platform: detect Apple Container CLI vs Docker
-_container_cmd := if `command -v container 2>/dev/null || true` != "" { "container" } else { "docker" }
+# OmniClaw runs on Docker only (OrbStack on macOS). Apple Container was removed
+# in the OrbStack migration. The CONTAINER_CMD env var is preserved as a knob
+# in container/build.sh but it ignores anything other than 'docker'.
+_container_cmd := "docker"
 
 # Default: start or restart OmniClaw. Bootstraps service if not yet loaded.
 [macos]

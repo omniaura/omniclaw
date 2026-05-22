@@ -1,7 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
-# 03-setup-container.sh — Build container image and verify with test run
+# 03-setup-container.sh — Build the agent container image with Docker (OrbStack on macOS)
+#
+# OmniClaw runs agents in Docker. On macOS we use OrbStack (Apple-Silicon native,
+# lightweight, Docker-CLI-compatible). Apple Container was removed because it
+# caused kernel panics on macOS 26 and was otherwise unreliable.
+#
+# Usage: 03-setup-container.sh [--runtime docker]
+#   --runtime is optional and only accepts 'docker'. The flag is preserved for
+#   backwards compatibility with older fresh-install runs that passed it.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
@@ -11,58 +19,27 @@ mkdir -p "$PROJECT_ROOT/logs"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [setup-container] $*" >> "$LOG_FILE"; }
 
-# Parse args
-RUNTIME=""
+# Parse args — accept --runtime for backwards compat, but enforce docker.
+RUNTIME="docker"
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --runtime) RUNTIME="$2"; shift 2 ;;
+    --runtime)
+      if [ -n "${2:-}" ] && [ "$2" != "docker" ]; then
+        log "WARNING: --runtime=$2 ignored; OmniClaw is docker-only since OrbStack migration"
+      fi
+      shift 2
+      ;;
     *) shift ;;
   esac
 done
 
-if [ -z "$RUNTIME" ]; then
-  log "ERROR: --runtime flag is required (apple-container|docker)"
-  cat <<EOF
-=== OMNICLAW SETUP: SETUP_CONTAINER ===
-RUNTIME: unknown
-IMAGE: omniclaw-agent:latest
-BUILD_OK: false
-TEST_OK: false
-STATUS: failed
-ERROR: missing_runtime_flag
-LOG: logs/setup.log
-=== END ===
-EOF
-  exit 4
-fi
-
 IMAGE="omniclaw-agent:latest"
 
-# Determine build/run commands based on runtime
-case "$RUNTIME" in
-  apple-container)
-    if ! command -v container >/dev/null 2>&1; then
-      log "Apple Container runtime not found"
-      cat <<EOF
-=== OMNICLAW SETUP: SETUP_CONTAINER ===
-RUNTIME: apple-container
-IMAGE: $IMAGE
-BUILD_OK: false
-TEST_OK: false
-STATUS: failed
-ERROR: runtime_not_available
-LOG: logs/setup.log
-=== END ===
-EOF
-      exit 2
-    fi
-    BUILD_CMD="container build"
-    RUN_CMD="container"
-    ;;
-  docker)
-    if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
-      log "Docker runtime not available or not running"
-      cat <<EOF
+# Verify docker is reachable. On macOS, this requires OrbStack.app to have been
+# launched at least once — after that it runs as a background service forever.
+if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+  log "Docker not available — is OrbStack installed and launched at least once?"
+  cat <<EOF
 === OMNICLAW SETUP: SETUP_CONTAINER ===
 RUNTIME: docker
 IMAGE: $IMAGE
@@ -70,43 +47,25 @@ BUILD_OK: false
 TEST_OK: false
 STATUS: failed
 ERROR: runtime_not_available
+HINT: On macOS, install OrbStack (\`brew install --cask orbstack\`) and open OrbStack.app once. On Linux, \`sudo systemctl start docker\`.
 LOG: logs/setup.log
 === END ===
 EOF
-      exit 2
-    fi
-    BUILD_CMD="docker build"
-    RUN_CMD="docker"
-    ;;
-  *)
-    log "Unknown runtime: $RUNTIME"
-    cat <<EOF
-=== OMNICLAW SETUP: SETUP_CONTAINER ===
-RUNTIME: $RUNTIME
-IMAGE: $IMAGE
-BUILD_OK: false
-TEST_OK: false
-STATUS: failed
-ERROR: unknown_runtime
-LOG: logs/setup.log
-=== END ===
-EOF
-    exit 4
-    ;;
-esac
+  exit 2
+fi
 
-log "Building container with $RUNTIME"
+log "Building container with docker (OrbStack on macOS)"
 
 # Build
 BUILD_OK="false"
-if (cd "$PROJECT_ROOT" && $BUILD_CMD -t "$IMAGE" -f container/Dockerfile .) >> "$LOG_FILE" 2>&1; then
+if (cd "$PROJECT_ROOT" && docker build -t "$IMAGE" -f container/Dockerfile .) >> "$LOG_FILE" 2>&1; then
   BUILD_OK="true"
   log "Container build succeeded"
 else
   log "Container build failed"
   cat <<EOF
 === OMNICLAW SETUP: SETUP_CONTAINER ===
-RUNTIME: $RUNTIME
+RUNTIME: docker
 IMAGE: $IMAGE
 BUILD_OK: false
 TEST_OK: false
@@ -121,7 +80,7 @@ fi
 # Test
 TEST_OK="false"
 log "Testing container with echo command"
-TEST_OUTPUT=$(echo '{}' | $RUN_CMD run -i --rm --entrypoint /bin/echo "$IMAGE" "Container OK" 2>>"$LOG_FILE") || true
+TEST_OUTPUT=$(echo '{}' | docker run -i --rm --entrypoint /bin/echo "$IMAGE" "Container OK" 2>>"$LOG_FILE") || true
 if echo "$TEST_OUTPUT" | grep -q "Container OK"; then
   TEST_OK="true"
   log "Container test passed"
@@ -136,7 +95,7 @@ fi
 
 cat <<EOF
 === OMNICLAW SETUP: SETUP_CONTAINER ===
-RUNTIME: $RUNTIME
+RUNTIME: docker
 IMAGE: $IMAGE
 BUILD_OK: $BUILD_OK
 TEST_OK: $TEST_OK

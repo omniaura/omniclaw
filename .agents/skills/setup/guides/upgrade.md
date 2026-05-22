@@ -20,17 +20,15 @@ If any step fails, it exits without restarting — old service + image stay up s
 **Step 1 — Is the container up to date?**
 
 ```bash
-container run -i --rm --entrypoint wc omniclaw-agent:latest -l /app/src/index.ts
+docker run -i --rm --entrypoint wc omniclaw-agent:latest -l /app/src/index.ts
 ```
 
 Stale or errors → flush cache and rebuild:
 
 ```bash
-container builder stop && container builder rm && container builder start
+docker builder prune -f
 ./container/build.sh
 ```
-
-> `--no-cache` alone doesn't fix this with Apple Container's buildkit — the cache bust is required.
 
 **Step 2 — Restart the service**
 

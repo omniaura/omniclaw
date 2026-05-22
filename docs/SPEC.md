@@ -154,7 +154,7 @@ omniclaw/
 │   ├── backends/
 │   │   ├── index.ts               # Backend initialization and resolution
 │   │   ├── types.ts               # Backend interfaces (ContainerInput, ContainerOutput, Backend)
-│   │   ├── local-backend.ts       # Apple Container + Docker backend
+│   │   ├── local-backend.ts       # Docker (OrbStack) backend
 │   │   └── stream-parser.ts       # Container output stream parsing
 │   │
 │   ├── effect/
@@ -443,10 +443,13 @@ interface Backend {
 
 ### Supported Backends
 
-| Backend         | Type              | Environment   | Use Case                       |
-| --------------- | ----------------- | ------------- | ------------------------------ |
-| Apple Container | `apple-container` | macOS (local) | Development, local agents      |
-| Docker          | `docker`          | Any (local)   | Cross-platform local execution |
+| Backend | Type     | Environment                           | Use Case              |
+| ------- | -------- | ------------------------------------- | --------------------- |
+| Docker  | `docker` | Any (OrbStack on macOS, Linux docker) | Local agent execution |
+
+The legacy `'apple-container'` BackendType value is retained as a backwards-compat
+alias for DB rows written before the OrbStack migration; it routes to the same
+LocalBackend singleton.
 
 ### Backend Selection
 
@@ -455,7 +458,7 @@ Each agent has a `backend` field that determines where it runs:
 ```typescript
 interface Agent {
   id: string;
-  backend: BackendType; // 'apple-container' | 'docker'
+  backend: BackendType; // 'docker' (or legacy 'apple-container' alias)
   // ...
 }
 ```
@@ -756,7 +759,7 @@ All agents are registered in `/workspace/ipc/agent_registry.json`:
       "id": "main",
       "name": "PeytonOmni",
       "jid": "...",
-      "backend": "apple-container",
+      "backend": "docker",
       "description": "Main orchestrator"
     }
   ]
@@ -769,7 +772,7 @@ All agents are registered in `/workspace/ipc/agent_registry.json`:
 Code Review Request:
 1. PeytonOmni — Fetch PR, analyze changes
 2. Delegate to reviewer agent — "Run tests"
-3. Reviewer (Apple Container) — Checkout branch, run tests
+3. Reviewer (Docker) — Checkout branch, run tests
 4. Share results back — via IPC context
 5. PeytonOmni — Post review with test results
 ```
@@ -820,7 +823,7 @@ See [SECURITY.md](./SECURITY.md) for the complete security model. Key points:
 
 ### Container Isolation (Primary Boundary)
 
-All agents run in isolated containers (Apple Container or Docker):
+All agents run in isolated Docker containers (OrbStack on macOS, native docker on Linux):
 
 - **Filesystem isolation** — Only mounted directories visible
 - **Process isolation** — Container processes cannot affect host

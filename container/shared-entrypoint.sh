@@ -2,7 +2,7 @@
 set -e
 
 # Shared Claude VM entrypoint — minimal setup, sleeps forever.
-# Individual agent processes are started via `container exec` using agent-exec.sh.
+# Individual agent processes are started via `docker exec` using agent-exec.sh.
 
 # When running as host uid (--user 501:20), there's no /etc/passwd entry.
 if ! id -un &>/dev/null 2>&1; then

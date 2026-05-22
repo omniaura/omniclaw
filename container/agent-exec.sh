@@ -2,9 +2,12 @@
 set -e
 
 # Per-agent exec wrapper for shared Claude VM.
-# Invoked via: container exec -i -e AGENT_WORKSPACE=... -e AGENT_IPC_DIR=... <vm> /app/agent-exec.sh
+# Invoked via: docker exec -i -e AGENT_WORKSPACE=... -e AGENT_IPC_DIR=... <vm> /app/agent-exec.sh
 #
-# Expects these env vars (set by container exec -e):
+# Note: the shared VM mode is currently disabled because it was Apple-Container-
+# only; this script is retained for future shared-VM-on-docker work.
+#
+# Expects these env vars (set by docker exec -e):
 #   AGENT_WORKSPACE   - e.g. /workspace/groups/main
 #   AGENT_IPC_DIR     - e.g. /data/ipc/main
 #   AGENT_SESSION_DIR - e.g. /data/sessions/main/.claude

@@ -35,7 +35,7 @@ OmniClaw aims for the middle path:
 
 ## What OmniClaw Does
 
-- Runs AI agents behind Apple Container or Docker with explicit mounts and runtime-specific credential allowlists
+- Runs AI agents inside Docker containers (OrbStack on macOS) with explicit mounts and runtime-specific credential allowlists
 - Routes messages from WhatsApp, Discord, Telegram, and Slack into agent-specific workspaces and context layers
 - Manages multiple agents per server/channel topology instead of assuming one bot equals one workspace
 - Ships a built-in operations UI for topology, logs, tasks, conversations, context editing, network discovery, and system status
@@ -148,7 +148,7 @@ agents:
 - macOS or Linux
 - Bun 1.3+
 - [Claude Code](https://claude.ai/download) for setup/customization workflows
-- [Apple Container](https://github.com/apple/container) on macOS or Docker on macOS/Linux
+- Docker — on macOS we recommend [OrbStack](https://orbstack.dev) (Apple-Silicon native, lightweight, Docker-compatible). Docker Desktop also works. On Linux use the distro's docker package.
 
 ## Core Concepts
 
@@ -171,7 +171,7 @@ OmniClaw can load agent/channel registrations from `agents.yaml` at startup. SQL
 agents:
   main:
     name: Omni
-    backend: apple-container
+    backend: docker
     channels:
       - jid: '123@s.whatsapp.net'
         trigger: '@Omni'
@@ -251,7 +251,7 @@ Key modules:
 
 - `src/index.ts` - orchestrator, startup, routing, web state, scheduler wiring
 - `src/channels/` - WhatsApp, Discord, Telegram, Slack adapters
-- `src/backends/` - Apple Container and Docker execution backends
+- `src/backends/` - Docker (OrbStack) execution backend
 - `src/group-queue.ts` - per-folder execution lanes and concurrency limits
 - `src/ipc.ts` - agent IPC watcher and command handling
 - `src/task-scheduler.ts` - cron, interval, and one-shot task execution
@@ -355,10 +355,10 @@ If you change container runner sources, rebuild the agent image:
 ./container/build.sh
 ```
 
-For Apple Container builds, flush build cache aggressively when debugging stale images:
+If a rebuild is silently picking up stale `COPY` content, flush docker's builder cache:
 
 ```bash
-container builder stop && container builder rm && container builder start
+docker builder prune -f
 ./container/build.sh
 ```
 

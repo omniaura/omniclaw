@@ -1,21 +1,34 @@
 #!/bin/bash
-# Build the OmniClaw agent container image
+# Build the OmniClaw agent container image with Docker (OrbStack on macOS).
+#
+# Apple Container was removed in the OrbStack migration — see PR notes for why
+# (kernel panics + 619 GB of orphaned snapshot storage on the reference host).
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Use CONTAINER_CMD from env, or auto-detect (prefer 'container' CLI, fall back to 'docker')
-if [ -z "$CONTAINER_CMD" ]; then
-    if command -v container &>/dev/null; then
-        CONTAINER_CMD="container"
-    elif command -v docker &>/dev/null; then
-        CONTAINER_CMD="docker"
-    else
-        echo "Error: neither 'container' nor 'docker' found in PATH"
-        exit 1
-    fi
+# CONTAINER_CMD override is kept for backwards compat in case someone has it
+# pinned in their environment, but the only supported value is 'docker'.
+CONTAINER_CMD="${CONTAINER_CMD:-docker}"
+if [ "$CONTAINER_CMD" != "docker" ]; then
+    echo "Warning: CONTAINER_CMD=$CONTAINER_CMD is not supported. Forcing 'docker'."
+    CONTAINER_CMD="docker"
+fi
+
+if ! command -v "$CONTAINER_CMD" &>/dev/null; then
+    echo "Error: 'docker' not found in PATH."
+    echo "On macOS: install OrbStack via 'brew install --cask orbstack' and open OrbStack.app once."
+    echo "On Linux: install Docker (curl -fsSL https://get.docker.com | sh) and start the daemon."
+    exit 1
+fi
+
+if ! "$CONTAINER_CMD" info >/dev/null 2>&1; then
+    echo "Error: Docker daemon is not running."
+    echo "On macOS: open OrbStack.app (or Docker Desktop) and wait for it to start."
+    echo "On Linux: sudo systemctl start docker"
+    exit 1
 fi
 
 BASE_IMAGE_NAME="omniclaw-agent-base"

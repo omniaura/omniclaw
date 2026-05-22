@@ -44,11 +44,9 @@ elif [ "$PLATFORM" = "linux" ]; then
 fi
 log "Service: $SERVICE"
 
-# 2. Check container runtime
+# 2. Check container runtime — OmniClaw requires Docker (OrbStack on macOS).
 CONTAINER_RUNTIME="none"
-if command -v container >/dev/null 2>&1; then
-  CONTAINER_RUNTIME="apple-container"
-elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   CONTAINER_RUNTIME="docker"
 fi
 log "Container runtime: $CONTAINER_RUNTIME"

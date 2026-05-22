@@ -161,7 +161,7 @@ ssh-keyscan github.com gitlab.com >> "$HOME/.ssh/known_hosts" 2>/dev/null || tru
 
 # Buffer stdin then run agent.
 # If /tmp/input.json already exists, skip the stdin buffering step.
-# Apple Container requires EOF to flush stdin pipe.
+# Buffer to a file so the agent reads from a regular file rather than a pipe.
 if [ ! -s /tmp/input.json ]; then
   cat > /tmp/input.json
 fi

@@ -63,7 +63,9 @@ const configSchema = z
       parseBooleanString,
       z.boolean().default(true),
     ),
-    LOCAL_RUNTIME: z.string().default('container'),
+    // Legacy: 'container' (Apple Container) is treated as 'docker'. OmniClaw runs on
+    // OrbStack/Docker only — Apple Container caused kernel panics and was removed.
+    LOCAL_RUNTIME: z.string().default('docker'),
     CONTAINER_IMAGE: z.string().default('omniclaw-agent:latest'),
     CONTAINER_MEMORY: z.string().default('4G'),
     SHARED_CLAUDE_VM: z.preprocess(
@@ -387,7 +389,9 @@ export const AGENTS_CONFIG_PATH = path.resolve(
   CONFIG.AGENTS_CONFIG_PATH,
 );
 
-export const LOCAL_RUNTIME = CONFIG.LOCAL_RUNTIME;
+// LOCAL_RUNTIME is always 'docker' since the migration away from Apple Container.
+// Legacy values like 'container' or 'apple-container' are silently coerced to 'docker'.
+export const LOCAL_RUNTIME = 'docker';
 export const STARTUP_CONFIRMATIONS = CONFIG.STARTUP_CONFIRMATIONS;
 export const CONTAINER_IMAGE = CONFIG.CONTAINER_IMAGE;
 export const CONTAINER_MEMORY = CONFIG.CONTAINER_MEMORY;
