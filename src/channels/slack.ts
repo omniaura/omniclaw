@@ -390,6 +390,24 @@ export class SlackChannel implements Channel {
     );
     let content = resolvedText;
 
+    if (
+      this.multiBotMode &&
+      mentions.length > 0 &&
+      this.botUserId &&
+      !mentions.some((m) => m.id === this.botUserId) &&
+      !/@allagents/i.test(content)
+    ) {
+      logger.debug(
+        {
+          channelId,
+          botId: this.botId,
+          mentionedUserIds: mentions.map((m) => m.id),
+        },
+        'Slack message mentions another bot — ignoring for this bot',
+      );
+      return;
+    }
+
     // Prepend thread context if this is a threaded reply
     if (
       'thread_ts' in event &&
