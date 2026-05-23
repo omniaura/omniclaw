@@ -68,12 +68,14 @@ async function readWhatsAppMediaStream(
   return Buffer.concat(chunks);
 }
 
-// Circuit breaker: force process restart if too many reconnects in a short window.
-// Fixes 408 timeout loops after Mac sleep or network drops where reconnect →
-// AwaitingInitialSync timeout → disconnect cycles for hours without processing messages.
-// [Upstream PR #534]
-const RECONNECT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
-const MAX_RECONNECTS_BEFORE_RESTART = 3;
+// Soft circuit-breaker: log a loud WARN once when a channel has been flapping
+// or stuck in a reconnect loop for too long. We never restart the host process
+// for transient network issues — that historically caused 5-30s of full
+// orchestrator downtime (WhatsApp, Discord, Telegram, Slack, Web UI, mDNS, IPC,
+// scheduled tasks all gone) every time the host had a brief DNS / routing blip.
+// On a flaky-network deployment this cascaded into 8x daily restarts.
+// The reconnect itself is handled by the existing exponential backoff below.
+const EXTENDED_OUTAGE_MS = 30 * 60 * 1000; // 30 minutes
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -101,8 +103,16 @@ export class WhatsAppChannel implements Channel {
   private reconnectAttempt = 0;
   private static readonly RECONNECT_BASE_MS = 2_000;
   private static readonly RECONNECT_MAX_MS = 5 * 60_000; // 5 min cap
-  // Circuit breaker: track reconnect timestamps within sliding window
+  // Up to ±25% jitter so multiple channels don't reconnect in lockstep when
+  // the host comes back from a network blip.
+  private static readonly RECONNECT_JITTER = 0.25;
+  // Tracks reconnect timestamps purely for telemetry / extended-outage warn.
+  // Kept as a field so existing tests that inspect it continue to compile.
   private reconnectTimestamps: number[] = [];
+  // Timestamp of the disconnect that started the current outage (cleared on open).
+  private outageStartedAt: number | null = null;
+  // True once we've logged the extended-outage warn for this outage so we don't spam.
+  private extendedOutageNotified = false;
 
   // Track IDs of messages we sent so the upsert handler can ignore echoes (self-chat loop fix)
   private sentMessageIds = new Set<string>();
@@ -230,36 +240,55 @@ export class WhatsAppChannel implements Channel {
         );
 
         if (shouldReconnect) {
-          // Circuit breaker: exit process if too many reconnects in window
+          // Track when the outage started (for the extended-outage warn). We
+          // do NOT use this to escalate to process.exit — see the comment on
+          // EXTENDED_OUTAGE_MS for why that path was removed.
           const now = Date.now();
+          if (this.outageStartedAt === null) {
+            this.outageStartedAt = now;
+            this.extendedOutageNotified = false;
+          }
           this.reconnectTimestamps.push(now);
-          this.reconnectTimestamps = this.reconnectTimestamps.filter(
-            (t) => now - t < RECONNECT_WINDOW_MS,
-          );
-          if (
-            this.reconnectTimestamps.length >= MAX_RECONNECTS_BEFORE_RESTART
-          ) {
-            logger.error(
-              {
-                count: this.reconnectTimestamps.length,
-                windowMs: RECONNECT_WINDOW_MS,
-              },
-              'Too many reconnections in window — restarting process',
-            );
-            process.exit(1);
+          // Cap the array so it doesn't grow unboundedly during long outages.
+          if (this.reconnectTimestamps.length > 100) {
+            this.reconnectTimestamps = this.reconnectTimestamps.slice(-100);
           }
 
           this.reconnectAttempt++;
-          const delay = Math.min(
+          const baseDelay = Math.min(
             WhatsAppChannel.RECONNECT_BASE_MS *
               2 ** (this.reconnectAttempt - 1),
             WhatsAppChannel.RECONNECT_MAX_MS,
           );
+          // Apply jitter: delay * (1 ± RECONNECT_JITTER)
+          const jitter =
+            (Math.random() * 2 - 1) * WhatsAppChannel.RECONNECT_JITTER;
+          const delay = Math.max(
+            WhatsAppChannel.RECONNECT_BASE_MS,
+            Math.round(baseDelay * (1 + jitter)),
+          );
+
+          const outageMs = now - this.outageStartedAt;
+          if (
+            !this.extendedOutageNotified &&
+            outageMs >= EXTENDED_OUTAGE_MS
+          ) {
+            this.extendedOutageNotified = true;
+            logger.warn(
+              {
+                outageMs,
+                attempts: this.reconnectAttempt,
+                nextDelayMs: delay,
+              },
+              'WhatsApp still disconnected, backing off (will keep retrying at cap)',
+            );
+          }
+
           logger.info(
             {
               attempt: this.reconnectAttempt,
               delayMs: delay,
-              reconnectsInWindow: this.reconnectTimestamps.length,
+              outageMs,
             },
             `WhatsApp disconnected — reconnecting in ${Math.round(delay / 1000)}s`,
           );
@@ -279,8 +308,21 @@ export class WhatsAppChannel implements Channel {
         }
       } else if (connection === 'open') {
         this.connected = true;
+        const wasExtendedOutage = this.extendedOutageNotified;
+        const outageMs =
+          this.outageStartedAt !== null
+            ? Date.now() - this.outageStartedAt
+            : 0;
         this.reconnectAttempt = 0;
         this.reconnectTimestamps = [];
+        this.outageStartedAt = null;
+        this.extendedOutageNotified = false;
+        if (wasExtendedOutage) {
+          logger.info(
+            { outageMs },
+            'WhatsApp reconnected after extended outage',
+          );
+        }
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)

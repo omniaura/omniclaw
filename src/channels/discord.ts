@@ -221,6 +221,13 @@ export interface DiscordChannelOpts {
   ) => SessionCommandResult;
 }
 
+// Per-bot outage telemetry. When a single Discord bot has been disconnected
+// for >EXTENDED_OUTAGE_MS we log a loud WARN once, and an INFO when it comes
+// back. We never restart the host process — discord.js handles reconnection
+// internally via WebSocketShard, and piling a process restart on top of a
+// transient host-network blip historically caused multi-channel outages.
+const DISCORD_EXTENDED_OUTAGE_MS = 30 * 60 * 1000; // 30 minutes
+
 export class DiscordChannel implements Channel {
   name = 'discord';
   prefixAssistantName = false;
@@ -230,6 +237,11 @@ export class DiscordChannel implements Channel {
   private connected = false;
   private opts: DiscordChannelOpts;
   private ownedJids = new Set<string>();
+
+  // Per-bot outage telemetry — see DISCORD_EXTENDED_OUTAGE_MS above.
+  private outageStartedAt: number | null = null;
+  private extendedOutageNotified = false;
+  private extendedOutageTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(opts: DiscordChannelOpts) {
     this.opts = opts;
@@ -315,7 +327,52 @@ export class DiscordChannel implements Channel {
       });
 
       this.client.on(Events.Error, (err) => {
-        logger.error({ err }, 'Discord client error');
+        logger.error({ err, botId: this.botId }, 'Discord client error');
+      });
+
+      // discord.js handles reconnection internally (WebSocketShard backoff).
+      // These listeners just surface what's happening so operators can see
+      // transient network blips in the log without us reimplementing retry —
+      // and so we can emit a single loud WARN if a bot stays disconnected for
+      // an extended period. We never escalate to process.exit.
+      this.client.on(Events.ShardDisconnect, (event, shardId) => {
+        this.connected = false;
+        if (this.outageStartedAt === null) {
+          this.outageStartedAt = Date.now();
+          this.extendedOutageNotified = false;
+        }
+        logger.warn(
+          {
+            botId: this.botId,
+            shardId,
+            code: event?.code,
+            reason: event?.reason,
+          },
+          'Discord shard disconnected — discord.js will auto-reconnect',
+        );
+        this.scheduleExtendedOutageCheck();
+      });
+
+      this.client.on(Events.ShardReconnecting, (shardId) => {
+        logger.info(
+          { botId: this.botId, shardId },
+          'Discord shard reconnecting',
+        );
+      });
+
+      this.client.on(Events.ShardResume, (shardId, replayedEvents) => {
+        this.handleShardRecovered(shardId, 'resumed', replayedEvents);
+      });
+
+      this.client.on(Events.ShardReady, (shardId) => {
+        this.handleShardRecovered(shardId, 'ready');
+      });
+
+      this.client.on(Events.ShardError, (err, shardId) => {
+        logger.warn(
+          { err, botId: this.botId, shardId },
+          'Discord shard error — discord.js will auto-reconnect',
+        );
       });
 
       // Log when discord.js REST layer hits a Discord 429 rate limit.
@@ -448,8 +505,71 @@ export class DiscordChannel implements Channel {
 
   async disconnect(): Promise<void> {
     this.connected = false;
+    if (this.extendedOutageTimer) {
+      clearTimeout(this.extendedOutageTimer);
+      this.extendedOutageTimer = null;
+    }
     this.client.destroy();
-    logger.info('Discord bot disconnected');
+    logger.info({ botId: this.botId }, 'Discord bot disconnected');
+  }
+
+  /**
+   * Schedule a one-shot check that fires when the current outage has lasted
+   * more than DISCORD_EXTENDED_OUTAGE_MS. If we're still disconnected when it
+   * fires, emit a loud WARN. We do NOT restart the process — discord.js keeps
+   * retrying internally and the bot will come back on its own once the network
+   * is healthy. This warn just makes the outage visible to operators.
+   */
+  private scheduleExtendedOutageCheck(): void {
+    if (this.extendedOutageTimer || this.outageStartedAt === null) return;
+    const elapsed = Date.now() - this.outageStartedAt;
+    const remaining = Math.max(0, DISCORD_EXTENDED_OUTAGE_MS - elapsed);
+    this.extendedOutageTimer = setTimeout(() => {
+      this.extendedOutageTimer = null;
+      if (
+        this.connected ||
+        this.outageStartedAt === null ||
+        this.extendedOutageNotified
+      ) {
+        return;
+      }
+      this.extendedOutageNotified = true;
+      logger.warn(
+        {
+          botId: this.botId,
+          outageMs: Date.now() - this.outageStartedAt,
+        },
+        'Discord bot still disconnected, backing off (discord.js will keep retrying)',
+      );
+    }, remaining);
+  }
+
+  private handleShardRecovered(
+    shardId: number,
+    kind: 'ready' | 'resumed',
+    replayedEvents?: number,
+  ): void {
+    this.connected = true;
+    const wasExtendedOutage = this.extendedOutageNotified;
+    const outageMs =
+      this.outageStartedAt !== null ? Date.now() - this.outageStartedAt : 0;
+    this.outageStartedAt = null;
+    this.extendedOutageNotified = false;
+    if (this.extendedOutageTimer) {
+      clearTimeout(this.extendedOutageTimer);
+      this.extendedOutageTimer = null;
+    }
+    if (wasExtendedOutage) {
+      logger.info(
+        { botId: this.botId, shardId, outageMs, kind },
+        'Discord bot reconnected after extended outage',
+      );
+    } else if (outageMs > 0) {
+      logger.info(
+        { botId: this.botId, shardId, outageMs, kind, replayedEvents },
+        `Discord shard ${kind}`,
+      );
+    }
   }
 
   async refreshSlashCommands(): Promise<void> {
