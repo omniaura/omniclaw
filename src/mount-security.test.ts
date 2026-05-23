@@ -232,6 +232,45 @@ describe('validateMount with allowlist', () => {
     expect(result.reason).toContain('Invalid container path');
   });
 
+  it('rejects container path with Docker volume option separator', () => {
+    writeAllowlist(baseAllowlist);
+    const result = validateMount(
+      {
+        hostPath: TEMP_ROOT + '/projects/my-app',
+        containerPath: 'my-app:rw',
+      },
+      true,
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('Invalid container path');
+  });
+
+  it('rejects container path with Docker mount option separator', () => {
+    writeAllowlist(baseAllowlist);
+    const result = validateMount(
+      {
+        hostPath: TEMP_ROOT + '/projects/my-app',
+        containerPath: 'my-app,readonly=false',
+      },
+      true,
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('Invalid container path');
+  });
+
+  it('rejects container path with control characters', () => {
+    writeAllowlist(baseAllowlist);
+    const result = validateMount(
+      {
+        hostPath: TEMP_ROOT + '/projects/my-app',
+        containerPath: 'my-app\nnext',
+      },
+      true,
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('Invalid container path');
+  });
+
   it('rejects absolute container path', () => {
     writeAllowlist(baseAllowlist);
     const result = validateMount(

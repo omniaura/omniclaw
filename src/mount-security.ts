@@ -206,6 +206,18 @@ function isValidContainerPath(containerPath: string): boolean {
     return false;
   }
 
+  // Must not contain Docker mount option separators. These paths are rendered
+  // into --mount/-v arguments, where ':' and ',' can alter option parsing.
+  if (containerPath.includes(':') || containerPath.includes(',')) {
+    return false;
+  }
+
+  // Reject control characters to keep generated runtime arguments single-line
+  // and unambiguous for container CLIs and logs.
+  if (/[\x00-\x1f\x7f]/.test(containerPath)) {
+    return false;
+  }
+
   // Must not be absolute (it will be prefixed with /workspace/extra/)
   if (containerPath.startsWith('/')) {
     return false;
@@ -252,7 +264,7 @@ export function validateMount(
   if (!isValidContainerPath(containerPath)) {
     return {
       allowed: false,
-      reason: `Invalid container path: "${containerPath}" - must be relative, non-empty, and not contain ".."`,
+      reason: `Invalid container path: "${containerPath}" - must be relative, non-empty, and not contain traversal or Docker option separators`,
     };
   }
 
