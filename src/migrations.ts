@@ -16,7 +16,7 @@ export interface Migration {
  * The version that represents the latest schema. Existing databases that
  * predate the migration framework are advanced through every migration to this.
  */
-export const BASELINE_VERSION = 7;
+export const BASELINE_VERSION = 8;
 
 // ---------------------------------------------------------------------------
 // Schema helpers (available for use in migrations)
@@ -314,7 +314,8 @@ const migration1: Migration = {
         roster_role_filters TEXT,
         avatar_url TEXT,
         avatar_source TEXT,
-        enabled INTEGER NOT NULL DEFAULT 1
+        enabled INTEGER NOT NULL DEFAULT 1,
+        model TEXT
       );
 
       CREATE TABLE IF NOT EXISTS channel_routes (
@@ -604,6 +605,14 @@ const migration7: Migration = {
   },
 };
 
+const migration8: Migration = {
+  version: 8,
+  description: 'Per-agent model override (e.g. opencode model selection)',
+  up: (db) => {
+    addColumnIfNotExists(db, 'agents', 'model', 'TEXT');
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Migration registry
 // ---------------------------------------------------------------------------
@@ -622,4 +631,5 @@ export const allMigrations: Migration[] = [
   migration5,
   migration6,
   migration7,
+  migration8,
 ];

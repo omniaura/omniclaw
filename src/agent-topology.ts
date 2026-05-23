@@ -74,6 +74,8 @@ const agentSchema = z
     serverFolder: z.string().min(1).optional(),
     agentContextFolder: z.string().min(1).optional(),
     discordCommands: discordCommandsSchema.optional(),
+    /** Per-agent model override (CLAUDE_MODEL/OPENCODE_MODEL/CODEX_MODEL/CURSOR_AGENT_MODEL). */
+    model: z.string().min(1).max(200).optional(),
     channels: z.array(channelSchema).min(1),
   })
   .strict();
@@ -150,6 +152,7 @@ export function loadDeclarativeAgentTopology(
         backend: agent.backend as BackendType | undefined,
         agentRuntime: agent.agentRuntime,
         description: agent.description,
+        model: agent.model,
         autoRespondToQuestions: channel.autoRespondToQuestions,
         autoRespondKeywords: channel.autoRespondKeywords,
         channelFolder: channel.channelFolder,

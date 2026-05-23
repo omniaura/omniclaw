@@ -71,6 +71,7 @@ function makeState(options?: {
     writeContextFile: () => {},
     updateAgentAvatar: () => {},
     setAgentEnabled: () => true,
+    setAgentModel: () => true,
     resolveChatImage: async () => null,
     resolveDiscordGuildImage: async () => null,
   };

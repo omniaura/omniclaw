@@ -623,6 +623,17 @@ export class FakeState implements WebStateProvider {
     return true;
   }
 
+  setAgentModel(agentId: string, model: string | null): boolean {
+    const agent = this.agents[agentId];
+    if (!agent) return false;
+    if (model === null || (typeof model === 'string' && model.trim() === '')) {
+      agent.model = undefined;
+    } else {
+      agent.model = model.trim();
+    }
+    return true;
+  }
+
   // ---- Admin mutation methods (called by admin API) ----
 
   addAgent(agent: Partial<Agent> & { id: string }): Agent {

@@ -61,6 +61,7 @@ interface AgentRow {
   avatar_url: string | null;
   avatar_source: string | null;
   enabled: number | null;
+  model: string | null;
 }
 
 interface AgentHealthRow {
@@ -210,6 +211,7 @@ function mapRowToAgent(row: AgentRow): Agent {
       row.enabled === null || row.enabled === undefined
         ? true
         : row.enabled === 1,
+    model: row.model || undefined,
   };
 }
 
@@ -1629,10 +1631,24 @@ export function setAgent(agent: Agent): void {
     enabledValue = existing && existing.enabled === 0 ? 0 : 1;
   }
 
+  // When the caller didn't specify `model`, preserve any existing row's value
+  // so registration paths (registerGroup, applyDeclarativeAgentTopology) don't
+  // silently wipe a model the user set through the Web UI.
+  let modelValue: string | null;
+  if (agent.model !== undefined) {
+    const trimmed = agent.model.trim();
+    modelValue = trimmed.length > 0 ? trimmed : null;
+  } else {
+    const existing = db
+      .prepare('SELECT model FROM agents WHERE id = ?')
+      .get(agent.id) as { model: string | null } | undefined;
+    modelValue = existing?.model ?? null;
+  }
+
   db.query(
     `
-    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at, agent_context_folder, roster_role_filters, avatar_url, avatar_source, enabled)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, agent_runtime, container_config, is_admin, server_folder, created_at, agent_context_folder, roster_role_filters, avatar_url, avatar_source, enabled, model)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     agent.id,
@@ -1652,7 +1668,25 @@ export function setAgent(agent: Agent): void {
     agent.avatarUrl || null,
     agent.avatarSource || null,
     enabledValue,
+    modelValue,
   );
+}
+
+/**
+ * Update only the model field for an agent (lightweight, avoids full setAgent).
+ * Pass null/empty to clear and fall back to the host .env default.
+ * Returns true on success, false if the agent doesn't exist.
+ */
+export function setAgentModel(
+  agentId: string,
+  model: string | null,
+): boolean {
+  const normalized =
+    typeof model === 'string' && model.trim().length > 0 ? model.trim() : null;
+  const result = db
+    .query('UPDATE agents SET model = ? WHERE id = ?')
+    .run(normalized, agentId);
+  return result.changes > 0;
 }
 
 /**

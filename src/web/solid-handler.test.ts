@@ -49,6 +49,7 @@ function makeState(): WebStateProvider {
     writeContextFile: () => {},
     updateAgentAvatar: () => {},
     setAgentEnabled: () => true,
+    setAgentModel: () => true,
   };
 }
 

@@ -140,6 +140,12 @@ export interface SchedulerDependencies {
    * running.
    */
   isAgentEnabled?: (agentFolder: string) => boolean;
+  /**
+   * Resolve the per-agent model override (from SQLite) for `agentFolder`.
+   * Returns undefined when no agent is found or no model is set, in which case
+   * the runtime falls back to the host .env value or its built-in default.
+   */
+  getAgentModel?: (agentFolder: string) => string | undefined;
   getSessions: () => Record<string, string>;
   resumePositionStore: ResumePositionStore;
   queue: GroupQueue;
@@ -422,6 +428,7 @@ async function runTask(
           discordGuildId: group.discordGuildId,
           serverFolder: group.serverFolder,
           agentRuntime: getAgentRuntime(group),
+          model: deps.getAgentModel?.(task.group_folder),
           agentName: group.name,
           discordBotId: group.discordBotId,
           agentTrigger: group.trigger,

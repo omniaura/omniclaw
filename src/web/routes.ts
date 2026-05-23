@@ -241,6 +241,21 @@ export function handleRequest(
     return json({ error: 'Method not allowed' }, 405);
   }
 
+  // Agent model override
+  if (pathname.startsWith('/api/agents/') && pathname.endsWith('/model')) {
+    let agentId: string;
+    try {
+      agentId = decodeURIComponent(
+        pathname.slice('/api/agents/'.length, -'/model'.length),
+      );
+    } catch {
+      return json({ error: 'Invalid agent ID encoding' }, 400);
+    }
+    if (!agentId) return json({ error: 'Missing agent ID' }, 400);
+    if (method === 'POST') return handleSetAgentModel(agentId, req, state);
+    return json({ error: 'Method not allowed' }, 405);
+  }
+
   // Agent detail API
   if (pathname.startsWith('/api/agents/') && pathname.endsWith('/detail')) {
     const agentId = decodeURIComponent(
@@ -1283,6 +1298,56 @@ async function handleSetAgentEnabled(
   if (!ok) return json({ error: 'Agent not found' }, 404);
 
   return json({ ok: true, agentId, enabled: body.enabled });
+}
+
+const MAX_MODEL_LENGTH = 200;
+
+async function handleSetAgentModel(
+  agentId: string,
+  req: Request,
+  state: WebStateProvider,
+): Promise<Response> {
+  const agents = state.getAgents();
+  const agent = agents[agentId];
+  if (!agent) return json({ error: 'Agent not found' }, 404);
+
+  let body: Record<string, unknown>;
+  try {
+    body = await readJsonBody<Record<string, unknown>>(
+      req,
+      MAX_WEB_JSON_BODY_BYTES,
+    );
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      return json({ error: 'Request body too large' }, 413);
+    }
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  // null / empty string clears the override.
+  let model: string | null;
+  if (body.model === null || body.model === undefined) {
+    model = null;
+  } else if (typeof body.model === 'string') {
+    const trimmed = body.model.trim();
+    if (trimmed.length === 0) {
+      model = null;
+    } else if (trimmed.length > MAX_MODEL_LENGTH) {
+      return json(
+        { error: `"model" must be ${MAX_MODEL_LENGTH} characters or fewer` },
+        400,
+      );
+    } else {
+      model = trimmed;
+    }
+  } else {
+    return json({ error: '"model" must be a string or null' }, 400);
+  }
+
+  const ok = state.setAgentModel(agentId, model);
+  if (!ok) return json({ error: 'Agent not found' }, 404);
+
+  return json({ ok: true, agentId, model });
 }
 
 // ---- Helpers ----

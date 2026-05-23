@@ -82,6 +82,12 @@ export interface RegisteredGroup {
   agentContextFolder?: string; // e.g., 'agents/peytonomi'
   /** Discord slash command availability for this agent/channel registration. */
   discordCommands?: DiscordCommandConfig;
+  /**
+   * Per-agent model override propagated to the agent's container env. See the
+   * Agent.model JSDoc for the runtime → env-var mapping. Persisted on the
+   * `agents` row, not on `registered_groups`.
+   */
+  model?: string;
 }
 
 export interface DiscordCommandConfig {
@@ -365,6 +371,17 @@ export interface Agent {
    * message. Defaults to true on existing rows via DB migration.
    */
   enabled?: boolean;
+  /**
+   * Per-agent model override, interpreted by the agent runtime:
+   *   claude-agent-sdk → CLAUDE_MODEL (e.g. "claude-opus-4-7")
+   *   opencode         → OPENCODE_MODEL (e.g. "anthropic/claude-sonnet-4-5")
+   *   codex            → CODEX_MODEL
+   *   cursor-sdk       → CURSOR_AGENT_MODEL
+   * When set, the orchestrator writes this value into the container's env
+   * file, overriding any host-level .env value. Empty / unset falls back to
+   * the host .env or runtime default.
+   */
+  model?: string;
 }
 
 /** Volatile, sanitized runtime state for discovery/roster views. */
@@ -432,6 +449,7 @@ export function registeredGroupToAgent(
     isAdmin: isMainGroup,
     serverFolder: group.serverFolder,
     createdAt: group.added_at,
+    model: group.model,
   };
 }
 
