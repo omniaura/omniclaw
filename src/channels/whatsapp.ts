@@ -269,10 +269,7 @@ export class WhatsAppChannel implements Channel {
           );
 
           const outageMs = now - this.outageStartedAt;
-          if (
-            !this.extendedOutageNotified &&
-            outageMs >= EXTENDED_OUTAGE_MS
-          ) {
+          if (!this.extendedOutageNotified && outageMs >= EXTENDED_OUTAGE_MS) {
             this.extendedOutageNotified = true;
             logger.warn(
               {
@@ -310,9 +307,7 @@ export class WhatsAppChannel implements Channel {
         this.connected = true;
         const wasExtendedOutage = this.extendedOutageNotified;
         const outageMs =
-          this.outageStartedAt !== null
-            ? Date.now() - this.outageStartedAt
-            : 0;
+          this.outageStartedAt !== null ? Date.now() - this.outageStartedAt : 0;
         this.reconnectAttempt = 0;
         this.reconnectTimestamps = [];
         this.outageStartedAt = null;

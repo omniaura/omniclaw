@@ -860,10 +860,7 @@ describe('WhatsApp channel source — no self-restart on network errors', () => 
   // handler in connection.update no longer escalates to process.exit. This
   // catches accidental re-introductions of the self-DoS pattern.
   it('connection.update path does not call process.exit', () => {
-    const src = fs.readFileSync(
-      path.join(__dirname, 'whatsapp.ts'),
-      'utf-8',
-    );
+    const src = fs.readFileSync(path.join(__dirname, 'whatsapp.ts'), 'utf-8');
     // The legacy log string must be gone.
     expect(src).not.toContain('Too many reconnections in window');
     // process.exit(...) must not be invoked as a call inside connectInternal
