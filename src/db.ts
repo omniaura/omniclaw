@@ -1677,10 +1677,7 @@ export function setAgent(agent: Agent): void {
  * Pass null/empty to clear and fall back to the host .env default.
  * Returns true on success, false if the agent doesn't exist.
  */
-export function setAgentModel(
-  agentId: string,
-  model: string | null,
-): boolean {
+export function setAgentModel(agentId: string, model: string | null): boolean {
   const normalized =
     typeof model === 'string' && model.trim().length > 0 ? model.trim() : null;
   const result = db

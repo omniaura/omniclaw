@@ -541,7 +541,9 @@ export function buildVolumeMounts(
  * Used by buildVolumeMounts to inject the per-agent SQLite `model` override
  * into the container's env file, overriding any host .env value.
  */
-export function modelEnvVarForRuntime(runtime: AgentRuntime | undefined): string {
+export function modelEnvVarForRuntime(
+  runtime: AgentRuntime | undefined,
+): string {
   switch (runtime) {
     case 'opencode':
       return 'OPENCODE_MODEL';
