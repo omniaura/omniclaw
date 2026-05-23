@@ -182,7 +182,7 @@ import {
   type WebServerHandle,
 } from './web/index.js';
 import { setDiscoveryContext } from './web/routes.js';
-import type { WebStateProvider } from './web/types.js';
+import type { PeerHealthSnapshot, WebStateProvider } from './web/types.js';
 
 // Global error handlers to prevent crashes from unhandled rejections/exceptions
 // See: https://github.com/omniaura/omniclaw/issues/221
@@ -3289,6 +3289,74 @@ async function main(): Promise<void> {
       findChannelForJid(jid, getPreferredChannelBotId(jid, discordBotId)),
   };
 
+  // Builds the LAN peer health snapshot consumed by /system. Captured by
+  // closure inside webState below — referenced lazily so it sees whatever
+  // trustStore / discovery state exists at request time. Returns an
+  // empty-but-shaped snapshot before the web server (and therefore
+  // discovery) is set up, or when WEB_UI_PORT is unset.
+  function buildPeerHealthSnapshot(): PeerHealthSnapshot {
+    if (!trustStore) {
+      return {
+        discovery_available: false,
+        discovery_active: false,
+        total: 0,
+        online: 0,
+        trusted: 0,
+        trusted_offline: 0,
+        pending_requests: 0,
+        by_status: { discovered: 0, pending: 0, trusted: 0, revoked: 0 },
+      };
+    }
+    const discovered = discoveryHandle?.getPeers() ?? new Map();
+    const stored = trustStore.getAllPeers();
+    const runtime = discoveryRuntime?.getSnapshot();
+    const onlineIds = new Set<string>(discovered.keys());
+
+    const byStatus = { discovered: 0, pending: 0, trusted: 0, revoked: 0 };
+    let total = 0;
+    let online = 0;
+    let trusted = 0;
+    let trustedOffline = 0;
+    const storedIds = new Set<string>();
+
+    for (const peer of stored) {
+      storedIds.add(peer.instanceId);
+      if (peer.status === 'revoked') {
+        // Track for breakdown completeness; do not count toward total /
+        // online / trusted, mirroring the /network page which hides them.
+        byStatus.revoked++;
+        continue;
+      }
+      byStatus[peer.status]++;
+      total++;
+      const isOnline = onlineIds.has(peer.instanceId);
+      if (isOnline) online++;
+      if (peer.status === 'trusted') {
+        trusted++;
+        if (!isOnline) trustedOffline++;
+      }
+    }
+    // Discovered-but-not-yet-stored peers (e.g. brand-new mDNS hits)
+    // count as `discovered` status and contribute to total / online.
+    for (const id of onlineIds) {
+      if (storedIds.has(id)) continue;
+      byStatus.discovered++;
+      total++;
+      online++;
+    }
+
+    return {
+      discovery_available: true,
+      discovery_active: runtime?.active ?? false,
+      total,
+      online,
+      trusted,
+      trusted_offline: trustedOffline,
+      pending_requests: trustStore.getPendingRequests().length,
+      by_status: byStatus,
+    };
+  }
+
   const webState: WebStateProvider = {
     getAgents: () => agents,
     getChannelSubscriptions: () => channelSubscriptions,
@@ -3379,6 +3447,7 @@ async function main(): Promise<void> {
       resolveAgentAvatarUrl(agentId, avatarUrl, avatarSource),
     resolveDiscordGuildImage: (guildId, botId) =>
       resolveDiscordGuildImageUrl(guildId, botId),
+    getPeerHealth: () => buildPeerHealthSnapshot(),
   };
 
   // Expire stale sessions on startup to prevent unbounded context growth

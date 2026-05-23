@@ -3,7 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import { handleRequest } from './routes.js';
 import { buildHealthData, renderSystemContent } from './system.js';
 import type { HealthData } from './system.js';
-import type { WebStateProvider } from './types.js';
+import type { PeerHealthSnapshot, WebStateProvider } from './types.js';
 import type { Agent } from '../types.js';
 import type { GroupQueueDetail } from '../group-queue.js';
 
@@ -551,6 +551,37 @@ describe('buildHealthData', () => {
     });
   });
 
+  it('defaults peers rollup to zeros when no getPeerHealth hook is provided', () => {
+    const health = buildHealthData(makeState(), 0);
+    expect(health.peers).toEqual({
+      discovery_available: false,
+      discovery_active: false,
+      total: 0,
+      online: 0,
+      trusted: 0,
+      trusted_offline: 0,
+      pending_requests: 0,
+      by_status: { discovered: 0, pending: 0, trusted: 0, revoked: 0 },
+    });
+  });
+
+  it('passes through the peers snapshot when a getPeerHealth hook is provided', () => {
+    const snapshot: PeerHealthSnapshot = {
+      discovery_available: true,
+      discovery_active: true,
+      total: 4,
+      online: 3,
+      trusted: 2,
+      trusted_offline: 1,
+      pending_requests: 1,
+      by_status: { discovered: 1, pending: 1, trusted: 2, revoked: 0 },
+    };
+    const state = makeState();
+    state.getPeerHealth = () => snapshot;
+    const health = buildHealthData(state, 0);
+    expect(health.peers).toEqual(snapshot);
+  });
+
   it('honors explicit lane reason fields when provided', () => {
     const details: GroupQueueDetail[] = [
       {
@@ -711,6 +742,92 @@ describe('renderSystemContent', () => {
     expect(html).toContain('agents');
     expect(html).toContain('tasks');
     expect(html).toContain('queue');
+    expect(html).toContain('peers');
+  });
+
+  it('renders peers tile with discovery=unavailable when no hook is wired', () => {
+    const html = renderSystemContent(makeState(), 0);
+    expect(html).toContain('id="sys-peers-discovery"');
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-peers-discovery">unavailable</span>',
+    );
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-peers-total">0</span>',
+    );
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-peers-online">0</span>',
+    );
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-peers-trusted">0</span>',
+    );
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-peers-trusted-offline">0</span>',
+    );
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-peers-pending-requests">0</span>',
+    );
+    // Every PeerStatus key must surface a stable id even when zero.
+    for (const status of ['trusted', 'pending', 'discovered', 'revoked']) {
+      expect(html).toContain(`id="sys-peers-status-${status}"`);
+    }
+  });
+
+  it('renders peers tile values from the snapshot when wired', () => {
+    const snapshot: PeerHealthSnapshot = {
+      discovery_available: true,
+      discovery_active: true,
+      total: 5,
+      online: 3,
+      trusted: 2,
+      trusted_offline: 1,
+      pending_requests: 2,
+      by_status: { discovered: 2, pending: 1, trusted: 2, revoked: 3 },
+    };
+    const state = makeState();
+    state.getPeerHealth = () => snapshot;
+    const html = renderSystemContent(state, 0);
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-peers-discovery">active</span>',
+    );
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-peers-total">5</span>',
+    );
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-peers-online">3</span>',
+    );
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-peers-trusted">2</span>',
+    );
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-peers-trusted-offline">1</span>',
+    );
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-peers-pending-requests">2</span>',
+    );
+    expect(html).toContain(
+      '<span class="breakdown-val" id="sys-peers-status-trusted">2</span>',
+    );
+    expect(html).toContain(
+      '<span class="breakdown-val" id="sys-peers-status-revoked">3</span>',
+    );
+  });
+
+  it('renders peers discovery as "disabled" when available but inactive', () => {
+    const state = makeState();
+    state.getPeerHealth = () => ({
+      discovery_available: true,
+      discovery_active: false,
+      total: 0,
+      online: 0,
+      trusted: 0,
+      trusted_offline: 0,
+      pending_requests: 0,
+      by_status: { discovered: 0, pending: 0, trusted: 0, revoked: 0 },
+    });
+    const html = renderSystemContent(state, 0);
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-peers-discovery">disabled</span>',
+    );
   });
 
   it('renders queue rollup with stable IDs', () => {
