@@ -151,6 +151,92 @@ describe('SlackChannel.ownsJid', () => {
   });
 });
 
+describe('SlackChannel.handleMessage multi-bot mention routing', () => {
+  const makeClient = () => ({
+    users: {
+      info: mock(({ user }: { user: string }) =>
+        Promise.resolve({
+          user: {
+            name: user === 'UOTHERBOT' ? 'otherbot' : 'peyton',
+            profile: {
+              display_name: user === 'UOTHERBOT' ? 'OtherBot' : 'Peyton',
+            },
+          },
+        }),
+      ),
+    },
+    conversations: {
+      info: mock(() => Promise.resolve({ channel: { name: 'test-channel' } })),
+    },
+  });
+
+  it('ignores messages that mention a different bot in multi-bot mode', async () => {
+    const onMessage = mock(() => {});
+    const channel = new SlackChannel({
+      botId: 'CLAYTON',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      multiBotMode: true,
+      onMessage,
+      onChatMetadata: () => {},
+      registeredGroups: () => ({
+        'slack:CLAYTON:C123': {
+          name: 'Clayton',
+          folder: 'clayton-discord',
+          trigger: '@Clayton',
+          added_at: new Date().toISOString(),
+        },
+      }),
+    });
+
+    (channel as any).botUserId = 'UCLAYTON';
+    (channel as any).client = makeClient();
+
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000100',
+      text: '<@UOTHERBOT> hello',
+      user: 'UPEYTON',
+    });
+
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
+  it('stores messages that mention this bot in multi-bot mode', async () => {
+    const onMessage = mock(() => {});
+    const channel = new SlackChannel({
+      botId: 'CLAYTON',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      multiBotMode: true,
+      onMessage,
+      onChatMetadata: () => {},
+      registeredGroups: () => ({
+        'slack:CLAYTON:C123': {
+          name: 'Clayton',
+          folder: 'clayton-discord',
+          trigger: '@Clayton',
+          added_at: new Date().toISOString(),
+        },
+      }),
+    });
+
+    (channel as any).botUserId = 'UCLAYTON';
+    (channel as any).client = makeClient();
+
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000100',
+      text: '<@UCLAYTON> hello',
+      user: 'UPEYTON',
+    });
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    const calls = onMessage.mock.calls as unknown as Array<[string]>;
+    expect(calls[0][0]).toBe('slack:CLAYTON:C123');
+  });
+});
+
 // --- Slack media download helpers ---
 
 describe('SlackChannel.downloadSlackFile', () => {
