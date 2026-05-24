@@ -1343,7 +1343,11 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
  */
 function ensureContextLayerFiles(
   agent: Agent | undefined,
-  layers: { serverFolder?: string; categoryFolder?: string; channelFolder?: string },
+  layers: {
+    serverFolder?: string;
+    categoryFolder?: string;
+    channelFolder?: string;
+  },
 ): void {
   const groupsBase = path.join(DATA_DIR, '..', 'groups');
   const layerPaths: string[] = [];
@@ -1395,7 +1399,9 @@ async function autoRegisterChannel(
 
   // If no explicit mapping, try to match bot ID to an agent ID
   if (!agentId) {
-    agentId = Object.keys(agents).find((id) => id.toLowerCase() === botId.toLowerCase());
+    agentId = Object.keys(agents).find(
+      (id) => id.toLowerCase() === botId.toLowerCase(),
+    );
   }
 
   if (!agentId || !agents[agentId]) {
@@ -3800,12 +3806,7 @@ async function main(): Promise<void> {
                   storeChatMetadata(chatJid, timestamp, name),
                 registeredGroups: () => registeredGroups,
                 autoRegister: async (chatJid, channelName) =>
-                  autoRegisterChannel(
-                    chatJid,
-                    channelName,
-                    'slack',
-                    bot.id,
-                  ),
+                  autoRegisterChannel(chatJid, channelName, 'slack', bot.id),
                 onReaction: async (chatJid, messageId, emoji, userName) => {
                   await handleReactionNotification(
                     chatJid,
