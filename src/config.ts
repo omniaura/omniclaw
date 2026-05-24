@@ -15,6 +15,8 @@ export interface SlackBotConfig {
   id: string;
   token: string;
   appToken: string;
+  /** Agent ID this bot routes unregistered channels to. */
+  agent?: string;
 }
 
 const AGENT_RUNTIME_VALUES = ['claude-agent-sdk', 'opencode', 'codex'] as const;
@@ -51,6 +53,7 @@ const configSchema = z
     DISCORD_BOT_TOKEN: z.string().optional(),
     TELEGRAM_BOT_TOKENS: z.string().optional(),
     TELEGRAM_BOT_TOKEN: z.string().optional(),
+    TELEGRAM_BOT_AGENT: z.string().optional(),
     SLACK_BOT_IDS: z.string().optional(),
     SLACK_BOT_DEFAULT: z.string().optional(),
     SLACK_BOT_TOKEN: z.string().optional(),
@@ -327,7 +330,8 @@ export function buildSlackBotConfigFromEnv(env: NodeJS.ProcessEnv): {
           `Invalid OmniClaw configuration:\nSLACK_BOT_${id}_APP_TOKEN: required when SLACK_BOT_IDS includes ${id}`,
         );
       }
-      bots.push({ id, token, appToken });
+      const agent = optionalTrimmedString(env[`SLACK_BOT_${id}_AGENT`]);
+      bots.push({ id, token, appToken, agent });
     }
     const preferredDefault = sanitizeBotId(env.SLACK_BOT_DEFAULT || '');
     const defaultBotId = bots.some((b) => b.id === preferredDefault)
@@ -354,6 +358,7 @@ export const DISCORD_BOT_IDS = DISCORD_BOTS.map((b) => b.id);
 export const DISCORD_BOT_TOKEN = DISCORD_BOTS[0]?.token || '';
 export const TELEGRAM_BOT_TOKENS = buildTelegramBotTokensFromEnv(process.env);
 export const TELEGRAM_BOT_TOKEN = TELEGRAM_BOT_TOKENS[0] || '';
+export const TELEGRAM_BOT_AGENT = CONFIG.TELEGRAM_BOT_AGENT;
 const slackEnv = buildSlackBotConfigFromEnv(process.env);
 export const SLACK_BOTS = slackEnv.bots;
 export const SLACK_DEFAULT_BOT_ID = slackEnv.defaultBotId;

@@ -104,6 +104,8 @@ export interface SlackChannelOpts {
     emoji: string,
     userName: string,
   ) => void;
+  /** Called when a message arrives from an unregistered channel. Return true if registered. */
+  autoRegister?: (chatJid: string, channelName: string) => Promise<boolean>;
 }
 
 export class SlackChannel implements Channel {
@@ -431,11 +433,19 @@ export class SlackChannel implements Channel {
       this.opts.onChatMetadata(legacyChatJid, timestamp, channelName);
     }
 
-    // Only process registered groups
+    // Only process registered groups (auto-register if callback provided)
     const groups = this.opts.registeredGroups();
-    const group =
+    let group =
       groups[chatJid] ||
       (this.allowLegacyJidRouting ? groups[legacyChatJid] : undefined);
+    if (!group && this.opts.autoRegister) {
+      const registered = await this.opts.autoRegister(chatJid, channelName);
+      if (registered) {
+        group =
+          groups[chatJid] ||
+          (this.allowLegacyJidRouting ? groups[legacyChatJid] : undefined);
+      }
+    }
     if (!group) {
       logger.debug(
         { chatJid, legacyChatJid, channelName },
