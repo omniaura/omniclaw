@@ -1,6 +1,11 @@
 # OmniClaw Roadmap
 
-Last updated: 2026-05-02
+Last updated: 2026-05-23
+
+> **Maintenance:** run `bash scripts/check-roadmap-refs.sh` after editing to catch
+> Planned Work entries that point at closed/merged issues without an explicit
+> annotation. Move shipped items to _Completed Recently_ instead of leaving stale
+> trackers in Planned Work.
 
 ## Guiding Principles
 
@@ -73,25 +78,26 @@ Self-maintenance is core to the AI-native operations principle, and the dep bump
 
 - #484 needs admin secret config so GitHub App can trigger CI on dep bump PRs
 - dependent on operator action; no agent-side fix possible until secrets are configured
-- once unblocked, the auto-close superseded dep bumps (#617) and auto-merge error surfacing (#616) workflows will run cleanly
+- once unblocked, the auto-close superseded dep bumps (#617, merged) and auto-merge error surfacing (#616, merged) workflows will run cleanly
 
-#### Scheduler Reliability and Chat Cohesion (#162, #186)
+#### Scheduler Reliability and Chat Cohesion (follow-on to #162, #186; active: #725)
 
-Recovery work has landed, but the full scheduler/chat cohesion vision is still open.
+Recovery, isolation, and handoff foundations have shipped (#162 and #186 both closed). The remaining work is the chat-cohesion edges that surface when scheduled and chat runs interleave.
 
 - stale task recovery and deterministic scheduler coverage have improved the base
-- #186 remains open for shared progress, isolated execution workspaces, lease/lock semantics, and structured handoffs between scheduled and chat work
+- snapshot current chat at turn boundaries for final-output routing (#725) is the active follow-on
+- continue tightening lease/lock semantics and structured handoffs as new edge cases surface
 
-#### Share Request Security Follow-through (#237, #240)
+#### Share Request Security Follow-through (follow-on to #237, #240)
 
-Recent hardening reduced risk in approval and transfer paths, but cleanup is still in progress.
+Approval-flow removal and post-approval file transfer both shipped (#237 and #240 closed). Treat any new findings under the `security` label as the canonical follow-on rather than these closed trackers.
 
-- finish removing obsolete approval flow paths
 - keep approval, provenance, and auditability crisp for cross-agent context sharing
+- file new tracking issues for any remaining cleanup rather than reopening the closed ones
 
-#### Test Reliability and Coverage Expansion (#200 and follow-ons)
+#### Test Reliability and Coverage Expansion
 
-Coverage has improved materially, but there are still gaps in end-to-end confidence and a few brittle areas.
+Coverage has improved materially (the original flaky-suite tracker #200 closed), but there are still gaps in end-to-end confidence and a few brittle areas.
 
 - stabilize remaining flaky suites and document root causes
 - keep filling high-value gaps in orchestrator, backend, and security-sensitive paths
@@ -105,19 +111,20 @@ Effect remains a targeted tool, not a migration goal.
 
 ### Medium-term
 
-#### Agent Runtime Agnosticism (#49)
+#### Agent Runtime Polish (follow-on to #49)
 
-OmniClaw still carries Claude-first assumptions in prompt assembly, context conventions, and session handling.
+The runtime-agnostic foundation shipped (#49 closed); per-agent runtime selection works across Claude Agent SDK, OpenCode, Codex, and Cursor. Remaining work is reducing Claude-first assumptions in prompt assembly, context conventions, and session handling so non-Claude runtimes feel first-class.
 
-- keep pushing runtime abstraction so Claude Agent SDK, OpenCode, Codex, and future local runtimes fit the same orchestration model
+- continue pushing the runtime abstraction as new runtimes are added
 - preserve per-agent runtime selection without forking the orchestrator
 
-#### Multi-bot / Multi-token Maturity (#100, #101, #102)
+#### Channel Parity Across Multi-bot Surfaces (follow-on to #100, #101, #102)
 
-Telegram and Slack multi-bot support have moved forward; the remaining work is consistency and polish across all channels.
+Per-channel multi-token support has shipped for Discord (#102), Telegram (#101), and Slack (#100). The remaining work is consistency and polish across all channels.
 
 - make multi-bot routing predictable across Discord, Telegram, and Slack
 - keep channel ownership, slash flow targeting, and avatar identity aligned
+- close Slack-side gaps as they surface (e.g. slash command parity, #759)
 
 #### Codebase Simplification
 
@@ -136,10 +143,6 @@ on `/system` and `/ipc` today; the items below extend it.
 - lightweight diagnostics for why an agent is idle, blocked, retrying, or offline
 
 ### Long-term
-
-#### Declarative Agent Topology (#57)
-
-Move toward a declarative source of truth for agent/channel topology while keeping SQLite for runtime state.
 
 #### Extensible MCP / Tool Plugin Model
 
@@ -193,6 +196,22 @@ Push from "personal assistant with tasks" toward a genuine multi-agent factory.
 - control plane route and startup branch coverage (#594)
 - Web UI fallback and pairing failure coverage (#581)
 - discovery, index, logger, and path-security coverage (#566, #556)
+
+#### Runtime, Topology, and Multi-bot Foundations
+
+- declarative agent topology config shipped (closes #57; delivered via #629)
+- agent runtime agnosticism shipped (closes #49) — Claude Agent SDK, OpenCode, Codex, Cursor all run under the same orchestration model
+- per-channel multi-bot/multi-token support shipped: Discord (closes #102), Telegram (closes #101), Slack (closes #100)
+- backend simplified to Docker (OrbStack on macOS) after Apple Container migration in #750
+- per-agent model override stored in SQLite (#760, in flight)
+
+#### Scheduler and Share Request Cleanup
+
+- scheduler crash recovery for stale in-progress and orphaned tasks shipped (closes #162)
+- scheduler/chat cohesion shared-progress and isolated-execution foundations shipped (closes #186)
+- post-approval file transfer handler shipped for share_request (closes #237)
+- legacy admin approval flow removed for share_request, delegate_task, request_context (closes #240)
+- flaky github-webhooks full-suite failure resolved (closes #200)
 
 ### Mar 2026
 
