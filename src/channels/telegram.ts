@@ -135,6 +135,8 @@ export interface TelegramChannelOpts {
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
   allowLegacyJidRouting?: boolean;
+  /** Called when a message arrives from an unregistered chat. Return true if registered. */
+  autoRegister?: (chatJid: string, chatName: string) => Promise<boolean>;
 }
 
 export class TelegramChannel implements Channel {
@@ -179,6 +181,25 @@ export class TelegramChannel implements Channel {
     const fromId = replyTo?.from?.id;
     if (fromId == null) return false;
     return String(fromId) === this.botId;
+  }
+
+  /**
+   * Look up the registered group for a chat, auto-registering if configured.
+   */
+  private async resolveGroup(
+    chatJid: string,
+    legacyChatJid: string,
+    chatName: string,
+  ): Promise<RegisteredGroup | undefined> {
+    const groups = this.opts.registeredGroups();
+    let group = groups[chatJid] || groups[legacyChatJid];
+    if (!group && this.opts.autoRegister) {
+      const registered = await this.opts.autoRegister(chatJid, chatName);
+      if (registered) {
+        group = groups[chatJid] || groups[legacyChatJid];
+      }
+    }
+    return group;
   }
 
   /**
@@ -272,8 +293,7 @@ export class TelegramChannel implements Channel {
       this.opts.onChatMetadata(legacyChatJid, timestamp, chatName);
 
       // Only deliver full message for registered groups
-      const groups = this.opts.registeredGroups();
-      const group = groups[chatJid] || groups[legacyChatJid];
+      const group = await this.resolveGroup(chatJid, legacyChatJid, chatName);
       if (!group) {
         logger.debug(
           { chatJid, legacyChatJid, chatName },
@@ -304,12 +324,17 @@ export class TelegramChannel implements Channel {
     });
 
     // Handle non-text messages with placeholders so the agent knows something was sent
-    const storeNonText = (ctx: any, placeholder: string) => {
+    const storeNonText = async (ctx: any, placeholder: string) => {
       const chatId = ctx.chat.id;
       const chatJid = `tg:${this.botId}:${chatId}`;
       const legacyChatJid = `tg:${chatId}`;
-      const groups = this.opts.registeredGroups();
-      const group = groups[chatJid] || groups[legacyChatJid];
+      const chatName =
+        ctx.chat.type === 'private'
+          ? ctx.from?.first_name || ctx.from?.username || 'Unknown'
+          : 'title' in ctx.chat
+            ? ctx.chat.title
+            : chatJid;
+      const group = await this.resolveGroup(chatJid, legacyChatJid, chatName);
       if (!group) return;
 
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
@@ -344,8 +369,13 @@ export class TelegramChannel implements Channel {
       const chatId = ctx.chat.id;
       const chatJid = `tg:${this.botId}:${chatId}`;
       const legacyChatJid = `tg:${chatId}`;
-      const groups = this.opts.registeredGroups();
-      const group = groups[chatJid] || groups[legacyChatJid];
+      const chatName =
+        ctx.chat.type === 'private'
+          ? ctx.from?.first_name || ctx.from?.username || 'Unknown'
+          : 'title' in ctx.chat
+            ? ctx.chat.title
+            : chatJid;
+      const group = await this.resolveGroup(chatJid, legacyChatJid, chatName);
       if (!group) return;
 
       const msgId = ctx.message.message_id.toString();
@@ -407,8 +437,13 @@ export class TelegramChannel implements Channel {
       const chatId = ctx.chat.id;
       const chatJid = `tg:${this.botId}:${chatId}`;
       const legacyChatJid = `tg:${chatId}`;
-      const groups = this.opts.registeredGroups();
-      const group = groups[chatJid] || groups[legacyChatJid];
+      const chatName =
+        ctx.chat.type === 'private'
+          ? ctx.from?.first_name || ctx.from?.username || 'Unknown'
+          : 'title' in ctx.chat
+            ? ctx.chat.title
+            : chatJid;
+      const group = await this.resolveGroup(chatJid, legacyChatJid, chatName);
       if (!group) return;
 
       const doc = ctx.message.document;

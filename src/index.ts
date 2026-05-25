@@ -52,6 +52,7 @@ import {
   SLACK_BOTS,
   SLACK_DEFAULT_BOT_ID,
   STARTUP_CONFIRMATIONS,
+  TELEGRAM_BOT_AGENT,
   TELEGRAM_BOT_TOKENS,
   WEB_UI_CORS_ORIGIN,
   WEB_UI_HOST,
@@ -1339,6 +1340,163 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     },
     'Group registered',
   );
+}
+
+/**
+ * Ensure empty CLAUDE.md files exist for all 4 context layers
+ * (agent → server → category → channel). Skips existing files.
+ */
+function ensureContextLayerFiles(
+  agent: Agent | undefined,
+  layers: {
+    serverFolder?: string;
+    categoryFolder?: string;
+    channelFolder?: string;
+  },
+): void {
+  const groupsBase = path.join(DATA_DIR, '..', 'groups');
+  const layerPaths: string[] = [];
+
+  if (agent?.agentContextFolder) {
+    layerPaths.push(agent.agentContextFolder);
+  }
+  if (layers.serverFolder) {
+    layerPaths.push(layers.serverFolder);
+  }
+  if (layers.categoryFolder) {
+    layerPaths.push(layers.categoryFolder);
+  }
+  if (layers.channelFolder) {
+    layerPaths.push(layers.channelFolder);
+  }
+
+  for (const layerPath of layerPaths) {
+    const dir = path.join(groupsBase, layerPath);
+    const resolved = path.resolve(dir);
+    if (!resolved.startsWith(path.resolve(groupsBase) + path.sep)) {
+      logger.warn({ layerPath }, 'Skipping out-of-bounds context layer path');
+      continue;
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    const claudeMdPath = path.join(dir, 'CLAUDE.md');
+    if (!fs.existsSync(claudeMdPath)) {
+      fs.writeFileSync(claudeMdPath, '', 'utf-8');
+      logger.info({ layerPath }, 'Created empty context layer CLAUDE.md');
+    }
+  }
+}
+
+/** Auto-register a channel for the given bot, creating subscriptions and context layers. */
+async function autoRegisterChannel(
+  chatJid: string,
+  channelName: string,
+  platform: 'slack' | 'telegram',
+  botId: string,
+): Promise<boolean> {
+  // Resolve the agent for this bot
+  let agentId: string | undefined;
+  if (platform === 'slack') {
+    const botConfig = SLACK_BOTS.find((b) => b.id === botId);
+    agentId = botConfig?.agent;
+  } else if (platform === 'telegram') {
+    agentId = TELEGRAM_BOT_AGENT;
+  }
+
+  // If no explicit mapping, try to match bot ID to an agent ID
+  if (!agentId) {
+    agentId = Object.keys(agents).find(
+      (id) => id.toLowerCase() === botId.toLowerCase(),
+    );
+  }
+
+  if (!agentId || !agents[agentId]) {
+    logger.warn(
+      { chatJid, platform, botId, agentId },
+      'Auto-register skipped: no matching agent found for bot',
+    );
+    return false;
+  }
+
+  const agent = agents[agentId];
+  const layers = resolveContextLayers({
+    channelJid: chatJid,
+    serverFolder: agent.serverFolder,
+  });
+
+  const now = new Date().toISOString();
+  const trigger = `@${agent.name}`;
+
+  // Create a minimal legacy registered group entry
+  const group: RegisteredGroup = {
+    name: channelName,
+    folder: agent.folder,
+    trigger,
+    added_at: now,
+    requiresTrigger: true,
+    serverFolder: layers.serverFolder,
+    channelFolder: layers.channelFolder,
+    categoryFolder: layers.categoryFolder,
+    agentContextFolder: agent.agentContextFolder,
+    backend: agent.backend,
+    agentRuntime: agent.agentRuntime,
+    description: agent.description,
+  };
+
+  registeredGroups[chatJid] = group;
+  setRegisteredGroup(chatJid, group);
+
+  // Create channel route
+  const route: ChannelRoute = {
+    channelJid: chatJid,
+    agentId,
+    trigger,
+    requiresTrigger: true,
+    createdAt: now,
+  };
+  channelRoutes[chatJid] = route;
+  setChannelRoute(route);
+
+  // Create channel subscription
+  const sub: ChannelSubscription = {
+    channelJid: chatJid,
+    agentId,
+    trigger,
+    requiresTrigger: true,
+    priority: 100,
+    isPrimary: true,
+    createdAt: now,
+    channelFolder: layers.channelFolder,
+    categoryFolder: layers.categoryFolder,
+  };
+  const existingSubs = channelSubscriptions[chatJid] || [];
+  const filteredSubs = existingSubs.filter((s) => s.agentId !== agentId);
+  filteredSubs.push(sub);
+  channelSubscriptions[chatJid] = filteredSubs;
+  setChannelSubscription(sub);
+
+  // Register JID→folder mapping for container sharing
+  queue.registerJidMapping(chatJid, agent.folder);
+
+  // Refresh registeredGroups from canonical state
+  refreshRegisteredGroupsFromCanonicalState();
+
+  // Create empty context layer files
+  ensureContextLayerFiles(agent, layers);
+
+  logger.info(
+    {
+      chatJid,
+      channelName,
+      platform,
+      botId,
+      agentId,
+      folder: agent.folder,
+      layers,
+    },
+    'Channel auto-registered',
+  );
+
+  return true;
 }
 
 /** Derive a server folder slug from a guild name */
@@ -3656,12 +3814,22 @@ async function main(): Promise<void> {
           TELEGRAM_BOT_TOKENS,
           (token, idx) =>
             Effect.gen(function* () {
-              const telegram = new TelegramChannel(token, {
+              const telegram: TelegramChannel = new TelegramChannel(token, {
                 onMessage: (chatJid, msg) => storeAndBroadcast(msg),
                 onChatMetadata: (chatJid, timestamp, name) =>
                   storeChatMetadata(chatJid, timestamp, name),
                 registeredGroups: () => registeredGroups,
                 allowLegacyJidRouting: TELEGRAM_BOT_TOKENS.length <= 1,
+                autoRegister: async (
+                  chatJid: string,
+                  chatName: string,
+                ): Promise<boolean> =>
+                  autoRegisterChannel(
+                    chatJid,
+                    chatName,
+                    'telegram',
+                    telegram.botId,
+                  ),
               });
               yield* Effect.tryPromise(() => telegram.connect());
               return telegram;
@@ -3703,6 +3871,8 @@ async function main(): Promise<void> {
                 onChatMetadata: (chatJid, timestamp, name) =>
                   storeChatMetadata(chatJid, timestamp, name),
                 registeredGroups: () => registeredGroups,
+                autoRegister: async (chatJid, channelName) =>
+                  autoRegisterChannel(chatJid, channelName, 'slack', bot.id),
                 onReaction: async (chatJid, messageId, emoji, userName) => {
                   await handleReactionNotification(
                     chatJid,
