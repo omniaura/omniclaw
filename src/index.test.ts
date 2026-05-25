@@ -22,8 +22,9 @@ import {
   _truncateIntermediateStatusBuffer,
   _setSessions,
   getAvailableGroups,
+  hasWakingTrigger,
 } from './index.js';
-import { DATA_DIR } from './config.js';
+import { buildTriggerPattern, DATA_DIR } from './config.js';
 import fs from 'fs';
 import path from 'path';
 import type {
@@ -649,5 +650,54 @@ describe('subscription selection', () => {
 
     expect(result.selectedByTrigger).toBe(true);
     expect(result.selected.map((s) => s.agentId)).toEqual(['agent-a']);
+  });
+});
+
+describe('hasWakingTrigger', () => {
+  const pattern = buildTriggerPattern('@Clayton');
+
+  it('wakes on an explicit @mention', () => {
+    expect(
+      hasWakingTrigger(
+        [{ id: 'slack-1', content: '@Clayton can you review this?' }],
+        pattern,
+      ),
+    ).toBe(true);
+  });
+
+  it('does NOT wake on a reaction notification that matches the trigger', () => {
+    // handleReactionNotification synthesizes this content + a `react-` id.
+    expect(
+      hasWakingTrigger(
+        [
+          {
+            id: 'react-1779680048436-l7zwa9',
+            content: '@Clayton [CodeRabbit reacted with :eyes:]',
+          },
+        ],
+        pattern,
+      ),
+    ).toBe(false);
+  });
+
+  it('still wakes when a real mention is batched alongside a reaction', () => {
+    expect(
+      hasWakingTrigger(
+        [
+          { id: 'react-1', content: '@Clayton [Someone reacted with :eyes:]' },
+          { id: 'slack-2', content: '@Clayton ship it' },
+        ],
+        pattern,
+      ),
+    ).toBe(true);
+  });
+
+  it('does not wake on unaddressed chatter', () => {
+    expect(
+      hasWakingTrigger(
+        [{ id: 'slack-3', content: 'https://example.com neat link' }],
+        pattern,
+      ),
+    ).toBe(false);
   });
 });
