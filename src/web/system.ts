@@ -1,7 +1,11 @@
 import fs from 'fs';
 import os from 'os';
 
-import type { RecentTaskOutcomes, WebStateProvider } from './types.js';
+import type {
+  PeerHealthSnapshot,
+  RecentTaskOutcomes,
+  WebStateProvider,
+} from './types.js';
 import {
   deriveMessageLaneReasonFromDetail,
   deriveTaskLaneReasonFromDetail,
@@ -50,6 +54,26 @@ const EMPTY_RECENT_OUTCOMES: RecentTaskOutcomes = {
   success: 0,
   error: 0,
   by_outcome_state: { done: 0, blocked: 0, abandoned: 0, unknown: 0 },
+};
+
+type PeerStatusKey = keyof PeerHealthSnapshot['by_status'];
+
+const PEER_STATUSES: readonly PeerStatusKey[] = [
+  'trusted',
+  'pending',
+  'discovered',
+  'revoked',
+];
+
+const EMPTY_PEER_HEALTH: PeerHealthSnapshot = {
+  discovery_available: false,
+  discovery_active: false,
+  total: 0,
+  online: 0,
+  trusted: 0,
+  trusted_offline: 0,
+  pending_requests: 0,
+  by_status: { discovered: 0, pending: 0, trusted: 0, revoked: 0 },
 };
 
 export interface HealthData {
@@ -151,6 +175,13 @@ export interface HealthData {
    * operator can spot recent errors or stalls at a glance.
    */
   recent_task_outcomes: RecentTaskOutcomes & { window_ms: number };
+  /**
+   * Aggregate LAN peer health. Mirrors the per-peer status taxonomy on
+   * the /network page. Defaults to zeros when the orchestrator does not
+   * expose a `getPeerHealth` hook (e.g. test stubs, builds with discovery
+   * compiled out).
+   */
+  peers: PeerHealthSnapshot;
   sse_clients: number;
   started_at: string;
 }
@@ -323,6 +354,7 @@ export function buildHealthData(
       ...recentOutcomes,
       window_ms: RECENT_OUTCOMES_WINDOW_MS,
     },
+    peers: state.getPeerHealth ? state.getPeerHealth() : EMPTY_PEER_HEALTH,
     sse_clients: sseClientCount,
     started_at: startedAt,
   };
@@ -612,9 +644,48 @@ export function renderSystemContent(
           'sys-queue-task-reason',
         ),
     ) +
+    // Peers rollup — mirrors the /network status taxonomy so operators
+    // can see LAN trust health at a glance without leaving /system.
+    metricCard(
+      'peers',
+      metricRow(
+        'discovery',
+        renderDiscoveryState(health.peers),
+        'sys-peers-discovery',
+      ) +
+        metricRow('total', String(health.peers.total), 'sys-peers-total') +
+        metricRow('online', String(health.peers.online), 'sys-peers-online') +
+        metricRow(
+          'trusted',
+          String(health.peers.trusted),
+          'sys-peers-trusted',
+        ) +
+        metricRow(
+          'trusted offline',
+          String(health.peers.trusted_offline),
+          'sys-peers-trusted-offline',
+        ) +
+        metricRow(
+          'pending requests',
+          String(health.peers.pending_requests),
+          'sys-peers-pending-requests',
+        ) +
+        `<div class="metric-sub">by status</div>` +
+        reasonRollup(
+          health.peers.by_status,
+          PEER_STATUSES,
+          'sys-peers-status',
+          'peer-status',
+        ),
+    ) +
     `</div>` +
     `</div>`
   );
+}
+
+function renderDiscoveryState(peers: PeerHealthSnapshot): string {
+  if (!peers.discovery_available) return 'unavailable';
+  return peers.discovery_active ? 'active' : 'disabled';
 }
 
 /** Full system page with SPA shell. */

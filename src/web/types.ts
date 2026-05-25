@@ -129,6 +129,13 @@ export interface WebStateProvider {
     source: string | null,
   ): void;
 
+  /**
+   * Snapshot of LAN discovery / peer trust state for the /system rollup.
+   * Optional so test stubs and lightweight providers can omit it; when
+   * unimplemented the /system page renders zeros for the peers tile.
+   */
+  getPeerHealth?(): PeerHealthSnapshot;
+
   // ---- Agent on/off switch ----
   /**
    * Toggle whether the agent is enabled. When disabled, the orchestrator
@@ -183,6 +190,38 @@ export interface RecentTaskOutcomes {
     blocked: number;
     abandoned: number;
     unknown: number;
+  };
+}
+
+/**
+ * Aggregate LAN peer health used by the /system peers tile. Mirrors the
+ * status taxonomy on the /network page so the two surfaces agree.
+ *
+ * `trusted_offline` is broken out because a trusted peer that is offline
+ * is the most operationally interesting case — sync, browse, and remote
+ * logs all silently fail against it.
+ */
+export interface PeerHealthSnapshot {
+  /** True when discovery is configured in this build (env / capability). */
+  discovery_available: boolean;
+  /** True when the discovery runtime is actually broadcasting/listening. */
+  discovery_active: boolean;
+  /** Total peers known across discovered + stored (excludes revoked). */
+  total: number;
+  /** Peers currently visible on the network (discovered this session). */
+  online: number;
+  /** Peers whose trust status is `trusted`. */
+  trusted: number;
+  /** Trusted peers that are not currently online. */
+  trusted_offline: number;
+  /** Inbound pair requests awaiting admin approval. */
+  pending_requests: number;
+  /** Count of peers by `PeerStatus`. Always carries all keys (zero default). */
+  by_status: {
+    discovered: number;
+    pending: number;
+    trusted: number;
+    revoked: number;
   };
 }
 

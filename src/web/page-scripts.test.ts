@@ -172,3 +172,40 @@ describe('conversations page script', () => {
     expect(script).toContain('function updateChatListTime(jid,timestamp){');
   });
 });
+
+describe('system page script', () => {
+  it('refreshes peer health tile from /api/health poll', () => {
+    const script = allPageScripts().system;
+
+    expect(script).toContain('fetch("/api/health")');
+    expect(script).toContain('if(h.peers){');
+    expect(script).toContain('getElementById("sys-peers-discovery")');
+    expect(script).toContain('getElementById("sys-peers-total")');
+    expect(script).toContain('getElementById("sys-peers-online")');
+    expect(script).toContain('getElementById("sys-peers-trusted")');
+    expect(script).toContain('getElementById("sys-peers-trusted-offline")');
+    expect(script).toContain('getElementById("sys-peers-pending-requests")');
+  });
+
+  it('refreshes peer by_status breakdown for every PeerStatus key', () => {
+    const script = allPageScripts().system;
+
+    expect(script).toContain(
+      'var pstats=["trusted","pending","discovered","revoked"];',
+    );
+    expect(script).toContain(
+      'el=document.getElementById("sys-peers-status-"+pk);',
+    );
+    expect(script).toContain(
+      'if(el)el.textContent=String(h.peers.by_status[pk]||0);',
+    );
+  });
+
+  it('mirrors the renderDiscoveryState logic when toggling the discovery cell', () => {
+    const script = allPageScripts().system;
+
+    expect(script).toContain(
+      '(!h.peers.discovery_available?"unavailable":(h.peers.discovery_active?"active":"disabled"))',
+    );
+  });
+});
