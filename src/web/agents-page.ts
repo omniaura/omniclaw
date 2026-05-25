@@ -37,6 +37,25 @@ const KNOWN_MESSAGE_LANE_REASONS: ReadonlySet<MessageLaneReason> = new Set([
   'no-work',
 ]);
 
+/** Pending work depth for an agent broken out by lane. */
+export interface AgentQueueDepth {
+  messages: number;
+  tasks: number;
+  total: number;
+}
+
+/** Derive pending message and task counts for an agent. */
+export function getAgentQueueDepth(
+  folder: string,
+  queueDetails: GroupQueueDetail[],
+): AgentQueueDepth {
+  const detail = queueDetails.find((d) => d.folderKey === folder);
+  if (!detail) return { messages: 0, tasks: 0, total: 0 };
+  const messages = detail.messageLane.pendingCount;
+  const tasks = detail.taskLane.pendingCount;
+  return { messages, tasks, total: messages + tasks };
+}
+
 /** Derive an agent's execution status from the group queue details. */
 export function getAgentExecStatus(
   folder: string,
@@ -141,12 +160,42 @@ export function renderExecStatusBadge(
   );
 }
 
+const ZERO_QUEUE_DEPTH: AgentQueueDepth = {
+  messages: 0,
+  tasks: 0,
+  total: 0,
+};
+
+/** Render the queue-depth cell for an agent row. */
+function renderQueueDepthCell(depth: AgentQueueDepth): string {
+  if (depth.total === 0) {
+    return `<td class="td-center td-queue-depth" data-queue-total="0"><span class="qd-zero">0</span></td>`;
+  }
+  const parts: string[] = [];
+  if (depth.messages > 0) {
+    parts.push(
+      `<span class="qd-msgs" title="${depth.messages} pending messages">${depth.messages}m</span>`,
+    );
+  }
+  if (depth.tasks > 0) {
+    parts.push(
+      `<span class="qd-tasks" title="${depth.tasks} pending tasks">${depth.tasks}t</span>`,
+    );
+  }
+  return (
+    `<td class="td-center td-queue-depth qd-nonzero" data-queue-total="${depth.total}" data-queue-messages="${depth.messages}" data-queue-tasks="${depth.tasks}">` +
+    parts.join('') +
+    `</td>`
+  );
+}
+
 /** Render a single agent row in the agents table. */
 export function renderAgentRow(
   agent: AgentChannelData,
   taskCount: number,
   execStatus: AgentExecStatus = 'offline',
   execReason: MessageLaneReason | null = null,
+  queueDepth: AgentQueueDepth = ZERO_QUEUE_DEPTH,
 ): string {
   const esc = escapeHtml;
   const avatar = avatarSrc(agent);
@@ -181,6 +230,7 @@ export function renderAgentRow(
     `<td><span class="badge ${backendBadgeClass(agent.backend)}">${esc(agent.backend)}</span></td>` +
     `<td><span class="badge badge-sm">${esc(agent.agentRuntime)}</span></td>` +
     `<td class="td-center">${agent.channels.length}</td>` +
+    renderQueueDepthCell(queueDepth) +
     `<td class="td-center">${taskCount}</td>` +
     `<td>` +
     (agent.isAdmin
@@ -236,6 +286,7 @@ export function renderAgentsContent(
     .map((a) => {
       let status: AgentExecStatus;
       let reason: MessageLaneReason | null = null;
+      let queueDepth: AgentQueueDepth = ZERO_QUEUE_DEPTH;
       if (a.remoteInstanceId) {
         status = 'offline';
       } else if (localAgents[a.id]?.enabled === false) {
@@ -243,8 +294,15 @@ export function renderAgentsContent(
       } else {
         status = getAgentExecStatus(a.folder, queueDetails);
         reason = getAgentExecReason(a.folder, queueDetails);
+        queueDepth = getAgentQueueDepth(a.folder, queueDetails);
       }
-      return renderAgentRow(a, taskCounts[a.folder] || 0, status, reason);
+      return renderAgentRow(
+        a,
+        taskCounts[a.folder] || 0,
+        status,
+        reason,
+        queueDepth,
+      );
     })
     .join('\n');
 
@@ -279,6 +337,7 @@ export function renderAgentsContent(
     `<th>backend</th>` +
     `<th>runtime</th>` +
     `<th class="th-center">channels</th>` +
+    `<th class="th-center" title="pending messages and tasks waiting to run">queued</th>` +
     `<th class="th-center">tasks</th>` +
     `<th>flags</th>` +
     `<th>actions</th>` +

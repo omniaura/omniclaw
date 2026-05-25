@@ -6,6 +6,7 @@ import { handleRequest } from './routes.js';
 import {
   getAgentExecReason,
   getAgentExecStatus,
+  getAgentQueueDepth,
   renderAgentRow,
   renderExecStatusBadge,
   renderAgentsContent,
@@ -973,5 +974,182 @@ describe('renderAgentsContent with execution status', () => {
     expect(html).not.toMatch(
       /data-agent-toggle=[^>]*data-agent-id="peer-2:remote-only"/,
     );
+  });
+});
+
+describe('getAgentQueueDepth', () => {
+  it('returns zero depth when agent has no queue entry', () => {
+    expect(getAgentQueueDepth('test-agent', [])).toEqual({
+      messages: 0,
+      tasks: 0,
+      total: 0,
+    });
+  });
+
+  it('returns message and task pending counts when present', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 3,
+          containerName: null,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 2,
+          containerName: null,
+          activeTask: null,
+        },
+      }),
+    ];
+    expect(getAgentQueueDepth('test-agent', details)).toEqual({
+      messages: 3,
+      tasks: 2,
+      total: 5,
+    });
+  });
+
+  it('matches by folder key when multiple agents are reported', () => {
+    const details = [
+      makeQueueDetail({
+        folderKey: 'other-agent',
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 7,
+          containerName: null,
+        },
+      }),
+    ];
+    expect(getAgentQueueDepth('test-agent', details)).toEqual({
+      messages: 0,
+      tasks: 0,
+      total: 0,
+    });
+    expect(getAgentQueueDepth('other-agent', details).messages).toBe(7);
+  });
+});
+
+describe('renderAgentRow queue depth cell', () => {
+  const agentData = {
+    id: 'agent-1',
+    name: 'Test Agent',
+    folder: 'test-agent',
+    backend: 'apple-container',
+    agentRuntime: 'claude-agent-sdk',
+    isAdmin: false,
+    channels: [],
+  };
+
+  it('renders a zero placeholder when depth is zero', () => {
+    const html = renderAgentRow(agentData, 0);
+    expect(html).toContain('td-queue-depth');
+    expect(html).toContain('data-queue-total="0"');
+    expect(html).toContain('qd-zero');
+  });
+
+  it('renders message-pending count with m suffix', () => {
+    const html = renderAgentRow(agentData, 0, 'queued', null, {
+      messages: 4,
+      tasks: 0,
+      total: 4,
+    });
+    expect(html).toContain('data-queue-total="4"');
+    expect(html).toContain('data-queue-messages="4"');
+    expect(html).toContain('qd-msgs');
+    expect(html).toContain('>4m<');
+    expect(html).not.toContain('qd-tasks');
+  });
+
+  it('renders task-pending count with t suffix', () => {
+    const html = renderAgentRow(agentData, 0, 'queued', null, {
+      messages: 0,
+      tasks: 2,
+      total: 2,
+    });
+    expect(html).toContain('data-queue-tasks="2"');
+    expect(html).toContain('qd-tasks');
+    expect(html).toContain('>2t<');
+    expect(html).not.toContain('qd-msgs');
+  });
+
+  it('renders both message and task counts when both nonzero', () => {
+    const html = renderAgentRow(agentData, 0, 'queued', null, {
+      messages: 3,
+      tasks: 1,
+      total: 4,
+    });
+    expect(html).toContain('qd-nonzero');
+    expect(html).toContain('>3m<');
+    expect(html).toContain('>1t<');
+  });
+});
+
+describe('renderAgentsContent queue depth column', () => {
+  it('includes the queued column header', () => {
+    const html = renderAgentsContent(makeState());
+    expect(html).toContain('>queued<');
+  });
+
+  it('surfaces nonzero pending message count from queue details', () => {
+    const state = makeState();
+    const origGetQueueDetails = state.getQueueDetails;
+    state.getQueueDetails = () => [
+      makeQueueDetail({
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 5,
+          containerName: null,
+        },
+      }),
+    ];
+
+    const html = renderAgentsContent(state);
+    expect(html).toContain('data-queue-total="5"');
+    expect(html).toContain('data-queue-messages="5"');
+    expect(html).toContain('>5m<');
+
+    state.getQueueDetails = origGetQueueDetails;
+  });
+
+  it('renders zero queue depth for agents with no queue entry', () => {
+    const state = makeState();
+    const origGetQueueDetails = state.getQueueDetails;
+    state.getQueueDetails = () => [];
+
+    const html = renderAgentsContent(state);
+    expect(html).toContain('data-queue-total="0"');
+    expect(html).toContain('qd-zero');
+
+    state.getQueueDetails = origGetQueueDetails;
+  });
+
+  it('shows zero queue depth for remote agents (toggled on their own host)', () => {
+    const remotePeers = [
+      {
+        instanceId: 'peer-1',
+        instanceName: 'macbook',
+        online: true,
+        host: '192.168.1.10',
+        port: 4444,
+        agents: [
+          {
+            id: 'remote-agent',
+            name: 'Remote',
+            folder: 'remote',
+            backend: 'docker' as const,
+            agentRuntime: 'opencode' as const,
+            channels: [],
+          },
+        ],
+      },
+    ];
+    const html = renderAgentsContent(makeState({}), remotePeers);
+    // Remote agent row should have queue cell rendered but as zero (depth
+    // for remote agents lives on the peer's own host).
+    expect(html).toContain('data-agent-id="peer-1:remote-agent"');
+    expect(html).toContain('qd-zero');
   });
 });
