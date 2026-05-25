@@ -1731,6 +1731,25 @@ export function _handleSessionCommandForTest(
 }
 
 /**
+ * Whether a batch of pending messages contains a real trigger that should wake
+ * a trigger-gated agent. Synthetic reaction notifications (id `react-*`) are
+ * stored with content like "@Agent [User reacted with :eyes:]" (see
+ * handleReactionNotification), which matches the trigger pattern even though no
+ * one addressed the agent. A reaction is not a mention, so it must not wake an
+ * idle agent — otherwise every emoji (e.g. a bot's :eyes:) spams a response.
+ *
+ * @internal - exported for testing
+ */
+export function hasWakingTrigger(
+  messages: Array<{ id: string; content: string }>,
+  triggerPattern: RegExp,
+): boolean {
+  return messages.some(
+    (m) => !m.id.startsWith('react-') && triggerPattern.test(m.content.trim()),
+  );
+}
+
+/**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  */
@@ -1764,10 +1783,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   // selectSubscriptionsForMessage(). Don't re-apply trigger gating here.
   if (!agentId && !isMainGroup && group.requiresTrigger !== false) {
     const groupTriggerPattern = buildTriggerPattern(group.trigger);
-    const hasTrigger = missedMessages.some((m) =>
-      groupTriggerPattern.test(m.content.trim()),
-    );
-    if (!hasTrigger) return true;
+    if (!hasWakingTrigger(missedMessages, groupTriggerPattern)) return true;
   }
 
   const log = logger.child({
