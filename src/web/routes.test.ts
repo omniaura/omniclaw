@@ -717,6 +717,74 @@ describe('web routes unit tests', () => {
 
     expect(res.status).toBe(405);
   });
+
+  it('triggers a task to run now via the state provider', async () => {
+    const calls: string[] = [];
+    const res = await handle(
+      new Request('http://localhost/api/tasks/task-001/run', {
+        method: 'POST',
+      }),
+      makeState({
+        runTaskNow: (id) => {
+          calls.push(id);
+          return { ok: true };
+        },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(calls).toEqual(['task-001']);
+    expect((await jsonBody(res)) as { ok: boolean; id: string }).toEqual({
+      ok: true,
+      id: 'task-001',
+    });
+  });
+
+  it('returns 404 when running a task that does not exist', async () => {
+    const res = await handle(
+      new Request('http://localhost/api/tasks/missing/run', {
+        method: 'POST',
+      }),
+      makeState({ runTaskNow: () => ({ ok: false, reason: 'not_found' }) }),
+    );
+
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 409 when running a task in an invalid state', async () => {
+    const res = await handle(
+      new Request('http://localhost/api/tasks/task-001/run', {
+        method: 'POST',
+      }),
+      makeState({ runTaskNow: () => ({ ok: false, reason: 'invalid_state' }) }),
+    );
+
+    expect(res.status).toBe(409);
+  });
+
+  it('returns 501 when run-now is unsupported by the provider', async () => {
+    const state = makeState();
+    delete (state as { runTaskNow?: unknown }).runTaskNow;
+    const res = await handle(
+      new Request('http://localhost/api/tasks/task-001/run', {
+        method: 'POST',
+      }),
+      state,
+    );
+
+    expect(res.status).toBe(501);
+  });
+
+  it('rejects non-POST methods for run-now', async () => {
+    const res = await handle(
+      new Request('http://localhost/api/tasks/task-001/run', {
+        method: 'GET',
+      }),
+      makeState({ runTaskNow: () => ({ ok: true }) }),
+    );
+
+    expect(res.status).toBe(405);
+  });
 });
 
 describe('handleRequest task run logs', () => {

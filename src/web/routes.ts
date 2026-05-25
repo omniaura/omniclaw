@@ -154,6 +154,19 @@ export function handleRequest(
       return json({ error: 'Method not allowed' }, 405);
     }
 
+    // Run now: /api/tasks/{id}/run
+    if (rest.endsWith('/run')) {
+      let taskId: string;
+      try {
+        taskId = decodeURIComponent(rest.slice(0, -'/run'.length));
+      } catch {
+        return json({ error: 'Invalid task ID encoding' }, 400);
+      }
+      if (!taskId) return json({ error: 'Missing task ID' }, 400);
+      if (method === 'POST') return handleRunTaskNow(taskId, state);
+      return json({ error: 'Method not allowed' }, 405);
+    }
+
     // Task run logs: /api/tasks/{id}/runs
     if (rest.endsWith('/runs')) {
       let taskId: string;
@@ -725,6 +738,19 @@ function handleDeleteTask(taskId: string, state: WebStateProvider): Response {
   }
 
   return json({ deleted: true, id: taskId });
+}
+
+function handleRunTaskNow(taskId: string, state: WebStateProvider): Response {
+  if (!state.runTaskNow)
+    return json({ error: 'Run-now is not supported' }, 501);
+
+  const result = state.runTaskNow(taskId);
+  if (result.ok) return json({ ok: true, id: taskId });
+  if (result.reason === 'not_found')
+    return json({ error: 'Task not found' }, 404);
+  if (result.reason === 'invalid_state')
+    return json({ error: 'Task cannot be run in its current state' }, 409);
+  return json({ error: 'Failed to run task' }, 400);
 }
 
 function handleGetChats(state: WebStateProvider): Response {

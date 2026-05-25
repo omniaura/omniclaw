@@ -110,6 +110,18 @@ describe('renderTaskTableRows', () => {
     expect(html).toContain('>Resume<');
     expect(html).toContain('badge status-active');
     expect(html).toContain('badge status-paused');
+    expect(html).toContain('data-tm-action="run"');
+  });
+
+  it('omits the Run button for completed tasks', () => {
+    const html = renderTaskTableRows([
+      makeTask({ id: 'task-active', status: 'active' }),
+      makeTask({ id: 'task-done', status: 'completed' }),
+    ]);
+
+    const completedRow = html.slice(html.indexOf('data-task-id="task-done"'));
+    expect(completedRow).not.toContain('data-tm-action="run"');
+    expect(html).toContain('data-tm-action="run"');
   });
 
   it('formats interval schedule labels across millisecond, second, minute, and hour boundaries', () => {

@@ -80,6 +80,15 @@ export interface WebStateProvider {
     >,
   ): void;
   deleteTask(id: string): void;
+  /**
+   * Trigger a scheduled task to run immediately, bypassing its schedule.
+   * Returns ok=false with a reason when the task is missing or in a
+   * non-runnable state (e.g. completed/cancelled).
+   */
+  runTaskNow?(id: string): {
+    ok: boolean;
+    reason?: 'not_found' | 'invalid_state';
+  };
   /** Calculate the next run time for a schedule. Returns null on invalid input. */
   calculateNextRun(
     scheduleType: 'cron' | 'interval' | 'once',

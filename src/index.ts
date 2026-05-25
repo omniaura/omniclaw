@@ -148,7 +148,11 @@ import {
   formatScheduledRunHandoffsForPrompt,
   readScheduledRunHandoffs,
 } from './task-handoffs.js';
-import { startSchedulerLoop } from './task-scheduler.js';
+import {
+  startSchedulerLoop,
+  triggerTaskNow,
+  type SchedulerDependencies,
+} from './task-scheduler.js';
 import {
   parseTelegramApiFileUrl,
   parseTelegramFileDescriptor,
@@ -3070,6 +3074,46 @@ async function main(): Promise<void> {
   });
   sanitizePersistedTelegramAvatarUrls();
 
+  const schedulerDeps: SchedulerDependencies = {
+    registeredGroups: () => registeredGroups,
+    getGroupForTask,
+    isAgentEnabled,
+    getSessions: () => sessions,
+    resumePositionStore,
+    queue,
+    onProcess: (groupJid, proc, containerName, groupFolder, lane) =>
+      queue.registerProcess(
+        groupJid,
+        proc,
+        containerName,
+        groupFolder,
+        undefined,
+        lane,
+      ),
+    sendMessage: async (jid, rawText, discordBotId) => {
+      const ch = findChannelForJid(
+        jid,
+        getPreferredChannelBotId(jid, discordBotId),
+      );
+      if (!ch) {
+        logger.warn({ jid }, 'No channel found for scheduled message');
+        return;
+      }
+      const group = getRegisteredGroupForJid(jid);
+      const text = formatOutbound(
+        ch,
+        rawText,
+        group ? getAgentName(group) : undefined,
+      );
+      if (text) {
+        const msgId = await ch.sendMessage(jid, text);
+        return msgId ? String(msgId) : undefined;
+      }
+    },
+    findChannel: (jid, discordBotId) =>
+      findChannelForJid(jid, getPreferredChannelBotId(jid, discordBotId)),
+  };
+
   const webState: WebStateProvider = {
     getAgents: () => agents,
     getChannelSubscriptions: () => channelSubscriptions,
@@ -3096,6 +3140,7 @@ async function main(): Promise<void> {
     createTask: (task) => dbCreateTask(task),
     updateTask: (id, updates) => dbUpdateTask(id, updates),
     deleteTask: (id) => dbDeleteTask(id),
+    runTaskNow: (id) => triggerTaskNow(id, schedulerDeps),
     calculateNextRun: (type, value) => calculateNextRun(type, value),
     readContextFile: (layerPath) => {
       const filePath = path.join(GROUPS_DIR, layerPath, 'CLAUDE.md');
@@ -3754,45 +3799,7 @@ async function main(): Promise<void> {
   });
 
   // Start subsystems (independently of connection handler)
-  startSchedulerLoop({
-    registeredGroups: () => registeredGroups,
-    getGroupForTask,
-    isAgentEnabled,
-    getSessions: () => sessions,
-    resumePositionStore,
-    queue,
-    onProcess: (groupJid, proc, containerName, groupFolder, lane) =>
-      queue.registerProcess(
-        groupJid,
-        proc,
-        containerName,
-        groupFolder,
-        undefined,
-        lane,
-      ),
-    sendMessage: async (jid, rawText, discordBotId) => {
-      const ch = findChannelForJid(
-        jid,
-        getPreferredChannelBotId(jid, discordBotId),
-      );
-      if (!ch) {
-        logger.warn({ jid }, 'No channel found for scheduled message');
-        return;
-      }
-      const group = getRegisteredGroupForJid(jid);
-      const text = formatOutbound(
-        ch,
-        rawText,
-        group ? getAgentName(group) : undefined,
-      );
-      if (text) {
-        const msgId = await ch.sendMessage(jid, text);
-        return msgId ? String(msgId) : undefined;
-      }
-    },
-    findChannel: (jid, discordBotId) =>
-      findChannelForJid(jid, getPreferredChannelBotId(jid, discordBotId)),
-  });
+  startSchedulerLoop(schedulerDeps);
   startIpcWatcher({
     sendMessage: async (jid, rawText, discordBotId) => {
       const ch = findChannelForJid(

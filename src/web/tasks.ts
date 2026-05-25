@@ -127,6 +127,10 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
             : 'status-completed';
       const toggleLabel = task.status === 'active' ? 'Pause' : 'Resume';
       const toggleStatus = task.status === 'active' ? 'paused' : 'active';
+      const runButton =
+        task.status === 'completed'
+          ? ''
+          : `<button class="btn btn-sm" data-tm-action="run">Run</button>`;
       const promptShort =
         task.prompt.length > 60
           ? task.prompt.slice(0, 57) + '\u2026'
@@ -160,6 +164,7 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
         `<td><span class="badge badge-sm">${escapeHtml(task.context_mode)}</span></td>` +
         `<td class="td-actions">` +
         `<button class="btn btn-sm btn-toggle" data-tm-action="toggle" data-status="${toggleStatus}">${toggleLabel}</button>` +
+        runButton +
         `<button class="btn btn-sm" data-tm-action="edit">Edit</button>` +
         `<button class="btn btn-sm" data-tm-action="runs">Runs</button>` +
         `<button class="btn btn-sm btn-danger" data-tm-action="delete">Del</button>` +

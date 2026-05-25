@@ -1009,6 +1009,13 @@ tbody.addEventListener("click",function(e){
     .catch(function(err){window.__toast(err.message||"Failed","error");btn.disabled=false;});
   }
 
+  if(action==="run"){
+    btn.disabled=true;
+    fetch("/api/tasks/"+encodeURIComponent(taskId)+"/run",{method:"POST"})
+    .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})
+    .then(function(){window.__toast("Task queued to run now");btn.disabled=false;})
+    .catch(function(err){window.__toast(err.message||"Failed to run task","error");btn.disabled=false;});
+  }
   if(action==="edit"){openEditModal(taskId);}
   if(action==="runs"){openRunHistory(taskId);}
   if(action==="delete"){openDeleteModal(taskId);}
@@ -1255,6 +1262,7 @@ function refreshTasks(){
       var sc=task.status==="active"?"status-active":task.status==="paused"?"status-paused":"status-completed";
       var tl=task.status==="active"?"Pause":"Resume";
       var ts2=task.status==="active"?"paused":"active";
+      var runBtn=task.status==="completed"?"":'<button class="btn btn-sm" data-tm-action="run">Run</button>';
       var ps=task.prompt.length>60?task.prompt.slice(0,57)+"\\u2026":task.prompt;
       var sl=scheduleLabel(task.schedule_type,task.schedule_value);
       var nr=task.next_run?relTime(task.next_run):"\\u2014";
@@ -1271,6 +1279,7 @@ function refreshTasks(){
         +'<td><span class="badge badge-sm">'+window.__esc(task.context_mode)+'</span></td>'
         +'<td class="td-actions">'
         +'<button class="btn btn-sm btn-toggle" data-tm-action="toggle" data-status="'+ts2+'">'+tl+'</button>'
+        +runBtn
         +'<button class="btn btn-sm" data-tm-action="edit">Edit</button>'
         +'<button class="btn btn-sm" data-tm-action="runs">Runs</button>'
         +'<button class="btn btn-sm btn-danger" data-tm-action="delete">Del</button>'
