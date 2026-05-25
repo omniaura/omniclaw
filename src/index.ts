@@ -3751,13 +3751,16 @@ async function main(): Promise<void> {
           TELEGRAM_BOT_TOKENS,
           (token, idx) =>
             Effect.gen(function* () {
-              const telegram = new TelegramChannel(token, {
+              const telegram: TelegramChannel = new TelegramChannel(token, {
                 onMessage: (chatJid, msg) => storeAndBroadcast(msg),
                 onChatMetadata: (chatJid, timestamp, name) =>
                   storeChatMetadata(chatJid, timestamp, name),
                 registeredGroups: () => registeredGroups,
                 allowLegacyJidRouting: TELEGRAM_BOT_TOKENS.length <= 1,
-                autoRegister: async (chatJid, chatName) =>
+                autoRegister: async (
+                  chatJid: string,
+                  chatName: string,
+                ): Promise<boolean> =>
                   autoRegisterChannel(
                     chatJid,
                     chatName,
