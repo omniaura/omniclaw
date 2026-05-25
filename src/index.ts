@@ -107,6 +107,7 @@ import {
   storeMessage,
   updateAgentAvatar,
   setAgentEnabled,
+  setAgentModel,
 } from './db.js';
 import {
   type DiscoveryHandle,
@@ -2530,6 +2531,7 @@ async function runAgent(
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
         agentRuntime: getAgentRuntime(group),
+        model: discoveryAgent?.model,
         channels: agentChannels,
         currentChannelName,
         agentName: group.name,
@@ -3253,6 +3255,10 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getGroupForTask,
     isAgentEnabled,
+    getAgentModel: (agentFolder) => {
+      const agent = Object.values(agents).find((a) => a.folder === agentFolder);
+      return agent?.model || undefined;
+    },
     getSessions: () => sessions,
     resumePositionStore,
     queue,
@@ -3356,6 +3362,21 @@ async function main(): Promise<void> {
       logger.info(
         { agentId, enabled },
         'Agent enabled flag updated via Web UI',
+      );
+      return true;
+    },
+    setAgentModel: (agentId, model) => {
+      if (!agents[agentId]) return false;
+      const ok = setAgentModel(agentId, model);
+      if (!ok) return false;
+      const normalized =
+        typeof model === 'string' && model.trim().length > 0
+          ? model.trim()
+          : undefined;
+      agents[agentId].model = normalized;
+      logger.info(
+        { agentId, model: normalized ?? null },
+        'Agent model updated via Web UI',
       );
       return true;
     },

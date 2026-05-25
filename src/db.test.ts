@@ -20,6 +20,7 @@ import {
   loadAllDeltaCursors,
   recordGitHubWebhookDelivery,
   setAgent,
+  setAgentModel,
   setDeltaCursorInDb,
   setAgentHealth,
   setRegisteredGroup,
@@ -245,6 +246,56 @@ describe('setAgent enabled-flag preservation', () => {
     setAgent({ ...baseAgent, enabled: false });
     setAgent({ ...baseAgent, enabled: true });
     expect(getAllAgents()['switch-agent']?.enabled).toBe(true);
+  });
+});
+
+describe('per-agent model override', () => {
+  const baseAgent: Agent = {
+    id: 'model-agent',
+    name: 'Model Agent',
+    folder: 'model-agent',
+    backend: 'docker',
+    agentRuntime: 'opencode',
+    isAdmin: false,
+    createdAt: '2026-05-23T00:00:00.000Z',
+  };
+
+  it('persists model on initial setAgent and reads back via getAllAgents', () => {
+    setAgent({ ...baseAgent, model: 'anthropic/claude-sonnet-4-5' });
+    expect(getAllAgents()['model-agent']?.model).toBe(
+      'anthropic/claude-sonnet-4-5',
+    );
+  });
+
+  it('preserves model across re-registration without explicit model field', () => {
+    setAgent({ ...baseAgent, model: 'anthropic/claude-sonnet-4-5' });
+    // Simulate registerGroup / topology resync — no model field passed.
+    setAgent({ ...baseAgent });
+    expect(getAllAgents()['model-agent']?.model).toBe(
+      'anthropic/claude-sonnet-4-5',
+    );
+  });
+
+  it('setAgentModel updates an existing agent and clears with null', () => {
+    setAgent(baseAgent);
+    expect(setAgentModel('model-agent', 'claude-opus-4-7')).toBe(true);
+    expect(getAllAgents()['model-agent']?.model).toBe('claude-opus-4-7');
+
+    expect(setAgentModel('model-agent', null)).toBe(true);
+    expect(getAllAgents()['model-agent']?.model).toBeUndefined();
+  });
+
+  it('setAgentModel trims whitespace and treats blank as clear', () => {
+    setAgent({ ...baseAgent, model: 'claude-opus-4-7' });
+    setAgentModel('model-agent', '   ');
+    expect(getAllAgents()['model-agent']?.model).toBeUndefined();
+
+    setAgentModel('model-agent', '  claude-haiku-4-5  ');
+    expect(getAllAgents()['model-agent']?.model).toBe('claude-haiku-4-5');
+  });
+
+  it('setAgentModel returns false for unknown agent', () => {
+    expect(setAgentModel('nonexistent', 'claude-opus-4-7')).toBe(false);
   });
 });
 

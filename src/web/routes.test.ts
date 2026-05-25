@@ -121,6 +121,7 @@ function makeState(
     writeContextFile: () => {},
     updateAgentAvatar: () => {},
     setAgentEnabled: () => true,
+    setAgentModel: () => true,
     resolveChatImage: async () => null,
     resolveDiscordGuildImage: async () => null,
     ...overrides,
@@ -1527,5 +1528,129 @@ describe('POST /api/agents/{id}/enabled (off-switch)', () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toContain('encoding');
+  });
+});
+
+describe('POST /api/agents/{id}/model', () => {
+  it('persists the model value and echoes it back', async () => {
+    const calls: Array<{ id: string; model: string | null }> = [];
+    const state = makeState({
+      setAgentModel: (id, model) => {
+        calls.push({ id, model });
+        return true;
+      },
+    });
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'anthropic/claude-sonnet-4-5' }),
+      }),
+      state,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({
+      ok: true,
+      agentId: 'agent-1',
+      model: 'anthropic/claude-sonnet-4-5',
+    });
+    expect(calls).toEqual([
+      { id: 'agent-1', model: 'anthropic/claude-sonnet-4-5' },
+    ]);
+  });
+
+  it('trims whitespace before persisting', async () => {
+    const calls: Array<{ id: string; model: string | null }> = [];
+    const state = makeState({
+      setAgentModel: (id, model) => {
+        calls.push({ id, model });
+        return true;
+      },
+    });
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: '  claude-opus-4-7  ' }),
+      }),
+      state,
+    );
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([{ id: 'agent-1', model: 'claude-opus-4-7' }]);
+  });
+
+  it('treats null and empty string as clear', async () => {
+    const calls: Array<{ id: string; model: string | null }> = [];
+    const state = makeState({
+      setAgentModel: (id, model) => {
+        calls.push({ id, model });
+        return true;
+      },
+    });
+
+    const resNull = await handle(
+      new Request('http://localhost/api/agents/agent-1/model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: null }),
+      }),
+      state,
+    );
+    expect(resNull.status).toBe(200);
+
+    const resBlank = await handle(
+      new Request('http://localhost/api/agents/agent-1/model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: '   ' }),
+      }),
+      state,
+    );
+    expect(resBlank.status).toBe(200);
+
+    expect(calls).toEqual([
+      { id: 'agent-1', model: null },
+      { id: 'agent-1', model: null },
+    ]);
+  });
+
+  it('rejects oversized model values', async () => {
+    const state = makeState();
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'x'.repeat(300) }),
+      }),
+      state,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects non-string non-null model values', async () => {
+    const state = makeState();
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 42 }),
+      }),
+      state,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 404 when the agent does not exist', async () => {
+    const state = makeState();
+    const res = await handle(
+      new Request('http://localhost/api/agents/missing/model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-opus-4-7' }),
+      }),
+      state,
+    );
+    expect(res.status).toBe(404);
   });
 });

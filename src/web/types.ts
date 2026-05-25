@@ -136,6 +136,12 @@ export interface WebStateProvider {
    * Returns true if the agent was found and updated.
    */
   setAgentEnabled(agentId: string, enabled: boolean): boolean;
+  /**
+   * Update the per-agent model override. Pass null/empty to clear and fall
+   * back to the host .env value or runtime default. Returns true if the
+   * agent was found and updated.
+   */
+  setAgentModel(agentId: string, model: string | null): boolean;
   /** Resolve a platform-backed icon for a specific chat/channel JID. */
   resolveChatImage?(chatJid: string): Promise<string | null>;
   /** Resolve a stored agent avatar reference to a fetchable URL. */

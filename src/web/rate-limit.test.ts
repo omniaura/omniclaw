@@ -51,6 +51,7 @@ function makeState(
     writeContextFile: () => {},
     updateAgentAvatar: () => {},
     setAgentEnabled: () => true,
+    setAgentModel: () => true,
     ...overrides,
   };
 }

@@ -20,6 +20,8 @@ export interface AgentDetailData {
   isAdmin: boolean;
   /** Whether the agent is enabled. Undefined for remote agents. */
   enabled?: boolean;
+  /** Per-agent model override. Undefined for remote agents or when unset. */
+  model?: string;
   description?: string;
   createdAt: string;
   remoteInstanceId?: string;
@@ -138,6 +140,7 @@ export function buildAgentDetailData(
     isAdmin: agent.isAdmin,
     // Default missing/undefined to true (agent is enabled unless explicitly off).
     enabled: agent.enabled !== false,
+    model: agent.model || undefined,
     remoteInstanceId: undefined,
     remoteInstanceName: undefined,
     remoteHost: undefined,
@@ -310,6 +313,19 @@ export function renderAgentDetailContent(
       ? `<div class="ad-info-item"><span class="ad-info-label">context folder</span><span class="ad-info-value">${esc(data.agentContextFolder)}</span></div>`
       : '') +
     `</div>` +
+    // Model override (local agents only). Editable inline; empty clears.
+    (!data.remoteInstanceId
+      ? `<div class="ad-section ad-model-section">` +
+        `<h3 class="ad-section-title">model</h3>` +
+        `<form class="ad-model-form" data-agent-model-form data-agent-id="${esc(data.id)}">` +
+        `<input type="text" class="ad-model-input" name="model" value="${esc(data.model || '')}" placeholder="(use .env default)" maxlength="200" autocomplete="off">` +
+        `<button class="btn btn-sm" type="submit">save</button>` +
+        `</form>` +
+        `<div class="ad-model-help td-dim">Overrides the host .env value. ` +
+        `Claude → claude-opus-4-7, OpenCode → anthropic/claude-sonnet-4-5, Codex → CODEX_MODEL, Cursor → CURSOR_AGENT_MODEL. ` +
+        `Leave blank to fall back to .env.</div>` +
+        `</div>`
+      : '') +
     // Channels section
     `<div class="ad-section">` +
     `<h3 class="ad-section-title">channels <span class="ad-count">${data.channels.length}</span></h3>` +

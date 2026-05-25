@@ -190,6 +190,10 @@ export function buildVolumeMounts(
   },
   options?: {
     allowGcpCredentials?: boolean;
+    /** Per-agent model override. Written to env file as the runtime's expected
+     *  env var (CLAUDE_MODEL / OPENCODE_MODEL / CODEX_MODEL / CURSOR_AGENT_MODEL),
+     *  taking precedence over any value from the host .env. */
+    model?: string;
   },
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
@@ -462,6 +466,18 @@ export function buildVolumeMounts(
     );
   }
 
+  // Per-agent model override (from SQLite). Wins over any host .env value so
+  // operators can configure model per agent without editing .env. Maps to the
+  // runtime's expected env var; an empty string clears any inherited value.
+  const modelOverride = options?.model?.trim();
+  if (modelOverride) {
+    const modelEnvVar = modelEnvVarForRuntime(agentRuntime);
+    filteredLines = filteredLines.filter(
+      (line) => !line.startsWith(`${modelEnvVar}=`),
+    );
+    filteredLines.push(`${modelEnvVar}=${modelOverride}`);
+  }
+
   if (filteredLines.length > 0) {
     fs.writeFileSync(path.join(envDir, 'env'), filteredLines.join('\n') + '\n');
     mounts.push({
@@ -518,6 +534,27 @@ export function buildVolumeMounts(
   }
 
   return mounts;
+}
+
+/**
+ * Map an agent runtime to the env var name its launcher reads for the model.
+ * Used by buildVolumeMounts to inject the per-agent SQLite `model` override
+ * into the container's env file, overriding any host .env value.
+ */
+export function modelEnvVarForRuntime(
+  runtime: AgentRuntime | undefined,
+): string {
+  switch (runtime) {
+    case 'opencode':
+      return 'OPENCODE_MODEL';
+    case 'codex':
+      return 'CODEX_MODEL';
+    case 'cursor-sdk':
+      return 'CURSOR_AGENT_MODEL';
+    case 'claude-agent-sdk':
+    default:
+      return 'CLAUDE_MODEL';
+  }
 }
 
 function extractAllowedEnvBlocks(
@@ -688,7 +725,10 @@ export class LocalBackend implements AgentBackend {
         agentContextFolder: input.agentContextFolder,
       },
       undefined,
-      { allowGcpCredentials: !!containerCfg?.allowGcpCredentials },
+      {
+        allowGcpCredentials: !!containerCfg?.allowGcpCredentials,
+        model: input.model,
+      },
     );
     const containerName = makeContainerName(folder, runtimeFolder);
     const effectiveNetwork = containerCfg?.networkMode ?? 'full';
@@ -1016,7 +1056,10 @@ export class LocalBackend implements AgentBackend {
         agentContextFolder: input.agentContextFolder,
       },
       undefined,
-      { allowGcpCredentials: !!containerCfg?.allowGcpCredentials },
+      {
+        allowGcpCredentials: !!containerCfg?.allowGcpCredentials,
+        model: input.model,
+      },
     );
 
     const effectiveNetwork = containerCfg?.networkMode ?? 'full';

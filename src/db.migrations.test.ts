@@ -343,6 +343,41 @@ describe('db migrations (bun:sqlite)', () => {
     db.close();
   });
 
+  it('adds model column to agents on fresh and legacy schemas (migration 8)', () => {
+    const fresh = new Database(':memory:');
+    createSchema(fresh);
+    expect(getAgentColumns(fresh)).toContain('model');
+
+    // Default value for legacy rows should be NULL — no model means fall back
+    // to the host .env value or runtime default.
+    fresh
+      .prepare(
+        `INSERT INTO agents (id, name, folder, backend, agent_runtime, is_admin, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'agent-no-model',
+        'No Model',
+        'agent-no-model',
+        'docker',
+        'opencode',
+        0,
+        '2026-05-23T00:00:00.000Z',
+      );
+    const row = fresh
+      .query('SELECT model FROM agents WHERE id = ?')
+      .get('agent-no-model') as { model: string | null };
+    expect(row.model).toBeNull();
+    fresh.close();
+
+    const legacy = new Database(':memory:');
+    seedLegacyObservedSchema(legacy);
+    expect(getAgentColumns(legacy)).not.toContain('model');
+    createSchema(legacy);
+    expect(getAgentColumns(legacy)).toContain('model');
+    legacy.close();
+  });
+
   it('adds agent_context_folder to agents and channel_folder/category_folder to channel_subscriptions', () => {
     const db = new Database(':memory:');
     seedLegacyObservedSchema(db);

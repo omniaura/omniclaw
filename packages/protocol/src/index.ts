@@ -58,6 +58,13 @@ export interface ContainerInput {
   secrets?: Record<string, string>;
   /** Which agent runtime to use inside the container. Default: claude-agent-sdk */
   agentRuntime?: AgentRuntime;
+  /**
+   * Per-agent model override. Written into the container's env file by the
+   * backend, mapped to the runtime's expected env var (CLAUDE_MODEL,
+   * OPENCODE_MODEL, CODEX_MODEL, CURSOR_AGENT_MODEL). Empty string / undefined
+   * falls back to the host .env value or runtime default.
+   */
+  model?: string;
   /** Multi-channel routing: all channels that map to this agent. Only set when agent has >1 route. */
   channels?: ChannelInfo[];
   /** Agent's display name (e.g. "OCPeyton"). Injected into system prompt for self-awareness. */

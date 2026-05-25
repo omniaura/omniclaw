@@ -452,6 +452,128 @@ describe('LocalBackend', () => {
       }
     });
 
+    it('overrides .env CLAUDE_MODEL with per-agent SQLite model', () => {
+      const fixture = createFixture();
+      try {
+        fs.writeFileSync(
+          path.join(fixture.tempProjectRoot, '.env'),
+          'CLAUDE_MODEL=claude-opus-4-6\n',
+        );
+
+        buildVolumeMounts(
+          { folder: fixture.groupFolder, name: 'Claude Test' } as any,
+          false,
+          false,
+          fixture.altRuntimeFolder,
+          'claude-agent-sdk',
+          undefined,
+          fixture.pathOverrides,
+          { model: 'claude-opus-4-7' },
+        );
+
+        const envContent = fs.readFileSync(
+          path.join(fixture.altEnvDir, 'env'),
+          'utf-8',
+        );
+        // The per-agent override wins over the .env value.
+        expect(envContent).toContain('CLAUDE_MODEL=claude-opus-4-7');
+        expect(envContent).not.toContain('CLAUDE_MODEL=claude-opus-4-6');
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
+    it('writes OPENCODE_MODEL for opencode runtime when model override is set', () => {
+      const fixture = createFixture();
+      try {
+        // No .env value to override — exercise the pure-append path.
+        fs.writeFileSync(
+          path.join(fixture.tempProjectRoot, '.env'),
+          'GITHUB_TOKEN=gh-token\n',
+        );
+
+        buildVolumeMounts(
+          { folder: fixture.groupFolder, name: 'OpenCode Test' } as any,
+          false,
+          false,
+          fixture.altRuntimeFolder,
+          'opencode',
+          undefined,
+          fixture.pathOverrides,
+          { model: 'anthropic/claude-sonnet-4-5' },
+        );
+
+        const envContent = fs.readFileSync(
+          path.join(fixture.altEnvDir, 'env'),
+          'utf-8',
+        );
+        expect(envContent).toContain(
+          'OPENCODE_MODEL=anthropic/claude-sonnet-4-5',
+        );
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
+    it('writes CODEX_MODEL for codex runtime when model override is set', () => {
+      const fixture = createFixture();
+      try {
+        fs.writeFileSync(
+          path.join(fixture.tempProjectRoot, '.env'),
+          'CODEX_MODEL=o4-old\n',
+        );
+
+        buildVolumeMounts(
+          { folder: fixture.groupFolder, name: 'Codex Test' } as any,
+          false,
+          false,
+          fixture.altRuntimeFolder,
+          'codex',
+          undefined,
+          fixture.pathOverrides,
+          { model: 'gpt-5-codex' },
+        );
+
+        const envContent = fs.readFileSync(
+          path.join(fixture.altEnvDir, 'env'),
+          'utf-8',
+        );
+        expect(envContent).toContain('CODEX_MODEL=gpt-5-codex');
+        expect(envContent).not.toContain('CODEX_MODEL=o4-old');
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
+    it('leaves .env CLAUDE_MODEL untouched when no override is provided', () => {
+      const fixture = createFixture();
+      try {
+        fs.writeFileSync(
+          path.join(fixture.tempProjectRoot, '.env'),
+          'CLAUDE_MODEL=claude-opus-4-6\n',
+        );
+
+        buildVolumeMounts(
+          { folder: fixture.groupFolder, name: 'No Override' } as any,
+          false,
+          false,
+          fixture.altRuntimeFolder,
+          'claude-agent-sdk',
+          undefined,
+          fixture.pathOverrides,
+          { model: undefined },
+        );
+
+        const envContent = fs.readFileSync(
+          path.join(fixture.altEnvDir, 'env'),
+          'utf-8',
+        );
+        expect(envContent).toContain('CLAUDE_MODEL=claude-opus-4-6');
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
     it('refreshes the cached agent-runner source when the source tree changes', () => {
       const fixture = createFixture();
       try {
