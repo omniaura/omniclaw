@@ -16,7 +16,7 @@ export interface Migration {
  * The version that represents the latest schema. Existing databases that
  * predate the migration framework are advanced through every migration to this.
  */
-export const BASELINE_VERSION = 6;
+export const BASELINE_VERSION = 7;
 
 // ---------------------------------------------------------------------------
 // Schema helpers (available for use in migrations)
@@ -238,6 +238,7 @@ const migration1: Migration = {
         FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id)
       );
       CREATE INDEX IF NOT EXISTS idx_task_run_logs ON task_run_logs(task_id, run_at);
+      CREATE INDEX IF NOT EXISTS idx_task_run_logs_run_at ON task_run_logs(run_at);
 
       CREATE TABLE IF NOT EXISTS task_run_phase_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -592,6 +593,17 @@ const migration6: Migration = {
   },
 };
 
+const migration7: Migration = {
+  version: 7,
+  description: 'Index task run logs by run timestamp',
+  up: (db) => {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_task_run_logs_run_at
+        ON task_run_logs(run_at);
+    `);
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Migration registry
 // ---------------------------------------------------------------------------
@@ -609,4 +621,5 @@ export const allMigrations: Migration[] = [
   migration4,
   migration5,
   migration6,
+  migration7,
 ];

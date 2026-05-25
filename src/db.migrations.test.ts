@@ -112,6 +112,13 @@ function getTableColumns(db: Database, table: string): string[] {
   return columns.map((c) => c.name);
 }
 
+function getIndexNames(db: Database, table: string): string[] {
+  const indexes = db.query(`PRAGMA index_list(${table})`).all() as Array<{
+    name: string;
+  }>;
+  return indexes.map((index) => index.name);
+}
+
 describe('db migrations (bun:sqlite)', () => {
   it('migrates legacy observed agents schema and keeps rows readable/writable', () => {
     // Use in-memory DB to avoid file system and module caching issues.
@@ -851,6 +858,40 @@ describe('versioned migration framework', () => {
     for (const name of expected) {
       expect(tableNames).toContain(name);
     }
+
+    db.close();
+  });
+
+  it('indexes task run logs by run timestamp on fresh DB', () => {
+    const db = new Database(':memory:');
+    runMigrations(db, allMigrations);
+
+    expect(getIndexNames(db, 'task_run_logs')).toContain(
+      'idx_task_run_logs_run_at',
+    );
+
+    db.close();
+  });
+
+  it('adds task run timestamp index to existing migrated DBs', () => {
+    const db = new Database(':memory:');
+    runMigrations(
+      db,
+      allMigrations.filter((migration) => migration.version <= 6),
+    );
+    db.exec('DROP INDEX IF EXISTS idx_task_run_logs_run_at');
+
+    expect(getSchemaVersion(db)).toBe(6);
+    expect(getIndexNames(db, 'task_run_logs')).not.toContain(
+      'idx_task_run_logs_run_at',
+    );
+
+    runMigrations(db, allMigrations);
+
+    expect(getSchemaVersion(db)).toBe(BASELINE_VERSION);
+    expect(getIndexNames(db, 'task_run_logs')).toContain(
+      'idx_task_run_logs_run_at',
+    );
 
     db.close();
   });

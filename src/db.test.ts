@@ -6,6 +6,8 @@ import {
   cleanupExpiredGitHubWebhookDeliveries,
   createTask,
   deleteTask,
+  getRecentTaskOutcomeStats,
+  logTaskRun,
   getAllAgents,
   getAgentHealth,
   getAllAgentHealth,
@@ -739,6 +741,111 @@ describe('task CRUD', () => {
 
     deleteTask('task-3');
     expect(getTaskById('task-3')).toBeNull();
+  });
+});
+
+describe('getRecentTaskOutcomeStats', () => {
+  function seedTask(id: string): void {
+    createTask({
+      id,
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'p',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: null,
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+    });
+  }
+
+  it('returns zeroes when there are no task runs', () => {
+    const stats = getRecentTaskOutcomeStats('2026-01-01T00:00:00.000Z');
+    expect(stats.total).toBe(0);
+    expect(stats.success).toBe(0);
+    expect(stats.error).toBe(0);
+    expect(stats.by_outcome_state).toEqual({
+      done: 0,
+      blocked: 0,
+      abandoned: 0,
+      unknown: 0,
+    });
+  });
+
+  it('aggregates success/error split and outcome state buckets within the window', () => {
+    seedTask('t-recent');
+    seedTask('t-other');
+
+    const insideWindow = '2026-05-22T12:00:00.000Z';
+    const olderThanWindow = '2026-05-21T00:00:00.000Z';
+
+    // Inside the window: 2 done success, 1 blocked success, 1 error abandoned,
+    // 1 error with no outcome (unknown).
+    logTaskRun({
+      task_id: 't-recent',
+      run_at: insideWindow,
+      duration_ms: 100,
+      status: 'success',
+      result: 'ok',
+      error: null,
+      outcome_state: 'done',
+    });
+    logTaskRun({
+      task_id: 't-recent',
+      run_at: insideWindow,
+      duration_ms: 100,
+      status: 'success',
+      result: 'ok',
+      error: null,
+      outcome_state: 'done',
+    });
+    logTaskRun({
+      task_id: 't-other',
+      run_at: insideWindow,
+      duration_ms: 100,
+      status: 'success',
+      result: 'ok',
+      error: null,
+      outcome_state: 'blocked',
+    });
+    logTaskRun({
+      task_id: 't-other',
+      run_at: insideWindow,
+      duration_ms: 100,
+      status: 'error',
+      result: null,
+      error: 'boom',
+      outcome_state: 'abandoned',
+    });
+    logTaskRun({
+      task_id: 't-other',
+      run_at: insideWindow,
+      duration_ms: 100,
+      status: 'error',
+      result: null,
+      error: 'no outcome',
+    });
+
+    // Outside the window: should NOT be counted.
+    logTaskRun({
+      task_id: 't-recent',
+      run_at: olderThanWindow,
+      duration_ms: 50,
+      status: 'success',
+      result: 'old',
+      error: null,
+      outcome_state: 'done',
+    });
+
+    const stats = getRecentTaskOutcomeStats('2026-05-22T00:00:00.000Z');
+    expect(stats.total).toBe(5);
+    expect(stats.success).toBe(3);
+    expect(stats.error).toBe(2);
+    expect(stats.by_outcome_state.done).toBe(2);
+    expect(stats.by_outcome_state.blocked).toBe(1);
+    expect(stats.by_outcome_state.abandoned).toBe(1);
+    expect(stats.by_outcome_state.unknown).toBe(1);
   });
 });
 

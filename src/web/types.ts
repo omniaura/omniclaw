@@ -45,6 +45,14 @@ export interface WebStateProvider {
   getTaskRunLogs(taskId: string, limit?: number): TaskRunLog[];
   /** Phase events for a specific task run (identified by taskId + run_at timestamp). */
   getTaskRunPhaseEvents(taskId: string, runAt: string): TaskRunPhaseEvent[];
+  /**
+   * Aggregate task run outcomes since the given ISO timestamp. Used by the
+   * /system page to roll up recent task outcomes (success/error counts and
+   * outcome-state breakdown) without drilling into individual tasks. Optional
+   * so the existing FakeState and test stubs continue to compile; when absent,
+   * the /system page renders zeroes for the rollup.
+   */
+  getRecentTaskOutcomes?(sinceIso: string): RecentTaskOutcomes;
   /** Search messages by content with optional filters. */
   searchMessages(
     query: string,
@@ -143,6 +151,24 @@ export interface QueueStats {
   idleContainers: number;
   maxActive: number;
   maxIdle: number;
+}
+
+/**
+ * Aggregate of recent task run outcomes. Buckets cover the success/error split
+ * from `task_run_logs.status` and the agent-reported outcome state
+ * (done/blocked/abandoned) from `task_run_logs.outcome_state`. Runs with no
+ * outcome state recorded fall into `unknown`.
+ */
+export interface RecentTaskOutcomes {
+  total: number;
+  success: number;
+  error: number;
+  by_outcome_state: {
+    done: number;
+    blocked: number;
+    abandoned: number;
+    unknown: number;
+  };
 }
 
 export interface WebServerConfig {

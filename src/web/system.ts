@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 
-import type { WebStateProvider } from './types.js';
+import type { RecentTaskOutcomes, WebStateProvider } from './types.js';
 import {
   deriveMessageLaneReasonFromDetail,
   deriveTaskLaneReasonFromDetail,
@@ -34,6 +34,23 @@ const AGENT_EXEC_STATUSES: readonly AgentExecStatus[] = [
   'offline',
   'disabled',
 ];
+
+/**
+ * Window for the "recent task outcomes" rollup on /system. Picked at one hour
+ * so the tile reflects the recent operator-visible past without dragging in
+ * stale data from yesterday's runs.
+ */
+const RECENT_OUTCOMES_WINDOW_MS = 60 * 60 * 1000;
+
+const OUTCOME_STATES: readonly (keyof RecentTaskOutcomes['by_outcome_state'])[] =
+  ['done', 'blocked', 'abandoned', 'unknown'];
+
+const EMPTY_RECENT_OUTCOMES: RecentTaskOutcomes = {
+  total: 0,
+  success: 0,
+  error: 0,
+  by_outcome_state: { done: 0, blocked: 0, abandoned: 0, unknown: 0 },
+};
 
 export interface HealthData {
   status: 'healthy';
@@ -127,6 +144,13 @@ export interface HealthData {
      */
     task_lane_reasons: Record<TaskLaneReason, number>;
   };
+  /**
+   * Aggregate of task run outcomes from the last
+   * {@link RECENT_OUTCOMES_WINDOW_MS} milliseconds. Mirrors the per-task data
+   * already available on /tasks but rolled up across every task so the
+   * operator can spot recent errors or stalls at a glance.
+   */
+  recent_task_outcomes: RecentTaskOutcomes & { window_ms: number };
   sse_clients: number;
   started_at: string;
 }
@@ -231,6 +255,13 @@ export function buildHealthData(
     taskLaneReasons[deriveTaskLaneReasonFromDetail(g)]++;
   }
 
+  const sinceIso = new Date(
+    Date.now() - RECENT_OUTCOMES_WINDOW_MS,
+  ).toISOString();
+  const recentOutcomes: RecentTaskOutcomes = state.getRecentTaskOutcomes
+    ? state.getRecentTaskOutcomes(sinceIso)
+    : EMPTY_RECENT_OUTCOMES;
+
   return {
     status: 'healthy',
     version: APP_VERSION,
@@ -287,6 +318,10 @@ export function buildHealthData(
       max_retries: maxRetries,
       message_lane_reasons: messageLaneReasons,
       task_lane_reasons: taskLaneReasons,
+    },
+    recent_task_outcomes: {
+      ...recentOutcomes,
+      window_ms: RECENT_OUTCOMES_WINDOW_MS,
     },
     sse_clients: sseClientCount,
     started_at: startedAt,
@@ -486,6 +521,37 @@ export function renderSystemContent(
           'sys-tasks-completed',
         ) +
         metricRow('total', String(health.tasks.total), 'sys-tasks-total'),
+    ) +
+    // Recent task outcomes (rolled up across all tasks in the last window)
+    metricCard(
+      'recent task outcomes',
+      metricRow(
+        'window',
+        formatDuration(health.recent_task_outcomes.window_ms),
+        'sys-recent-window',
+      ) +
+        metricRow(
+          'total',
+          String(health.recent_task_outcomes.total),
+          'sys-recent-total',
+        ) +
+        metricRow(
+          'success',
+          String(health.recent_task_outcomes.success),
+          'sys-recent-success',
+        ) +
+        metricRow(
+          'error',
+          String(health.recent_task_outcomes.error),
+          'sys-recent-error',
+        ) +
+        `<div class="metric-sub">by outcome state</div>` +
+        reasonRollup(
+          health.recent_task_outcomes.by_outcome_state,
+          OUTCOME_STATES,
+          'sys-recent-outcome',
+          'outcome',
+        ),
     ) +
     // Queue rollup (per-group lane aggregates from /ipc, summarized here)
     metricCard(

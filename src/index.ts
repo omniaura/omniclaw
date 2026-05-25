@@ -89,6 +89,7 @@ import {
   getRouterState,
   getSubscriptionsForAgent,
   getTaskById,
+  getRecentTaskOutcomeStats,
   getTaskRunLogs,
   getTaskRunPhaseEvents,
   initDatabase,
@@ -3102,6 +3103,7 @@ async function main(): Promise<void> {
     getTaskRunLogs: (taskId, limit) => getTaskRunLogs(taskId, limit),
     getTaskRunPhaseEvents: (taskId, runAt) =>
       getTaskRunPhaseEvents(taskId, runAt),
+    getRecentTaskOutcomes: (sinceIso) => getRecentTaskOutcomeStats(sinceIso),
     searchMessages: (query, chatJid, limit, filters) =>
       dbSearchMessages({
         query,
