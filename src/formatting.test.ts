@@ -62,8 +62,8 @@ describe('formatMessages', () => {
   it('formats a single message as XML with participant attributes', () => {
     const result = formatMessages([makeMsg()]);
     expect(result).toBe(
-      '<messages excerpt_participants="Alice" participants="Alice" participant_keys="123@s.whatsapp.net">\n' +
-        '<message id="1" sender="Alice" sender_id="123@s.whatsapp.net" sender_key="123@s.whatsapp.net" sender_label="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
+      '<messages excerpt_participants="Alice" participant_keys="123@s.whatsapp.net">\n' +
+        '<message id="1" sender="Alice" sender_id="123@s.whatsapp.net" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
         '</messages>',
     );
   });
@@ -102,7 +102,7 @@ describe('formatMessages', () => {
       }),
     ];
     const result = formatMessages(msgs);
-    expect(result).toContain('participants="Alice, Bob"');
+    expect(result).toContain('excerpt_participants="Alice, Bob"');
     expect(result).toContain('sender="Alice"');
     expect(result).toContain('sender="Bob"');
     expect(result).toContain('>hi</message>');
@@ -125,7 +125,7 @@ describe('formatMessages', () => {
       }),
     ];
     const result = formatMessages(msgs);
-    expect(result).toContain('participants="Alice"');
+    expect(result).toContain('excerpt_participants="Alice"');
     // Should appear once in participants, not "Alice, Alice"
     expect(result).not.toContain('Alice, Alice');
   });
@@ -148,15 +148,15 @@ describe('formatMessages', () => {
       }),
     ];
     const result = formatMessages(msgs);
-    expect(result).toContain('participants="Alice"');
-    expect(result).not.toContain('participants="Alice, System"');
+    expect(result).toContain('excerpt_participants="Alice"');
+    expect(result).not.toContain('excerpt_participants="Alice, System"');
   });
 
   it('escapes special characters in sender names', () => {
     const result = formatMessages([makeMsg({ sender_name: 'A & B <Co>' })]);
     expect(result).toContain('sender="A &amp; B &lt;Co&gt;"');
     expect(result).toContain('sender_id="123@s.whatsapp.net"');
-    expect(result).toContain('participants="A &amp; B &lt;Co&gt;"');
+    expect(result).toContain('excerpt_participants="A &amp; B &lt;Co&gt;"');
   });
 
   it('escapes special characters in content', () => {
@@ -189,7 +189,7 @@ describe('formatMessages', () => {
     const result = formatMessages(msgs);
     // Participants header should only show the first display name (deduped by sender ID)
     const headerLine = result.split('\n')[0];
-    expect(headerLine).toContain('participants="Alice"');
+    expect(headerLine).toContain('excerpt_participants="Alice"');
     expect(headerLine).not.toContain('Alice (New Name)');
     // But both messages still show their respective sender names
     expect(result).toContain('sender="Alice"');
@@ -216,16 +216,16 @@ describe('formatMessages', () => {
     ];
     const result = formatMessages(msgs);
     // Both appear in participants because they have different sender IDs
-    expect(result).toContain('participants="Alice, Alice"');
+    expect(result).toContain('excerpt_participants="Alice, Alice"');
   });
 
-  it('includes sender_id attribute with immutable ID', () => {
+  it('includes only the canonical sender_id attribute with immutable ID', () => {
     const result = formatMessages([
       makeMsg({ sender: 'discord:456789', sender_name: 'Bob' }),
     ]);
     expect(result).toContain('sender_id="discord:456789"');
-    expect(result).toContain('sender_key="discord:456789"');
-    expect(result).toContain('sender_label="Bob"');
+    expect(result).not.toContain('sender_key=');
+    expect(result).not.toContain('sender_label=');
   });
 
   it('includes participant_keys for immutable sender roster', () => {
@@ -283,8 +283,8 @@ describe('formatMessages', () => {
     ];
     const result = formatMessages(msgs);
     // Only "Valid" should appear in participants (Ghost has no sender ID)
-    expect(result).toContain('participants="Valid"');
-    expect(result).not.toContain('participants="Ghost');
+    expect(result).toContain('excerpt_participants="Valid"');
+    expect(result).not.toContain('excerpt_participants="Ghost');
     // But Ghost's message is still rendered in the XML body
     expect(result).toContain('sender="Ghost"');
   });
@@ -314,7 +314,7 @@ describe('formatMessages', () => {
     ];
     const result = formatMessages(msgs);
     // Should show only the first name for the sender (first-name-wins dedup by sender ID)
-    expect(result).toContain('participants="Alice"');
+    expect(result).toContain('excerpt_participants="Alice"');
     expect(result).not.toContain('Alice, Alice');
   });
 
@@ -336,7 +336,7 @@ describe('formatMessages', () => {
       }),
     ];
     const result = formatMessages(msgs);
-    expect(result).toContain('participants="Alice, Bob"');
+    expect(result).toContain('excerpt_participants="Alice, Bob"');
   });
 
   it('excludes system sender from participant roster', () => {
@@ -357,9 +357,9 @@ describe('formatMessages', () => {
       }),
     ];
     const result = formatMessages(msgs);
-    expect(result).toContain('participants="Alice"');
+    expect(result).toContain('excerpt_participants="Alice"');
     // System should not appear in participants attribute (still appears as message sender)
-    expect(result).not.toContain('participants="Alice, System"');
+    expect(result).not.toContain('excerpt_participants="Alice, System"');
   });
 });
 
