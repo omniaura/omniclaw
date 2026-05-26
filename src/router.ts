@@ -29,8 +29,6 @@ export function formatMessages(
     return (
       `<message id="${m.id}" sender="${escapeXml(m.sender_name)}" ` +
       `sender_id="${escapeXml(m.sender)}" ` +
-      `sender_key="${escapeXml(m.sender)}" ` +
-      `sender_label="${escapeXml(m.sender_name)}" ` +
       `time="${m.timestamp}">${escapeXml(m.content)}</message>`
     );
   });
@@ -54,8 +52,6 @@ export function formatMessages(
   if (senders.length > 0) {
     const roster = senders.map(escapeXml).join(', ');
     attrs.push(`excerpt_participants="${roster}"`);
-    // Backward-compatible alias for existing prompts/parsers.
-    attrs.push(`participants="${roster}"`);
   }
 
   if (seen.size > 0) {

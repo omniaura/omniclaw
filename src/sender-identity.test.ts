@@ -87,9 +87,9 @@ describe('canonical sender envelope format', () => {
     const result = formatMessages([msg]);
 
     expect(result).toContain('sender_id="discord:456789012345678"');
-    expect(result).toContain('sender_key="discord:456789012345678"');
     expect(result).toContain('sender="TestUser"');
-    expect(result).toContain('sender_label="TestUser"');
+    expect(result).not.toContain('sender_key=');
+    expect(result).not.toContain('sender_label=');
   });
 
   it('WhatsApp adapter produces whatsapp:<jid> sender format', () => {
@@ -167,7 +167,7 @@ describe('label-only spoof detection', () => {
     const result = formatMessages(msgs);
 
     // Both should appear in roster because they have different sender IDs
-    expect(result).toContain('participants="Alice, Alice"');
+    expect(result).toContain('excerpt_participants="Alice, Alice"');
     // Immutable IDs are distinct — agent can tell them apart
     expect(result).toContain('participant_keys="discord:111, discord:999"');
     // Each message carries its own immutable ID
@@ -264,7 +264,7 @@ describe('empty and missing sender identity', () => {
     const result = formatMessages(msgs);
 
     const headerLine = result.split('\n')[0];
-    expect(headerLine).toContain('participants="Valid"');
+    expect(headerLine).toContain('excerpt_participants="Valid"');
     expect(headerLine).not.toContain('Ghost');
     // Ghost message still rendered in body
     expect(result).toContain('sender="Ghost"');
@@ -277,9 +277,9 @@ describe('empty and missing sender identity', () => {
     ];
     const result = formatMessages(msgs);
 
-    expect(result).toContain('participants="Bob"');
-    expect(result).not.toContain('participants="Bob, "');
-    expect(result).not.toContain('participants=", Bob"');
+    expect(result).toContain('excerpt_participants="Bob"');
+    expect(result).not.toContain('excerpt_participants="Bob, "');
+    expect(result).not.toContain('excerpt_participants=", Bob"');
   });
 
   it('system sender is never included in participant roster', () => {
@@ -294,7 +294,7 @@ describe('empty and missing sender identity', () => {
     ];
     const result = formatMessages(msgs);
 
-    expect(result).toContain('participants="User"');
+    expect(result).toContain('excerpt_participants="User"');
     // System should not appear in participants attribute
     const headerLine = result.split('\n')[0];
     expect(headerLine).not.toContain('System');
@@ -519,7 +519,7 @@ describe('cross-platform sender identity in formatted output', () => {
       'participant_keys="discord:12345, telegram:12345"',
     );
     // Both appear in participants (same name, different IDs)
-    expect(result).toContain('participants="User, User"');
+    expect(result).toContain('excerpt_participants="User, User"');
   });
 });
 

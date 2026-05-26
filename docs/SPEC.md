@@ -603,10 +603,10 @@ Agents support `resumeAt` persistence — the byte offset is saved so subsequent
 When a triggered message arrives, the agent receives all messages since its last interaction, formatted as XML:
 
 ```xml
-<messages participants="John, Sarah">
-<message id="msg1" sender="John" time="2026-02-23T14:32:00Z">hey everyone, should we do pizza tonight?</message>
-<message id="msg2" sender="Sarah" time="2026-02-23T14:33:00Z">sounds good to me</message>
-<message id="msg3" sender="John" time="2026-02-23T14:35:00Z">@Omni what toppings do you recommend?</message>
+<messages excerpt_participants="John, Sarah" participant_keys="discord:111, discord:222">
+<message id="msg1" sender="John" sender_id="discord:111" time="2026-02-23T14:32:00Z">hey everyone, should we do pizza tonight?</message>
+<message id="msg2" sender="Sarah" sender_id="discord:222" time="2026-02-23T14:33:00Z">sounds good to me</message>
+<message id="msg3" sender="John" sender_id="discord:111" time="2026-02-23T14:35:00Z">@Omni what toppings do you recommend?</message>
 </messages>
 ```
 

@@ -317,7 +317,7 @@ This audit is observational only. The instrumentation counters specified in Sect
 
 ## Implementation Notes
 
-- `formatMessages()` now emits explicit immutable sender attributes (`sender_id` and `sender_key`) alongside presentation attributes, plus `participant_keys` for the deduplicated immutable roster.
+- `formatMessages()` now emits explicit immutable sender attributes (`sender_id` on each message and `participant_keys` on the batch) alongside presentation sender names.
 - Sender identity observability now logs `participant_roster_inflation` and `sender_name_changed` counters through the structured logger.
 
 _Last updated: 2026-03-18_
