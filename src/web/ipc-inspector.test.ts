@@ -317,6 +317,95 @@ describe('renderIpcInspector', () => {
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
   });
 
+  it('renders task lane lastError message, age, and logs link when present', () => {
+    const detail: GroupQueueDetail = {
+      folderKey: 'agent-zeta',
+      messageLane: {
+        active: false,
+        idle: false,
+        pendingCount: 0,
+        containerName: null,
+        reason: 'no-work',
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work',
+        lastError: {
+          message: 'scheduled task crashed',
+          at: Date.now() - 4_000,
+        },
+      },
+      retryCount: 0,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [detail] }),
+    );
+    expect(html).toContain('class="last-error-link"');
+    expect(html).toContain('href="/logs"');
+    expect(html).toContain('scheduled task crashed');
+    expect(html).toMatch(/last-error-age">[0-9.]+s<\/span>/);
+  });
+
+  it('labels both lanes when message and task lanes both have errors', () => {
+    const detail: GroupQueueDetail = {
+      folderKey: 'agent-eta',
+      messageLane: {
+        active: false,
+        idle: false,
+        pendingCount: 1,
+        containerName: null,
+        reason: 'retrying',
+        lastError: { message: 'message lane error', at: Date.now() },
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work',
+        lastError: { message: 'task lane error', at: Date.now() },
+      },
+      retryCount: 1,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [detail] }),
+    );
+    expect(html).toContain('message lane error');
+    expect(html).toContain('task lane error');
+    expect(html).toContain('<span class="last-error-lane">msg</span>');
+    expect(html).toContain('<span class="last-error-lane">task</span>');
+  });
+
+  it('does not render a lane label when only one lane has an error', () => {
+    const detail: GroupQueueDetail = {
+      folderKey: 'agent-theta',
+      messageLane: {
+        active: false,
+        idle: false,
+        pendingCount: 0,
+        containerName: null,
+        reason: 'no-work',
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work',
+        lastError: { message: 'only task failed', at: Date.now() },
+      },
+      retryCount: 0,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [detail] }),
+    );
+    expect(html).toContain('only task failed');
+    expect(html).not.toContain('<span class="last-error-lane">');
+  });
+
   it('escapes HTML in group names', () => {
     const xssDetail: GroupQueueDetail = {
       folderKey: '<script>alert(1)</script>',

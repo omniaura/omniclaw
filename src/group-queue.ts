@@ -138,6 +138,13 @@ export interface GroupQueueDetail {
      * {@link deriveTaskLaneReasonFromDetail} when missing.
      */
     reason?: TaskLaneReason;
+    /**
+     * Last error captured on the task lane, cleared after a successful run.
+     * Mirrors {@link messageLane.lastError} so the IPC inspector can surface
+     * task failures inline. Optional for backward compatibility with older
+     * fixtures and lightweight stubs.
+     */
+    lastError?: { message: string; at: number } | null;
   };
   retryCount: number;
 }
@@ -222,6 +229,8 @@ interface GroupState {
   taskContainerName: string | null;
   taskGroupFolder: string | null;
   taskBackend: AgentBackend | null;
+  /** Last error captured on the task lane, cleared after a successful run. */
+  taskLastError: { message: string; at: number } | null;
 
   // Tracking for context injection
   activeTaskInfo: ActiveTaskInfo | null;
@@ -327,6 +336,7 @@ export class GroupQueue {
         taskContainerName: null,
         taskGroupFolder: null,
         taskBackend: null,
+        taskLastError: null,
 
         activeTaskInfo: null,
       };
@@ -802,7 +812,9 @@ export class GroupQueue {
 
     try {
       await task.fn();
+      state.taskLastError = null;
     } catch (err) {
+      state.taskLastError = { message: summarizeError(err), at: Date.now() };
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
       state.taskActive = false;
@@ -1046,6 +1058,7 @@ export class GroupQueue {
               }
             : null,
           reason: taskReason,
+          lastError: state.taskLastError,
         },
         retryCount: state.retryCount,
       });

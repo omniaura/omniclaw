@@ -995,6 +995,43 @@ describe('GroupQueue', () => {
       }
     });
 
+    it('captures task lane last error on failure and clears on success', async () => {
+      queue.setProcessMessagesFn(mock(async () => true));
+
+      queue.enqueueTask(
+        'group1@g.us',
+        'task-fail',
+        async () => {
+          throw new Error('task blew up');
+        },
+        'Failing task',
+      );
+      await Bun.sleep(10);
+
+      let detail = queue
+        .getDetailedStats()
+        .find((g) => g.folderKey === 'group1@g.us');
+      expect(detail).toBeDefined();
+      expect(detail!.taskLane.lastError).not.toBeNull();
+      expect(detail!.taskLane.lastError!.message).toBe('task blew up');
+      expect(typeof detail!.taskLane.lastError!.at).toBe('number');
+
+      // A subsequent successful task on the same lane clears the error.
+      queue.enqueueTask(
+        'group1@g.us',
+        'task-ok',
+        async () => {},
+        'Passing task',
+      );
+      await Bun.sleep(10);
+
+      detail = queue
+        .getDetailedStats()
+        .find((g) => g.folderKey === 'group1@g.us');
+      expect(detail).toBeDefined();
+      expect(detail!.taskLane.lastError).toBeNull();
+    });
+
     it('does not record a lastError when the processor merely returns false', async () => {
       const scheduled: Array<() => void> = [];
       const originalSetTimeout = globalThis.setTimeout;
