@@ -213,6 +213,13 @@ describe('buildHealthData', () => {
       offline: 0,
       disabled: 0,
     });
+    expect(health.agents.idle_reasons).toEqual({
+      running: 0,
+      'cooling-down': 0,
+      'back-pressure': 0,
+      retrying: 0,
+      'no-work': 0,
+    });
   });
 
   it('rolls up agents by derived execution status', () => {
@@ -308,6 +315,74 @@ describe('buildHealthData', () => {
       offline: 1, // a4 (no queue detail)
       disabled: 1, // a5 (enabled=false beats queue state)
     });
+    // Only a3 (idle, cooling-down) contributes an idle reason. a1/a2 are
+    // actively working, a5 is disabled, and a4 is offline with no detail.
+    expect(health.agents.idle_reasons).toEqual({
+      running: 0,
+      'cooling-down': 1,
+      'back-pressure': 0,
+      retrying: 0,
+      'no-work': 0,
+    });
+  });
+
+  it('rolls up non-working agents by structured idle reason', () => {
+    const agents = [
+      makeAgent({ id: 'cool', folder: 'cool' }),
+      makeAgent({ id: 'press', folder: 'press' }),
+      makeAgent({ id: 'retry', folder: 'retry' }),
+      makeAgent({ id: 'empty', folder: 'empty' }),
+      makeAgent({ id: 'busy', folder: 'busy' }),
+      makeAgent({ id: 'gone', folder: 'gone-missing' }),
+    ];
+    const idleLane = (
+      folderKey: string,
+      over: {
+        active?: boolean;
+        idle?: boolean;
+        pendingCount?: number;
+        retryCount?: number;
+      },
+    ): GroupQueueDetail => ({
+      folderKey,
+      messageLane: {
+        active: over.active ?? false,
+        idle: over.idle ?? false,
+        pendingCount: over.pendingCount ?? 0,
+        containerName: null,
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+      },
+      retryCount: over.retryCount ?? 0,
+    });
+    const details: GroupQueueDetail[] = [
+      // idle container waiting → cooling-down
+      idleLane('cool', { idle: true }),
+      // not active, not idle, messages waiting → queued / back-pressure
+      idleLane('press', { pendingCount: 3 }),
+      // not active, not idle, backing off → offline / retrying
+      idleLane('retry', { retryCount: 2 }),
+      // not active, not idle, nothing pending → offline / no-work
+      idleLane('empty', {}),
+      // actively processing → excluded from idle reasons
+      idleLane('busy', { active: true }),
+      // 'gone' agent has no detail → offline with no derivable reason
+    ];
+    const health = buildHealthData(makeState(agents, details), 0);
+    expect(health.agents.idle_reasons).toEqual({
+      running: 0,
+      'cooling-down': 1, // cool
+      'back-pressure': 1, // press
+      retrying: 1, // retry
+      'no-work': 1, // empty
+    });
+    // Sanity-check the companion status rollup for the same fixture.
+    expect(health.agents.by_exec_status.executing).toBe(1); // busy
+    expect(health.agents.by_exec_status.offline).toBe(3); // retry, empty, gone
   });
 
   it('reports zero queue rollup when no groups are tracked', () => {
@@ -744,6 +819,22 @@ describe('renderSystemContent', () => {
     expect(html).toContain('tasks');
     expect(html).toContain('queue');
     expect(html).toContain('peers');
+  });
+
+  it('renders the agents tile idle-reason rollup with stable ids', () => {
+    const html = renderSystemContent(makeState(), 0);
+    expect(html).toContain('idle reasons');
+    // Every MessageLaneReason key must surface a stable id even when zero,
+    // so the live poll can patch counts in place.
+    for (const reason of [
+      'running',
+      'cooling-down',
+      'back-pressure',
+      'retrying',
+      'no-work',
+    ]) {
+      expect(html).toContain(`id="sys-agents-idle-reason-${reason}"`);
+    }
   });
 
   it('renders peers tile with discovery=unavailable when no hook is wired', () => {

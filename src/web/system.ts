@@ -12,7 +12,11 @@ import {
   type MessageLaneReason,
   type TaskLaneReason,
 } from '../group-queue.js';
-import { getAgentExecStatus, type AgentExecStatus } from './agents-page.js';
+import {
+  getAgentExecStatus,
+  getAgentExecReason,
+  type AgentExecStatus,
+} from './agents-page.js';
 import { renderShell, escapeHtml, formatDurationCompact } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 
@@ -112,6 +116,17 @@ export interface HealthData {
      * shown on the /agents page so /system and /agents agree on the rollup.
      */
     by_exec_status: Record<AgentExecStatus, number>;
+    /**
+     * For agents that are *not* actively working and *not* operator-disabled
+     * (i.e. status idle / queued / offline), a count by the structured
+     * {@link MessageLaneReason} explaining why. Answers the operator question
+     * "why are my non-working agents not working" — e.g. `cooling-down`
+     * (healthy idle) vs `back-pressure` (waiting for a slot) vs `retrying`
+     * (backing off). Uses the same per-agent derivation surfaced as the reason
+     * chip on /agents, so the two pages agree. Agents with no derivable reason
+     * are not counted in any bucket.
+     */
+    idle_reasons: Record<MessageLaneReason, number>;
   };
   containers: {
     active: number;
@@ -230,6 +245,13 @@ export function buildHealthData(
     offline: 0,
     disabled: 0,
   };
+  const idleReasons: Record<MessageLaneReason, number> = {
+    running: 0,
+    'cooling-down': 0,
+    'back-pressure': 0,
+    retrying: 0,
+    'no-work': 0,
+  };
   for (const agent of agents) {
     byBackend[agent.backend] = (byBackend[agent.backend] || 0) + 1;
     byRuntime[agent.agentRuntime] = (byRuntime[agent.agentRuntime] || 0) + 1;
@@ -238,6 +260,12 @@ export function buildHealthData(
         ? 'disabled'
         : getAgentExecStatus(agent.folder, queueDetails);
     byExecStatus[status]++;
+    // Explain *why* a non-working, non-disabled agent is idle/queued/offline.
+    // Active (executing/running-task) and disabled agents have no idle reason.
+    if (status === 'idle' || status === 'queued' || status === 'offline') {
+      const reason = getAgentExecReason(agent.folder, queueDetails);
+      if (reason !== null) idleReasons[reason]++;
+    }
   }
 
   let activeTasks = 0,
@@ -324,6 +352,7 @@ export function buildHealthData(
       by_backend: byBackend,
       by_runtime: byRuntime,
       by_exec_status: byExecStatus,
+      idle_reasons: idleReasons,
     },
     containers: {
       active: Math.max(0, stats.activeContainers - stats.idleContainers),
@@ -525,6 +554,12 @@ export function renderSystemContent(
           AGENT_EXEC_STATUSES,
           'sys-agents-state',
           'exec',
+        ) +
+        `<div class="metric-sub">idle reasons</div>` +
+        reasonRollup(
+          health.agents.idle_reasons,
+          MESSAGE_LANE_REASONS,
+          'sys-agents-idle-reason',
         ) +
         `<div class="metric-sub">by backend</div>` +
         breakdownList(health.agents.by_backend) +
