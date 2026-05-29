@@ -4,7 +4,7 @@
  * Supports create, edit, pause/resume, delete, and run-history viewing.
  */
 
-import type { ScheduledTask } from '../types.js';
+import type { ScheduledTask, TaskOutcomeState } from '../types.js';
 import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
@@ -151,6 +151,10 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
           : task.last_result === 'error'
             ? 'run-error'
             : '';
+      const outcomeBadge = renderOutcomeBadge(
+        task.last_outcome_state,
+        task.last_outcome_reason,
+      );
 
       return (
         `<tr data-task-id="${escapeHtml(task.id)}" data-status="${escapeHtml(task.status)}">` +
@@ -160,7 +164,7 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
         `<td class="td-sched"><span class="sched-type badge badge-sm">${escapeHtml(task.schedule_type)}</span> ` +
         `<span class="sched-label">${escapeHtml(schedLabel)}</span></td>` +
         `<td class="td-time" title="${escapeHtml(task.next_run ?? '')}">${escapeHtml(nextRun)}</td>` +
-        `<td class="td-time ${lastResultClass}" title="${escapeHtml(task.last_run ?? '')}">${escapeHtml(lastRun)}</td>` +
+        `<td class="td-time ${lastResultClass}" title="${escapeHtml(task.last_run ?? '')}">${escapeHtml(lastRun)}${outcomeBadge}</td>` +
         `<td><span class="badge badge-sm">${escapeHtml(task.context_mode)}</span></td>` +
         `<td class="td-actions">` +
         `<button class="btn btn-sm btn-toggle" data-tm-action="toggle" data-status="${toggleStatus}">${toggleLabel}</button>` +
@@ -229,6 +233,32 @@ function renderTaskModal(
     `<button type="button" class="btn" id="${prefix}-cancel">Cancel</button>` +
     `<button type="submit" class="btn btn-primary" id="${prefix}-submit">${submitLabel}</button>` +
     `</div></form></div></div>`
+  );
+}
+
+const OUTCOME_BADGE_CLASS: Record<string, string> = {
+  done: 'outcome-done',
+  blocked: 'outcome-blocked',
+  abandoned: 'outcome-abandoned',
+  skipped: 'outcome-skipped',
+};
+
+/**
+ * Render a small badge for the most recent run's outcome state. The reason (if
+ * any) is exposed via the title attribute so blocked/abandoned tasks surface
+ * their cause on hover. Returns an empty string when no outcome was recorded.
+ */
+function renderOutcomeBadge(
+  state: TaskOutcomeState | null | undefined,
+  reason: string | null | undefined,
+): string {
+  if (!state) return '';
+  const cls = OUTCOME_BADGE_CLASS[state] ?? 'outcome-unknown';
+  const title = reason ? ` title="${escapeHtml(reason)}"` : '';
+  return (
+    `<div class="task-outcome">` +
+    `<span class="badge badge-sm ${cls}"${title}>${escapeHtml(state)}</span>` +
+    `</div>`
   );
 }
 

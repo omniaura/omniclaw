@@ -259,6 +259,62 @@ describe('renderTaskTableRows', () => {
     }
   });
 
+  it('surfaces the last outcome state with the reason as a tooltip', () => {
+    const html = renderTaskTableRows([
+      makeTask({
+        id: 'task-blocked',
+        last_outcome_state: 'blocked',
+        last_outcome_reason: 'Waiting on <staging> API & credentials',
+      }),
+    ]);
+
+    expect(html).toContain('class="task-outcome"');
+    expect(html).toContain('badge badge-sm outcome-blocked');
+    expect(html).toContain('>blocked</span>');
+    expect(html).toContain(
+      'title="Waiting on &lt;staging&gt; API &amp; credentials"',
+    );
+  });
+
+  it('renders distinct outcome classes for each known state', () => {
+    const html = renderTaskTableRows([
+      makeTask({ id: 'task-done', last_outcome_state: 'done' }),
+      makeTask({ id: 'task-abandoned', last_outcome_state: 'abandoned' }),
+      makeTask({ id: 'task-skipped', last_outcome_state: 'skipped' }),
+    ]);
+
+    expect(html).toContain('outcome-done');
+    expect(html).toContain('outcome-abandoned');
+    expect(html).toContain('outcome-skipped');
+  });
+
+  it('falls back to the unknown class for unrecognized outcome states', () => {
+    const html = renderTaskTableRows([
+      makeTask({
+        id: 'task-weird',
+        last_outcome_state: 'mystery' as never,
+      }),
+    ]);
+
+    expect(html).toContain('outcome-unknown');
+    expect(html).toContain('>mystery</span>');
+  });
+
+  it('omits the outcome badge when no outcome state is recorded', () => {
+    const html = renderTaskTableRows([makeTask({ id: 'task-no-outcome' })]);
+
+    expect(html).not.toContain('task-outcome');
+  });
+
+  it('renders the outcome badge without a title when no reason is provided', () => {
+    const html = renderTaskTableRows([
+      makeTask({ id: 'task-no-reason', last_outcome_state: 'done' }),
+    ]);
+
+    expect(html).toContain('outcome-done');
+    expect(html).not.toContain('title="undefined"');
+  });
+
   it('falls back to raw run timestamps when Date construction fails', () => {
     const RealDate = Date;
 
