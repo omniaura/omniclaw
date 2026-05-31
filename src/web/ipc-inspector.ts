@@ -60,7 +60,7 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
       );
       const msgRunningMs = g.messageLane.runningMs;
       const msgAge =
-        typeof msgRunningMs === 'number' && msgRunningMs >= 0
+        typeof msgRunningMs === 'number' && msgRunningMs > 0
           ? `<span class="lane-age" title="running for ${escapeHtml(formatDurationCompact(msgRunningMs))}">${escapeHtml(formatDurationCompact(msgRunningMs))}</span>`
           : '';
       const retryCell =
