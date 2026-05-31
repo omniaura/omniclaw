@@ -35,6 +35,18 @@ export function escapeJsonForHtml(json: string): string {
     .replace(/\u2029/g, '\\u2029');
 }
 
+/**
+ * Format a millisecond duration as a compact human-readable string for
+ * operator surfaces. Unit progression: `<1s` \u2192 ms, `<1m` \u2192 seconds (1 dp),
+ * `<1h` \u2192 minutes (1 dp), else hours (1 dp).
+ */
+export function formatDurationCompact(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 3_600_000) return `${(ms / 60_000).toFixed(1)}m`;
+  return `${(ms / 3_600_000).toFixed(1)}h`;
+}
+
 /** Render just the nav link elements (used for SSE patching of active state). */
 export function renderNavLinks(activePath: string): string {
   return NAV_ITEMS.map(

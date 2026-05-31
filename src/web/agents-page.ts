@@ -12,7 +12,7 @@ import {
   type MessageLaneReason,
 } from '../group-queue.js';
 import type { WebStateProvider } from './types.js';
-import { renderShell, escapeHtml } from './shared.js';
+import { renderShell, escapeHtml, formatDurationCompact } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 import {
   buildAgentChannelData,
@@ -167,14 +167,6 @@ function backendBadgeClass(backend: string): string {
   return '';
 }
 
-/** Format a millisecond duration as a compact age badge string. */
-function formatRunningDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  if (ms < 3_600_000) return `${(ms / 60_000).toFixed(1)}m`;
-  return `${(ms / 3_600_000).toFixed(1)}h`;
-}
-
 /** Render the execution status badge for an agent. */
 export function renderExecStatusBadge(
   status: AgentExecStatus,
@@ -202,10 +194,10 @@ export function renderExecStatusBadge(
   // agents directory.
   const shouldShowAge =
     typeof runningMs === 'number' &&
-    runningMs >= 0 &&
+    runningMs > 0 &&
     (status === 'executing' || status === 'running-task');
   if (!shouldShowAge) return statusBadge + reasonBadge;
-  const formatted = formatRunningDuration(runningMs);
+  const formatted = formatDurationCompact(runningMs);
   return (
     statusBadge +
     reasonBadge +
@@ -213,7 +205,7 @@ export function renderExecStatusBadge(
   );
 }
 
-const ZERO_QUEUE_DEPTH: AgentQueueDepth = {
+export const ZERO_QUEUE_DEPTH: AgentQueueDepth = {
   messages: 0,
   tasks: 0,
   total: 0,
@@ -305,38 +297,24 @@ export function renderAgentRow(
   );
 }
 
-/** Render the agents page content (no shell wrapper — for SPA nav). */
-export function renderAgentsContent(
+/**
+ * Build just the `<tbody>` row HTML for the agents directory. Shared between
+ * the initial full-page render and the SSE patch path so live updates surface
+ * the same lane reason, queue depth, and running-age signals as page load.
+ */
+export function buildAgentRowsHtml(
   state: WebStateProvider,
   remotePeers: RemotePeerAgents[] = [],
 ): string {
   const agentData = buildAgentChannelData(state, remotePeers);
   const tasks = state.getTasks();
   const queueDetails = state.getQueueDetails();
-
-  // Count tasks per agent group folder
   const taskCounts: Record<string, number> = {};
   for (const t of tasks) {
     taskCounts[t.group_folder] = (taskCounts[t.group_folder] || 0) + 1;
   }
-
-  // Collect unique backends and runtimes for filter dropdowns
-  const backends = [...new Set(agentData.map((a) => a.backend))].sort();
-  const runtimes = [...new Set(agentData.map((a) => a.agentRuntime))].sort();
-
-  const localCount = agentData.filter((a) => !a.remoteInstanceId).length;
-  const remoteCount = agentData.filter((a) => a.remoteInstanceId).length;
-
-  const backendOptions = backends
-    .map((b) => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`)
-    .join('');
-
-  const runtimeOptions = runtimes
-    .map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`)
-    .join('');
-
   const localAgents = state.getAgents();
-  const rows = agentData
+  return agentData
     .map((a) => {
       let status: AgentExecStatus;
       let reason: MessageLaneReason | null = null;
@@ -362,6 +340,31 @@ export function renderAgentsContent(
       );
     })
     .join('\n');
+}
+
+/** Render the agents page content (no shell wrapper — for SPA nav). */
+export function renderAgentsContent(
+  state: WebStateProvider,
+  remotePeers: RemotePeerAgents[] = [],
+): string {
+  const agentData = buildAgentChannelData(state, remotePeers);
+
+  // Collect unique backends and runtimes for filter dropdowns
+  const backends = [...new Set(agentData.map((a) => a.backend))].sort();
+  const runtimes = [...new Set(agentData.map((a) => a.agentRuntime))].sort();
+
+  const localCount = agentData.filter((a) => !a.remoteInstanceId).length;
+  const remoteCount = agentData.filter((a) => a.remoteInstanceId).length;
+
+  const backendOptions = backends
+    .map((b) => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`)
+    .join('');
+
+  const runtimeOptions = runtimes
+    .map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`)
+    .join('');
+
+  const rows = buildAgentRowsHtml(state, remotePeers);
 
   return (
     `<div data-init="window.__initPage && window.__initPage('agents')">` +

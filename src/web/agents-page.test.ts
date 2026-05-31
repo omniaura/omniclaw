@@ -4,6 +4,7 @@ import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 import type { GroupQueueDetail } from '../group-queue.js';
 import { handleRequest } from './routes.js';
 import {
+  buildAgentRowsHtml,
   getAgentExecReason,
   getAgentExecStatus,
   getAgentQueueDepth,
@@ -1437,6 +1438,77 @@ describe('renderAgentsContent running age column', () => {
     ];
 
     const html = renderAgentsContent(makeState({}), remotePeers);
+    expect(html).not.toContain('lane-age');
+  });
+});
+
+describe('buildAgentRowsHtml (SSE patch path)', () => {
+  it('threads runningMs into the patched rows so the chip survives live updates', () => {
+    const state = makeState();
+    state.getQueueDetails = () => [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+          runningMs: 8500,
+        },
+      }),
+    ];
+    const html = buildAgentRowsHtml(state);
+    expect(html).toContain('exec-executing');
+    expect(html).toContain('lane-age');
+    expect(html).toContain('data-exec-running-ms="8500"');
+  });
+
+  it('threads queueDepth into the patched rows so pending counts stay live', () => {
+    const state = makeState();
+    state.getQueueDetails = () => [
+      makeQueueDetail({
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 3,
+          containerName: null,
+        },
+      }),
+    ];
+    const html = buildAgentRowsHtml(state);
+    expect(html).toContain('exec-queued');
+    expect(html).toContain('data-queue-total="3"');
+    expect(html).toContain('data-queue-messages="3"');
+  });
+
+  it('reflects disabled state in the patched rows', () => {
+    const state = makeState({
+      'agent-1': makeAgent({ enabled: false }),
+    });
+    const html = buildAgentRowsHtml(state);
+    expect(html).toContain('exec-disabled');
+  });
+
+  it('emits no lane-age chip for remote agents', () => {
+    const remotePeers = [
+      {
+        instanceId: 'peer-1',
+        instanceName: 'macbook',
+        online: true,
+        host: '192.168.1.10',
+        port: 4444,
+        agents: [
+          {
+            id: 'remote-agent',
+            name: 'Remote',
+            folder: 'remote',
+            backend: 'docker' as const,
+            agentRuntime: 'opencode' as const,
+            channels: [],
+          },
+        ],
+      },
+    ];
+    const html = buildAgentRowsHtml(makeState({}), remotePeers);
     expect(html).not.toContain('lane-age');
   });
 });
