@@ -126,6 +126,12 @@ describe('getDiscordChannelSeed', () => {
     expect(content).toContain('secondary channel');
   });
 
+  it('includes silent-by-default guidance for unaddressed turns', () => {
+    const content = getDiscordChannelSeed();
+    expect(content).toContain('<internal>');
+    expect(content).toContain('stripInternalTags');
+  });
+
   it('matches the discord-channel template version', () => {
     const content = getDiscordChannelSeed();
     const template = SEED_TEMPLATES.get('discord-channel')!;
