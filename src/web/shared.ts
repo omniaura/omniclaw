@@ -651,6 +651,7 @@ function shellCSS(): string {
     `.tasks-stats{display:flex;gap:12px;margin-bottom:8px}`,
     `.tasks-stat{font-size:11px;color:var(--text-dim);font-variant-numeric:tabular-nums}`,
     `.tasks-stat.stat-active{color:var(--green)}`,
+    `.tasks-stat.stat-executing{color:var(--blue)}`,
     `.tasks-stat.stat-paused{color:var(--yellow)}`,
     `.tasks-stat.stat-completed{color:var(--text-dim)}`,
     `.tasks-filters{display:flex;gap:3px}`,

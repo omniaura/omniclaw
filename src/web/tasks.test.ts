@@ -3,8 +3,10 @@ import { describe, expect, it } from 'bun:test';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 import { handleRequest } from './routes.js';
 import {
+  formatRunningAge,
   outcomeStateColor,
   renderOutcomeStateBadge,
+  renderRunningBadge,
   renderTaskTableRows,
   renderTasks,
   renderTasksContent,
@@ -420,6 +422,214 @@ describe('renderTasksContent', () => {
     expect(html).toContain(
       'No scheduled tasks yet. Create one to get started.',
     );
+  });
+
+  it('surfaces an executing stat when at least one task is currently running', () => {
+    const html = renderTasksContent(
+      makeState([
+        makeTask({ executing_since: new Date().toISOString() }),
+        makeTask({
+          id: 'task-002',
+          executing_since: new Date().toISOString(),
+        }),
+        makeTask({ id: 'task-003', status: 'paused' }),
+      ]),
+    );
+
+    expect(html).toContain('stat-executing">2 executing');
+  });
+
+  it('omits the executing stat when no task is currently running', () => {
+    const html = renderTasksContent(makeState([makeTask()]));
+
+    expect(html).not.toContain('stat-executing');
+    expect(html).not.toContain('executing</span>');
+  });
+
+  it('ignores executing_since on completed tasks for the stat counter', () => {
+    const html = renderTasksContent(
+      makeState([
+        makeTask({
+          id: 'task-stale-completed',
+          status: 'completed',
+          executing_since: new Date().toISOString(),
+        }),
+      ]),
+    );
+
+    expect(html).not.toContain('stat-executing');
+  });
+});
+
+describe('renderRunningBadge', () => {
+  const RealDate = Date;
+  const fixedNow = new RealDate('2026-05-08T12:00:00.000Z');
+
+  class FixedDate extends RealDate {
+    constructor(value?: string | number | Date) {
+      super(value ?? fixedNow.getTime());
+    }
+
+    static now() {
+      return fixedNow.getTime();
+    }
+  }
+
+  function withFixedDate<T>(fn: () => T): T {
+    globalThis.Date = FixedDate as DateConstructor;
+    try {
+      return fn();
+    } finally {
+      globalThis.Date = RealDate;
+    }
+  }
+
+  it('renders nothing when executing_since is null', () => {
+    expect(renderRunningBadge(makeTask({ executing_since: null }))).toBe('');
+  });
+
+  it('renders nothing for completed tasks even if executing_since is set', () => {
+    expect(
+      renderRunningBadge(
+        makeTask({
+          status: 'completed',
+          executing_since: '2026-05-08T11:59:00.000Z',
+        }),
+      ),
+    ).toBe('');
+  });
+
+  it('renders nothing when executing_since is in the future (clock skew)', () => {
+    withFixedDate(() => {
+      expect(
+        renderRunningBadge(
+          makeTask({ executing_since: '2026-05-08T12:05:00.000Z' }),
+        ),
+      ).toBe('');
+    });
+  });
+
+  it('renders nothing when executing_since is not a valid date', () => {
+    expect(
+      renderRunningBadge(makeTask({ executing_since: 'not-a-date' })),
+    ).toBe('');
+  });
+
+  it('renders a lane-age badge with seconds for sub-minute runs', () => {
+    withFixedDate(() => {
+      const html = renderRunningBadge(
+        makeTask({ executing_since: '2026-05-08T11:59:30.000Z' }),
+      );
+      expect(html).toContain('class="lane-age"');
+      expect(html).toContain('running 30s');
+      expect(html).toContain('since 2026-05-08T11:59:30.000Z');
+    });
+  });
+
+  it('renders minutes for runs between one minute and one hour', () => {
+    withFixedDate(() => {
+      const html = renderRunningBadge(
+        makeTask({ executing_since: '2026-05-08T11:55:00.000Z' }),
+      );
+      expect(html).toContain('running 5m');
+    });
+  });
+
+  it('renders hours for runs longer than one hour', () => {
+    withFixedDate(() => {
+      const html = renderRunningBadge(
+        makeTask({ executing_since: '2026-05-08T10:30:00.000Z' }),
+      );
+      expect(html).toContain('running 1.5h');
+    });
+  });
+
+  it('escapes the executing_since timestamp in the title attribute', () => {
+    withFixedDate(() => {
+      const html = renderRunningBadge(
+        makeTask({
+          // Date.parse tolerates trailing junk on some runtimes, but we use
+          // a clearly invalid-looking suffix that still parses on Bun.
+          executing_since: '2026-05-08T11:59:30.000Z',
+        }),
+      );
+      // Title should not include any raw HTML metacharacters.
+      expect(html).not.toContain('<script');
+      expect(html).toContain('title=');
+    });
+  });
+});
+
+describe('formatRunningAge', () => {
+  it('renders sub-second durations in milliseconds', () => {
+    expect(formatRunningAge(0)).toBe('0ms');
+    expect(formatRunningAge(250)).toBe('250ms');
+    expect(formatRunningAge(999)).toBe('999ms');
+  });
+
+  it('rounds seconds for sub-minute durations', () => {
+    expect(formatRunningAge(1000)).toBe('1s');
+    expect(formatRunningAge(30_400)).toBe('30s');
+    expect(formatRunningAge(59_500)).toBe('60s');
+  });
+
+  it('rounds minutes for sub-hour durations', () => {
+    expect(formatRunningAge(60_000)).toBe('1m');
+    expect(formatRunningAge(125_000)).toBe('2m');
+    expect(formatRunningAge(3_599_000)).toBe('60m');
+  });
+
+  it('renders hours with one decimal place', () => {
+    expect(formatRunningAge(3_600_000)).toBe('1.0h');
+    expect(formatRunningAge(5_400_000)).toBe('1.5h');
+    expect(formatRunningAge(36_000_000)).toBe('10.0h');
+  });
+});
+
+describe('renderTaskTableRows — running badge integration', () => {
+  const RealDate = Date;
+  const fixedNow = new RealDate('2026-05-08T12:00:00.000Z');
+
+  class FixedDate extends RealDate {
+    constructor(value?: string | number | Date) {
+      super(value ?? fixedNow.getTime());
+    }
+
+    static now() {
+      return fixedNow.getTime();
+    }
+  }
+
+  it('appends a running badge to the status cell when executing_since is set', () => {
+    globalThis.Date = FixedDate as DateConstructor;
+    try {
+      const html = renderTaskTableRows([
+        makeTask({
+          id: 'task-running',
+          executing_since: '2026-05-08T11:58:00.000Z',
+        }),
+      ]);
+
+      expect(html).toContain('badge status-active');
+      expect(html).toContain('class="lane-age"');
+      expect(html).toContain('running 2m');
+    } finally {
+      globalThis.Date = RealDate;
+    }
+  });
+
+  it('omits the running badge for completed and idle-active rows', () => {
+    const html = renderTaskTableRows([
+      makeTask({ id: 'task-idle', executing_since: null }),
+      makeTask({
+        id: 'task-completed',
+        status: 'completed',
+        executing_since: '2026-05-08T11:00:00.000Z',
+      }),
+    ]);
+
+    expect(html).not.toContain('class="lane-age"');
+    expect(html).not.toContain('running');
   });
 });
 
