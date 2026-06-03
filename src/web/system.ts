@@ -288,7 +288,10 @@ export function buildHealthData(
       }
     }
     const msgRunningMs = g.messageLane.runningMs;
-    if (typeof msgRunningMs === 'number' && msgRunningMs > longestRunningMessageMs) {
+    if (
+      typeof msgRunningMs === 'number' &&
+      msgRunningMs > longestRunningMessageMs
+    ) {
       longestRunningMessageMs = msgRunningMs;
     }
     if (g.retryCount > 0) retryingGroups++;

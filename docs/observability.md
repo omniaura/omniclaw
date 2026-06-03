@@ -27,36 +27,36 @@ Source: `src/web/system.ts` (`HealthData`, `renderSystemContent`).
 
 ### Top-level cards
 
-| Card          | Fields                                                                                                                                                | What it tells you                                                                     |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `server`      | version, uptime, started, sse clients                                                                                                                 | Process identity; SSE client count tracks live UI subscribers.                        |
-| `runtime`     | bun, platform, arch                                                                                                                                   | Runtime info — useful when a build is misbehaving on a specific host.                 |
-| `memory`      | rss, heap used, heap total                                                                                                                            | Orchestrator process memory; growth here points at a host-side leak.                  |
-| `cpu`         | cores, load 1m / 5m / 15m                                                                                                                             | Host load average; sustained `load > cores` means CPU-bound work.                     |
-| `host memory` | total, used (with %), free                                                                                                                            | Whole-machine memory pressure — distinct from the orchestrator's own usage.           |
-| `containers`  | active (`active/max_active`), idle (`idle/max_idle`)                                                                                                  | Agent container pool. Pinned at max → back-pressure source.                           |
-| `agents`      | total, by state, by backend, by runtime                                                                                                               | Agent inventory plus the structured exec-state breakdown (see below).                 |
-| `tasks`       | active, paused, completed, total                                                                                                                      | Scheduled-task lifecycle counts (not the running queue — see `queue` card).           |
+| Card          | Fields                                                                                                                                                                     | What it tells you                                                                     |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `server`      | version, uptime, started, sse clients                                                                                                                                      | Process identity; SSE client count tracks live UI subscribers.                        |
+| `runtime`     | bun, platform, arch                                                                                                                                                        | Runtime info — useful when a build is misbehaving on a specific host.                 |
+| `memory`      | rss, heap used, heap total                                                                                                                                                 | Orchestrator process memory; growth here points at a host-side leak.                  |
+| `cpu`         | cores, load 1m / 5m / 15m                                                                                                                                                  | Host load average; sustained `load > cores` means CPU-bound work.                     |
+| `host memory` | total, used (with %), free                                                                                                                                                 | Whole-machine memory pressure — distinct from the orchestrator's own usage.           |
+| `containers`  | active (`active/max_active`), idle (`idle/max_idle`)                                                                                                                       | Agent container pool. Pinned at max → back-pressure source.                           |
+| `agents`      | total, by state, by backend, by runtime                                                                                                                                    | Agent inventory plus the structured exec-state breakdown (see below).                 |
+| `tasks`       | active, paused, completed, total                                                                                                                                           | Scheduled-task lifecycle counts (not the running queue — see `queue` card).           |
 | `queue`       | groups, processing, running tasks, longest running, longest message run, pending msgs/tasks, retrying, total retries, max retries, message lane reasons, task lane reasons | Rollup of every group's lane state. Cross-reference with `/ipc` for per-group detail. |
 
 ### Queue card fields
 
 Source: `HealthData.queue` in `src/web/system.ts`.
 
-| Field                  | Source                                     | Meaning                                                                   |
-| ---------------------- | ------------------------------------------ | ------------------------------------------------------------------------- |
-| `groups`               | `queueDetails.length`                      | Group folders the orchestrator is currently tracking.                     |
-| `processing`           | groups with `messageLane.active === true`  | Lanes actively processing inbound messages right now.                     |
-| `running tasks`        | groups with `taskLane.activeTask !== null` | Scheduled tasks currently executing across all task lanes.                |
-| `longest running`      | `max(taskLane.activeTask.runningMs)`       | Age of the oldest in-flight task. Stays at `—` when no task is running.   |
+| Field                  | Source                                     | Meaning                                                                       |
+| ---------------------- | ------------------------------------------ | ----------------------------------------------------------------------------- |
+| `groups`               | `queueDetails.length`                      | Group folders the orchestrator is currently tracking.                         |
+| `processing`           | groups with `messageLane.active === true`  | Lanes actively processing inbound messages right now.                         |
+| `running tasks`        | groups with `taskLane.activeTask !== null` | Scheduled tasks currently executing across all task lanes.                    |
+| `longest running`      | `max(taskLane.activeTask.runningMs)`       | Age of the oldest in-flight task. Stays at `—` when no task is running.       |
 | `longest message run`  | `max(messageLane.runningMs)`               | Age of the oldest in-flight message run. Stays at `—` when `processing` is 0. |
-| `pending msgs`         | sum of `messageLane.pendingCount`          | Messages queued across all groups (back-pressure ceiling).                |
-| `pending tasks`        | sum of `taskLane.pendingCount`             | Scheduled tasks queued across all groups.                                 |
-| `retrying`             | groups with `retryCount > 0`               | Breadth of retry pressure — how many groups are currently in backoff.     |
-| `total retries`        | sum of `retryCount`                        | Intensity — one group stuck retrying many times will inflate this.        |
-| `max retries`          | `max(retryCount)`                          | Highest individual retry depth, useful for spotting a single stuck group. |
-| `message lane reasons` | reason-code rollup (see below)             | Distribution of message lanes across the 5 message reason codes.          |
-| `task lane reasons`    | reason-code rollup (see below)             | Distribution of task lanes across the 3 task reason codes.                |
+| `pending msgs`         | sum of `messageLane.pendingCount`          | Messages queued across all groups (back-pressure ceiling).                    |
+| `pending tasks`        | sum of `taskLane.pendingCount`             | Scheduled tasks queued across all groups.                                     |
+| `retrying`             | groups with `retryCount > 0`               | Breadth of retry pressure — how many groups are currently in backoff.         |
+| `total retries`        | sum of `retryCount`                        | Intensity — one group stuck retrying many times will inflate this.            |
+| `max retries`          | `max(retryCount)`                          | Highest individual retry depth, useful for spotting a single stuck group.     |
+| `message lane reasons` | reason-code rollup (see below)             | Distribution of message lanes across the 5 message reason codes.              |
+| `task lane reasons`    | reason-code rollup (see below)             | Distribution of task lanes across the 3 task reason codes.                    |
 
 ### Agent exec-state breakdown
 
