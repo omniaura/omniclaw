@@ -37,7 +37,7 @@ Source: `src/web/system.ts` (`HealthData`, `renderSystemContent`).
 | `containers`  | active (`active/max_active`), idle (`idle/max_idle`)                                                                                                  | Agent container pool. Pinned at max → back-pressure source.                           |
 | `agents`      | total, by state, by backend, by runtime                                                                                                               | Agent inventory plus the structured exec-state breakdown (see below).                 |
 | `tasks`       | active, paused, completed, total                                                                                                                      | Scheduled-task lifecycle counts (not the running queue — see `queue` card).           |
-| `queue`       | groups, processing, running tasks, longest running, pending msgs/tasks, retrying, total retries, max retries, message lane reasons, task lane reasons | Rollup of every group's lane state. Cross-reference with `/ipc` for per-group detail. |
+| `queue`       | groups, processing, running tasks, longest running, longest message run, pending msgs/tasks, retrying, total retries, max retries, message lane reasons, task lane reasons | Rollup of every group's lane state. Cross-reference with `/ipc` for per-group detail. |
 
 ### Queue card fields
 
@@ -49,6 +49,7 @@ Source: `HealthData.queue` in `src/web/system.ts`.
 | `processing`           | groups with `messageLane.active === true`  | Lanes actively processing inbound messages right now.                     |
 | `running tasks`        | groups with `taskLane.activeTask !== null` | Scheduled tasks currently executing across all task lanes.                |
 | `longest running`      | `max(taskLane.activeTask.runningMs)`       | Age of the oldest in-flight task. Stays at `—` when no task is running.   |
+| `longest message run`  | `max(messageLane.runningMs)`               | Age of the oldest in-flight message run. Stays at `—` when `processing` is 0. |
 | `pending msgs`         | sum of `messageLane.pendingCount`          | Messages queued across all groups (back-pressure ceiling).                |
 | `pending tasks`        | sum of `taskLane.pendingCount`             | Scheduled tasks queued across all groups.                                 |
 | `retrying`             | groups with `retryCount > 0`               | Breadth of retry pressure — how many groups are currently in backoff.     |
