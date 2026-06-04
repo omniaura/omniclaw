@@ -67,6 +67,33 @@ async function resolveSlackUserName(
   }
 }
 
+/**
+ * Resolve both a display name and `is_bot` flag for a Slack user. The reaction
+ * handler uses `is_bot` to drop reactions from other Slack apps/bots (e.g.
+ * CodeRabbit) so they don't wake the agent or pollute the warm-container
+ * stream. Falls back to `{ name: fallback, isBot: false }` on lookup failure;
+ * treating unknown reactors as humans is the conservative choice — the
+ * downstream trigger-pattern check still gates whether a human reaction is
+ * acted on.
+ */
+async function resolveSlackUserIdentity(
+  client: WebClient,
+  userId: string,
+  fallback: string,
+): Promise<{ name: string; isBot: boolean }> {
+  try {
+    const info = await client.users.info({ user: userId });
+    const name =
+      info.user?.profile?.display_name ||
+      info.user?.profile?.real_name ||
+      info.user?.name ||
+      fallback;
+    return { name, isBot: info.user?.is_bot === true };
+  } catch {
+    return { name: fallback, isBot: false };
+  }
+}
+
 /** Resolve <@USERID> Slack mentions into display names. */
 async function resolveMentions(
   text: string,
@@ -103,6 +130,7 @@ export interface SlackChannelOpts {
     messageId: string,
     emoji: string,
     userName: string,
+    reactor: { id: string; isBot: boolean },
   ) => void;
   /** Called when a message arrives from an unregistered channel. Return true if registered. */
   autoRegister?: (chatJid: string, channelName: string) => Promise<boolean>;
@@ -152,6 +180,12 @@ export class SlackChannel implements Channel {
         event.item.type === 'message' ? event.item.channel : null;
       if (!channelId) return;
 
+      // Ignore reactions from this bot itself — Slack delivers reaction_added
+      // events for our own reactions when we use `reactions.add` from
+      // share-request approval flows, and they would otherwise re-enter
+      // the message loop as @-mention noise.
+      if (this.botUserId && event.user === this.botUserId) return;
+
       const chatJid = channelIdToJid(
         channelId,
         this.multiBotMode ? this.botId : undefined,
@@ -161,13 +195,16 @@ export class SlackChannel implements Channel {
 
       const emoji = `:${event.reaction}:`;
 
-      const userName = await resolveSlackUserName(
+      const { name: userName, isBot } = await resolveSlackUserIdentity(
         this.client,
         event.user,
         event.user,
       );
 
-      this.opts.onReaction?.(chatJid, messageId, emoji, userName);
+      this.opts.onReaction?.(chatJid, messageId, emoji, userName, {
+        id: event.user,
+        isBot,
+      });
     });
 
     // Start Socket Mode — resolves when connected

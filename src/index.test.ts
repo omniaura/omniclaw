@@ -23,6 +23,7 @@ import {
   _setSessions,
   getAvailableGroups,
   hasWakingTrigger,
+  shouldDropBotReaction,
 } from './index.js';
 import { buildTriggerPattern, DATA_DIR } from './config.js';
 import fs from 'fs';
@@ -699,5 +700,26 @@ describe('hasWakingTrigger', () => {
         pattern,
       ),
     ).toBe(false);
+  });
+});
+
+describe('shouldDropBotReaction', () => {
+  it('drops reactions from bot/app reactors', () => {
+    expect(shouldDropBotReaction({ id: 'U_CODERABBIT', isBot: true })).toBe(
+      true,
+    );
+  });
+
+  it('keeps reactions from human reactors', () => {
+    expect(shouldDropBotReaction({ id: 'U_HUMAN', isBot: false })).toBe(false);
+  });
+
+  it('keeps reactions when isBot is missing or unknown (default-false)', () => {
+    // Mirrors the resolver fallback when users.info lookup fails — we choose
+    // to treat unresolved reactors as humans so a transient API blip can't
+    // silently swallow a real user's reaction.
+    expect(shouldDropBotReaction({ id: 'U_UNKNOWN', isBot: false })).toBe(
+      false,
+    );
   });
 });
