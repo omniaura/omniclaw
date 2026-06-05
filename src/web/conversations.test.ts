@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from 'bun:test';
 
 import { startWebServer, type WebServerHandle } from './server.js';
+import { chatPlatformFromJid } from './conversations.js';
 import type { WebStateProvider, QueueStats } from './types.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 
@@ -265,6 +266,35 @@ describe('conversations page', () => {
     expect(html).toContain('search-results');
   });
 
+  it('renders platform badge for each chat row', async () => {
+    const state = makeState({
+      getChats: () => [
+        { jid: 'dc:123', name: 'discord-chan', last_message_time: '' },
+        { jid: 'tg:bot:456', name: 'tg-chan', last_message_time: '' },
+        {
+          jid: '1234567890@g.us',
+          name: 'wa-group',
+          last_message_time: '',
+        },
+        { jid: 'slack:T1:C9', name: 'slack-chan', last_message_time: '' },
+        { jid: 'mystery:abc', name: 'who-knows', last_message_time: '' },
+      ],
+    });
+    handle = startWebServer(testConfig(), state);
+    const res = await authedFetch('/conversations');
+    const html = await res.text();
+    expect(html).toContain('platform-discord');
+    expect(html).toContain('platform-telegram');
+    expect(html).toContain('platform-whatsapp');
+    expect(html).toContain('platform-slack');
+    expect(html).toContain('platform-unknown');
+    // Badge label text appears alongside the class
+    expect(html).toMatch(/platform-discord"[^>]*>dc</);
+    expect(html).toMatch(/platform-telegram"[^>]*>tg</);
+    expect(html).toMatch(/platform-whatsapp"[^>]*>wa</);
+    expect(html).toMatch(/platform-slack"[^>]*>sl</);
+  });
+
   it('renders search filter controls', async () => {
     handle = startWebServer(testConfig(), makeState());
     const res = await authedFetch('/conversations');
@@ -277,6 +307,29 @@ describe('conversations page', () => {
     expect(html).toContain('all chats');
     expect(html).toContain('general');
     expect(html).toContain('dev-chat');
+  });
+});
+
+describe('chatPlatformFromJid', () => {
+  it('classifies discord JIDs', () => {
+    expect(chatPlatformFromJid('dc:123')).toBe('discord');
+    expect(chatPlatformFromJid('dc:guild:channel')).toBe('discord');
+  });
+  it('classifies telegram JIDs', () => {
+    expect(chatPlatformFromJid('tg:bot:456')).toBe('telegram');
+  });
+  it('classifies slack JIDs', () => {
+    expect(chatPlatformFromJid('slack:T1:C9')).toBe('slack');
+  });
+  it('classifies whatsapp group JIDs', () => {
+    expect(chatPlatformFromJid('1234@g.us')).toBe('whatsapp');
+  });
+  it('classifies whatsapp 1:1 JIDs', () => {
+    expect(chatPlatformFromJid('1234@s.whatsapp.net')).toBe('whatsapp');
+  });
+  it('falls back to unknown for unrecognized prefixes', () => {
+    expect(chatPlatformFromJid('mystery:abc')).toBe('unknown');
+    expect(chatPlatformFromJid('')).toBe('unknown');
   });
 });
 
