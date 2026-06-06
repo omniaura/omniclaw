@@ -315,13 +315,24 @@ describe('conversations page', () => {
     // time would race the rendering; instead we generate timestamps that sit
     // comfortably inside the relevant buckets.
     const now = Date.now();
-    const minutesAgo = (m: number) =>
-      new Date(now - m * 60_000).toISOString();
+    const minutesAgo = (m: number) => new Date(now - m * 60_000).toISOString();
     const state = makeState({
       getChats: () => [
-        { jid: 'dc:fresh', name: 'fresh-room', last_message_time: minutesAgo(2) },
-        { jid: 'dc:warm', name: 'warm-room', last_message_time: minutesAgo(90) },
-        { jid: 'dc:cold', name: 'cold-room', last_message_time: minutesAgo(60 * 26) },
+        {
+          jid: 'dc:fresh',
+          name: 'fresh-room',
+          last_message_time: minutesAgo(2),
+        },
+        {
+          jid: 'dc:warm',
+          name: 'warm-room',
+          last_message_time: minutesAgo(90),
+        },
+        {
+          jid: 'dc:cold',
+          name: 'cold-room',
+          last_message_time: minutesAgo(60 * 26),
+        },
       ],
     });
     handle = startWebServer(testConfig(), state);
