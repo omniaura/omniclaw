@@ -57,16 +57,48 @@ function chatOptions(chats: Array<{ jid: string; name: string }>): string {
   );
 }
 
+/**
+ * Format a chat's last-message timestamp as a short relative string
+ * (e.g. "5m ago", "2h ago", "3d ago"). Used in the sidebar so an operator can
+ * scan freshness without reading locale dates. Returns the original string when
+ * the input cannot be parsed, and "now" for sub-minute deltas. Future-dated
+ * inputs (clock skew, bad data) are normalised to absolute deltas so we never
+ * render an "in 5m" surprise for a chat row.
+ */
+export function formatChatRelativeTime(isoStr: string, nowMs?: number): string {
+  if (!isoStr) return '\u2014';
+  const t = Date.parse(isoStr);
+  if (Number.isNaN(t)) return isoStr;
+  const now = nowMs ?? Date.now();
+  const diff = Math.max(0, now - t);
+  if (diff < 60_000) return 'now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  if (diff < 30 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`;
+  return new Date(t).toLocaleDateString();
+}
+
+function formatChatAbsoluteTimeTitle(isoStr: string): string {
+  if (!isoStr) return '';
+  const date = new Date(isoStr);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString();
+}
+
 /** Render conversations content (no shell). */
 export function renderConversationsContent(state: WebStateProvider): string {
   const chats = state.getChats();
 
   const chatListItems = chats
     .map((c) => {
-      const lastTime = c.last_message_time
-        ? new Date(c.last_message_time).toLocaleString()
+      const relTime = c.last_message_time
+        ? formatChatRelativeTime(c.last_message_time)
         : '\u2014';
       const platform = chatPlatformFromJid(c.jid);
+      const absTime = c.last_message_time
+        ? formatChatAbsoluteTimeTitle(c.last_message_time)
+        : '';
+      const titleAttr = absTime ? ` title="${escapeHtml(absTime)}"` : '';
       return (
         `<div class="chat-item" data-jid="${escapeHtml(c.jid)}" data-chat-platform="${platform}" tabindex="0">` +
         `<div class="chat-name-row">` +
@@ -74,7 +106,7 @@ export function renderConversationsContent(state: WebStateProvider): string {
         `<div class="chat-name">${escapeHtml(c.name || c.jid)}</div>` +
         `</div>` +
         `<div class="chat-meta">${escapeHtml(c.jid)}</div>` +
-        `<div class="chat-meta">${lastTime}</div>` +
+        `<div class="chat-meta chat-time"${titleAttr}>${escapeHtml(relTime)}</div>` +
         `</div>`
       );
     })

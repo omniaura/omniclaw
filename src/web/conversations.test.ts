@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'bun:test';
 
 import { startWebServer, type WebServerHandle } from './server.js';
-import { chatPlatformFromJid } from './conversations.js';
+import { chatPlatformFromJid, formatChatRelativeTime } from './conversations.js';
 import type { WebStateProvider, QueueStats } from './types.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 
@@ -307,6 +307,98 @@ describe('conversations page', () => {
     expect(html).toContain('all chats');
     expect(html).toContain('general');
     expect(html).toContain('dev-chat');
+  });
+
+  it('renders relative last-message time on each chat row', async () => {
+    // Pin "now" by injecting chats whose timestamps are relative to a fixed
+    // wall-clock offset from the current moment. Using Date.now() at request
+    // time would race the rendering; instead we generate timestamps that sit
+    // comfortably inside the relevant buckets.
+    const now = Date.now();
+    const minutesAgo = (m: number) =>
+      new Date(now - m * 60_000).toISOString();
+    const state = makeState({
+      getChats: () => [
+        { jid: 'dc:fresh', name: 'fresh-room', last_message_time: minutesAgo(2) },
+        { jid: 'dc:warm', name: 'warm-room', last_message_time: minutesAgo(90) },
+        { jid: 'dc:cold', name: 'cold-room', last_message_time: minutesAgo(60 * 26) },
+      ],
+    });
+    handle = startWebServer(testConfig(), state);
+    const res = await authedFetch('/conversations');
+    const html = await res.text();
+    // chat-time class is present on each row so operators can target it.
+    expect(html).toContain('chat-time');
+    // Buckets render the expected short suffixes.
+    expect(html).toContain('2m ago');
+    expect(html).toContain('1h ago');
+    expect(html).toContain('1d ago');
+    // The locale-formatted absolute timestamp survives as the hover title.
+    expect(html).toContain('title="');
+  });
+
+  it('shows em dash on chat rows with no last-message timestamp', async () => {
+    const state = makeState({
+      getChats: () => [
+        { jid: 'dc:empty', name: 'silent-room', last_message_time: '' },
+      ],
+    });
+    handle = startWebServer(testConfig(), state);
+    const res = await authedFetch('/conversations');
+    const html = await res.text();
+    expect(html).toContain('chat-time');
+    expect(html).toContain('—');
+  });
+});
+
+describe('formatChatRelativeTime helper', () => {
+  // Fixed reference point so the tests stay deterministic regardless of when
+  // the suite runs.
+  const NOW = Date.parse('2026-03-01T12:00:00.000Z');
+  const at = (offsetMs: number) => new Date(NOW - offsetMs).toISOString();
+
+  it('returns "now" for sub-minute deltas', () => {
+    expect(formatChatRelativeTime(at(0), NOW)).toBe('now');
+    expect(formatChatRelativeTime(at(45_000), NOW)).toBe('now');
+  });
+
+  it('renders minutes for deltas under an hour', () => {
+    expect(formatChatRelativeTime(at(60_000), NOW)).toBe('1m ago');
+    expect(formatChatRelativeTime(at(5 * 60_000), NOW)).toBe('5m ago');
+    expect(formatChatRelativeTime(at(59 * 60_000), NOW)).toBe('59m ago');
+  });
+
+  it('renders hours for deltas under a day', () => {
+    expect(formatChatRelativeTime(at(60 * 60_000), NOW)).toBe('1h ago');
+    expect(formatChatRelativeTime(at(3 * 3_600_000), NOW)).toBe('3h ago');
+    expect(formatChatRelativeTime(at(23 * 3_600_000), NOW)).toBe('23h ago');
+  });
+
+  it('renders days for deltas under a month', () => {
+    expect(formatChatRelativeTime(at(86_400_000), NOW)).toBe('1d ago');
+    expect(formatChatRelativeTime(at(7 * 86_400_000), NOW)).toBe('7d ago');
+    expect(formatChatRelativeTime(at(29 * 86_400_000), NOW)).toBe('29d ago');
+  });
+
+  it('falls back to a locale date for deltas beyond a month', () => {
+    const out = formatChatRelativeTime(at(60 * 86_400_000), NOW);
+    expect(out).not.toContain('ago');
+    expect(out).not.toBe('now');
+    // toLocaleDateString output varies by locale; just assert it parses.
+    expect(Number.isNaN(Date.parse(out))).toBe(false);
+  });
+
+  it('treats future timestamps as "now" rather than rendering negative ages', () => {
+    // Clock skew should never surface "in 5m" — bound the diff at zero.
+    expect(formatChatRelativeTime(at(-5 * 60_000), NOW)).toBe('now');
+  });
+
+  it('returns an em dash for empty input', () => {
+    expect(formatChatRelativeTime('', NOW)).toBe('—');
+  });
+
+  it('returns the raw input for unparseable strings', () => {
+    expect(formatChatRelativeTime('not-a-date', NOW)).toBe('not-a-date');
   });
 });
 
