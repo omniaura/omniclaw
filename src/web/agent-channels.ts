@@ -31,6 +31,12 @@ export interface AgentChannelData {
   remoteInstanceName?: string;
   remoteHost?: string;
   remotePort?: number;
+  /**
+   * Per-agent model override (e.g. "claude-opus-4-7"). Local agents only —
+   * remote peers manage model selection on their own host. Undefined / empty
+   * means "use the runtime's host .env default".
+   */
+  model?: string;
   channels: ChannelInfo[];
 }
 
@@ -95,6 +101,7 @@ export function buildAgentChannelData(
       agentContextFolder: a.agentContextFolder,
       avatarUrl: sanitizeTelegramAvatarUrl(a.avatarUrl, a.avatarSource),
       serverIconUrl,
+      model: a.model,
       channels,
     };
   });
