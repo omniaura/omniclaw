@@ -2011,6 +2011,30 @@ function renderPeerActions(peer){
   return '<span style="color:var(--text-muted);font-size:0.8rem">offline</span>';
 }
 
+// Mirror of formatPeerLastSeen() in src/web/network.ts so live refreshes via
+// /api/discovery/peers keep the chip the server-rendered row already shows.
+function formatPeerLastSeen(lastSeen,nowMs){
+  if(!lastSeen)return "";
+  var t=Date.parse(lastSeen);
+  if(isNaN(t))return "";
+  var now=typeof nowMs==="number"?nowMs:Date.now();
+  var diff=Math.max(0,now-t);
+  if(diff<60000)return "now";
+  if(diff<3600000)return Math.floor(diff/60000)+"m ago";
+  if(diff<86400000)return Math.floor(diff/3600000)+"h ago";
+  if(diff<30*86400000)return Math.floor(diff/86400000)+"d ago";
+  return new Date(t).toLocaleDateString();
+}
+
+function renderPeerOnlineCell(peer){
+  var dot=peer.online?'<span style="color:var(--green)">●</span>':'<span style="color:var(--text-muted)">○</span>';
+  if(peer.online)return dot;
+  var rel=formatPeerLastSeen(peer.lastSeen);
+  if(!rel)return dot;
+  var title=peer.lastSeen?' title="'+window.__esc(peer.lastSeen)+'"':'';
+  return dot+' <span class="peer-last-seen" style="color:var(--text-muted);font-size:0.75rem;margin-left:0.35rem"'+title+'>'+window.__esc(rel)+'</span>';
+}
+
 function renderPeerRows(peers){
   if(!Array.isArray(peers))return "";
   return peers.map(function(peer){
@@ -2018,7 +2042,7 @@ function renderPeerRows(peers){
       +'<td><strong>'+window.__esc(peer.name||"")+'</strong></td>'
       +'<td><code>'+window.__esc(peer.host||"")+':'+window.__esc(String(peer.port||0))+'</code></td>'
       +'<td>'+renderPeerStatus(peer.status)+'</td>'
-      +'<td>'+(peer.online?'<span style="color:var(--green)">●</span>':'<span style="color:var(--text-muted)">○</span>')+'</td>'
+      +'<td>'+renderPeerOnlineCell(peer)+'</td>'
       +'<td>'+renderPeerActions(peer)+'</td></tr>';
   }).join("");
 }
