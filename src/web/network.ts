@@ -183,6 +183,51 @@ export function renderPendingRequests(requests: PairRequest[]): string {
     .join('\n');
 }
 
+/**
+ * Format a peer's lastSeen ISO timestamp as a short relative string
+ * (e.g. "5m ago", "2h ago", "3d ago"). Used inline with the online dot on
+ * /network rows so an operator can tell a "just disconnected" peer from a
+ * stale one at a glance. Sub-minute deltas render as "now", future-dated
+ * inputs (clock skew) clamp to "now", and gaps past ~30 days fall back to a
+ * locale date so the cell never grows into an unreadable "425d ago".
+ */
+export function formatPeerLastSeen(
+  lastSeen: string | null | undefined,
+  nowMs?: number,
+): string {
+  if (!lastSeen) return '';
+  const t = Date.parse(lastSeen);
+  if (Number.isNaN(t)) return '';
+  const now = nowMs ?? Date.now();
+  const diff = Math.max(0, now - t);
+  if (diff < 60_000) return 'now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  if (diff < 30 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`;
+  return new Date(t).toLocaleDateString();
+}
+
+/**
+ * Compose the "online" cell content: the existing colored dot, plus a small
+ * "last seen" chip for offline peers when we know when we last saw them.
+ * Online peers stay as a bare dot — they are "now" by definition and the
+ * action column already telegraphs the trust state. The chip carries the
+ * absolute ISO timestamp on `title` so the precise value is one hover away.
+ */
+export function renderPeerOnlineCell(peer: PeerView): string {
+  const dot = peer.online
+    ? '<span style="color:var(--green)">●</span>'
+    : '<span style="color:var(--text-muted)">○</span>';
+  if (peer.online) return dot;
+  const rel = formatPeerLastSeen(peer.lastSeen);
+  if (!rel) return dot;
+  const title = peer.lastSeen ? ` title="${escapeHtml(peer.lastSeen)}"` : '';
+  return (
+    dot +
+    ` <span class="peer-last-seen" style="color:var(--text-muted);font-size:0.75rem;margin-left:0.35rem"${title}>${escapeHtml(rel)}</span>`
+  );
+}
+
 export function renderPeerRows(peers: PeerView[]): string {
   return peers
     .map((peer) => {
@@ -194,7 +239,7 @@ export function renderPeerRows(peers: PeerView[]): string {
         `<td><strong>${escapeHtml(peer.name)}</strong></td>` +
         `<td><code>${escapeHtml(peer.host)}:${peer.port}</code></td>` +
         `<td>${statusBadge}</td>` +
-        `<td>${peer.online ? '<span style="color:var(--green)">●</span>' : '<span style="color:var(--text-muted)">○</span>'}</td>` +
+        `<td>${renderPeerOnlineCell(peer)}</td>` +
         `<td>${actions}</td>` +
         `</tr>`
       );

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  formatPeerLastSeen,
   renderNetworkContent,
   renderNetworkPage,
+  renderPeerOnlineCell,
   renderPeerRows,
   renderPendingRequests,
 } from './network.js';
@@ -249,6 +251,151 @@ describe('renderPeerRows', () => {
     );
     expect(html).toContain('<span class="badge">unknown</span>');
     expect(html).toContain('offline</span>');
+  });
+
+  it('renders an offline peer with a last-seen relative chip and absolute title', () => {
+    const now = Date.parse('2026-06-07T12:00:00.000Z');
+    const lastSeen = new Date(now - 5 * 60_000).toISOString();
+    const html = renderPeerRows([
+      makePeer({
+        instanceId: 'offline-1',
+        status: 'trusted',
+        online: false,
+        lastSeen,
+      }),
+    ]);
+
+    expect(html).toContain('peer-last-seen');
+    expect(html).toContain(`title="${lastSeen}"`);
+    // Either "5m ago" (now-relative at test time) or any *m/h/d ago value —
+    // assert structural attributes rather than the exact minute count so the
+    // suite stays stable as wall-clock drifts past the captured `lastSeen`.
+    expect(html).toMatch(
+      /peer-last-seen[^>]*>(now|\d+m ago|\d+h ago|\d+d ago)</,
+    );
+  });
+
+  it('omits the last-seen chip when the peer is online', () => {
+    const html = renderPeerRows([
+      makePeer({
+        instanceId: 'online-1',
+        status: 'trusted',
+        online: true,
+        lastSeen: '2026-06-07T11:59:00.000Z',
+      }),
+    ]);
+
+    expect(html).toContain('<span style="color:var(--green)">●</span>');
+    expect(html).not.toContain('peer-last-seen');
+  });
+
+  it('omits the chip when an offline peer has no recorded lastSeen', () => {
+    const html = renderPeerRows([
+      makePeer({
+        instanceId: 'never-seen-1',
+        status: 'pending',
+        online: false,
+        lastSeen: null,
+      }),
+    ]);
+
+    expect(html).toContain('<span style="color:var(--text-muted)">○</span>');
+    expect(html).not.toContain('peer-last-seen');
+  });
+});
+
+describe('formatPeerLastSeen', () => {
+  const NOW = Date.parse('2026-06-07T12:00:00.000Z');
+
+  it('returns an empty string for null / undefined / empty input', () => {
+    expect(formatPeerLastSeen(null, NOW)).toBe('');
+    expect(formatPeerLastSeen(undefined, NOW)).toBe('');
+    expect(formatPeerLastSeen('', NOW)).toBe('');
+  });
+
+  it('returns an empty string for unparseable input', () => {
+    expect(formatPeerLastSeen('not-a-date', NOW)).toBe('');
+  });
+
+  it('returns "now" for sub-minute gaps', () => {
+    expect(formatPeerLastSeen(new Date(NOW - 30_000).toISOString(), NOW)).toBe(
+      'now',
+    );
+  });
+
+  it('returns minutes for gaps under one hour', () => {
+    expect(
+      formatPeerLastSeen(new Date(NOW - 5 * 60_000).toISOString(), NOW),
+    ).toBe('5m ago');
+    expect(
+      formatPeerLastSeen(new Date(NOW - 59 * 60_000).toISOString(), NOW),
+    ).toBe('59m ago');
+  });
+
+  it('returns hours for gaps under one day', () => {
+    expect(
+      formatPeerLastSeen(new Date(NOW - 3 * 3_600_000).toISOString(), NOW),
+    ).toBe('3h ago');
+  });
+
+  it('returns days for gaps under thirty days', () => {
+    expect(
+      formatPeerLastSeen(new Date(NOW - 5 * 86_400_000).toISOString(), NOW),
+    ).toBe('5d ago');
+  });
+
+  it('falls back to a locale date past ~30 days', () => {
+    const stale = new Date(NOW - 60 * 86_400_000).toISOString();
+    const out = formatPeerLastSeen(stale, NOW);
+    // Locale-formatted dates vary by environment; just assert it is not the
+    // raw ISO and not a relative "Nd ago" string.
+    expect(out).not.toBe('');
+    expect(out).not.toContain('ago');
+    expect(out).not.toBe(stale);
+  });
+
+  it('clamps future-dated input to "now" instead of rendering "in 5m"', () => {
+    const future = new Date(NOW + 5 * 60_000).toISOString();
+    expect(formatPeerLastSeen(future, NOW)).toBe('now');
+  });
+});
+
+describe('renderPeerOnlineCell', () => {
+  function peerFor(overrides: Partial<PeerView> = {}): PeerView {
+    return {
+      instanceId: 'p',
+      name: 'P',
+      host: 'p.local',
+      port: 8080,
+      addresses: [],
+      status: 'trusted',
+      online: true,
+      approvedAt: null,
+      lastSeen: null,
+      ...overrides,
+    };
+  }
+
+  it('returns a bare green dot for an online peer with lastSeen set', () => {
+    const html = renderPeerOnlineCell(
+      peerFor({ online: true, lastSeen: '2026-06-07T11:00:00.000Z' }),
+    );
+    expect(html).toBe('<span style="color:var(--green)">●</span>');
+  });
+
+  it('returns a bare grey dot for an offline peer with no lastSeen', () => {
+    const html = renderPeerOnlineCell(
+      peerFor({ online: false, lastSeen: null }),
+    );
+    expect(html).toBe('<span style="color:var(--text-muted)">○</span>');
+  });
+
+  it('emits both the relative chip and the absolute title for an offline peer', () => {
+    const lastSeen = '2026-06-07T11:00:00.000Z';
+    const html = renderPeerOnlineCell(peerFor({ online: false, lastSeen }));
+    expect(html).toContain('class="peer-last-seen"');
+    expect(html).toContain(`title="${lastSeen}"`);
+    expect(html).toContain('<span style="color:var(--text-muted)">○</span>');
   });
 });
 
