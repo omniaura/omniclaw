@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import { App } from '@slack/bolt';
+import { App, Assistant } from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
+import type { KnownBlock } from '@slack/web-api';
 
 import { logger } from '../logger.js';
 import {
@@ -43,9 +44,38 @@ export function channelIdToJid(channelId: string, botId?: string): string {
   return `slack:${channelId}`;
 }
 
-/** Split text at Slack's 4000-char message limit (hard split, no break preference) */
-function splitMessage(text: string, maxLen = 4000): string[] {
+// Slack limits: plain `text` messages cap at 4,000 chars; `markdown` blocks
+// (standard markdown rendering, added for AI apps) cap at 12,000.
+const TEXT_LIMIT = 4000;
+const MARKDOWN_BLOCK_LIMIT = 11500;
+const THREAD_ROOT_CACHE_MAX = 1000;
+const SEEN_MESSAGE_CACHE_MAX = 500;
+const THREAD_EXCERPT_MAX_CHARS = 140;
+
+// Rotating status shown under the assistant thread while the agent works.
+const STATUS_LOADING_MESSAGES = [
+  'Thinking it through…',
+  'Working on it…',
+  'Checking my notes…',
+  'Almost there…',
+];
+
+/** Split text into chunks that fit a Slack markdown block. */
+function splitMarkdown(text: string): string[] {
+  return splitMessageShared(text, MARKDOWN_BLOCK_LIMIT, {
+    preferBreaks: true,
+    preserveLeadingWhitespace: true,
+  });
+}
+
+/** Split text at Slack's plain-text message limit (hard split, no break preference). */
+function splitMessage(text: string, maxLen = TEXT_LIMIT): string[] {
   return splitMessageShared(text, maxLen, false);
+}
+
+/** A `markdown` block renders standard markdown (GFM) instead of legacy mrkdwn. */
+function markdownBlocks(text: string): KnownBlock[] {
+  return [{ type: 'markdown', text }];
 }
 
 /** Resolve a Slack user ID to a display name, falling back to the provided default. */
@@ -121,6 +151,17 @@ export class SlackChannel implements Channel {
   private allowLegacyJidRouting: boolean;
   private opts: SlackChannelOpts;
 
+  /** Active assistant (AI app) thread per DM channel: channelId → thread_ts. */
+  private assistantThreads = new Map<string, string>();
+  /** Assistant threads we've already titled (`channelId:thread_ts`). */
+  private titledAssistantThreads = new Set<string>();
+  /** Message ts → thread root ts, so replies always thread under the root. */
+  private threadRootByTs = new Map<string, string>();
+  /** Cached excerpts of thread root messages, keyed by `channelId:thread_ts`. */
+  private threadRootExcerpts = new Map<string, string>();
+  /** Dedup of processed messages (`channelId:ts`) across message/app_mention events. */
+  private seenMessages = new Set<string>();
+
   constructor(opts: SlackChannelOpts) {
     this.opts = opts;
     this.botId = opts.botId;
@@ -143,6 +184,16 @@ export class SlackChannel implements Channel {
     this.app.message(async ({ message }: { message: any }) => {
       await this.handleMessage(message).catch((err: unknown) =>
         logger.error({ err }, 'Error handling Slack message'),
+      );
+    });
+
+    // Mention fallback: covers channels where the bot can't read message
+    // history. message.* events carry richer payloads (files), so give them a
+    // moment to win the dedup race before processing the mention payload.
+    this.app.event('app_mention', async ({ event }) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await this.handleMessage(event).catch((err: unknown) =>
+        logger.error({ err }, 'Error handling Slack app_mention'),
       );
     });
 
@@ -169,6 +220,15 @@ export class SlackChannel implements Channel {
 
       this.opts.onReaction?.(chatJid, messageId, emoji, userName);
     });
+
+    // Slack AI-app assistant threads (the "agent" split-pane experience).
+    // Harmless when the app doesn't have the Agents feature enabled — the
+    // events simply never arrive.
+    try {
+      this.registerAssistant();
+    } catch (err) {
+      logger.warn({ err }, 'Failed to register Slack assistant middleware');
+    }
 
     // Start Socket Mode — resolves when connected
     await this.app.start();
@@ -200,22 +260,33 @@ export class SlackChannel implements Channel {
       return;
     }
 
+    // Slack requires threading on the root ts — map reply targets through the
+    // thread-root cache. Bare sends to a DM with an active assistant thread go
+    // into that thread so they show up in the agent pane.
+    const threadTs = replyToMessageId
+      ? (this.threadRootByTs.get(replyToMessageId) ?? replyToMessageId)
+      : this.assistantThreads.get(channelId);
+
     try {
-      const chunks = splitMessage(text);
+      // Assistant threads get the native AI streaming treatment.
+      if (threadTs && this.assistantThreads.get(channelId) === threadTs) {
+        const ts = await this.sendStreamed(channelId, threadTs, text);
+        if (ts) {
+          this.rememberThreadRoot(ts, threadTs);
+          logger.info({ jid, length: text.length }, 'Slack message streamed');
+          return ts;
+        }
+      }
+
+      const chunks = splitMarkdown(text);
       let firstTs: string | undefined;
       let lastTs: string | undefined;
 
       for (let i = 0; i < chunks.length; i++) {
-        // First chunk threads under the trigger message (replyToMessageId).
-        // Subsequent chunks thread under the first chunk so they form a single thread.
-        const threadTs =
-          i === 0 ? replyToMessageId : (firstTs ?? replyToMessageId);
-        const result = await this.client.chat.postMessage({
-          channel: channelId,
-          text: chunks[i],
-          ...(threadTs ? { thread_ts: threadTs } : {}),
-        });
-        const ts = result.ts as string | undefined;
+        // First chunk threads under the resolved root; subsequent chunks
+        // thread under the first chunk so they form a single thread.
+        const chunkThread = i === 0 ? threadTs : (firstTs ?? threadTs);
+        const ts = await this.postChunk(channelId, chunks[i], chunkThread);
         if (i === 0) firstTs = ts;
         lastTs = ts;
       }
@@ -224,6 +295,62 @@ export class SlackChannel implements Channel {
       return lastTs;
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Slack message');
+    }
+  }
+
+  async editMessage(
+    jid: string,
+    messageId: string,
+    text: string,
+  ): Promise<void> {
+    const channelId = this.extractChannelId(jid);
+    if (!channelId) return;
+    const chunk = text.slice(0, MARKDOWN_BLOCK_LIMIT);
+    try {
+      await this.client.chat.update({
+        channel: channelId,
+        ts: messageId,
+        text: chunk.slice(0, TEXT_LIMIT),
+        blocks: markdownBlocks(chunk),
+      });
+    } catch (err) {
+      // markdown block can be rejected for odd content — retry as plain text
+      try {
+        await this.client.chat.update({
+          channel: channelId,
+          ts: messageId,
+          text: text.slice(0, TEXT_LIMIT),
+          blocks: [],
+        });
+      } catch (err2) {
+        logger.warn(
+          { jid, messageId, err: err2 },
+          'Failed to edit Slack message',
+        );
+      }
+    }
+  }
+
+  /**
+   * Typing indicator: in assistant threads we surface Slack's native AI
+   * status ("is thinking…" with rotating loading messages). Regular channels
+   * have no public typing API, so this is a no-op there. Slack clears the
+   * status automatically when the reply lands in the thread.
+   */
+  async setTyping(jid: string, isTyping: boolean): Promise<void> {
+    const channelId = this.extractChannelId(jid);
+    if (!channelId) return;
+    const threadTs = this.assistantThreads.get(channelId);
+    if (!threadTs) return;
+    try {
+      await this.client.assistant.threads.setStatus({
+        channel_id: channelId,
+        thread_ts: threadTs,
+        status: isTyping ? 'is thinking…' : '',
+        ...(isTyping ? { loading_messages: STATUS_LOADING_MESSAGES } : {}),
+      });
+    } catch (err) {
+      logger.debug({ jid, err }, 'Slack assistant setStatus failed');
     }
   }
 
@@ -313,36 +440,238 @@ export class SlackChannel implements Channel {
     const channelId = this.extractChannelId(jid);
     if (!channelId) return null;
     // In Slack, a thread is created implicitly on first reply — just return the anchor info
-    return { channelId, ts: messageId };
+    return { channelId, ts: this.threadRootByTs.get(messageId) ?? messageId };
   }
 
   async sendToThread(
     thread: { channelId: string; ts: string },
     text: string,
   ): Promise<void> {
-    const chunks = splitMessage(text);
-    for (const chunk of chunks) {
+    for (const chunk of splitMarkdown(text)) {
       try {
-        await this.client.chat.postMessage({
-          channel: thread.channelId,
-          text: chunk,
-          thread_ts: thread.ts,
-        });
+        await this.postChunk(thread.channelId, chunk, thread.ts);
       } catch (err) {
         logger.warn({ thread, err }, 'Failed to send to Slack thread');
       }
     }
   }
 
-  // Slack doesn't expose a public "user is typing" API, so we no-op setTyping
-  // (the Bolt SDK does not support sending typing indicators to channels)
-
   // ──────────────────────────────────────────────────────────────────────────
   // Private helpers
   // ──────────────────────────────────────────────────────────────────────────
 
+  /**
+   * Register Bolt's Assistant middleware for Slack's AI-app experience:
+   * suggested prompts on thread open, auto thread titles, and context saving.
+   * Requires the app manifest to enable the Agents feature (`assistant:write`
+   * scope + `assistant_thread_started`/`assistant_thread_context_changed`
+   * event subscriptions).
+   */
+  private registerAssistant(): void {
+    const assistant = new Assistant({
+      threadStarted: async ({ event, setSuggestedPrompts }) => {
+        const thread = event.assistant_thread;
+        this.assistantThreads.set(thread.channel_id, thread.thread_ts);
+        try {
+          await setSuggestedPrompts({
+            title: 'How can I help?',
+            prompts: [
+              {
+                title: 'What can you do?',
+                message:
+                  'What can you do? Give me a quick tour of your capabilities.',
+              },
+              {
+                title: 'Schedule a recurring task',
+                message:
+                  'I want to schedule a recurring task — ask me what it should do and how often.',
+              },
+              {
+                title: 'Summarize something',
+                message:
+                  'I am going to paste some text. Summarize it and pull out any action items.',
+              },
+            ],
+          });
+        } catch (err) {
+          logger.debug({ err }, 'Slack assistant suggested prompts failed');
+        }
+      },
+      threadContextChanged: async ({ saveThreadContext }) => {
+        try {
+          await saveThreadContext();
+        } catch (err) {
+          logger.debug({ err }, 'Slack assistant saveThreadContext failed');
+        }
+      },
+      userMessage: async ({ message, setTitle }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const event = message as any;
+        const channelId: string | undefined = event.channel;
+        const threadTs: string | undefined = event.thread_ts;
+        if (channelId && threadTs) {
+          this.assistantThreads.set(channelId, threadTs);
+          // Title the thread after the first user message so the agent pane
+          // sidebar stays navigable.
+          if (event.text) {
+            const key = `${channelId}:${threadTs}`;
+            if (!this.titledAssistantThreads.has(key)) {
+              this.titledAssistantThreads.add(key);
+              try {
+                await setTitle(String(event.text).slice(0, 60));
+              } catch (err) {
+                logger.debug({ err }, 'Slack assistant setTitle failed');
+              }
+            }
+          }
+        }
+        await this.handleMessage(event, { assistantThread: true }).catch(
+          (err: unknown) =>
+            logger.error({ err }, 'Error handling Slack assistant message'),
+        );
+      },
+    });
+    this.app.assistant(assistant);
+  }
+
+  /**
+   * Stream a response via chat.startStream/appendStream/stopStream — renders
+   * with Slack's native AI-response treatment in assistant threads. Returns
+   * the message ts, or undefined when streaming is unavailable so the caller
+   * can fall back to chat.postMessage.
+   */
+  private async sendStreamed(
+    channelId: string,
+    threadTs: string,
+    text: string,
+  ): Promise<string | undefined> {
+    const chunks = splitMarkdown(text);
+    let ts: string | undefined;
+    try {
+      const started = await this.client.chat.startStream({
+        channel: channelId,
+        thread_ts: threadTs,
+        markdown_text: chunks[0],
+      });
+      ts = started.ts as string | undefined;
+      if (!ts) return undefined;
+      for (let i = 1; i < chunks.length; i++) {
+        await this.client.chat.appendStream({
+          channel: channelId,
+          ts,
+          markdown_text: chunks[i],
+        });
+      }
+      await this.client.chat.stopStream({ channel: channelId, ts });
+      return ts;
+    } catch (err) {
+      logger.debug(
+        { channelId, err },
+        'Slack streaming send unavailable — falling back to chat.postMessage',
+      );
+      // Content already landed via startStream — finalize instead of duplicating.
+      if (ts) {
+        try {
+          await this.client.chat.stopStream({ channel: channelId, ts });
+          return ts;
+        } catch {
+          // fall through to postMessage fallback
+        }
+      }
+      return undefined;
+    }
+  }
+
+  /**
+   * Post a single chunk as a markdown block (standard markdown rendering),
+   * falling back to plain text if Slack rejects the block.
+   */
+  private async postChunk(
+    channelId: string,
+    chunk: string,
+    threadTs?: string,
+  ): Promise<string | undefined> {
+    try {
+      const result = await this.client.chat.postMessage({
+        channel: channelId,
+        text: chunk.slice(0, TEXT_LIMIT), // notification fallback
+        blocks: markdownBlocks(chunk),
+        ...(threadTs ? { thread_ts: threadTs } : {}),
+      });
+      const ts = result.ts as string | undefined;
+      if (ts) this.rememberThreadRoot(ts, threadTs ?? ts);
+      return ts;
+    } catch (err) {
+      logger.debug(
+        { channelId, err },
+        'Slack markdown block send failed — falling back to plain text',
+      );
+      let lastTs: string | undefined;
+      for (const piece of splitMessage(chunk)) {
+        const result = await this.client.chat.postMessage({
+          channel: channelId,
+          text: piece,
+          ...(threadTs ? { thread_ts: threadTs } : {}),
+        });
+        lastTs = result.ts as string | undefined;
+        if (lastTs) this.rememberThreadRoot(lastTs, threadTs ?? lastTs);
+      }
+      return lastTs;
+    }
+  }
+
+  private rememberThreadRoot(ts: string, root: string): void {
+    this.threadRootByTs.set(ts, root);
+    if (this.threadRootByTs.size > THREAD_ROOT_CACHE_MAX) {
+      const oldest = this.threadRootByTs.keys().next().value;
+      if (oldest !== undefined) this.threadRootByTs.delete(oldest);
+    }
+  }
+
+  /** Dedup across message + app_mention deliveries of the same message. */
+  private markSeen(key: string): boolean {
+    if (this.seenMessages.has(key)) return false;
+    this.seenMessages.add(key);
+    if (this.seenMessages.size > SEEN_MESSAGE_CACHE_MAX) {
+      const oldest = this.seenMessages.values().next().value;
+      if (oldest !== undefined) this.seenMessages.delete(oldest);
+    }
+    return true;
+  }
+
+  /** Fetch (and cache) a short excerpt of a thread's root message. */
+  private async getThreadRootExcerpt(
+    channelId: string,
+    threadTs: string,
+  ): Promise<string | null> {
+    const key = `${channelId}:${threadTs}`;
+    const cached = this.threadRootExcerpts.get(key);
+    if (cached !== undefined) return cached || null;
+    try {
+      const result = await this.client.conversations.replies({
+        channel: channelId,
+        ts: threadTs,
+        limit: 1,
+      });
+      const rootText = result.messages?.[0]?.text || '';
+      const excerpt = rootText
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, THREAD_EXCERPT_MAX_CHARS);
+      this.threadRootExcerpts.set(key, excerpt);
+      return excerpt || null;
+    } catch {
+      this.threadRootExcerpts.set(key, '');
+      return null;
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleMessage(event: any): Promise<void> {
+  private async handleMessage(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    event: any,
+    opts: { assistantThread?: boolean } = {},
+  ): Promise<void> {
     // Ignore bot messages (including our own)
     if (event.subtype === 'bot_message') return;
     if ('bot_id' in event && event.bot_id) return;
@@ -356,6 +685,10 @@ export class SlackChannel implements Channel {
     if (!hasText && !hasFiles) return;
 
     const channelId = event.channel;
+    // The same message can arrive via message + app_mention (and assistant
+    // routing) — process it once.
+    if (!this.markSeen(`${channelId}:${event.ts}`)) return;
+
     const chatJid = channelIdToJid(
       channelId,
       this.multiBotMode ? this.botId : undefined,
@@ -364,6 +697,9 @@ export class SlackChannel implements Channel {
     // Slack ts is the unique message timestamp, doubles as message ID
     const msgId = event.ts;
     const timestamp = new Date(parseFloat(event.ts) * 1000).toISOString();
+
+    // Replies to this message must thread under the root ts.
+    this.rememberThreadRoot(event.ts, event.thread_ts || event.ts);
 
     const senderUserId = 'user' in event ? event.user : 'unknown';
     const sender = `slack:${senderUserId}`;
@@ -410,21 +746,33 @@ export class SlackChannel implements Channel {
       return;
     }
 
-    // Prepend thread context if this is a threaded reply
+    // Annotate threaded replies with the root message so the agent has
+    // context. Assistant threads skip this — the whole conversation IS the
+    // thread, and history comes from the message store.
     if (
+      !opts.assistantThread &&
       'thread_ts' in event &&
       event.thread_ts &&
       event.thread_ts !== event.ts
     ) {
-      // This message is a reply in a thread — note context for the agent
-      content = `[Thread reply] ${content}`;
+      const excerpt = await this.getThreadRootExcerpt(
+        channelId,
+        event.thread_ts,
+      );
+      content = excerpt
+        ? `[Thread reply to: "${excerpt}"] ${content}`
+        : `[Thread reply] ${content}`;
     }
 
     // Store channel metadata for group discovery
     let channelName = channelId;
     try {
-      const info = await this.client.conversations.info({ channel: channelId });
-      channelName = info.channel?.name || channelId;
+      const info = await this.client.conversations.info({
+        channel: channelId,
+      });
+      channelName =
+        info.channel?.name ||
+        (info.channel?.is_im ? `DM: ${senderName}` : channelId);
     } catch {
       // Fall back to channel ID
     }
@@ -512,6 +860,7 @@ export class SlackChannel implements Channel {
    * attachment markers to prepend/append to the message content.
    */
   private async processFileAttachments(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     files: any[],
     group: RegisteredGroup,
     msgId: string,

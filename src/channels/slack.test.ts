@@ -8,8 +8,15 @@ mock.module('@slack/bolt', () => ({
   App: class MockApp {
     message() {}
     event() {}
+    assistant() {}
     async start() {}
     async stop() {}
+  },
+  Assistant: class MockAssistant {
+    constructor(public config: unknown) {}
+    getMiddleware() {
+      return async () => {};
+    }
   },
 }));
 
@@ -234,6 +241,299 @@ describe('SlackChannel.handleMessage multi-bot mention routing', () => {
     expect(onMessage).toHaveBeenCalledTimes(1);
     const calls = onMessage.mock.calls as unknown as Array<[string]>;
     expect(calls[0][0]).toBe('slack:CLAYTON:C123');
+  });
+});
+
+// --- Outbound sending: markdown blocks, threading, streaming ---
+
+const makeSendChannel = () =>
+  new SlackChannel({
+    botId: 'TEST',
+    token: 'xoxb-test',
+    appToken: 'xapp-test',
+    onMessage: () => {},
+    onChatMetadata: () => {},
+    registeredGroups: () => ({}),
+  });
+
+describe('SlackChannel.sendMessage', () => {
+  it('sends markdown blocks with a plain-text notification fallback', async () => {
+    const channel = makeSendChannel();
+    const postMessage = mock(() => Promise.resolve({ ts: '1.100' }));
+    (channel as any).client = { chat: { postMessage } };
+
+    const ts = await channel.sendMessage('slack:C123', '**bold** and `code`');
+
+    expect(ts).toBe('1.100');
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    const args = (postMessage.mock.calls[0] as unknown as [any])[0];
+    expect(args.channel).toBe('C123');
+    expect(args.blocks).toEqual([
+      { type: 'markdown', text: '**bold** and `code`' },
+    ]);
+    expect(args.text).toBe('**bold** and `code`');
+    expect(args.thread_ts).toBeUndefined();
+  });
+
+  it('falls back to plain text when the markdown block is rejected', async () => {
+    const channel = makeSendChannel();
+    let calls = 0;
+    const postMessage = mock((args: any) => {
+      calls++;
+      if (args.blocks) return Promise.reject(new Error('invalid_blocks'));
+      return Promise.resolve({ ts: '2.200' });
+    });
+    (channel as any).client = { chat: { postMessage } };
+
+    const ts = await channel.sendMessage('slack:C123', 'hello');
+
+    expect(ts).toBe('2.200');
+    expect(calls).toBe(2);
+    const fallbackArgs = (postMessage.mock.calls[1] as unknown as [any])[0];
+    expect(fallbackArgs.blocks).toBeUndefined();
+    expect(fallbackArgs.text).toBe('hello');
+  });
+
+  it('threads replies under the thread root, not the child message', async () => {
+    const channel = makeSendChannel();
+    const postMessage = mock(() => Promise.resolve({ ts: '3.300' }));
+    (channel as any).client = { chat: { postMessage } };
+    // Inbound threaded message "200.2" belonged to thread rooted at "100.1"
+    (channel as any).rememberThreadRoot('200.2', '100.1');
+
+    await channel.sendMessage('slack:C123', 'reply', '200.2');
+
+    const args = (postMessage.mock.calls[0] as unknown as [any])[0];
+    expect(args.thread_ts).toBe('100.1');
+  });
+
+  it('streams responses into active assistant threads', async () => {
+    const channel = makeSendChannel();
+    const startStream = mock(() => Promise.resolve({ ts: '4.400' }));
+    const appendStream = mock(() => Promise.resolve({}));
+    const stopStream = mock(() => Promise.resolve({}));
+    const postMessage = mock(() => Promise.resolve({ ts: '9.999' }));
+    (channel as any).client = {
+      chat: { startStream, appendStream, stopStream, postMessage },
+    };
+    (channel as any).assistantThreads.set('D123', '50.5');
+
+    const ts = await channel.sendMessage('slack:D123', 'streamed answer');
+
+    expect(ts).toBe('4.400');
+    expect(postMessage).not.toHaveBeenCalled();
+    const startArgs = (startStream.mock.calls[0] as unknown as [any])[0];
+    expect(startArgs.channel).toBe('D123');
+    expect(startArgs.thread_ts).toBe('50.5');
+    expect(startArgs.markdown_text).toBe('streamed answer');
+    expect(stopStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to postMessage when streaming is unavailable', async () => {
+    const channel = makeSendChannel();
+    const startStream = mock(() =>
+      Promise.reject(new Error('feature_not_enabled')),
+    );
+    const postMessage = mock(() => Promise.resolve({ ts: '5.500' }));
+    (channel as any).client = { chat: { startStream, postMessage } };
+    (channel as any).assistantThreads.set('D123', '50.5');
+
+    const ts = await channel.sendMessage('slack:D123', 'answer');
+
+    expect(ts).toBe('5.500');
+    const args = (postMessage.mock.calls[0] as unknown as [any])[0];
+    expect(args.thread_ts).toBe('50.5');
+  });
+});
+
+describe('SlackChannel.editMessage', () => {
+  it('updates the message with a markdown block', async () => {
+    const channel = makeSendChannel();
+    const update = mock(() => Promise.resolve({}));
+    (channel as any).client = { chat: { update } };
+
+    await channel.editMessage('slack:C123', '1.100', 'new *content*');
+
+    expect(update).toHaveBeenCalledTimes(1);
+    const args = (update.mock.calls[0] as unknown as [any])[0];
+    expect(args.channel).toBe('C123');
+    expect(args.ts).toBe('1.100');
+    expect(args.blocks).toEqual([{ type: 'markdown', text: 'new *content*' }]);
+  });
+
+  it('retries as plain text when the block edit fails', async () => {
+    const channel = makeSendChannel();
+    const update = mock((args: any) =>
+      args.blocks?.length
+        ? Promise.reject(new Error('invalid_blocks'))
+        : Promise.resolve({}),
+    );
+    (channel as any).client = { chat: { update } };
+
+    await channel.editMessage('slack:C123', '1.100', 'plain');
+
+    expect(update).toHaveBeenCalledTimes(2);
+    const retryArgs = (update.mock.calls[1] as unknown as [any])[0];
+    expect(retryArgs.text).toBe('plain');
+    expect(retryArgs.blocks).toEqual([]);
+  });
+});
+
+describe('SlackChannel.setTyping', () => {
+  it('sets assistant thread status while typing', async () => {
+    const channel = makeSendChannel();
+    const setStatus = mock(() => Promise.resolve({}));
+    (channel as any).client = { assistant: { threads: { setStatus } } };
+    (channel as any).assistantThreads.set('D123', '50.5');
+
+    await channel.setTyping('slack:D123', true);
+
+    expect(setStatus).toHaveBeenCalledTimes(1);
+    const args = (setStatus.mock.calls[0] as unknown as [any])[0];
+    expect(args.channel_id).toBe('D123');
+    expect(args.thread_ts).toBe('50.5');
+    expect(args.status).toContain('thinking');
+    expect(Array.isArray(args.loading_messages)).toBe(true);
+  });
+
+  it('clears the status when typing stops', async () => {
+    const channel = makeSendChannel();
+    const setStatus = mock(() => Promise.resolve({}));
+    (channel as any).client = { assistant: { threads: { setStatus } } };
+    (channel as any).assistantThreads.set('D123', '50.5');
+
+    await channel.setTyping('slack:D123', false);
+
+    const args = (setStatus.mock.calls[0] as unknown as [any])[0];
+    expect(args.status).toBe('');
+    expect(args.loading_messages).toBeUndefined();
+  });
+
+  it('no-ops outside assistant threads', async () => {
+    const channel = makeSendChannel();
+    const setStatus = mock(() => Promise.resolve({}));
+    (channel as any).client = { assistant: { threads: { setStatus } } };
+
+    await channel.setTyping('slack:C123', true);
+
+    expect(setStatus).not.toHaveBeenCalled();
+  });
+});
+
+// --- Inbound handling: dedup and thread context ---
+
+describe('SlackChannel.handleMessage extras', () => {
+  const makeInboundClient = (rootText?: string) => ({
+    users: {
+      info: mock(() =>
+        Promise.resolve({
+          user: { name: 'peyton', profile: { display_name: 'Peyton' } },
+        }),
+      ),
+    },
+    conversations: {
+      info: mock(() => Promise.resolve({ channel: { name: 'general' } })),
+      replies: mock(() =>
+        Promise.resolve({
+          messages: rootText !== undefined ? [{ text: rootText }] : [],
+        }),
+      ),
+    },
+  });
+
+  const makeInboundChannel = (onMessage: () => void) => {
+    const channel = new SlackChannel({
+      botId: 'TEST',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      onMessage,
+      onChatMetadata: () => {},
+      registeredGroups: () => ({
+        'slack:C123': {
+          name: 'general',
+          folder: 'general',
+          trigger: '@bot',
+          added_at: new Date().toISOString(),
+        },
+      }),
+    });
+    (channel as any).botUserId = 'UBOT';
+    return channel;
+  };
+
+  it('processes duplicate deliveries of the same message only once', async () => {
+    const onMessage = mock(() => {});
+    const channel = makeInboundChannel(onMessage);
+    (channel as any).client = makeInboundClient();
+
+    const event = {
+      channel: 'C123',
+      ts: '1700000000.000100',
+      text: 'hello',
+      user: 'UPEYTON',
+    };
+    await (channel as any).handleMessage(event);
+    await (channel as any).handleMessage({ ...event, type: 'app_mention' });
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('annotates threaded replies with the root message excerpt', async () => {
+    const onMessage = mock(() => {});
+    const channel = makeInboundChannel(onMessage);
+    (channel as any).client = makeInboundClient('What is the deploy status?');
+
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000200',
+      thread_ts: '1700000000.000100',
+      text: 'any update?',
+      user: 'UPEYTON',
+    });
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    const msg = (onMessage.mock.calls[0] as unknown as [string, any])[1];
+    expect(msg.content).toBe(
+      '[Thread reply to: "What is the deploy status?"] any update?',
+    );
+  });
+
+  it('skips the thread annotation in assistant threads', async () => {
+    const onMessage = mock(() => {});
+    const channel = makeInboundChannel(onMessage);
+    (channel as any).client = makeInboundClient('root');
+
+    await (channel as any).handleMessage(
+      {
+        channel: 'C123',
+        ts: '1700000000.000300',
+        thread_ts: '1700000000.000100',
+        text: 'assistant question',
+        user: 'UPEYTON',
+      },
+      { assistantThread: true },
+    );
+
+    const msg = (onMessage.mock.calls[0] as unknown as [string, any])[1];
+    expect(msg.content).toBe('assistant question');
+  });
+
+  it('records thread roots so replies thread correctly', async () => {
+    const onMessage = mock(() => {});
+    const channel = makeInboundChannel(onMessage);
+    (channel as any).client = makeInboundClient('root');
+
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000400',
+      thread_ts: '1700000000.000100',
+      text: 'threaded',
+      user: 'UPEYTON',
+    });
+
+    expect((channel as any).threadRootByTs.get('1700000000.000400')).toBe(
+      '1700000000.000100',
+    );
   });
 });
 
