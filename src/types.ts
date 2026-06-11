@@ -289,6 +289,24 @@ export interface FactoryWorkflowClaim {
 
 // --- Channel abstraction ---
 
+/**
+ * Handle for a natively streamed outbound message (e.g. Slack's
+ * chat.startStream/appendStream/stopStream). Created via
+ * Channel.startMessageStream; all methods may throw — callers fall back to
+ * sendMessage/editMessage on failure.
+ */
+export interface OutboundMessageStream {
+  /**
+   * Append an intermediate status update (tool call, progress note).
+   * Rendered as a task timeline on platforms that support it.
+   */
+  appendStatus(text: string): Promise<void>;
+  /** Append final response text (markdown). */
+  appendText(text: string): Promise<void>;
+  /** Finalize the stream. Returns the message id, or undefined if nothing was sent. */
+  stop(): Promise<string | undefined>;
+}
+
 export interface Channel {
   name: string;
   /** Optional channel/bot identity key for multi-bot routing (Discord/Telegram). */
@@ -310,6 +328,15 @@ export interface Channel {
   sendToThread?(thread: unknown, text: string): Promise<void>;
   // Optional: edit an existing message in-place.
   editMessage?(jid: string, messageId: string, text: string): Promise<void>;
+  /**
+   * Optional: start a natively streamed message (e.g. Slack chat.startStream).
+   * Returns null when streaming isn't possible for this target (no thread
+   * anchor, missing recipient info) so callers can fall back to sendMessage.
+   */
+  startMessageStream?(
+    jid: string,
+    replyToMessageId?: string,
+  ): Promise<OutboundMessageStream | null>;
   // Optional: add/remove emoji reactions on messages.
   addReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
   removeReaction?(jid: string, messageId: string, emoji: string): Promise<void>;

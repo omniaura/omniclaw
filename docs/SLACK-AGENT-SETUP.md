@@ -67,5 +67,6 @@ After install, open Slack and:
 - Clicking it opens a dedicated assistant pane with your three suggested prompts.
 - Sending a message shows the rotating "is thinking…" status below the input.
 - The reply renders rich markdown (lists, code blocks, links) instead of escaped `*literal asterisks*`.
+- Replies stream in with Slack's native AI "generating" treatment, and the agent's intermediate tool activity renders as a task timeline panel on the message (the same UI Cursor/CodeRabbit use) — not a regular message whose text gets edited over and over. This works in the assistant pane and in channel threads where the bot was mentioned; the only places that still fall back to plain messages are un-threaded sends with no one to attribute the run to (e.g. scheduled task output posted top-level into a channel).
 
 If any of those are missing, check the bot's OAuth scopes page — Slack silently drops events the bot isn't scoped for.

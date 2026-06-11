@@ -325,8 +325,45 @@ describe('SlackChannel.sendMessage', () => {
     const startArgs = (startStream.mock.calls[0] as unknown as [any])[0];
     expect(startArgs.channel).toBe('D123');
     expect(startArgs.thread_ts).toBe('50.5');
-    expect(startArgs.markdown_text).toBe('streamed answer');
+    expect(startArgs.chunks).toEqual([
+      { type: 'markdown_text', text: 'streamed answer' },
+    ]);
     expect(stopStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('streams threaded replies in regular channels with recipient info', async () => {
+    const channel = makeSendChannel();
+    const startStream = mock(() => Promise.resolve({ ts: '6.600' }));
+    const stopStream = mock(() => Promise.resolve({}));
+    const postMessage = mock(() => Promise.resolve({ ts: '9.999' }));
+    (channel as any).client = {
+      chat: { startStream, stopStream, postMessage },
+    };
+    (channel as any).teamId = 'T999';
+    (channel as any).lastHumanSenderByChannel.set('C123', 'UPEYTON');
+    (channel as any).rememberThreadRoot('100.1', '100.1');
+
+    const ts = await channel.sendMessage('slack:C123', 'answer', '100.1');
+
+    expect(ts).toBe('6.600');
+    expect(postMessage).not.toHaveBeenCalled();
+    const startArgs = (startStream.mock.calls[0] as unknown as [any])[0];
+    expect(startArgs.thread_ts).toBe('100.1');
+    expect(startArgs.recipient_user_id).toBe('UPEYTON');
+    expect(startArgs.recipient_team_id).toBe('T999');
+  });
+
+  it('does not stream in channels when the recipient is unknown', async () => {
+    const channel = makeSendChannel();
+    const startStream = mock(() => Promise.resolve({ ts: '6.600' }));
+    const postMessage = mock(() => Promise.resolve({ ts: '7.700' }));
+    (channel as any).client = { chat: { startStream, postMessage } };
+    (channel as any).teamId = 'T999'; // no lastHumanSenderByChannel entry
+
+    const ts = await channel.sendMessage('slack:C123', 'answer', '100.1');
+
+    expect(ts).toBe('7.700');
+    expect(startStream).not.toHaveBeenCalled();
   });
 
   it('falls back to postMessage when streaming is unavailable', async () => {
@@ -343,6 +380,100 @@ describe('SlackChannel.sendMessage', () => {
     expect(ts).toBe('5.500');
     const args = (postMessage.mock.calls[0] as unknown as [any])[0];
     expect(args.thread_ts).toBe('50.5');
+  });
+});
+
+describe('SlackChannel.startMessageStream', () => {
+  it('streams intermediate statuses as a task timeline and finals as markdown', async () => {
+    const channel = makeSendChannel();
+    const startStream = mock(() => Promise.resolve({ ts: '8.800' }));
+    const appendStream = mock(() => Promise.resolve({}));
+    const stopStream = mock(() => Promise.resolve({}));
+    (channel as any).client = {
+      chat: { startStream, appendStream, stopStream },
+    };
+    (channel as any).teamId = 'T999';
+    (channel as any).lastHumanSenderByChannel.set('C123', 'UPEYTON');
+
+    const stream = await channel.startMessageStream('slack:C123', '100.1');
+    expect(stream).not.toBeNull();
+
+    await stream!.appendStatus('Reading src/index.ts\nsome detail');
+    await stream!.appendStatus('Running tests');
+    await stream!.appendText('All done **bold**');
+    const ts = await stream!.stop();
+
+    expect(ts).toBe('8.800');
+    // First status opens the stream with a task in timeline mode
+    const startArgs = (startStream.mock.calls[0] as unknown as [any])[0];
+    expect(startArgs.task_display_mode).toBe('timeline');
+    expect(startArgs.chunks).toEqual([
+      {
+        type: 'task_update',
+        id: 'task-1',
+        title: 'Reading src/index.ts',
+        status: 'in_progress',
+        details: 'Reading src/index.ts\nsome detail',
+      },
+    ]);
+    // Second status completes task-1 and opens task-2
+    const append1 = (appendStream.mock.calls[0] as unknown as [any])[0];
+    expect(append1.chunks).toEqual([
+      {
+        type: 'task_update',
+        id: 'task-1',
+        title: 'Reading src/index.ts',
+        status: 'complete',
+      },
+      {
+        type: 'task_update',
+        id: 'task-2',
+        title: 'Running tests',
+        status: 'in_progress',
+      },
+    ]);
+    // Final text completes task-2 and appends markdown
+    const append2 = (appendStream.mock.calls[1] as unknown as [any])[0];
+    expect(append2.chunks).toEqual([
+      {
+        type: 'task_update',
+        id: 'task-2',
+        title: 'Running tests',
+        status: 'complete',
+      },
+      { type: 'markdown_text', text: 'All done **bold**' },
+    ]);
+    expect(stopStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null without a thread anchor', async () => {
+    const channel = makeSendChannel();
+    (channel as any).teamId = 'T999';
+    (channel as any).lastHumanSenderByChannel.set('C123', 'UPEYTON');
+
+    expect(await channel.startMessageStream('slack:C123')).toBeNull();
+  });
+
+  it('returns null in channels without recipient info', async () => {
+    const channel = makeSendChannel();
+    expect(await channel.startMessageStream('slack:C123', '100.1')).toBeNull();
+  });
+
+  it('uses the active assistant thread as anchor for bare DM streams', async () => {
+    const channel = makeSendChannel();
+    const startStream = mock(() => Promise.resolve({ ts: '9.900' }));
+    const stopStream = mock(() => Promise.resolve({}));
+    (channel as any).client = { chat: { startStream, stopStream } };
+    (channel as any).assistantThreads.set('D123', '50.5');
+
+    const stream = await channel.startMessageStream('slack:D123');
+    expect(stream).not.toBeNull();
+    await stream!.appendText('hi');
+    await stream!.stop();
+
+    const startArgs = (startStream.mock.calls[0] as unknown as [any])[0];
+    expect(startArgs.thread_ts).toBe('50.5');
+    expect(startArgs.recipient_user_id).toBeUndefined();
   });
 });
 

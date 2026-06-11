@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { App, Assistant } from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
-import type { KnownBlock } from '@slack/web-api';
+import type { AnyChunk, KnownBlock } from '@slack/web-api';
 
 import { logger } from '../logger.js';
 import {
@@ -22,6 +22,7 @@ import type {
   Channel,
   OnChatMetadata,
   OnInboundMessage,
+  OutboundMessageStream,
   RegisteredGroup,
 } from '../types.js';
 import { splitMessage as splitMessageShared } from './utils.js';
@@ -51,6 +52,8 @@ const MARKDOWN_BLOCK_LIMIT = 11500;
 const THREAD_ROOT_CACHE_MAX = 1000;
 const SEEN_MESSAGE_CACHE_MAX = 500;
 const THREAD_EXCERPT_MAX_CHARS = 140;
+const TASK_TITLE_MAX_CHARS = 80;
+const TASK_DETAILS_MAX_CHARS = 500;
 
 // Rotating status shown under the assistant thread while the agent works.
 const STATUS_LOADING_MESSAGES = [
@@ -119,6 +122,13 @@ async function resolveMentions(
   return { text, mentions };
 }
 
+interface SlackStreamTarget {
+  channelId: string;
+  threadTs: string;
+  /** Required by chat.startStream outside DMs. */
+  recipient?: { recipient_user_id: string; recipient_team_id: string };
+}
+
 export interface SlackChannelOpts {
   botId: string;
   token: string; // Bot token (xoxb-...)
@@ -140,12 +150,15 @@ export interface SlackChannelOpts {
 
 export class SlackChannel implements Channel {
   name = 'slack';
-  prefixAssistantName = true;
+  // Slack always shows the bot's display name on its messages — prefixing the
+  // agent name again ("Clayton: …") is redundant noise.
+  prefixAssistantName = false;
   readonly botId: string;
 
   private app: App;
   private client: WebClient;
   private botUserId: string | null = null;
+  private teamId: string | null = null;
   private connected = false;
   private multiBotMode: boolean;
   private allowLegacyJidRouting: boolean;
@@ -161,6 +174,11 @@ export class SlackChannel implements Channel {
   private threadRootExcerpts = new Map<string, string>();
   /** Dedup of processed messages (`channelId:ts`) across message/app_mention events. */
   private seenMessages = new Set<string>();
+  /**
+   * Last human sender per channel — chat.startStream needs a
+   * recipient_user_id when streaming outside a DM.
+   */
+  private lastHumanSenderByChannel = new Map<string, string>();
 
   constructor(opts: SlackChannelOpts) {
     this.opts = opts;
@@ -237,6 +255,7 @@ export class SlackChannel implements Channel {
     try {
       const authResult = await this.client.auth.test();
       this.botUserId = authResult.user_id as string;
+      this.teamId = (authResult.team_id as string) || null;
       const botName = authResult.user || 'unknown';
       logger.info(
         { botUserId: this.botUserId, botName },
@@ -268,13 +287,16 @@ export class SlackChannel implements Channel {
       : this.assistantThreads.get(channelId);
 
     try {
-      // Assistant threads get the native AI streaming treatment.
-      if (threadTs && this.assistantThreads.get(channelId) === threadTs) {
-        const ts = await this.sendStreamed(channelId, threadTs, text);
-        if (ts) {
-          this.rememberThreadRoot(ts, threadTs);
-          logger.info({ jid, length: text.length }, 'Slack message streamed');
-          return ts;
+      // Threaded sends get the native AI streaming treatment when possible
+      // (assistant threads, and channel threads where the recipient is known).
+      if (threadTs) {
+        const target = this.resolveStreamTarget(channelId, threadTs);
+        if (target) {
+          const ts = await this.trySendStreamed(target, text);
+          if (ts) {
+            logger.info({ jid, length: text.length }, 'Slack message streamed');
+            return ts;
+          }
         }
       }
 
@@ -535,50 +557,163 @@ export class SlackChannel implements Channel {
   }
 
   /**
-   * Stream a response via chat.startStream/appendStream/stopStream — renders
-   * with Slack's native AI-response treatment in assistant threads. Returns
-   * the message ts, or undefined when streaming is unavailable so the caller
-   * can fall back to chat.postMessage.
+   * Start a natively streamed message. Returns null when streaming isn't
+   * possible for this target: chat.startStream requires a thread anchor, and
+   * outside DMs also a recipient user + team.
    */
-  private async sendStreamed(
+  async startMessageStream(
+    jid: string,
+    replyToMessageId?: string,
+  ): Promise<OutboundMessageStream | null> {
+    const channelId = this.extractChannelId(jid);
+    if (!channelId) return null;
+    const threadTs = replyToMessageId
+      ? (this.threadRootByTs.get(replyToMessageId) ?? replyToMessageId)
+      : this.assistantThreads.get(channelId);
+    if (!threadTs) return null;
+    const target = this.resolveStreamTarget(channelId, threadTs);
+    if (!target) return null;
+    return this.createOutboundStream(target);
+  }
+
+  private resolveStreamTarget(
     channelId: string,
     threadTs: string,
+  ): SlackStreamTarget | null {
+    // DM channels (assistant threads included) stream without recipient info.
+    if (channelId.startsWith('D')) return { channelId, threadTs };
+    const userId = this.lastHumanSenderByChannel.get(channelId);
+    if (!userId || !this.teamId) return null;
+    return {
+      channelId,
+      threadTs,
+      recipient: {
+        recipient_user_id: userId,
+        recipient_team_id: this.teamId,
+      },
+    };
+  }
+
+  /**
+   * Streamed message session backed by chat.startStream/appendStream/
+   * stopStream. Status updates render as Slack's task-timeline panel
+   * (`task_update` chunks); final text streams as markdown. Operations are
+   * serialized through an internal chain so concurrent appends can't race
+   * the startStream call.
+   */
+  private createOutboundStream(
+    target: SlackStreamTarget,
+  ): OutboundMessageStream {
+    const { channelId, threadTs } = target;
+    let ts: string | undefined;
+    let taskSeq = 0;
+    let openTask: { id: string; title: string } | null = null;
+    let chain: Promise<unknown> = Promise.resolve();
+
+    const run = <T>(fn: () => Promise<T>): Promise<T> => {
+      const next = chain.then(fn);
+      chain = next.catch(() => undefined);
+      return next;
+    };
+
+    const send = async (chunks: AnyChunk[]): Promise<void> => {
+      if (!ts) {
+        const started = await this.client.chat.startStream({
+          channel: channelId,
+          thread_ts: threadTs,
+          ...(target.recipient ?? {}),
+          task_display_mode: 'timeline',
+          chunks,
+        });
+        ts = started.ts as string | undefined;
+        if (!ts) throw new Error('chat.startStream returned no ts');
+        this.rememberThreadRoot(ts, threadTs);
+      } else {
+        await this.client.chat.appendStream({ channel: channelId, ts, chunks });
+      }
+    };
+
+    const closeOpenTask = (): AnyChunk[] => {
+      if (!openTask) return [];
+      const closer: AnyChunk = {
+        type: 'task_update',
+        id: openTask.id,
+        title: openTask.title,
+        status: 'complete',
+      };
+      openTask = null;
+      return [closer];
+    };
+
+    return {
+      appendStatus: (text: string) =>
+        run(async () => {
+          const trimmed = text.trim();
+          const title =
+            (trimmed.split('\n')[0] || '').slice(0, TASK_TITLE_MAX_CHARS) ||
+            'Working…';
+          const id = `task-${++taskSeq}`;
+          const task: AnyChunk = {
+            type: 'task_update',
+            id,
+            title,
+            status: 'in_progress',
+            ...(trimmed.length > title.length
+              ? { details: trimmed.slice(0, TASK_DETAILS_MAX_CHARS) }
+              : {}),
+          };
+          const chunks = [...closeOpenTask(), task];
+          openTask = { id, title };
+          await send(chunks);
+        }),
+      appendText: (text: string) =>
+        run(async () => {
+          for (const chunk of splitMarkdown(text)) {
+            await send([
+              ...closeOpenTask(),
+              { type: 'markdown_text', text: chunk },
+            ]);
+          }
+        }),
+      stop: () =>
+        run(async () => {
+          if (!ts) return undefined;
+          const closers = closeOpenTask();
+          await this.client.chat.stopStream({
+            channel: channelId,
+            ts,
+            ...(closers.length > 0 ? { chunks: closers } : {}),
+          });
+          return ts;
+        }),
+    };
+  }
+
+  /**
+   * Send a complete response through the streaming APIs in one shot.
+   * Returns the message ts, or undefined when streaming is unavailable so
+   * the caller can fall back to chat.postMessage.
+   */
+  private async trySendStreamed(
+    target: SlackStreamTarget,
     text: string,
   ): Promise<string | undefined> {
-    const chunks = splitMarkdown(text);
-    let ts: string | undefined;
+    const stream = this.createOutboundStream(target);
     try {
-      const started = await this.client.chat.startStream({
-        channel: channelId,
-        thread_ts: threadTs,
-        markdown_text: chunks[0],
-      });
-      ts = started.ts as string | undefined;
-      if (!ts) return undefined;
-      for (let i = 1; i < chunks.length; i++) {
-        await this.client.chat.appendStream({
-          channel: channelId,
-          ts,
-          markdown_text: chunks[i],
-        });
-      }
-      await this.client.chat.stopStream({ channel: channelId, ts });
-      return ts;
+      await stream.appendText(text);
+      return await stream.stop();
     } catch (err) {
       logger.debug(
-        { channelId, err },
+        { channelId: target.channelId, err },
         'Slack streaming send unavailable — falling back to chat.postMessage',
       );
-      // Content already landed via startStream — finalize instead of duplicating.
-      if (ts) {
-        try {
-          await this.client.chat.stopStream({ channel: channelId, ts });
-          return ts;
-        } catch {
-          // fall through to postMessage fallback
-        }
+      // If content already landed via startStream, finalize instead of
+      // duplicating; stop() returns undefined when nothing was sent.
+      try {
+        return await stream.stop();
+      } catch {
+        return undefined;
       }
-      return undefined;
     }
   }
 
@@ -702,6 +837,9 @@ export class SlackChannel implements Channel {
     this.rememberThreadRoot(event.ts, event.thread_ts || event.ts);
 
     const senderUserId = 'user' in event ? event.user : 'unknown';
+    if (senderUserId && senderUserId !== 'unknown') {
+      this.lastHumanSenderByChannel.set(channelId, senderUserId);
+    }
     const sender = `slack:${senderUserId}`;
     const senderName = await resolveSlackUserName(
       this.client,
