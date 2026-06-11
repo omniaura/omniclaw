@@ -16,7 +16,7 @@ The new agent capabilities require three coupled things on the Slack side:
 
 - **Scope** — `assistant:write` (in addition to the existing `chat:write` / `*:history` / `reactions:*` set).
 - **Events** — `assistant_thread_started` and `assistant_thread_context_changed`, so Bolt's `Assistant` middleware fires.
-- **Feature flag** — the `features.assistant_view` block, which is what makes Slack render your app in the *AI Apps* picker and give you a dedicated assistant pane.
+- **Feature flag** — the `features.assistant_view` block, which is what makes Slack render your app in the _AI Apps_ picker and give you a dedicated assistant pane.
 
 Without all three, the code paths in `src/channels/slack.ts` (`registerAssistant`, `setStatus`, suggested prompts, streaming) compile and run but Slack never invokes them. Same binary, no visible agent UI.
 

@@ -18,9 +18,18 @@
     "assistant_view": {
       "assistant_description": "Personal Claude assistant — chat, schedule tasks, work across your stack.",
       "suggested_prompts": [
-        { "title": "What can you do?", "message": "What can you do? Give me a quick tour of your capabilities." },
-        { "title": "Schedule a recurring task", "message": "I want to schedule a recurring task — ask me what it should do and how often." },
-        { "title": "Summarize something", "message": "I am going to paste some text. Summarize it and pull out any action items." }
+        {
+          "title": "What can you do?",
+          "message": "What can you do? Give me a quick tour of your capabilities."
+        },
+        {
+          "title": "Schedule a recurring task",
+          "message": "I want to schedule a recurring task — ask me what it should do and how often."
+        },
+        {
+          "title": "Summarize something",
+          "message": "I am going to paste some text. Summarize it and pull out any action items."
+        }
       ]
     }
   },
