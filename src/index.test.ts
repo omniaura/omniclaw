@@ -204,6 +204,103 @@ describe('intermediate status streaming', () => {
     expect(edits.at(-1)).toBe('Final response follows below.');
   });
 
+  it('streams intermediates and the final reply through a native message stream', async () => {
+    const statuses: string[] = [];
+    const texts: string[] = [];
+    let stopped = 0;
+    const sends: string[] = [];
+    const streamer = _createIntermediateStatusStreamer({
+      channel: {
+        sendMessage: async (_jid, text) => {
+          sends.push(text);
+          return 'status-1';
+        },
+        editMessage: async () => undefined,
+        startMessageStream: async (_jid, replyTo) => {
+          expect(replyTo).toBe('trigger-1');
+          return {
+            appendStatus: async (text: string) => {
+              statuses.push(text);
+            },
+            appendText: async (text: string) => {
+              texts.push(text);
+            },
+            stop: async () => {
+              stopped++;
+              return 'stream-1';
+            },
+          };
+        },
+      },
+      chatJid: 'slack:C123',
+      replyAnchor: () => 'trigger-1',
+      editDebounceMs: 1,
+    });
+
+    await streamer.append('tool call 1');
+    await streamer.append('tool call 2');
+    expect(streamer.isActive).toBe(true);
+    const edited = await streamer.editFinal('final answer');
+
+    expect(edited).toBe(true);
+    expect(statuses).toEqual(['tool call 1', 'tool call 2']);
+    expect(texts).toEqual(['final answer']);
+    expect(stopped).toBe(1);
+    // No status message was ever posted/edited — fully native
+    expect(sends).toEqual([]);
+  });
+
+  it('falls back to the edit loop when the native stream is unavailable', async () => {
+    const sends: string[] = [];
+    const streamer = _createIntermediateStatusStreamer({
+      channel: {
+        sendMessage: async (_jid, text) => {
+          sends.push(text);
+          return 'status-1';
+        },
+        editMessage: async () => undefined,
+        startMessageStream: async () => null,
+      },
+      chatJid: 'slack:C123',
+      editDebounceMs: 1,
+    });
+
+    await streamer.append('working');
+
+    expect(sends).toEqual(['working']);
+    expect(streamer.messageId).toBe('status-1');
+  });
+
+  it('falls back mid-run when a native stream append fails, keeping the buffer', async () => {
+    const sends: string[] = [];
+    let appendCalls = 0;
+    const streamer = _createIntermediateStatusStreamer({
+      channel: {
+        sendMessage: async (_jid, text) => {
+          sends.push(text);
+          return 'status-1';
+        },
+        editMessage: async () => undefined,
+        startMessageStream: async () => ({
+          appendStatus: async () => {
+            appendCalls++;
+            if (appendCalls > 1) throw new Error('stream broke');
+          },
+          appendText: async () => undefined,
+          stop: async () => undefined,
+        }),
+      },
+      chatJid: 'slack:C123',
+      editDebounceMs: 1,
+    });
+
+    await streamer.append('first');
+    await streamer.append('second');
+
+    // Fallback status message carries the full buffered context
+    expect(sends).toEqual(['first\nsecond']);
+  });
+
   it('truncates live buffers on line boundaries and strips broken fences', () => {
     const text = ['before', '```', 'secret output', '```', 'after'].join('\n');
 

@@ -170,6 +170,7 @@ import {
   type ChannelRoute,
   type ChannelSubscription,
   type NewMessage,
+  type OutboundMessageStream,
   type RegisteredGroup,
   registeredGroupToAgent,
   registeredGroupToRoute,
@@ -278,7 +279,10 @@ const INTERMEDIATE_EDIT_DEBOUNCE_MS = 750;
 const DEFAULT_SESSION_LIST_LIMIT = 10;
 const MAX_SESSION_LIST_LIMIT = 25;
 
-type IntermediateStatusChannel = Pick<Channel, 'sendMessage' | 'editMessage'>;
+type IntermediateStatusChannel = Pick<
+  Channel,
+  'sendMessage' | 'editMessage' | 'startMessageStream'
+>;
 
 export function _truncateIntermediateStatusBuffer(
   text: string,
@@ -308,6 +312,8 @@ export function _createIntermediateStatusStreamer(opts: {
   chatJid: string;
   bufferLimit?: number;
   editDebounceMs?: number;
+  /** Reply anchor for threading natively streamed messages. */
+  replyAnchor?: () => string | null | undefined;
   onDebug?: (err: unknown, message: string) => void;
 }) {
   const channel = opts.channel;
@@ -319,6 +325,38 @@ export function _createIntermediateStatusStreamer(opts: {
   let buffer = '';
   let editTimer: ReturnType<typeof setTimeout> | null = null;
   let editInFlight: Promise<void> | null = null;
+  // Native streaming (e.g. Slack chat.startStream task timeline). When the
+  // channel supports it for this target, intermediates stream as task chunks
+  // and the final reply streams as markdown — no edit loop at all.
+  let nativeStream: OutboundMessageStream | null = null;
+  let nativeStreamPromise: Promise<OutboundMessageStream | null> | null = null;
+  let nativeUnavailable = false;
+
+  const ensureNativeStream =
+    async (): Promise<OutboundMessageStream | null> => {
+      if (nativeUnavailable || !channel?.startMessageStream) return null;
+      if (!nativeStreamPromise) {
+        nativeStreamPromise = channel
+          .startMessageStream(opts.chatJid, opts.replyAnchor?.() ?? undefined)
+          .catch((err) => {
+            onDebug(err, 'Native message stream creation failed');
+            return null;
+          });
+      }
+      nativeStream = await nativeStreamPromise;
+      if (!nativeStream) nativeUnavailable = true;
+      return nativeStream;
+    };
+
+  const abandonNativeStream = (): void => {
+    const stream = nativeStream;
+    nativeStream = null;
+    nativeStreamPromise = null;
+    nativeUnavailable = true;
+    // Finalize whatever partial content was streamed so the message doesn't
+    // hang in the "generating" state.
+    stream?.stop().catch(() => undefined);
+  };
 
   const flushEdit = async (): Promise<void> => {
     if (!channel?.editMessage || !messageId) return;
@@ -365,19 +403,52 @@ export function _createIntermediateStatusStreamer(opts: {
     get buffer(): string {
       return buffer;
     },
+    /** True when a status message or native stream is open for this run. */
+    get isActive(): boolean {
+      return Boolean(messageId || creationPromise || nativeStream);
+    },
     async append(text: string): Promise<void> {
       if (!channel) return;
       const clean = text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       if (!clean) return;
+      // Keep the buffer in both modes so a mid-run fallback retains context.
       buffer = _truncateIntermediateStatusBuffer(
         `${buffer}${buffer ? '\n' : ''}${clean}`,
         bufferLimit,
       );
+      if (!nativeUnavailable && channel.startMessageStream) {
+        const stream = await ensureNativeStream();
+        if (stream) {
+          try {
+            await stream.appendStatus(clean);
+            return;
+          } catch (err) {
+            onDebug(err, 'Native stream append failed — falling back to edits');
+            abandonNativeStream();
+          }
+        }
+      }
       const hadMessage = Boolean(messageId);
       const id = await ensureMessage();
       if (id && hadMessage) scheduleEdit();
     },
     async editFinal(text: string): Promise<boolean> {
+      // Wait out any in-flight native stream creation before deciding the mode.
+      if (nativeStreamPromise) await ensureNativeStream();
+      if (nativeStream) {
+        const stream = nativeStream;
+        try {
+          await stream.appendText(text);
+          await stream.stop();
+          nativeStream = null;
+          nativeStreamPromise = null;
+          return true;
+        } catch (err) {
+          onDebug(err, 'Native stream finalize failed');
+          abandonNativeStream();
+          return false;
+        }
+      }
       if (!channel?.editMessage) return false;
       if (editTimer) {
         clearTimeout(editTimer);
@@ -413,6 +484,12 @@ export function _createIntermediateStatusStreamer(opts: {
       creationPromise = null;
       messageId = null;
       buffer = '';
+      // Close any dangling native stream so it doesn't hang in "generating".
+      const stream = nativeStream;
+      nativeStream = null;
+      nativeStreamPromise = null;
+      nativeUnavailable = false;
+      stream?.stop().catch(() => undefined);
     },
   };
 }
@@ -2045,17 +2122,13 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
 
   let hadError = false;
   let outputSentToUser = false;
-  // Edited-message streaming: a single status message that gets updated with
-  // intermediate tool calls/logs, then replaced by the final reply.
+  // Intermediate streaming: native message streams (Slack task timeline)
+  // where supported, otherwise a single status message edited in place.
   const intermediateChannel =
-    group.containerConfig?.streamIntermediates !== false && channel?.editMessage
+    group.containerConfig?.streamIntermediates !== false &&
+    (channel?.editMessage || channel?.startMessageStream)
       ? channel
       : null;
-  const intermediateStatus = _createIntermediateStatusStreamer({
-    channel: intermediateChannel,
-    chatJid,
-    onDebug: (err, message) => log.debug({ err }, message),
-  });
 
   // Patterns that indicate system/auth errors — never send these to channels
   // Adopted from [Upstream PR #298] - Prevents infinite loops from auth failures
@@ -2106,6 +2179,12 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
   // Use reply threading only for the first outbound message in this run.
   // Subsequent outputs should not keep replying to the original trigger.
   let replyAnchorMessageId: string | null = triggeringMessageId;
+  const intermediateStatus = _createIntermediateStatusStreamer({
+    channel: intermediateChannel,
+    chatJid,
+    replyAnchor: () => replyAnchorMessageId,
+    onDebug: (err, message) => log.debug({ err }, message),
+  });
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
   let output: 'success' | 'error';
   try {
@@ -2173,10 +2252,9 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
                   const replyId =
                     targetJid === chatJid ? replyAnchorMessageId : null;
                   if (
-                    intermediateStatus.messageId &&
+                    intermediateStatus.isActive &&
                     targetJid === chatJid &&
-                    targetChannel === intermediateChannel &&
-                    targetChannel.editMessage
+                    targetChannel === intermediateChannel
                   ) {
                     const edited =
                       await intermediateStatus.editFinal(formatted);
@@ -2243,6 +2321,9 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
         logger.debug({ err, chatJid }, 'Failed to clear typing indicator');
       });
     if (idleTimer) clearTimeout(idleTimer);
+    // Close any dangling native status stream (e.g. agent errored mid-run)
+    // so the streamed message doesn't hang in the "generating" state.
+    intermediateStatus.reset();
   }
 
   if (output === 'error' || hadError) {
