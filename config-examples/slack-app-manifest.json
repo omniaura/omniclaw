@@ -1,8 +1,7 @@
 {
-  "$schema": "https://raw.githubusercontent.com/slackapi/manifest-schema/main/manifest.schema.json",
   "display_information": {
     "name": "OmniClaw",
-    "description": "Personal Claude assistant",
+    "description": "General-purpose coding agent",
     "background_color": "#1d1d1f"
   },
   "features": {
@@ -16,7 +15,7 @@
       "always_online": true
     },
     "assistant_view": {
-      "assistant_description": "Personal Claude assistant — chat, schedule tasks, work across your stack.",
+      "assistant_description": "General-purpose coding agent — chat, schedule tasks, work across your stack.",
       "suggested_prompts": [
         {
           "title": "What can you do?",
