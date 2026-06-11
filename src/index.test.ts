@@ -251,23 +251,25 @@ describe('intermediate status streaming', () => {
   });
 
   it('falls back to the edit loop when the native stream is unavailable', async () => {
-    const sends: string[] = [];
+    const sends: Array<{ text: string; replyTo?: string }> = [];
     const streamer = _createIntermediateStatusStreamer({
       channel: {
-        sendMessage: async (_jid, text) => {
-          sends.push(text);
+        sendMessage: async (_jid, text, replyTo) => {
+          sends.push({ text, replyTo });
           return 'status-1';
         },
         editMessage: async () => undefined,
         startMessageStream: async () => null,
       },
       chatJid: 'slack:C123',
+      replyAnchor: () => 'trigger-1',
       editDebounceMs: 1,
     });
 
     await streamer.append('working');
 
-    expect(sends).toEqual(['working']);
+    // The fallback status message threads under the trigger too
+    expect(sends).toEqual([{ text: 'working', replyTo: 'trigger-1' }]);
     expect(streamer.messageId).toBe('status-1');
   });
 

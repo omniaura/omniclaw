@@ -664,7 +664,19 @@ export class SlackChannel implements Channel {
           };
           const chunks = [...closeOpenTask(), task];
           openTask = { id, title };
-          await send(chunks);
+          try {
+            await send(chunks);
+          } catch (err) {
+            // A dropped status update isn't worth abandoning the stream for
+            // (e.g. transient rate limit) — but a failed startStream means
+            // streaming is unavailable, so propagate for the caller to fall
+            // back to the edit-loop.
+            if (!ts) throw err;
+            logger.debug(
+              { channelId, err },
+              'Slack task update append failed (non-fatal)',
+            );
+          }
         }),
       appendText: (text: string) =>
         run(async () => {

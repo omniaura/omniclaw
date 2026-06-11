@@ -263,6 +263,19 @@ function isAgentEnabled(idOrFolder: string): boolean {
 const consecutiveErrors: Record<string, number> = {};
 const MAX_CONSECUTIVE_ERRORS = 3;
 
+// Per-dispatch reply anchor: the inbound message the next outbound reply
+// should thread under. Seeded when a run starts, refreshed by the pipe paths
+// when follow-up messages are fed into a running container, and consumed
+// (nulled) after each reply goes out. Module-level because container runs
+// outlive a single processGroupMessages batch.
+const pendingReplyAnchor: Record<string, string | null> = {};
+
+/** Reply anchor for a batch: last message id, unless synthetic. */
+function replyAnchorFromMessages(messages: NewMessage[]): string | null {
+  const id = messages[messages.length - 1]?.id || null;
+  return id && /^(synth|react|notify)-/.test(id) ? null : id;
+}
+
 let whatsapp: WhatsAppChannel | null = null;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -382,7 +395,11 @@ export function _createIntermediateStatusStreamer(opts: {
     if (!creationPromise) {
       const initialBuffer = buffer;
       creationPromise = channel
-        .sendMessage(opts.chatJid, initialBuffer.slice(0, 2000))
+        .sendMessage(
+          opts.chatJid,
+          initialBuffer.slice(0, 2000),
+          opts.replyAnchor?.() ?? undefined,
+        )
         .then((id) => {
           messageId = typeof id === 'string' ? id : null;
           if (messageId && buffer !== initialBuffer) scheduleEdit();
@@ -2176,13 +2193,16 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
     lastMessageId && /^(synth|react|notify)-/.test(lastMessageId)
       ? null
       : lastMessageId;
-  // Use reply threading only for the first outbound message in this run.
-  // Subsequent outputs should not keep replying to the original trigger.
-  let replyAnchorMessageId: string | null = triggeringMessageId;
+  // Reply anchor: the message the next outbound reply should thread under.
+  // Kept in module state (not a closure variable) because follow-up messages
+  // are piped into the running container by a different loop iteration — the
+  // pipe paths refresh the anchor so each reply threads to what the user most
+  // recently said, then it's consumed after the reply goes out.
+  pendingReplyAnchor[dispatchJid] = triggeringMessageId;
   const intermediateStatus = _createIntermediateStatusStreamer({
     channel: intermediateChannel,
     chatJid,
-    replyAnchor: () => replyAnchorMessageId,
+    replyAnchor: () => pendingReplyAnchor[dispatchJid],
     onDebug: (err, message) => log.debug({ err }, message),
   });
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
@@ -2248,9 +2268,11 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
                   getAgentName(group),
                 );
                 if (formatted) {
-                  // Don't use triggeringMessageId for cross-channel responses — it belongs to the original chat
+                  // Don't use the reply anchor for cross-channel responses — it belongs to the original chat
                   const replyId =
-                    targetJid === chatJid ? replyAnchorMessageId : null;
+                    targetJid === chatJid
+                      ? pendingReplyAnchor[dispatchJid]
+                      : null;
                   if (
                     intermediateStatus.isActive &&
                     targetJid === chatJid &&
@@ -2272,7 +2294,11 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
                       replyId || undefined,
                     );
                   }
-                  if (replyAnchorMessageId) replyAnchorMessageId = null;
+                  // Anchor consumed — unless a pipe already refreshed it for
+                  // a newer message while this reply was being sent.
+                  if (pendingReplyAnchor[dispatchJid] === replyId) {
+                    pendingReplyAnchor[dispatchJid] = null;
+                  }
                   outputSentToUser = true;
                   // Stop typing refresh — prevents the 8s interval from
                   // re-triggering typing AFTER the response is visible.
@@ -2954,6 +2980,10 @@ async function startMessageLoop(): Promise<void> {
               channelRosterHasRoleLabels: true,
             });
 
+            // Refresh the reply anchor before piping so the running
+            // container's next reply threads under this message.
+            pendingReplyAnchor[chatJid] =
+              replyAnchorFromMessages(messagesToSend);
             if (await queue.sendMessage(chatJid, formatted)) {
               logger.info(
                 { chatJid, count: messagesToSend.length },
@@ -3010,6 +3040,10 @@ async function startMessageLoop(): Promise<void> {
               channelRosterHasRoleLabels: true,
             });
 
+            // Refresh the reply anchor before piping so the running
+            // container's next reply threads under this message.
+            pendingReplyAnchor[dispatchJid] =
+              replyAnchorFromMessages(messagesToSend);
             if (await queue.sendMessage(dispatchJid, formatted)) {
               logger.info(
                 { chatJid, agentId: sub.agentId, count: messagesToSend.length },

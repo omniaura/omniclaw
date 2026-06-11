@@ -446,6 +446,33 @@ describe('SlackChannel.startMessageStream', () => {
     expect(stopStream).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the stream alive when a status append fails after start', async () => {
+    const channel = makeSendChannel();
+    let appendCalls = 0;
+    const startStream = mock(() => Promise.resolve({ ts: '8.800' }));
+    const appendStream = mock(() => {
+      appendCalls++;
+      if (appendCalls === 1) return Promise.reject(new Error('rate_limited'));
+      return Promise.resolve({});
+    });
+    const stopStream = mock(() => Promise.resolve({}));
+    (channel as any).client = {
+      chat: { startStream, appendStream, stopStream },
+    };
+    (channel as any).teamId = 'T999';
+    (channel as any).lastHumanSenderByChannel.set('C123', 'UPEYTON');
+
+    const stream = await channel.startMessageStream('slack:C123', '100.1');
+    await stream!.appendStatus('first');
+    // This append fails transiently — must not throw or kill the stream
+    await stream!.appendStatus('second');
+    await stream!.appendText('final');
+    const ts = await stream!.stop();
+
+    expect(ts).toBe('8.800');
+    expect(stopStream).toHaveBeenCalledTimes(1);
+  });
+
   it('returns null without a thread anchor', async () => {
     const channel = makeSendChannel();
     (channel as any).teamId = 'T999';
