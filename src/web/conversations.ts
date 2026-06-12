@@ -44,6 +44,16 @@ function renderPlatformBadge(jid: string): string {
   );
 }
 
+/**
+ * Compact 24h message count for the activity badge. Keeps the badge narrow
+ * even for very chatty chats (e.g. "1.2k" instead of "1234").
+ */
+export function formatActivityCount(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 10_000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return Math.round(n / 1000) + 'k';
+}
+
 /** Build chat filter <option> list for the search panel dropdown. */
 function chatOptions(chats: Array<{ jid: string; name: string }>): string {
   return (
@@ -88,6 +98,9 @@ function formatChatAbsoluteTimeTitle(isoStr: string): string {
 /** Render conversations content (no shell). */
 export function renderConversationsContent(state: WebStateProvider): string {
   const chats = state.getChats();
+  const recentCounts = state.getChat24hMessageCounts
+    ? state.getChat24hMessageCounts()
+    : new Map<string, number>();
 
   const chatListItems = chats
     .map((c) => {
@@ -99,11 +112,16 @@ export function renderConversationsContent(state: WebStateProvider): string {
         ? formatChatAbsoluteTimeTitle(c.last_message_time)
         : '';
       const titleAttr = absTime ? ` title="${escapeHtml(absTime)}"` : '';
+      const recent = recentCounts.get(c.jid) ?? 0;
+      const activityBadge =
+        recent > 0
+          ? ` <span class="chat-activity-badge" title="${recent} message${recent === 1 ? '' : 's'} in the last 24h">${formatActivityCount(recent)}</span>`
+          : '';
       return (
         `<div class="chat-item" data-jid="${escapeHtml(c.jid)}" data-chat-platform="${platform}" tabindex="0">` +
         `<div class="chat-name-row">` +
         renderPlatformBadge(c.jid) +
-        `<div class="chat-name">${escapeHtml(c.name || c.jid)}</div>` +
+        `<div class="chat-name">${escapeHtml(c.name || c.jid)}${activityBadge}</div>` +
         `</div>` +
         `<div class="chat-meta">${escapeHtml(c.jid)}</div>` +
         `<div class="chat-meta chat-time"${titleAttr}>${escapeHtml(relTime)}</div>` +

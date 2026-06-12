@@ -12,6 +12,7 @@ import {
   getAgentHealth,
   getAllAgentHealth,
   getAllChats,
+  getChat24hMessageCounts,
   getRegisteredGroup,
   getDeltaCursorFromDb,
   getMessagesSince,
@@ -726,6 +727,103 @@ describe('storeChatMetadata', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:01.000Z');
     const chats = getAllChats();
     expect(chats[0].last_message_time).toBe('2024-01-01T00:00:05.000Z');
+  });
+});
+
+describe('getChat24hMessageCounts', () => {
+  const NOW = new Date('2024-06-01T12:00:00.000Z');
+
+  function isoMinutesAgo(minutes: number): string {
+    return new Date(NOW.getTime() - minutes * 60_000).toISOString();
+  }
+
+  it('counts only messages within the trailing 24h window', () => {
+    store({
+      id: 'recent-1',
+      chat_jid: 'chat-a',
+      sender: 'u1',
+      sender_name: 'A',
+      content: 'hi',
+      timestamp: isoMinutesAgo(30), // 30m ago — in window
+    });
+    store({
+      id: 'recent-2',
+      chat_jid: 'chat-a',
+      sender: 'u1',
+      sender_name: 'A',
+      content: 'hi again',
+      timestamp: isoMinutesAgo(60 * 23), // 23h ago — in window
+    });
+    store({
+      id: 'old',
+      chat_jid: 'chat-a',
+      sender: 'u1',
+      sender_name: 'A',
+      content: 'stale',
+      timestamp: isoMinutesAgo(60 * 36), // 36h ago — outside window
+    });
+
+    const counts = getChat24hMessageCounts(NOW);
+    expect(counts.get('chat-a')).toBe(2);
+  });
+
+  it('groups by chat_jid', () => {
+    store({
+      id: 'a1',
+      chat_jid: 'chat-a',
+      sender: 'u',
+      sender_name: 'U',
+      content: 'x',
+      timestamp: isoMinutesAgo(10),
+    });
+    store({
+      id: 'a2',
+      chat_jid: 'chat-a',
+      sender: 'u',
+      sender_name: 'U',
+      content: 'x',
+      timestamp: isoMinutesAgo(20),
+    });
+    store({
+      id: 'b1',
+      chat_jid: 'chat-b',
+      sender: 'u',
+      sender_name: 'U',
+      content: 'x',
+      timestamp: isoMinutesAgo(15),
+    });
+
+    const counts = getChat24hMessageCounts(NOW);
+    expect(counts.get('chat-a')).toBe(2);
+    expect(counts.get('chat-b')).toBe(1);
+  });
+
+  it('returns an empty map when no recent messages exist', () => {
+    store({
+      id: 'old',
+      chat_jid: 'chat-a',
+      sender: 'u',
+      sender_name: 'U',
+      content: 'stale',
+      timestamp: isoMinutesAgo(60 * 48),
+    });
+    const counts = getChat24hMessageCounts(NOW);
+    expect(counts.size).toBe(0);
+  });
+
+  it('omits chats with zero recent activity from the result map', () => {
+    storeChatMetadata('quiet-chat', isoMinutesAgo(60 * 72));
+    store({
+      id: 'm1',
+      chat_jid: 'busy-chat',
+      sender: 'u',
+      sender_name: 'U',
+      content: 'x',
+      timestamp: isoMinutesAgo(5),
+    });
+    const counts = getChat24hMessageCounts(NOW);
+    expect(counts.has('quiet-chat')).toBe(false);
+    expect(counts.get('busy-chat')).toBe(1);
   });
 });
 

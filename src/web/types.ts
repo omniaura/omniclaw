@@ -35,6 +35,13 @@ export interface WebStateProvider {
     name: string;
     last_message_time: string;
   }>;
+  /**
+   * Per-chat message count over the trailing 24h window, keyed by chat_jid.
+   * Chats with zero recent messages may be omitted. Optional so lightweight
+   * test stubs can keep compiling — callers fall back to "no data" when the
+   * method is absent.
+   */
+  getChat24hMessageCounts?(): Map<string, number>;
   /** Live queue stats from GroupQueue. */
   getQueueStats(): QueueStats;
   /** Per-group queue details for the IPC inspector. */
