@@ -99,7 +99,7 @@ RUN bun install -g @anthropic-ai/claude-code
 # Copy the native binary into /usr/local/bin and wrap it there instead of executing out of
 # /root/.bun directly. Linux ARM64 also cannot download Chrome for Testing, so those builds
 # must install system Chromium and force agent-browser to launch it explicitly.
-ARG AGENT_BROWSER_VERSION=0.27.2
+ARG AGENT_BROWSER_VERSION=0.27.3
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 COPY agent-browser-wrapper.sh /tmp/agent-browser-wrapper
 RUN echo 'trustedDependencies = ["agent-browser"]' >> /root/.bunfig.toml \
