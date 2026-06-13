@@ -6,6 +6,8 @@ import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 import type { RemotePeerAgents } from '../discovery/types.js';
 import {
   buildAgentDetailData,
+  formatTaskLastRun,
+  lastRunOutcomeClass,
   renderAgentDetailContent,
 } from './agent-detail.js';
 
@@ -226,6 +228,62 @@ describe('buildAgentDetailData', () => {
   });
 });
 
+// ---- Unit tests for formatTaskLastRun ----
+
+describe('formatTaskLastRun', () => {
+  const NOW = Date.parse('2026-06-12T12:00:00.000Z');
+
+  it('returns em-dash when last_run is null', () => {
+    expect(formatTaskLastRun(null, NOW)).toBe('—');
+  });
+
+  it('returns "<1m ago" for sub-minute deltas', () => {
+    expect(formatTaskLastRun(new Date(NOW - 30_000).toISOString(), NOW)).toBe(
+      '<1m ago',
+    );
+  });
+
+  it('formats minutes for sub-hour deltas', () => {
+    expect(
+      formatTaskLastRun(new Date(NOW - 15 * 60_000).toISOString(), NOW),
+    ).toBe('15m ago');
+  });
+
+  it('formats hours for sub-day deltas', () => {
+    expect(
+      formatTaskLastRun(new Date(NOW - 4 * 3_600_000).toISOString(), NOW),
+    ).toBe('4h ago');
+  });
+
+  it('formats days for older deltas', () => {
+    expect(
+      formatTaskLastRun(new Date(NOW - 3 * 86_400_000).toISOString(), NOW),
+    ).toBe('3d ago');
+  });
+
+  it('returns input verbatim for unparseable input', () => {
+    expect(formatTaskLastRun('not-a-date', NOW)).toBe('not-a-date');
+  });
+});
+
+describe('lastRunOutcomeClass', () => {
+  it('maps success to run-success', () => {
+    expect(lastRunOutcomeClass('success')).toBe('run-success');
+  });
+
+  it('maps error to run-error', () => {
+    expect(lastRunOutcomeClass('error')).toBe('run-error');
+  });
+
+  it('returns empty string for null', () => {
+    expect(lastRunOutcomeClass(null)).toBe('');
+  });
+
+  it('returns empty string for unknown values', () => {
+    expect(lastRunOutcomeClass('weird')).toBe('');
+  });
+});
+
 // ---- Unit tests for renderAgentDetailContent ----
 
 describe('renderAgentDetailContent', () => {
@@ -270,6 +328,61 @@ describe('renderAgentDetailContent', () => {
     expect(html).toContain('Run the daily check');
     expect(html).toContain('status-active');
     expect(html).toContain('cron');
+  });
+
+  it('renders last-run column with em-dash when task has never run', () => {
+    const data = buildAgentDetailData('test-agent', makeState())!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('<th>last run</th>');
+    expect(html).toContain('title="never run"');
+  });
+
+  it('renders last-run column with relative time and success class', () => {
+    const state = makeState({
+      getTasks: () => [
+        makeTask({
+          last_run: new Date(Date.now() - 5 * 60_000).toISOString(),
+          last_result: 'success',
+        }),
+      ],
+    });
+    const data = buildAgentDetailData('test-agent', state)!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('run-success');
+    expect(html).toContain('5m ago');
+  });
+
+  it('renders last-run column with error class for failed runs', () => {
+    const state = makeState({
+      getTasks: () => [
+        makeTask({
+          last_run: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+          last_result: 'error',
+        }),
+      ],
+    });
+    const data = buildAgentDetailData('test-agent', state)!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('run-error');
+    expect(html).toContain('2h ago');
+  });
+
+  it('uses correct colspan for empty-tasks row when local agent', () => {
+    const state = makeState({ getTasks: () => [] });
+    const data = buildAgentDetailData('test-agent', state)!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('colspan="6"');
+    expect(html).toContain('No scheduled tasks');
+  });
+
+  it('uses correct colspan for empty-tasks row when remote agent', () => {
+    const data = buildAgentDetailData(
+      'peer-1:remote:agent',
+      makeState(),
+      remotePeers,
+    )!;
+    const html = renderAgentDetailContent(data, 'peer-1:remote:agent');
+    expect(html).toContain('colspan="5"');
   });
 
   it('renders recent conversations', () => {
@@ -507,6 +620,25 @@ describe('/api/agents/:id/detail endpoint', () => {
     expect(data.channels).toHaveLength(1);
     expect(data.tasks).toHaveLength(1);
     expect(data.recentChats).toHaveLength(1);
+  });
+
+  it('includes last_run and last_result on each task in JSON response', async () => {
+    handle = startWebServer(
+      testConfig(),
+      makeState({
+        getTasks: () => [
+          makeTask({
+            last_run: '2026-06-12T11:00:00.000Z',
+            last_result: 'success',
+          }),
+        ],
+      }),
+    );
+    const res = await authedFetch('/api/agents/test-agent/detail');
+    const data = (await res.json()) as JsonObject;
+    const tasks = data.tasks as Array<JsonObject>;
+    expect(tasks[0].last_run).toBe('2026-06-12T11:00:00.000Z');
+    expect(tasks[0].last_result).toBe('success');
   });
 
   it('returns 404 for unknown agent', async () => {

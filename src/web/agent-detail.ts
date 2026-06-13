@@ -11,6 +11,36 @@ function imageRev(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12);
 }
 
+/**
+ * Format a past timestamp into a short relative string for the agent detail
+ * tasks table. Mirrors the unit progression used on `/tasks` so the two
+ * surfaces agree at a glance. `now` is injectable for deterministic tests.
+ */
+export function formatTaskLastRun(
+  isoStr: string | null,
+  now: number = Date.now(),
+): string {
+  if (!isoStr) return '—';
+  const t = new Date(isoStr).getTime();
+  if (Number.isNaN(t)) return isoStr;
+  const diff = Math.max(0, now - t);
+  if (diff < 60_000) return '<1m ago';
+  if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)}h ago`;
+  return `${Math.round(diff / 86_400_000)}d ago`;
+}
+
+/**
+ * Map a task's `last_result` into the same outcome CSS class used by `/tasks`
+ * (`run-success` / `run-error`). Keeps the success/error colors aligned
+ * across surfaces.
+ */
+export function lastRunOutcomeClass(result: string | null): string {
+  if (result === 'success') return 'run-success';
+  if (result === 'error') return 'run-error';
+  return '';
+}
+
 export interface AgentDetailData {
   id: string;
   name: string;
@@ -45,6 +75,7 @@ export interface AgentDetailData {
     status: string;
     next_run: string | null;
     last_run: string | null;
+    last_result: string | null;
   }>;
   recentChats: Array<{
     jid: string;
@@ -119,6 +150,7 @@ export function buildAgentDetailData(
       status: t.status,
       next_run: t.next_run,
       last_run: t.last_run,
+      last_result: t.last_result,
     }));
 
   // Find recent chats for this agent's channels
@@ -222,6 +254,11 @@ export function renderAgentDetailContent(
             const nextRun = t.next_run
               ? new Date(t.next_run).toLocaleString()
               : '\u2014';
+            const lastRunLabel = formatTaskLastRun(t.last_run);
+            const lastRunClass = lastRunOutcomeClass(t.last_result);
+            const lastRunTitle = t.last_run
+              ? `${new Date(t.last_run).toLocaleString()}${t.last_result ? ` \u2014 ${t.last_result}` : ''}`
+              : 'never run';
             const promptPreview =
               t.prompt.length > 80
                 ? t.prompt.slice(0, 80) + '\u2026'
@@ -240,12 +277,13 @@ export function renderAgentDetailContent(
               `<td class="td-prompt" title="${esc(t.prompt)}">${esc(promptPreview)}</td>` +
               `<td class="td-dim">${esc(t.schedule_type)}: ${esc(t.schedule_value)}</td>` +
               `<td class="td-dim">${nextRun}</td>` +
+              `<td class="td-dim ${lastRunClass}" title="${esc(lastRunTitle)}">${esc(lastRunLabel)}</td>` +
               actionCell +
               `</tr>`
             );
           })
           .join('')
-      : `<tr><td colspan="${isLocal ? '5' : '4'}" class="td-dim">No scheduled tasks</td></tr>`;
+      : `<tr><td colspan="${isLocal ? '6' : '5'}" class="td-dim">No scheduled tasks</td></tr>`;
 
   // --- Recent chats ---
   const chatsHtml =
@@ -337,7 +375,7 @@ export function renderAgentDetailContent(
     `<div class="ad-section">` +
     `<h3 class="ad-section-title">scheduled tasks <span class="ad-count">${data.tasks.length}</span></h3>` +
     `<div class="ad-table-wrap"><table>` +
-    `<thead><tr><th>status</th><th>prompt</th><th>schedule</th><th>next run</th>${isLocal ? '<th></th>' : ''}</tr></thead>` +
+    `<thead><tr><th>status</th><th>prompt</th><th>schedule</th><th>next run</th><th>last run</th>${isLocal ? '<th></th>' : ''}</tr></thead>` +
     `<tbody>${tasksHtml}</tbody>` +
     `</table></div></div>` +
     // Recent conversations section
