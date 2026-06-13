@@ -1,6 +1,6 @@
 # OmniClaw Roadmap
 
-Last updated: 2026-05-23
+Last updated: 2026-06-13
 
 > **Maintenance:** run `bash scripts/check-roadmap-refs.sh` after editing to catch
 > Planned Work entries that point at closed/merged issues without an explicit
@@ -203,7 +203,13 @@ Push from "personal assistant with tasks" toward a genuine multi-agent factory.
 - agent runtime agnosticism shipped (closes #49) — Claude Agent SDK, OpenCode, Codex, Cursor all run under the same orchestration model
 - per-channel multi-bot/multi-token support shipped: Discord (closes #102), Telegram (closes #101), Slack (closes #100)
 - backend simplified to Docker (OrbStack on macOS) after Apple Container migration in #750
-- per-agent model override stored in SQLite (#760, in flight)
+- per-agent model override stored in SQLite (#760)
+- redundant message prompt attributes trimmed (#770)
+- LAN peer health rollup surfaced on /system (#754)
+- recent task outcomes rollup surfaced on /system (#749)
+- Slack multi-bot mention routing fix (#758)
+- Discord reconnect storm process-restart guard (#757)
+- Docker mount target separator rejection hardening (#753)
 
 #### Scheduler and Share Request Cleanup
 
@@ -212,6 +218,20 @@ Push from "personal assistant with tasks" toward a genuine multi-agent factory.
 - post-approval file transfer handler shipped for share_request (closes #237)
 - legacy admin approval flow removed for share_request, delegate_task, request_context (closes #240)
 - flaky github-webhooks full-suite failure resolved (closes #200)
+
+### Jun 2026
+
+#### Slack AI-App Modernization
+
+- modernize Slack channel with native AI-app agent features (#829)
+- native streamed responses + task timeline for agent runs (#836)
+- replies stay threaded across follow-up messages in live sessions (#837)
+- reference AI-app manifest and setup guide shipped (#832, `docs/SLACK-AGENT-SETUP.md`)
+
+#### Runtime Dep Sustained
+
+- claude-agent-sdk, opencode CLI/SDK, codex, agent-browser, go, and just bumps continued landing through the bot pipeline (#784–#845)
+- empty-commit workaround still required until #484 admin secrets land
 
 ### Mar 2026
 
