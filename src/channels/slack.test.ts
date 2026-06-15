@@ -384,7 +384,7 @@ describe('SlackChannel.sendMessage', () => {
 });
 
 describe('SlackChannel.startMessageStream', () => {
-  it('streams intermediate statuses as a task timeline and finals as markdown', async () => {
+  it('updates a single progress card in place and streams the final as markdown', async () => {
     const channel = makeSendChannel();
     const startStream = mock(() => Promise.resolve({ ts: '8.800' }));
     const appendStream = mock(() => Promise.resolve({}));
@@ -404,46 +404,76 @@ describe('SlackChannel.startMessageStream', () => {
     const ts = await stream!.stop();
 
     expect(ts).toBe('8.800');
-    // First status opens the stream with a task in timeline mode
+    // First status opens the stream with the single progress card (#850: one
+    // evolving card per run, not one card per agent action).
     const startArgs = (startStream.mock.calls[0] as unknown as [any])[0];
     expect(startArgs.task_display_mode).toBe('timeline');
     expect(startArgs.chunks).toEqual([
       {
         type: 'task_update',
-        id: 'task-1',
+        id: 'agent-progress',
         title: 'Reading src/index.ts',
         status: 'in_progress',
         details: 'Reading src/index.ts\nsome detail',
       },
     ]);
-    // Second status completes task-1 and opens task-2
+    // Second status reuses the SAME id, updating the card in place — no new card
     const append1 = (appendStream.mock.calls[0] as unknown as [any])[0];
     expect(append1.chunks).toEqual([
       {
         type: 'task_update',
-        id: 'task-1',
-        title: 'Reading src/index.ts',
-        status: 'complete',
-      },
-      {
-        type: 'task_update',
-        id: 'task-2',
+        id: 'agent-progress',
         title: 'Running tests',
         status: 'in_progress',
       },
     ]);
-    // Final text completes task-2 and appends markdown
+    // Final text completes the progress card and appends markdown
     const append2 = (appendStream.mock.calls[1] as unknown as [any])[0];
     expect(append2.chunks).toEqual([
       {
         type: 'task_update',
-        id: 'task-2',
+        id: 'agent-progress',
         title: 'Running tests',
         status: 'complete',
       },
       { type: 'markdown_text', text: 'All done **bold**' },
     ]);
     expect(stopStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('collapses many tool actions into one card and skips code-fence titles', async () => {
+    const channel = makeSendChannel();
+    const startStream = mock(() => Promise.resolve({ ts: '8.800' }));
+    const appendStream = mock(() => Promise.resolve({}));
+    const stopStream = mock(() => Promise.resolve({}));
+    (channel as any).client = {
+      chat: { startStream, appendStream, stopStream },
+    };
+    (channel as any).teamId = 'T999';
+    (channel as any).lastHumanSenderByChannel.set('C123', 'UPEYTON');
+
+    const stream = await channel.startMessageStream('slack:C123', '100.1');
+    // A tool call followed by its (code-fenced) result — both update one card.
+    await stream!.appendStatus('> **Bash**: `gh pr view 1379`');
+    await stream!.appendStatus('```\nPR #1379: Fix streaming\n```');
+    await stream!.stop();
+
+    // Exactly one startStream → one Slack message for the whole run (#850).
+    expect(startStream).toHaveBeenCalledTimes(1);
+    // Every status update reuses the single card id.
+    const allChunks = [
+      ...(startStream.mock.calls as unknown as [any][]).flatMap(
+        (c) => c[0].chunks,
+      ),
+      ...(appendStream.mock.calls as unknown as [any][]).flatMap(
+        (c) => c[0].chunks,
+      ),
+    ].filter((chunk: any) => chunk.type === 'task_update');
+    expect(allChunks.every((c: any) => c.id === 'agent-progress')).toBe(true);
+    // The code-fenced tool result surfaces its content, not a bare ```.
+    const resultUpdate = (appendStream.mock.calls[0] as unknown as [any])[0]
+      .chunks[0];
+    expect(resultUpdate.title).toBe('PR #1379: Fix streaming');
   });
 
   it('keeps the stream alive when a status append fails after start', async () => {
