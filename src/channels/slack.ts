@@ -53,7 +53,9 @@ const THREAD_ROOT_CACHE_MAX = 1000;
 const SEEN_MESSAGE_CACHE_MAX = 500;
 const THREAD_EXCERPT_MAX_CHARS = 140;
 const TASK_TITLE_MAX_CHARS = 80;
-const TASK_DETAILS_MAX_CHARS = 500;
+// Slack caps each task_update chunk at 256 chars; keep title + details under it
+// so progress updates always render instead of being silently rejected.
+const TASK_DETAILS_MAX_CHARS = 160;
 
 // Rotating status shown under the assistant thread while the agent works.
 const STATUS_LOADING_MESSAGES = [
@@ -596,17 +598,24 @@ export class SlackChannel implements Channel {
 
   /**
    * Streamed message session backed by chat.startStream/appendStream/
-   * stopStream. Status updates render as Slack's task-timeline panel
-   * (`task_update` chunks); final text streams as markdown. Operations are
-   * serialized through an internal chain so concurrent appends can't race
-   * the startStream call.
+   * stopStream — ONE Slack message per agent run.
+   *
+   * Intermediate activity updates a SINGLE live "progress" task card in place
+   * (re-sending the same `task_update` id, which Slack updates rather than
+   * appending) so a tool-heavy run shows one evolving status line instead of a
+   * card per action (#850). The final reply streams as markdown into the same
+   * message; `stop()` finalizes it in place so it persists (unlike CodeRabbit,
+   * which deletes its streamed message). Operations are serialized through an
+   * internal chain so concurrent appends can't race the startStream call.
    */
   private createOutboundStream(
     target: SlackStreamTarget,
   ): OutboundMessageStream {
     const { channelId, threadTs } = target;
+    // Stable id for the single progress card. Reusing it makes every status
+    // append update that one card in place instead of stacking a new one.
+    const PROGRESS_TASK_ID = 'agent-progress';
     let ts: string | undefined;
-    let taskSeq = 0;
     let openTask: { id: string; title: string } | null = null;
     let chain: Promise<unknown> = Promise.resolve();
 
@@ -649,23 +658,28 @@ export class SlackChannel implements Channel {
       appendStatus: (text: string) =>
         run(async () => {
           const trimmed = text.trim();
-          const title =
-            (trimmed.split('\n')[0] || '').slice(0, TASK_TITLE_MAX_CHARS) ||
-            'Working…';
-          const id = `task-${++taskSeq}`;
+          // First meaningful line becomes the card title — skip code-fence
+          // markers so tool-result updates (```…```) don't surface a bare ```.
+          const firstLine =
+            trimmed
+              .split('\n')
+              .map((l) => l.trim())
+              .find((l) => l && !/^`{3,}/.test(l)) || '';
+          const title = firstLine.slice(0, TASK_TITLE_MAX_CHARS) || 'Working…';
+          // Always reuse the same task id so each update mutates the single
+          // live card in place rather than appending a new one per action.
           const task: AnyChunk = {
             type: 'task_update',
-            id,
+            id: PROGRESS_TASK_ID,
             title,
             status: 'in_progress',
             ...(trimmed.length > title.length
               ? { details: trimmed.slice(0, TASK_DETAILS_MAX_CHARS) }
               : {}),
           };
-          const chunks = [...closeOpenTask(), task];
-          openTask = { id, title };
+          openTask = { id: PROGRESS_TASK_ID, title };
           try {
-            await send(chunks);
+            await send([task]);
           } catch (err) {
             // A dropped status update isn't worth abandoning the stream for
             // (e.g. transient rate limit) — but a failed startStream means

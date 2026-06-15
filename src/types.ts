@@ -298,7 +298,8 @@ export interface FactoryWorkflowClaim {
 export interface OutboundMessageStream {
   /**
    * Append an intermediate status update (tool call, progress note).
-   * Rendered as a task timeline on platforms that support it.
+   * Platforms that support it render this as a single live progress indicator
+   * that updates in place — one evolving status per run, not one entry per call.
    */
   appendStatus(text: string): Promise<void>;
   /** Append final response text (markdown). */
