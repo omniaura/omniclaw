@@ -4,7 +4,7 @@
  * Supports create, edit, pause/resume, delete, and run-history viewing.
  */
 
-import type { ScheduledTask } from '../types.js';
+import type { ScheduledTask, TaskOutcomeState } from '../types.js';
 import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
@@ -151,6 +151,10 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
           : task.last_result === 'error'
             ? 'run-error'
             : '';
+      const outcomeBadge = renderOutcomeStateBadge(
+        task.last_outcome_state ?? null,
+        task.last_outcome_reason ?? null,
+      );
 
       return (
         `<tr data-task-id="${escapeHtml(task.id)}" data-status="${escapeHtml(task.status)}">` +
@@ -160,7 +164,7 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
         `<td class="td-sched"><span class="sched-type badge badge-sm">${escapeHtml(task.schedule_type)}</span> ` +
         `<span class="sched-label">${escapeHtml(schedLabel)}</span></td>` +
         `<td class="td-time" title="${escapeHtml(task.next_run ?? '')}">${escapeHtml(nextRun)}</td>` +
-        `<td class="td-time ${lastResultClass}" title="${escapeHtml(task.last_run ?? '')}">${escapeHtml(lastRun)}</td>` +
+        `<td class="td-time ${lastResultClass}" title="${escapeHtml(task.last_run ?? '')}">${escapeHtml(lastRun)}${outcomeBadge}</td>` +
         `<td><span class="badge badge-sm">${escapeHtml(task.context_mode)}</span></td>` +
         `<td class="td-actions">` +
         `<button class="btn btn-sm btn-toggle" data-tm-action="toggle" data-status="${toggleStatus}">${toggleLabel}</button>` +
@@ -173,6 +177,43 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
       );
     })
     .join('\n');
+}
+
+/**
+ * Map a TaskOutcomeState to the CSS color variable used by the badge.
+ * Mirrors the palette in the task runs modal (page-scripts.ts).
+ */
+export function outcomeStateColor(
+  state: TaskOutcomeState | null | undefined,
+): string | null {
+  if (state === 'done') return 'var(--green)';
+  if (state === 'skipped') return 'var(--text-dim)';
+  if (state === 'blocked') return 'var(--yellow)';
+  if (state === 'abandoned') return 'var(--red)';
+  return null;
+}
+
+/**
+ * Render an inline outcome state badge for the /tasks last-run cell.
+ * Returns an empty string when no outcome state is set. The reason, if
+ * present, is surfaced as the tooltip; otherwise the badge tooltips the
+ * state name itself.
+ */
+export function renderOutcomeStateBadge(
+  state: TaskOutcomeState | null | undefined,
+  reason: string | null | undefined,
+): string {
+  const color = outcomeStateColor(state);
+  if (!color || !state) return '';
+  const tooltip = reason && reason.length > 0 ? reason : state;
+  return (
+    ` <span class="task-outcome-badge"` +
+    ` data-outcome-state="${escapeHtml(state)}"` +
+    ` title="${escapeHtml(tooltip)}"` +
+    ` style="background:color-mix(in srgb,${color} 20%,transparent);color:${color};` +
+    `padding:1px 6px;border-radius:3px;font-size:10px;margin-left:6px;` +
+    `vertical-align:middle">${escapeHtml(state)}</span>`
+  );
 }
 
 function renderTaskModal(

@@ -3,6 +3,8 @@ import { describe, expect, it } from 'bun:test';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 import { handleRequest } from './routes.js';
 import {
+  outcomeStateColor,
+  renderOutcomeStateBadge,
   renderTaskTableRows,
   renderTasks,
   renderTasksContent,
@@ -288,6 +290,107 @@ describe('renderTaskTableRows', () => {
     } finally {
       globalThis.Date = RealDate;
     }
+  });
+});
+
+describe('outcomeStateColor', () => {
+  it('returns green for done', () => {
+    expect(outcomeStateColor('done')).toBe('var(--green)');
+  });
+
+  it('returns dim for skipped', () => {
+    expect(outcomeStateColor('skipped')).toBe('var(--text-dim)');
+  });
+
+  it('returns yellow for blocked', () => {
+    expect(outcomeStateColor('blocked')).toBe('var(--yellow)');
+  });
+
+  it('returns red for abandoned', () => {
+    expect(outcomeStateColor('abandoned')).toBe('var(--red)');
+  });
+
+  it('returns null for null/undefined', () => {
+    expect(outcomeStateColor(null)).toBeNull();
+    expect(outcomeStateColor(undefined)).toBeNull();
+  });
+});
+
+describe('renderOutcomeStateBadge', () => {
+  it('returns empty string when no outcome state is set', () => {
+    expect(renderOutcomeStateBadge(null, null)).toBe('');
+    expect(renderOutcomeStateBadge(undefined, 'some reason')).toBe('');
+  });
+
+  it('renders a done badge with reason tooltip', () => {
+    const html = renderOutcomeStateBadge('done', 'all checks passed');
+
+    expect(html).toContain('class="task-outcome-badge"');
+    expect(html).toContain('data-outcome-state="done"');
+    expect(html).toContain('title="all checks passed"');
+    expect(html).toContain('var(--green)');
+    expect(html).toContain('>done</span>');
+  });
+
+  it('falls back to the state name as tooltip when no reason is provided', () => {
+    const html = renderOutcomeStateBadge('blocked', null);
+
+    expect(html).toContain('title="blocked"');
+    expect(html).toContain('var(--yellow)');
+    expect(html).toContain('>blocked</span>');
+  });
+
+  it('escapes reason content to prevent XSS', () => {
+    const html = renderOutcomeStateBadge(
+      'abandoned',
+      '<script>alert(1)</script>',
+    );
+
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+});
+
+describe('renderTaskTableRows — outcome badge', () => {
+  it('renders the outcome badge in the last-run cell when an outcome state is set', () => {
+    const html = renderTaskTableRows([
+      makeTask({
+        last_run: '2026-05-08T11:55:00.000Z',
+        last_result: 'success',
+        last_outcome_state: 'done',
+        last_outcome_reason: 'sync complete',
+      }),
+    ]);
+
+    expect(html).toContain('task-outcome-badge');
+    expect(html).toContain('data-outcome-state="done"');
+    expect(html).toContain('title="sync complete"');
+  });
+
+  it('omits the outcome badge when last_outcome_state is null', () => {
+    const html = renderTaskTableRows([
+      makeTask({
+        last_run: '2026-05-08T11:55:00.000Z',
+        last_result: 'success',
+      }),
+    ]);
+
+    expect(html).not.toContain('task-outcome-badge');
+  });
+
+  it('renders a blocked badge alongside the run-error class for failed runs', () => {
+    const html = renderTaskTableRows([
+      makeTask({
+        last_run: '2026-05-08T11:55:00.000Z',
+        last_result: 'error',
+        last_outcome_state: 'blocked',
+        last_outcome_reason: 'awaiting user reply',
+      }),
+    ]);
+
+    expect(html).toContain('run-error');
+    expect(html).toContain('data-outcome-state="blocked"');
+    expect(html).toContain('title="awaiting user reply"');
   });
 });
 
