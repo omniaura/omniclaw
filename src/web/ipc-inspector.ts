@@ -5,7 +5,7 @@ import {
   type MessageLaneReason,
   type TaskLaneReason,
 } from '../group-queue.js';
-import { renderShell, escapeHtml } from './shared.js';
+import { renderShell, escapeHtml, formatDurationCompact } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 
 const MESSAGE_REASON_CODES = new Set<MessageLaneReason>([
@@ -48,7 +48,7 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
           : 'off';
       const taskStatus = g.taskLane.active ? 'active' : 'off';
       const taskInfo = g.taskLane.activeTask
-        ? `${escapeHtml(g.taskLane.activeTask.taskId)} (${formatDuration(g.taskLane.activeTask.runningMs)})`
+        ? `${escapeHtml(g.taskLane.activeTask.taskId)} (${formatDurationCompact(g.taskLane.activeTask.runningMs)})`
         : '\u2014';
       const msgReason = renderLaneReason(
         deriveMessageLaneReasonFromDetail(g),
@@ -60,8 +60,8 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
       );
       const msgRunningMs = g.messageLane.runningMs;
       const msgAge =
-        typeof msgRunningMs === 'number' && msgRunningMs >= 0
-          ? `<span class="lane-age" title="running for ${escapeHtml(formatDuration(msgRunningMs))}">${escapeHtml(formatDuration(msgRunningMs))}</span>`
+        typeof msgRunningMs === 'number' && msgRunningMs > 0
+          ? `<span class="lane-age" title="running for ${escapeHtml(formatDurationCompact(msgRunningMs))}">${escapeHtml(formatDurationCompact(msgRunningMs))}</span>`
           : '';
       const retryCell =
         g.retryCount > 0
@@ -142,7 +142,7 @@ function renderLastError(
   return (
     `<a href="/logs" class="last-error-link" title="${escapeHtml(err.message)}">` +
     `<span class="last-error-text">${escapeHtml(err.message)}</span>` +
-    `<span class="last-error-age">${formatDuration(ageMs)}</span>` +
+    `<span class="last-error-age">${formatDurationCompact(ageMs)}</span>` +
     `</a>`
   );
 }
@@ -163,10 +163,4 @@ export function renderIpcInspector(state: WebStateProvider): string {
     renderIpcInspectorContent(state),
     allPageScripts(),
   );
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
 }

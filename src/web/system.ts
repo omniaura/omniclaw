@@ -13,7 +13,7 @@ import {
   type TaskLaneReason,
 } from '../group-queue.js';
 import { getAgentExecStatus, type AgentExecStatus } from './agents-page.js';
-import { renderShell, escapeHtml } from './shared.js';
+import { renderShell, escapeHtml, formatDurationCompact } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 
 const MESSAGE_LANE_REASONS: readonly MessageLaneReason[] = [
@@ -360,17 +360,6 @@ export function buildHealthData(
   };
 }
 
-/**
- * Format a millisecond duration for human-friendly display in operator surfaces.
- * Mirrors the helper used by the IPC inspector so the unit progression matches:
- * `<1s` → ms, `<1m` → seconds (one decimal), otherwise minutes (one decimal).
- */
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
-}
-
 function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
@@ -559,7 +548,7 @@ export function renderSystemContent(
       'recent task outcomes',
       metricRow(
         'window',
-        formatDuration(health.recent_task_outcomes.window_ms),
+        formatDurationCompact(health.recent_task_outcomes.window_ms),
         'sys-recent-window',
       ) +
         metricRow(
@@ -602,7 +591,7 @@ export function renderSystemContent(
         metricRow(
           'longest running',
           health.queue.running_tasks > 0
-            ? formatDuration(health.queue.longest_running_task_ms)
+            ? formatDurationCompact(health.queue.longest_running_task_ms)
             : '\u2014',
           'sys-queue-longest-running',
         ) +

@@ -4,9 +4,11 @@ import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 import type { GroupQueueDetail } from '../group-queue.js';
 import { handleRequest } from './routes.js';
 import {
+  buildAgentRowsHtml,
   getAgentExecReason,
   getAgentExecStatus,
   getAgentQueueDepth,
+  getAgentRunningMs,
   renderAgentRow,
   renderExecStatusBadge,
   renderAgentsContent,
@@ -1152,5 +1154,361 @@ describe('renderAgentsContent queue depth column', () => {
     // for remote agents lives on the peer's own host).
     expect(html).toContain('data-agent-id="peer-1:remote-agent"');
     expect(html).toContain('qd-zero');
+  });
+});
+
+describe('getAgentRunningMs', () => {
+  it('returns null when there is no queue detail for the folder', () => {
+    expect(getAgentRunningMs('test-agent', [])).toBeNull();
+  });
+
+  it('returns null when the agent is idle (lane active but cooldown)', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: true,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+          runningMs: null,
+        },
+      }),
+    ];
+    expect(getAgentRunningMs('test-agent', details)).toBeNull();
+  });
+
+  it('returns null when nothing is pending or running', () => {
+    expect(getAgentRunningMs('test-agent', [makeQueueDetail()])).toBeNull();
+  });
+
+  it('returns the message-lane runningMs when actively processing a message', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+          runningMs: 4250,
+        },
+      }),
+    ];
+    expect(getAgentRunningMs('test-agent', details)).toBe(4250);
+  });
+
+  it('returns the task activeTask.runningMs when running a scheduled task', () => {
+    const details = [
+      makeQueueDetail({
+        taskLane: {
+          active: true,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+          activeTask: {
+            taskId: 'task-1',
+            promptPreview: 'p',
+            startedAt: Date.now(),
+            runningMs: 12_000,
+          },
+        },
+      }),
+    ];
+    expect(getAgentRunningMs('test-agent', details)).toBe(12_000);
+  });
+
+  it('prefers the message lane when both lanes are active (matches status priority)', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+          runningMs: 800,
+        },
+        taskLane: {
+          active: true,
+          pendingCount: 0,
+          containerName: 'ctr-2',
+          activeTask: {
+            taskId: 'task-1',
+            promptPreview: 'p',
+            startedAt: Date.now(),
+            runningMs: 99_999,
+          },
+        },
+      }),
+    ];
+    expect(getAgentRunningMs('test-agent', details)).toBe(800);
+  });
+
+  it('returns null when message lane is active but runningMs is missing or negative', () => {
+    const detailsMissing = [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+      }),
+    ];
+    expect(getAgentRunningMs('test-agent', detailsMissing)).toBeNull();
+
+    const detailsNegative = [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+          runningMs: -1,
+        },
+      }),
+    ];
+    expect(getAgentRunningMs('test-agent', detailsNegative)).toBeNull();
+  });
+
+  it('matches by folder key', () => {
+    const details = [
+      makeQueueDetail({
+        folderKey: 'other-agent',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+          runningMs: 2000,
+        },
+      }),
+    ];
+    expect(getAgentRunningMs('test-agent', details)).toBeNull();
+    expect(getAgentRunningMs('other-agent', details)).toBe(2000);
+  });
+});
+
+describe('renderExecStatusBadge running age', () => {
+  it('renders a lane-age badge for executing rows when runningMs is provided', () => {
+    const html = renderExecStatusBadge('executing', null, 4250);
+    expect(html).toContain('lane-age');
+    expect(html).toContain('data-exec-running-ms="4250"');
+    expect(html).toContain('4.3s');
+  });
+
+  it('renders a lane-age badge for running-task rows', () => {
+    const html = renderExecStatusBadge('running-task', null, 75_000);
+    expect(html).toContain('lane-age');
+    expect(html).toContain('data-exec-running-ms="75000"');
+    expect(html).toContain('1.3m');
+  });
+
+  it('formats sub-second ages as ms', () => {
+    const html = renderExecStatusBadge('executing', null, 250);
+    expect(html).toContain('>250ms<');
+  });
+
+  it('formats multi-hour ages with an h suffix', () => {
+    const html = renderExecStatusBadge('executing', null, 7_200_000);
+    expect(html).toContain('>2.0h<');
+  });
+
+  it('omits the lane-age badge for non-active statuses', () => {
+    expect(renderExecStatusBadge('idle', 'cooling-down', 5000)).not.toContain(
+      'lane-age',
+    );
+    expect(
+      renderExecStatusBadge('queued', 'back-pressure', 5000),
+    ).not.toContain('lane-age');
+    expect(renderExecStatusBadge('offline', 'no-work', 5000)).not.toContain(
+      'lane-age',
+    );
+    expect(renderExecStatusBadge('disabled', null, 5000)).not.toContain(
+      'lane-age',
+    );
+  });
+
+  it('omits the lane-age badge when runningMs is null or negative', () => {
+    expect(renderExecStatusBadge('executing', null, null)).not.toContain(
+      'lane-age',
+    );
+    expect(renderExecStatusBadge('executing', null, -1)).not.toContain(
+      'lane-age',
+    );
+  });
+
+  it('renders the age alongside the reason chip when both apply (defensive — UI prioritises reason for non-active)', () => {
+    // reason chips are suppressed on executing rows, so the age stands alone.
+    const html = renderExecStatusBadge('executing', 'running', 1500);
+    expect(html).toContain('lane-age');
+    expect(html).not.toContain('lane-reason');
+  });
+});
+
+describe('renderAgentsContent running age column', () => {
+  it('renders a lane-age badge when the message lane is actively processing', () => {
+    const state = makeState();
+    const origGetQueueDetails = state.getQueueDetails;
+    state.getQueueDetails = () => [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+          runningMs: 3500,
+        },
+      }),
+    ];
+
+    const html = renderAgentsContent(state);
+    expect(html).toContain('exec-executing');
+    expect(html).toContain('lane-age');
+    expect(html).toContain('data-exec-running-ms="3500"');
+
+    state.getQueueDetails = origGetQueueDetails;
+  });
+
+  it('renders a lane-age badge when a scheduled task is running', () => {
+    const state = makeState();
+    const origGetQueueDetails = state.getQueueDetails;
+    state.getQueueDetails = () => [
+      makeQueueDetail({
+        taskLane: {
+          active: true,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+          activeTask: {
+            taskId: 'task-1',
+            promptPreview: 'p',
+            startedAt: Date.now(),
+            runningMs: 45_000,
+          },
+        },
+      }),
+    ];
+
+    const html = renderAgentsContent(state);
+    expect(html).toContain('exec-task');
+    expect(html).toContain('lane-age');
+    expect(html).toContain('data-exec-running-ms="45000"');
+
+    state.getQueueDetails = origGetQueueDetails;
+  });
+
+  it('does not render a lane-age badge for idle agents', () => {
+    const state = makeState();
+    const origGetQueueDetails = state.getQueueDetails;
+    state.getQueueDetails = () => [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: true,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+          runningMs: null,
+        },
+      }),
+    ];
+
+    const html = renderAgentsContent(state);
+    expect(html).toContain('exec-idle');
+    expect(html).not.toContain('lane-age');
+
+    state.getQueueDetails = origGetQueueDetails;
+  });
+
+  it('does not render a lane-age badge for remote agents', () => {
+    const remotePeers = [
+      {
+        instanceId: 'peer-1',
+        instanceName: 'macbook',
+        online: true,
+        host: '192.168.1.10',
+        port: 4444,
+        agents: [
+          {
+            id: 'remote-agent',
+            name: 'Remote',
+            folder: 'remote',
+            backend: 'docker' as const,
+            agentRuntime: 'opencode' as const,
+            channels: [],
+          },
+        ],
+      },
+    ];
+
+    const html = renderAgentsContent(makeState({}), remotePeers);
+    expect(html).not.toContain('lane-age');
+  });
+});
+
+describe('buildAgentRowsHtml (SSE patch path)', () => {
+  it('threads runningMs into the patched rows so the chip survives live updates', () => {
+    const state = makeState();
+    state.getQueueDetails = () => [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+          runningMs: 8500,
+        },
+      }),
+    ];
+    const html = buildAgentRowsHtml(state);
+    expect(html).toContain('exec-executing');
+    expect(html).toContain('lane-age');
+    expect(html).toContain('data-exec-running-ms="8500"');
+  });
+
+  it('threads queueDepth into the patched rows so pending counts stay live', () => {
+    const state = makeState();
+    state.getQueueDetails = () => [
+      makeQueueDetail({
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 3,
+          containerName: null,
+        },
+      }),
+    ];
+    const html = buildAgentRowsHtml(state);
+    expect(html).toContain('exec-queued');
+    expect(html).toContain('data-queue-total="3"');
+    expect(html).toContain('data-queue-messages="3"');
+  });
+
+  it('reflects disabled state in the patched rows', () => {
+    const state = makeState({
+      'agent-1': makeAgent({ enabled: false }),
+    });
+    const html = buildAgentRowsHtml(state);
+    expect(html).toContain('exec-disabled');
+  });
+
+  it('emits no lane-age chip for remote agents', () => {
+    const remotePeers = [
+      {
+        instanceId: 'peer-1',
+        instanceName: 'macbook',
+        online: true,
+        host: '192.168.1.10',
+        port: 4444,
+        agents: [
+          {
+            id: 'remote-agent',
+            name: 'Remote',
+            folder: 'remote',
+            backend: 'docker' as const,
+            agentRuntime: 'opencode' as const,
+            channels: [],
+          },
+        ],
+      },
+    ];
+    const html = buildAgentRowsHtml(makeState({}), remotePeers);
+    expect(html).not.toContain('lane-age');
   });
 });

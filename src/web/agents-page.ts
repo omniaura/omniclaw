@@ -12,7 +12,7 @@ import {
   type MessageLaneReason,
 } from '../group-queue.js';
 import type { WebStateProvider } from './types.js';
-import { renderShell, escapeHtml } from './shared.js';
+import { renderShell, escapeHtml, formatDurationCompact } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 import {
   buildAgentChannelData,
@@ -81,6 +81,37 @@ export function getAgentExecStatus(
 }
 
 /**
+ * Resolve how long the currently active run on an agent's lane has been
+ * executing, in milliseconds. Returns `null` when the agent is not actively
+ * running anything (idle, queued, offline) or when the underlying lane
+ * snapshot does not yet expose a running duration.
+ *
+ * Used by the agents directory to surface stuck/long-running work inline
+ * with the status badge, without requiring an operator to drill into the
+ * IPC inspector.
+ */
+export function getAgentRunningMs(
+  folder: string,
+  queueDetails: GroupQueueDetail[],
+): number | null {
+  const detail = queueDetails.find((d) => d.folderKey === folder);
+  if (!detail) return null;
+
+  // Message lane takes precedence — matches getAgentExecStatus.
+  if (detail.messageLane.active && !detail.messageLane.idle) {
+    const ms = detail.messageLane.runningMs;
+    return typeof ms === 'number' && ms >= 0 ? ms : null;
+  }
+
+  if (detail.taskLane.active && detail.taskLane.activeTask) {
+    const ms = detail.taskLane.activeTask.runningMs;
+    return typeof ms === 'number' && ms >= 0 ? ms : null;
+  }
+
+  return null;
+}
+
+/**
  * Derive the underlying message-lane reason code for an agent.
  *
  * Returns the structured {@link MessageLaneReason} when the agent has a
@@ -140,6 +171,7 @@ function backendBadgeClass(backend: string): string {
 export function renderExecStatusBadge(
   status: AgentExecStatus,
   reason: MessageLaneReason | null = null,
+  runningMs: number | null = null,
 ): string {
   const label = EXEC_STATUS_LABELS[status];
   const css = EXEC_STATUS_CSS[status];
@@ -153,14 +185,27 @@ export function renderExecStatusBadge(
     status !== 'executing' &&
     status !== 'running-task' &&
     status !== 'disabled';
-  if (!shouldShowReason) return statusBadge;
+  const reasonBadge = shouldShowReason
+    ? `<span class="lane-reason reason-${reason}" data-exec-reason="${reason}">${escapeHtml(reason as string)}</span>`
+    : '';
+  // Surface the running duration only for actively executing agents — the
+  // age tells an operator how long the current message or task has been
+  // running, helping spot stuck or long-running work without leaving the
+  // agents directory.
+  const shouldShowAge =
+    typeof runningMs === 'number' &&
+    runningMs > 0 &&
+    (status === 'executing' || status === 'running-task');
+  if (!shouldShowAge) return statusBadge + reasonBadge;
+  const formatted = formatDurationCompact(runningMs);
   return (
     statusBadge +
-    `<span class="lane-reason reason-${reason}" data-exec-reason="${reason}">${escapeHtml(reason as string)}</span>`
+    reasonBadge +
+    `<span class="lane-age" data-exec-running-ms="${runningMs}" title="running for ${escapeHtml(formatted)}">${escapeHtml(formatted)}</span>`
   );
 }
 
-const ZERO_QUEUE_DEPTH: AgentQueueDepth = {
+export const ZERO_QUEUE_DEPTH: AgentQueueDepth = {
   messages: 0,
   tasks: 0,
   total: 0,
@@ -196,6 +241,7 @@ export function renderAgentRow(
   execStatus: AgentExecStatus = 'offline',
   execReason: MessageLaneReason | null = null,
   queueDepth: AgentQueueDepth = ZERO_QUEUE_DEPTH,
+  runningMs: number | null = null,
 ): string {
   const esc = escapeHtml;
   const avatar = avatarSrc(agent);
@@ -226,7 +272,7 @@ export function renderAgentRow(
     `<span class="ap-avatar-wrap">${avatarHtml}</span>` +
     `<span class="ap-name">${esc(agent.name)}</span>` +
     `</a></td>` +
-    `<td>${renderExecStatusBadge(execStatus, execReason)}</td>` +
+    `<td>${renderExecStatusBadge(execStatus, execReason, runningMs)}</td>` +
     `<td><span class="badge ${backendBadgeClass(agent.backend)}">${esc(agent.backend)}</span></td>` +
     `<td><span class="badge badge-sm">${esc(agent.agentRuntime)}</span></td>` +
     `<td class="td-center">${agent.channels.length}</td>` +
@@ -251,20 +297,57 @@ export function renderAgentRow(
   );
 }
 
-/** Render the agents page content (no shell wrapper — for SPA nav). */
-export function renderAgentsContent(
+/**
+ * Build just the `<tbody>` row HTML for the agents directory. Shared between
+ * the initial full-page render and the SSE patch path so live updates surface
+ * the same lane reason, queue depth, and running-age signals as page load.
+ */
+export function buildAgentRowsHtml(
   state: WebStateProvider,
   remotePeers: RemotePeerAgents[] = [],
 ): string {
   const agentData = buildAgentChannelData(state, remotePeers);
   const tasks = state.getTasks();
   const queueDetails = state.getQueueDetails();
-
-  // Count tasks per agent group folder
   const taskCounts: Record<string, number> = {};
   for (const t of tasks) {
     taskCounts[t.group_folder] = (taskCounts[t.group_folder] || 0) + 1;
   }
+  const localAgents = state.getAgents();
+  return agentData
+    .map((a) => {
+      let status: AgentExecStatus;
+      let reason: MessageLaneReason | null = null;
+      let queueDepth: AgentQueueDepth = ZERO_QUEUE_DEPTH;
+      let runningMs: number | null = null;
+      if (a.remoteInstanceId) {
+        status = 'offline';
+      } else if (localAgents[a.id]?.enabled === false) {
+        status = 'disabled';
+      } else {
+        status = getAgentExecStatus(a.folder, queueDetails);
+        reason = getAgentExecReason(a.folder, queueDetails);
+        queueDepth = getAgentQueueDepth(a.folder, queueDetails);
+        runningMs = getAgentRunningMs(a.folder, queueDetails);
+      }
+      return renderAgentRow(
+        a,
+        taskCounts[a.folder] || 0,
+        status,
+        reason,
+        queueDepth,
+        runningMs,
+      );
+    })
+    .join('\n');
+}
+
+/** Render the agents page content (no shell wrapper — for SPA nav). */
+export function renderAgentsContent(
+  state: WebStateProvider,
+  remotePeers: RemotePeerAgents[] = [],
+): string {
+  const agentData = buildAgentChannelData(state, remotePeers);
 
   // Collect unique backends and runtimes for filter dropdowns
   const backends = [...new Set(agentData.map((a) => a.backend))].sort();
@@ -281,30 +364,7 @@ export function renderAgentsContent(
     .map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`)
     .join('');
 
-  const localAgents = state.getAgents();
-  const rows = agentData
-    .map((a) => {
-      let status: AgentExecStatus;
-      let reason: MessageLaneReason | null = null;
-      let queueDepth: AgentQueueDepth = ZERO_QUEUE_DEPTH;
-      if (a.remoteInstanceId) {
-        status = 'offline';
-      } else if (localAgents[a.id]?.enabled === false) {
-        status = 'disabled';
-      } else {
-        status = getAgentExecStatus(a.folder, queueDetails);
-        reason = getAgentExecReason(a.folder, queueDetails);
-        queueDepth = getAgentQueueDepth(a.folder, queueDetails);
-      }
-      return renderAgentRow(
-        a,
-        taskCounts[a.folder] || 0,
-        status,
-        reason,
-        queueDepth,
-      );
-    })
-    .join('\n');
+  const rows = buildAgentRowsHtml(state, remotePeers);
 
   return (
     `<div data-init="window.__initPage && window.__initPage('agents')">` +

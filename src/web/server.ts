@@ -44,13 +44,7 @@ import { renderSystemContent } from './system.js';
 import { renderSettingsContent } from './settings.js';
 import { renderTasksContent } from './tasks.js';
 import { renderLogsContent } from './logs.js';
-import {
-  renderAgentsContent,
-  renderAgentRow,
-  getAgentExecStatus,
-  getAgentExecReason,
-} from './agents-page.js';
-import { buildAgentChannelData } from './agent-channels.js';
+import { renderAgentsContent, buildAgentRowsHtml } from './agents-page.js';
 import {
   initSolidHandler,
   getSolidHandler,
@@ -1148,25 +1142,7 @@ function patchAgents(client: SseClient, state: WebStateProvider): void {
 
 function patchAgentsPage(client: SseClient, state: WebStateProvider): void {
   if (!client.subscriptions.has('agents')) return;
-  const agentData = buildAgentChannelData(state);
-  const tasks = state.getTasks();
-  const queueDetails = state.getQueueDetails();
-  const taskCounts: Record<string, number> = {};
-  for (const t of tasks) {
-    taskCounts[t.group_folder] = (taskCounts[t.group_folder] || 0) + 1;
-  }
-  const rows = agentData
-    .map((a) => {
-      const status = a.remoteInstanceId
-        ? ('offline' as const)
-        : getAgentExecStatus(a.folder, queueDetails);
-      const reason = a.remoteInstanceId
-        ? null
-        : getAgentExecReason(a.folder, queueDetails);
-      return renderAgentRow(a, taskCounts[a.folder] || 0, status, reason);
-    })
-    .join('\n');
-  client.stream.patchElements(rows, {
+  client.stream.patchElements(buildAgentRowsHtml(state), {
     selector: '#ap-tbody',
     mode: 'inner',
   });
