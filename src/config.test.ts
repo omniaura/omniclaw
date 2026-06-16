@@ -167,6 +167,23 @@ describe('buildDiscordBotConfigFromEnv', () => {
     ]);
   });
 
+  it('allows a Discord bot to enable privileged intents with a truthy value', () => {
+    const parsed = buildDiscordBotConfigFromEnv({
+      DISCORD_BOT_IDS: 'CODEX',
+      DISCORD_BOT_CODEX_TOKEN: 'token-codex',
+      DISCORD_BOT_CODEX_PRIVILEGED_INTENTS: 'yes',
+    });
+
+    expect(parsed.bots).toEqual([
+      {
+        id: 'CODEX',
+        token: 'token-codex',
+        runtime: undefined,
+        privilegedIntents: true,
+      },
+    ]);
+  });
+
   it('supports legacy DISCORD_BOT_TOKEN', () => {
     const parsed = buildDiscordBotConfigFromEnv({
       DISCORD_BOT_TOKEN: 'legacy-token',
@@ -203,6 +220,16 @@ describe('buildDiscordBotConfigFromEnv', () => {
     ).toThrow(
       'DISCORD_BOT_CLAUDE_RUNTIME: expected one of claude-agent-sdk, opencode, codex',
     );
+  });
+
+  it('fails fast when Discord privileged intents has an invalid boolean value', () => {
+    expect(() =>
+      buildDiscordBotConfigFromEnv({
+        DISCORD_BOT_IDS: 'CLAUDE',
+        DISCORD_BOT_CLAUDE_TOKEN: 'token-a',
+        DISCORD_BOT_CLAUDE_PRIVILEGED_INTENTS: 'sometimes',
+      }),
+    ).toThrow('DISCORD_BOT_CLAUDE_PRIVILEGED_INTENTS: expected boolean');
   });
 });
 
@@ -304,6 +331,15 @@ describe('buildSlackBotConfigFromEnv', () => {
     ).toThrow(
       'SLACK_BOT_OPS_APP_TOKEN: required when SLACK_BOT_IDS includes OPS',
     );
+  });
+
+  it('fails fast when a listed Slack bot is missing its bot token', () => {
+    expect(() =>
+      buildSlackBotConfigFromEnv({
+        SLACK_BOT_IDS: 'OPS',
+        SLACK_BOT_OPS_APP_TOKEN: 'xapp-ops',
+      }),
+    ).toThrow('SLACK_BOT_OPS_TOKEN: required when SLACK_BOT_IDS includes OPS');
   });
 });
 
