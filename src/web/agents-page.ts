@@ -167,6 +167,51 @@ function backendBadgeClass(backend: string): string {
   return '';
 }
 
+/**
+ * Strip the longest provider prefix from a model id so the chip stays short
+ * without losing the variant. Handles forms like:
+ *   "claude-opus-4-7"               → "opus-4-7"
+ *   "anthropic/claude-sonnet-4-5"   → "sonnet-4-5"
+ *   "openai/gpt-5-codex-mini"       → "gpt-5-codex-mini"
+ *
+ * Falls back to the raw id when no known prefix matches. The full id is still
+ * shown on hover via the cell's `title` attribute.
+ */
+export function shortenModelLabel(model: string): string {
+  const trimmed = model.trim();
+  if (!trimmed) return '';
+  const afterSlash = trimmed.includes('/')
+    ? trimmed.slice(trimmed.lastIndexOf('/') + 1)
+    : trimmed;
+  const knownPrefixes = ['claude-', 'gpt-claude-'];
+  for (const prefix of knownPrefixes) {
+    if (afterSlash.startsWith(prefix)) {
+      const rest = afterSlash.slice(prefix.length);
+      if (rest.length > 0) return rest;
+    }
+  }
+  return afterSlash;
+}
+
+/**
+ * Render the runtime cell, with an optional model-override chip when the
+ * agent has a per-agent model set. The chip carries the full model id on
+ * hover so the short label never hides the operator's actual override.
+ */
+export function renderRuntimeCell(
+  agentRuntime: string,
+  model: string | undefined,
+): string {
+  const runtimeBadge = `<span class="badge badge-sm">${escapeHtml(agentRuntime)}</span>`;
+  const trimmedModel = model?.trim();
+  if (!trimmedModel) return runtimeBadge;
+  const short = shortenModelLabel(trimmedModel);
+  return (
+    runtimeBadge +
+    ` <span class="badge badge-sm badge-model" title="${escapeHtml(trimmedModel)}" data-agent-model="${escapeHtml(trimmedModel)}">${escapeHtml(short)}</span>`
+  );
+}
+
 /** Render the execution status badge for an agent. */
 export function renderExecStatusBadge(
   status: AgentExecStatus,
@@ -274,7 +319,7 @@ export function renderAgentRow(
     `</a></td>` +
     `<td>${renderExecStatusBadge(execStatus, execReason, runningMs)}</td>` +
     `<td><span class="badge ${backendBadgeClass(agent.backend)}">${esc(agent.backend)}</span></td>` +
-    `<td><span class="badge badge-sm">${esc(agent.agentRuntime)}</span></td>` +
+    `<td>${renderRuntimeCell(agent.agentRuntime, agent.model)}</td>` +
     `<td class="td-center">${agent.channels.length}</td>` +
     renderQueueDepthCell(queueDepth) +
     `<td class="td-center">${taskCount}</td>` +

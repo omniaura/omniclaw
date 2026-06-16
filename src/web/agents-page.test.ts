@@ -11,9 +11,11 @@ import {
   getAgentRunningMs,
   renderAgentRow,
   renderExecStatusBadge,
+  renderRuntimeCell,
   renderAgentsContent,
   renderAgentsPage,
   renderAgentsPageWithRemote,
+  shortenModelLabel,
 } from './agents-page.js';
 import type { WebStateProvider } from './types.js';
 
@@ -1510,5 +1512,170 @@ describe('buildAgentRowsHtml (SSE patch path)', () => {
     ];
     const html = buildAgentRowsHtml(makeState({}), remotePeers);
     expect(html).not.toContain('lane-age');
+  });
+});
+
+describe('shortenModelLabel', () => {
+  it('strips the claude- prefix from bare model ids', () => {
+    expect(shortenModelLabel('claude-opus-4-7')).toBe('opus-4-7');
+    expect(shortenModelLabel('claude-sonnet-4-6')).toBe('sonnet-4-6');
+    expect(shortenModelLabel('claude-haiku-4-5-20251001')).toBe(
+      'haiku-4-5-20251001',
+    );
+  });
+
+  it('keeps only the segment after the last slash for provider-prefixed ids', () => {
+    expect(shortenModelLabel('anthropic/claude-sonnet-4-5')).toBe('sonnet-4-5');
+    expect(shortenModelLabel('openai/gpt-5-codex-mini')).toBe(
+      'gpt-5-codex-mini',
+    );
+  });
+
+  it('returns the raw id when no known prefix matches', () => {
+    expect(shortenModelLabel('custom-model')).toBe('custom-model');
+  });
+
+  it('trims surrounding whitespace and returns "" for blank input', () => {
+    expect(shortenModelLabel('  claude-opus-4-7  ')).toBe('opus-4-7');
+    expect(shortenModelLabel('')).toBe('');
+    expect(shortenModelLabel('   ')).toBe('');
+  });
+
+  it('does not strip the prefix when nothing follows it', () => {
+    // Avoid producing an empty chip; fall back to the full label.
+    expect(shortenModelLabel('claude-')).toBe('claude-');
+  });
+});
+
+describe('renderRuntimeCell', () => {
+  it('renders only the runtime badge when no model override is set', () => {
+    const html = renderRuntimeCell('claude-agent-sdk', undefined);
+    expect(html).toContain('>claude-agent-sdk<');
+    expect(html).not.toContain('badge-model');
+    expect(html).not.toContain('data-agent-model');
+  });
+
+  it('renders only the runtime badge when model is an empty string', () => {
+    expect(renderRuntimeCell('opencode', '')).not.toContain('badge-model');
+  });
+
+  it('renders only the runtime badge when model is whitespace only', () => {
+    expect(renderRuntimeCell('opencode', '   ')).not.toContain('badge-model');
+  });
+
+  it('renders a model chip with the shortened label when the override is set', () => {
+    const html = renderRuntimeCell('claude-agent-sdk', 'claude-opus-4-7');
+    expect(html).toContain('badge-model');
+    expect(html).toContain('>opus-4-7<');
+    expect(html).toContain('data-agent-model="claude-opus-4-7"');
+    expect(html).toContain('title="claude-opus-4-7"');
+  });
+
+  it('keeps the full model id on hover even when shortened', () => {
+    const html = renderRuntimeCell('opencode', 'anthropic/claude-sonnet-4-5');
+    expect(html).toContain('title="anthropic/claude-sonnet-4-5"');
+    expect(html).toContain('>sonnet-4-5<');
+  });
+
+  it('escapes HTML in the model override', () => {
+    const html = renderRuntimeCell(
+      'claude-agent-sdk',
+      '<script>alert(1)</script>',
+    );
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('emits the model chip after the runtime badge so the runtime stays primary', () => {
+    const html = renderRuntimeCell('claude-agent-sdk', 'claude-opus-4-7');
+    const runtimeIdx = html.indexOf('claude-agent-sdk');
+    const modelIdx = html.indexOf('badge-model');
+    expect(runtimeIdx).toBeGreaterThanOrEqual(0);
+    expect(modelIdx).toBeGreaterThan(runtimeIdx);
+  });
+});
+
+describe('renderAgentRow model badge', () => {
+  it('renders a model chip when the AgentChannelData carries a model', () => {
+    const agentData = {
+      id: 'agent-1',
+      name: 'With Model',
+      folder: 'with-model',
+      backend: 'apple-container',
+      agentRuntime: 'claude-agent-sdk',
+      isAdmin: false,
+      model: 'claude-opus-4-7',
+      channels: [],
+    };
+
+    const html = renderAgentRow(agentData, 0);
+
+    expect(html).toContain('badge-model');
+    expect(html).toContain('>opus-4-7<');
+    expect(html).toContain('data-agent-model="claude-opus-4-7"');
+  });
+
+  it('does not render a model chip when no model override is set', () => {
+    const agentData = {
+      id: 'agent-1',
+      name: 'No Model',
+      folder: 'no-model',
+      backend: 'apple-container',
+      agentRuntime: 'claude-agent-sdk',
+      isAdmin: false,
+      channels: [],
+    };
+
+    const html = renderAgentRow(agentData, 0);
+
+    expect(html).not.toContain('badge-model');
+    expect(html).not.toContain('data-agent-model');
+  });
+});
+
+describe('renderAgentsContent surfaces per-agent model override', () => {
+  it('renders a model chip on rows for local agents with a model override set', () => {
+    const agents = {
+      'agent-1': makeAgent({ model: 'claude-opus-4-7' }),
+    };
+    const html = renderAgentsContent(makeState(agents));
+
+    expect(html).toContain('badge-model');
+    expect(html).toContain('>opus-4-7<');
+    expect(html).toContain('data-agent-model="claude-opus-4-7"');
+  });
+
+  it('omits the model chip when the local agent has no override', () => {
+    const html = renderAgentsContent(makeState());
+    expect(html).not.toContain('badge-model');
+  });
+
+  it('does not project a model chip onto remote agent rows', () => {
+    // Remote agents carry no model override in their discovery payload; the
+    // badge must only surface for local rows where the value is authoritative.
+    const remotePeers = [
+      {
+        instanceId: 'peer-1',
+        instanceName: 'remote-mac',
+        online: true,
+        host: '192.168.1.10',
+        port: 4444,
+        agents: [
+          {
+            id: 'remote-agent',
+            name: 'Remote',
+            folder: 'remote',
+            backend: 'docker' as const,
+            agentRuntime: 'opencode' as const,
+            channels: [],
+          },
+        ],
+      },
+    ];
+
+    const html = renderAgentsContent(makeState({}), remotePeers);
+
+    expect(html).toContain('data-agent-id="peer-1:remote-agent"');
+    expect(html).not.toContain('badge-model');
   });
 });
