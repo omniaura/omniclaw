@@ -614,7 +614,7 @@ export function renderSystemContent(
         metricRow(
           'longest message run',
           health.queue.processing_groups > 0
-            ? formatDuration(health.queue.longest_running_message_ms)
+            ? formatDurationCompact(health.queue.longest_running_message_ms)
             : '\u2014',
           'sys-queue-longest-running-message',
         ) +
