@@ -212,6 +212,7 @@ export interface DiscordChannelOpts {
     messageId: string,
     emoji: string,
     userName: string,
+    reactor: { id: string; isBot: boolean },
   ) => void;
   onSessionCommand?: (
     command: DiscordSessionCommand,
@@ -1320,7 +1321,10 @@ export class DiscordChannel implements Channel {
     const emoji = reaction.emoji.name || '';
 
     const userName = user.displayName || user.username || 'Someone';
-    this.opts.onReaction?.(chatJid, reaction.message.id, emoji, userName);
+    this.opts.onReaction?.(chatJid, reaction.message.id, emoji, userName, {
+      id: user.id,
+      isBot: user.bot ?? false,
+    });
   }
 
   private async handleSlashCommand(

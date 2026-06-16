@@ -3300,6 +3300,27 @@ function buildAgentRegistry(extraFolders: string[] = []): void {
 }
 
 /**
+ * Identity of the user (or app) who added a reaction. Channel adapters resolve
+ * this from platform metadata so the orchestrator can drop noise from other
+ * bots/apps (e.g. CodeRabbit reacting `:eyes:`) before it reaches the warm
+ * container and produces a filler reply.
+ */
+export interface ReactionReactor {
+  id: string;
+  isBot: boolean;
+}
+
+/**
+ * Return true when a reaction should be dropped before any orchestrator work
+ * (group lookup, queue dispatch). Reactions from bots/apps match the synthetic
+ * `@Agent [User reacted with :emoji:]` trigger pattern and otherwise pipe
+ * straight into a warm container, producing filler replies (#768).
+ */
+export function shouldDropBotReaction(reactor: ReactionReactor): boolean {
+  return reactor.isBot;
+}
+
+/**
  * Handle a reaction notification on a bot message (non-approval reactions).
  * Pipes to the active container or stores in DB and enqueues.
  */
@@ -3309,8 +3330,24 @@ async function handleReactionNotification(
   emoji: string,
   userName: string,
   channelName: string,
+  reactor: ReactionReactor,
   discordBotId?: string,
 ): Promise<void> {
+  if (shouldDropBotReaction(reactor)) {
+    logger.debug(
+      {
+        chatJid,
+        messageId,
+        emoji,
+        userName,
+        reactorId: reactor.id,
+        channelName,
+      },
+      'Dropping reaction from bot/app reactor',
+    );
+    return;
+  }
+
   // For multi-agent Discord channels, route to the subscription whose bot
   // received the reaction rather than blindly using the primary registered group.
   // Without this, a reaction on OCPeyton's message routes to Ditto (the primary).
@@ -3977,13 +4014,20 @@ async function main(): Promise<void> {
                 slashCommandGroups: buildSlashCommandGroupsFromSubscriptions,
                 onSessionCommand: (command, chatJid, group, sessionId) =>
                   handleSessionCommand(command, chatJid, group, sessionId),
-                onReaction: async (chatJid, messageId, emoji, userName) => {
+                onReaction: async (
+                  chatJid,
+                  messageId,
+                  emoji,
+                  userName,
+                  reactor,
+                ) => {
                   await handleReactionNotification(
                     chatJid,
                     messageId,
                     emoji,
                     userName,
                     'Discord',
+                    reactor,
                     bot.id,
                   );
                 },
@@ -4078,13 +4122,20 @@ async function main(): Promise<void> {
                 registeredGroups: () => registeredGroups,
                 autoRegister: async (chatJid, channelName) =>
                   autoRegisterChannel(chatJid, channelName, 'slack', bot.id),
-                onReaction: async (chatJid, messageId, emoji, userName) => {
+                onReaction: async (
+                  chatJid,
+                  messageId,
+                  emoji,
+                  userName,
+                  reactor,
+                ) => {
                   await handleReactionNotification(
                     chatJid,
                     messageId,
                     emoji,
                     userName,
                     'Slack',
+                    reactor,
                   );
                 },
               });
