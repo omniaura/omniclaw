@@ -67,7 +67,10 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
         g.retryCount > 0
           ? `<span class="retry-count">${g.retryCount}</span>`
           : '\u2014';
-      const lastErrorCell = renderLastError(g.messageLane.lastError);
+      const lastErrorCell = renderLastErrorCell(
+        g.messageLane.lastError,
+        g.taskLane.lastError,
+      );
       return `<tr>
         <td class="folder-key">${escapeHtml(g.folderKey)}</td>
         <td><span class="lane-badge lane-${msgStatus}">${msgStatus}</span>${msgReason}${msgAge}</td>
@@ -134,13 +137,37 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
   );
 }
 
+/**
+ * Render the "last error" cell, combining the message and task lanes. The two
+ * lanes fail independently, so a busy group can carry an error on either or
+ * both. When both are present each link is prefixed with its lane label so the
+ * operator can tell them apart; a single error renders bare for compactness.
+ */
+function renderLastErrorCell(
+  msgErr: { message: string; at: number } | null | undefined,
+  taskErr: { message: string; at: number } | null | undefined,
+): string {
+  if (!msgErr && !taskErr) return '\u2014';
+  const showLabels = !!msgErr && !!taskErr;
+  const segments: string[] = [];
+  if (msgErr) segments.push(renderLastError(msgErr, showLabels ? 'msg' : ''));
+  if (taskErr)
+    segments.push(renderLastError(taskErr, showLabels ? 'task' : ''));
+  return segments.join('');
+}
+
 function renderLastError(
   err: { message: string; at: number } | null | undefined,
+  laneLabel: string = '',
 ): string {
   if (!err) return '\u2014';
   const ageMs = Math.max(0, Date.now() - err.at);
+  const label = laneLabel
+    ? `<span class="last-error-lane">${escapeHtml(laneLabel)}</span>`
+    : '';
   return (
     `<a href="/logs" class="last-error-link" title="${escapeHtml(err.message)}">` +
+    label +
     `<span class="last-error-text">${escapeHtml(err.message)}</span>` +
     `<span class="last-error-age">${formatDurationCompact(ageMs)}</span>` +
     `</a>`
