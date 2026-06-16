@@ -360,6 +360,24 @@ describe('conversations page', () => {
     expect(html).toContain('chat-time');
     expect(html).toContain('—');
   });
+
+  it('omits the hover title for invalid last-message timestamps', async () => {
+    const state = makeState({
+      getChats: () => [
+        {
+          jid: 'dc:invalid',
+          name: 'bad-clock',
+          last_message_time: 'not-a-date',
+        },
+      ],
+    });
+    handle = startWebServer(testConfig(), state);
+    const res = await authedFetch('/conversations');
+    const html = await res.text();
+    expect(html).toContain('<div class="chat-meta chat-time">not-a-date</div>');
+    expect(html).not.toContain('Invalid Date');
+    expect(html).not.toContain('title="Invalid Date"');
+  });
 });
 
 describe('formatChatRelativeTime helper', () => {
@@ -392,11 +410,12 @@ describe('formatChatRelativeTime helper', () => {
   });
 
   it('falls back to a locale date for deltas beyond a month', () => {
-    const out = formatChatRelativeTime(at(60 * 86_400_000), NOW);
+    const iso = at(60 * 86_400_000);
+    const out = formatChatRelativeTime(iso, NOW);
+    const expected = new Date(iso).toLocaleDateString();
     expect(out).not.toContain('ago');
     expect(out).not.toBe('now');
-    // toLocaleDateString output varies by locale; just assert it parses.
-    expect(Number.isNaN(Date.parse(out))).toBe(false);
+    expect(out).toBe(expected);
   });
 
   it('treats future timestamps as "now" rather than rendering negative ages', () => {

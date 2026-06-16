@@ -249,13 +249,18 @@ describe('conversations page script', () => {
     expect(script).toContain('timeEl.textContent=chatRelTime(timestamp)');
     // Absolute time is preserved as the hover title so operators can still
     // recover the exact wall-clock time on demand.
-    expect(script).toContain(
-      'timeEl.setAttribute("title",new Date(timestamp).toLocaleString())',
-    );
+    expect(script).toContain('function chatAbsTime(iso){');
+    expect(script).toContain('if(isNaN(d.getTime()))return ""');
+    expect(script).toContain('var absTime=chatAbsTime(timestamp)');
+    expect(script).toContain('if(absTime)timeEl.setAttribute("title",absTime)');
+    expect(script).toContain('else timeEl.removeAttribute("title")');
     // The old behaviour (overwriting the second .chat-meta with a locale
     // string) must be gone, otherwise the bug returns.
     expect(script).not.toContain(
       'metas[1].textContent=new Date(timestamp).toLocaleString()',
+    );
+    expect(script).not.toContain(
+      'timeEl.setAttribute("title",new Date(timestamp).toLocaleString())',
     );
   });
 });
