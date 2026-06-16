@@ -239,7 +239,7 @@ describe('system page script', () => {
 
     expect(script).toContain('if(h.queue.message_lane_reasons){');
     expect(script).toContain(
-      'var mreasons=["running","cooling-down","back-pressure","retrying","no-work"];',
+      'var mreasons=Object.keys(h.queue.message_lane_reasons);',
     );
     expect(script).toContain(
       'el=document.getElementById("sys-queue-msg-reason-"+mrk);',
@@ -254,7 +254,7 @@ describe('system page script', () => {
 
     expect(script).toContain('if(h.queue.task_lane_reasons){');
     expect(script).toContain(
-      'var treasons=["running","back-pressure","no-work"];',
+      'var treasons=Object.keys(h.queue.task_lane_reasons);',
     );
     expect(script).toContain(
       'el=document.getElementById("sys-queue-task-reason-"+trk);',
