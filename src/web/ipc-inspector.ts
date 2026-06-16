@@ -59,6 +59,10 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
         TASK_REASON_CODES,
       );
       const msgRunningMs = g.messageLane.runningMs;
+      // Match agents-page `shouldShowAge`: only render the chip when we have a
+      // positive duration. A `0ms` chip on a freshly-transitioned row is more
+      // noise than signal, and keeping the threshold aligned across surfaces
+      // means a future consumer of runningMs only has one rule to follow.
       const msgAge =
         typeof msgRunningMs === 'number' && msgRunningMs > 0
           ? `<span class="lane-age" title="running for ${escapeHtml(formatDurationCompact(msgRunningMs))}">${escapeHtml(formatDurationCompact(msgRunningMs))}</span>`

@@ -490,6 +490,36 @@ describe('renderIpcInspector', () => {
     expect(html).not.toContain('class="lane-age"');
   });
 
+  it('omits message lane age when runningMs is exactly 0', () => {
+    // Aligns the visibility threshold with agents-page `shouldShowAge`: a freshly
+    // transitioned row (runningMs === 0) should not render a `0ms` chip, since
+    // the status badge already conveys that the lane is executing.
+    const detail: GroupQueueDetail = {
+      folderKey: 'agent-just-started',
+      messageLane: {
+        active: true,
+        idle: false,
+        pendingCount: 0,
+        containerName: 'ctr-just-started',
+        reason: 'running',
+        startedAt: Date.now(),
+        runningMs: 0,
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work',
+      },
+      retryCount: 0,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [detail] }),
+    );
+    expect(html).not.toContain('class="lane-age"');
+  });
+
   it('allowlists lane reason codes before rendering class names', () => {
     const xssDetail: GroupQueueDetail = {
       folderKey: 'agent-xss',
