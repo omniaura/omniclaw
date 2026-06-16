@@ -2,6 +2,48 @@ import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 
+/** Platforms surfaced by the chat-list badge. */
+export type ChatPlatform =
+  | 'discord'
+  | 'telegram'
+  | 'whatsapp'
+  | 'slack'
+  | 'unknown';
+
+/**
+ * Infer the originating platform from a chat JID. Mirrors the prefix taxonomy
+ * used by db.ts inferPlatformFromJid so the sidebar badge agrees with the
+ * stored sender_platform on persisted messages.
+ */
+export function chatPlatformFromJid(jid: string): ChatPlatform {
+  if (jid.startsWith('dc:')) return 'discord';
+  if (jid.startsWith('tg:')) return 'telegram';
+  if (jid.startsWith('slack:')) return 'slack';
+  if (jid.endsWith('@g.us') || jid.endsWith('@s.whatsapp.net'))
+    return 'whatsapp';
+  return 'unknown';
+}
+
+/** Short label rendered inside the chat-platform badge. */
+const PLATFORM_LABELS: Record<ChatPlatform, string> = {
+  discord: 'dc',
+  telegram: 'tg',
+  whatsapp: 'wa',
+  slack: 'sl',
+  unknown: '?',
+};
+
+/** Render the chat-platform badge for a sidebar row. */
+function renderPlatformBadge(jid: string): string {
+  const platform = chatPlatformFromJid(jid);
+  const label = PLATFORM_LABELS[platform];
+  return (
+    `<span class="badge badge-sm chat-platform platform-${platform}" ` +
+    `data-chat-platform="${platform}" title="${platform}">` +
+    `${escapeHtml(label)}</span>`
+  );
+}
+
 /** Build chat filter <option> list for the search panel dropdown. */
 function chatOptions(chats: Array<{ jid: string; name: string }>): string {
   return (
@@ -24,9 +66,13 @@ export function renderConversationsContent(state: WebStateProvider): string {
       const lastTime = c.last_message_time
         ? new Date(c.last_message_time).toLocaleString()
         : '\u2014';
+      const platform = chatPlatformFromJid(c.jid);
       return (
-        `<div class="chat-item" data-jid="${escapeHtml(c.jid)}" tabindex="0">` +
+        `<div class="chat-item" data-jid="${escapeHtml(c.jid)}" data-chat-platform="${platform}" tabindex="0">` +
+        `<div class="chat-name-row">` +
+        renderPlatformBadge(c.jid) +
         `<div class="chat-name">${escapeHtml(c.name || c.jid)}</div>` +
+        `</div>` +
         `<div class="chat-meta">${escapeHtml(c.jid)}</div>` +
         `<div class="chat-meta">${lastTime}</div>` +
         `</div>`
