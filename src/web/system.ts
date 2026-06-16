@@ -157,6 +157,13 @@ export interface HealthData {
      * tasks without drilling into /ipc.
      */
     longest_running_task_ms: number;
+    /**
+     * Longest currently-running message run age in milliseconds across all
+     * message lanes. Zero when no message lane is active. Operators can spot a
+     * stuck message turn from the queue rollup without drilling into /ipc, the
+     * same way {@link longest_running_task_ms} surfaces stuck task runs.
+     */
+    longest_running_message_ms: number;
     /** Number of group folders whose consecutive retry count is greater than zero. */
     retrying_groups: number;
     /**
@@ -282,6 +289,7 @@ export function buildHealthData(
   let processingGroups = 0;
   let runningTasks = 0;
   let longestRunningTaskMs = 0;
+  let longestRunningMessageMs = 0;
   let retryingGroups = 0;
   let totalRetries = 0;
   let maxRetries = 0;
@@ -306,6 +314,13 @@ export function buildHealthData(
       if (g.taskLane.activeTask.runningMs > longestRunningTaskMs) {
         longestRunningTaskMs = g.taskLane.activeTask.runningMs;
       }
+    }
+    const msgRunningMs = g.messageLane.runningMs;
+    if (
+      typeof msgRunningMs === 'number' &&
+      msgRunningMs > longestRunningMessageMs
+    ) {
+      longestRunningMessageMs = msgRunningMs;
     }
     if (g.retryCount > 0) retryingGroups++;
     totalRetries += g.retryCount;
@@ -373,6 +388,7 @@ export function buildHealthData(
       processing_groups: processingGroups,
       running_tasks: runningTasks,
       longest_running_task_ms: longestRunningTaskMs,
+      longest_running_message_ms: longestRunningMessageMs,
       retrying_groups: retryingGroups,
       total_retries: totalRetries,
       max_retries: maxRetries,
@@ -629,6 +645,13 @@ export function renderSystemContent(
             ? formatDurationCompact(health.queue.longest_running_task_ms)
             : '\u2014',
           'sys-queue-longest-running',
+        ) +
+        metricRow(
+          'longest message run',
+          health.queue.processing_groups > 0
+            ? formatDurationCompact(health.queue.longest_running_message_ms)
+            : '\u2014',
+          'sys-queue-longest-running-message',
         ) +
         metricRow(
           'pending msgs',

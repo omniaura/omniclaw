@@ -968,6 +968,83 @@ describe('renderSystemContent', () => {
     );
     // longest running task duration row is present
     expect(html).toContain('id="sys-queue-longest-running"');
+    // longest running message run row is present (mirrors the task version)
+    expect(html).toContain('id="sys-queue-longest-running-message"');
+  });
+
+  it('surfaces the longest running message age across all message lanes', () => {
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'g1-msg',
+          runningMs: 1500,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+      {
+        folderKey: 'g2',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'g2-msg',
+          runningMs: 90_000,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+    ];
+    const health = buildHealthData(makeState([makeAgent()], details), 0);
+    expect(health.queue.longest_running_message_ms).toBe(90_000);
+    expect(health.queue.processing_groups).toBe(2);
+    const html = renderSystemContent(makeState([makeAgent()], details), 0);
+    // 90000ms => 1.5m via the shared formatter
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-queue-longest-running-message">1.5m</span>',
+    );
+  });
+
+  it('renders an em-dash for longest running message when no lanes are active', () => {
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 0,
+          containerName: null,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+    ];
+    const health = buildHealthData(makeState([makeAgent()], details), 0);
+    expect(health.queue.processing_groups).toBe(0);
+    expect(health.queue.longest_running_message_ms).toBe(0);
+    const html = renderSystemContent(makeState([makeAgent()], details), 0);
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-queue-longest-running-message">—</span>',
+    );
   });
 
   it('surfaces the longest running task age across all task lanes', () => {
