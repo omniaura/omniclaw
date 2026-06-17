@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
+import { assertSafeModelOverride } from './agent-model-validation.js';
 import { discordCommandsSchema } from './agent-topology.js';
 import { DATA_DIR, STORE_DIR } from './config.js';
 import { TrustStore } from './discovery/trust-store.js';
@@ -1678,8 +1679,11 @@ export function setAgent(agent: Agent): void {
  * Returns true on success, false if the agent doesn't exist.
  */
 export function setAgentModel(agentId: string, model: string | null): boolean {
-  const normalized =
-    typeof model === 'string' && model.trim().length > 0 ? model.trim() : null;
+  // Defense-in-depth: reject control chars / NUL / over-long values even if
+  // the HTTP handler validator was bypassed. See agent-model-validation.ts
+  // and issue #857 — an unchecked override could inject extra env entries
+  // (e.g. ANTHROPIC_BASE_URL=...) when written to data/env/<agent>/env.
+  const normalized = assertSafeModelOverride(model);
   const result = db
     .query('UPDATE agents SET model = ? WHERE id = ?')
     .run(normalized, agentId);

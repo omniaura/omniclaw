@@ -1641,6 +1641,66 @@ describe('POST /api/agents/{id}/model', () => {
     expect(res.status).toBe(400);
   });
 
+  // Regression for #857: a model override with a newline could inject
+  // additional env entries (e.g. ANTHROPIC_BASE_URL=...) into the agent
+  // container env file. Reject any ASCII control character before the value
+  // ever reaches the persistence layer.
+  it('rejects model values containing control characters', async () => {
+    const cases: Array<{ label: string; model: string }> = [
+      { label: 'newline', model: 'claude-opus-4-6\nANTHROPIC_BASE_URL=evil' },
+      { label: 'carriage return', model: 'claude-opus-4-6\rfoo' },
+      { label: 'NUL', model: 'claude-opus-4-6\u0000foo' },
+      { label: 'tab', model: 'claude-opus-4-6\tfoo' },
+      { label: 'DEL (0x7F)', model: 'claude-opus-4-6\u007Ffoo' },
+    ];
+
+    for (const { label, model } of cases) {
+      const calls: Array<{ id: string; model: string | null }> = [];
+      const state = makeState({
+        setAgentModel: (id, m) => {
+          calls.push({ id, model: m });
+          return true;
+        },
+      });
+      const res = await handle(
+        new Request('http://localhost/api/agents/agent-1/model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model }),
+        }),
+        state,
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain('control');
+      // The unsafe value must never reach setAgentModel.
+      expect(calls).toEqual([]);
+      void label;
+    }
+  });
+
+  it('accepts a well-formed model identifier (happy path)', async () => {
+    const calls: Array<{ id: string; model: string | null }> = [];
+    const state = makeState({
+      setAgentModel: (id, model) => {
+        calls.push({ id, model });
+        return true;
+      },
+    });
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'anthropic/claude-opus-4-6' }),
+      }),
+      state,
+    );
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([
+      { id: 'agent-1', model: 'anthropic/claude-opus-4-6' },
+    ]);
+  });
+
   it('returns 404 when the agent does not exist', async () => {
     const state = makeState();
     const res = await handle(

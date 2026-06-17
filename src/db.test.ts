@@ -297,6 +297,27 @@ describe('per-agent model override', () => {
   it('setAgentModel returns false for unknown agent', () => {
     expect(setAgentModel('nonexistent', 'claude-opus-4-7')).toBe(false);
   });
+
+  // Defense-in-depth regression for #857: even if the HTTP validator is
+  // bypassed, setAgentModel must refuse to persist control-character payloads
+  // so they cannot reach data/env/<agent>/env as injected KEY=value lines.
+  it('setAgentModel throws on model values containing control characters', () => {
+    setAgent(baseAgent);
+    const cases = [
+      'claude-opus-4-6\nANTHROPIC_BASE_URL=evil',
+      'claude-opus-4-6\rfoo',
+      'claude-opus-4-6\u0000foo',
+      'claude-opus-4-6\tfoo',
+      'claude-opus-4-6\u007Ffoo',
+    ];
+    for (const bad of cases) {
+      expect(() => setAgentModel('model-agent', bad)).toThrow(
+        /control characters/,
+      );
+    }
+    // The persisted model is unchanged (no override was ever set on baseAgent).
+    expect(getAllAgents()['model-agent']?.model).toBeUndefined();
+  });
 });
 
 // --- storeMessage (sender_missing counter) ---

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import { validateModelOverride } from '../agent-model-validation.js';
 import { GROUPS_DIR } from '../config.js';
 import { assertPathWithin } from '../path-security.js';
 import type { ScheduledTask } from '../types.js';
@@ -1300,8 +1301,6 @@ async function handleSetAgentEnabled(
   return json({ ok: true, agentId, enabled: body.enabled });
 }
 
-const MAX_MODEL_LENGTH = 200;
-
 async function handleSetAgentModel(
   agentId: string,
   req: Request,
@@ -1324,25 +1323,14 @@ async function handleSetAgentModel(
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
-  // null / empty string clears the override.
-  let model: string | null;
-  if (body.model === null || body.model === undefined) {
-    model = null;
-  } else if (typeof body.model === 'string') {
-    const trimmed = body.model.trim();
-    if (trimmed.length === 0) {
-      model = null;
-    } else if (trimmed.length > MAX_MODEL_LENGTH) {
-      return json(
-        { error: `"model" must be ${MAX_MODEL_LENGTH} characters or fewer` },
-        400,
-      );
-    } else {
-      model = trimmed;
-    }
-  } else {
-    return json({ error: '"model" must be a string or null' }, 400);
+  // Shared validator: rejects control chars (\r, \n, NUL, …) so a model
+  // override cannot inject extra env entries when written to data/env/<agent>/env.
+  // See issue #857.
+  const validation = validateModelOverride(body.model);
+  if (!validation.ok) {
+    return json({ error: validation.error }, 400);
   }
+  const model = validation.value;
 
   const ok = state.setAgentModel(agentId, model);
   if (!ok) return json({ error: 'Agent not found' }, 404);
