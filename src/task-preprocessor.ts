@@ -208,11 +208,12 @@ export function runTaskPreprocessor(
     return { action: 'run', prompt: task.prompt };
   }
 
-  const workflowsDir = path.resolve(
-    options.workflowsDir ?? defaultWorkflowsDir(task),
-  );
+  let workflowsDir: string;
   let workflowPath: string;
   try {
+    workflowsDir = path.resolve(
+      options.workflowsDir ?? defaultWorkflowsDir(task),
+    );
     workflowPath = resolveWorkflowPath(task.preprocess_script, workflowsDir);
   } catch (err) {
     return {

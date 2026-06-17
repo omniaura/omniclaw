@@ -222,6 +222,37 @@ it('supports explicit workflow error actions', () => {
   });
 });
 
+it('uses default skip and error messages when workflow omits details', () => {
+  fs.writeFileSync(
+    path.join(workflowsDir, 'workflow.ts'),
+    'console.log(JSON.stringify({ action: "skip" }));',
+  );
+
+  expect(runTaskPreprocessor(task(), { workflowsDir })).toEqual({
+    action: 'skip',
+    reason: 'no work',
+  });
+
+  fs.writeFileSync(
+    path.join(workflowsDir, 'workflow.ts'),
+    'console.log(JSON.stringify({ action: "error" }));',
+  );
+
+  expect(runTaskPreprocessor(task(), { workflowsDir })).toEqual({
+    action: 'error',
+    error: 'workflow error',
+  });
+});
+
+it('runs the original prompt when workflow stdout is empty', () => {
+  fs.writeFileSync(path.join(workflowsDir, 'workflow.ts'), '');
+
+  expect(runTaskPreprocessor(task(), { workflowsDir })).toEqual({
+    action: 'run',
+    prompt: 'sync connector packages',
+  });
+});
+
 it('returns a sanitized error when workflow exits nonzero with stderr', () => {
   fs.writeFileSync(
     path.join(workflowsDir, 'workflow.ts'),
@@ -265,6 +296,27 @@ it('rejects workflow paths outside the workflows directory', () => {
   const result = runTaskPreprocessor(task({ preprocess_script: '../x.ts' }), {
     workflowsDir,
   });
+
+  expect(result.action).toBe('error');
+  if (result.action !== 'error') throw new Error('expected error result');
+  expect(result.error).toContain('Path traversal detected');
+});
+
+it('rejects whitespace workflow paths as empty', () => {
+  const result = runTaskPreprocessor(task({ preprocess_script: '   ' }), {
+    workflowsDir,
+  });
+
+  expect(result).toEqual({
+    action: 'error',
+    error: 'preprocess_script must be a non-empty path',
+  });
+});
+
+it('rejects traversal in group folder when using default workflows directory', () => {
+  const result = runTaskPreprocessor(
+    task({ group_folder: '../outside', preprocess_script: 'workflow.ts' }),
+  );
 
   expect(result.action).toBe('error');
   if (result.action !== 'error') throw new Error('expected error result');
