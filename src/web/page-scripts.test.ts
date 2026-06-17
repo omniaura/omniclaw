@@ -208,4 +208,59 @@ describe('system page script', () => {
       '(!h.peers.discovery_available?"unavailable":(h.peers.discovery_active?"active":"disabled"))',
     );
   });
+
+  it('refreshes queue card scalar fields from /api/health poll', () => {
+    const script = allPageScripts().system;
+
+    expect(script).toContain('if(h.queue){');
+    expect(script).toContain('getElementById("sys-queue-groups")');
+    expect(script).toContain('getElementById("sys-queue-processing")');
+    expect(script).toContain('getElementById("sys-queue-running-tasks")');
+    expect(script).toContain('getElementById("sys-queue-pending-messages")');
+    expect(script).toContain('getElementById("sys-queue-pending-tasks")');
+    expect(script).toContain('getElementById("sys-queue-retrying")');
+    expect(script).toContain('getElementById("sys-queue-total-retries")');
+    expect(script).toContain('getElementById("sys-queue-max-retries")');
+  });
+
+  it('renders the longest-running placeholder em-dash when no task is running', () => {
+    const script = allPageScripts().system;
+
+    expect(script).toContain('getElementById("sys-queue-longest-running")');
+    // Mirrors the server-side ternary in renderSystemContent so /system and
+    // the poll loop agree when no task is running.
+    expect(script).toContain(
+      'h.queue.running_tasks>0?fmtDur(h.queue.longest_running_task_ms):"—"',
+    );
+  });
+
+  it('refreshes message_lane_reasons rollup for every reason key', () => {
+    const script = allPageScripts().system;
+
+    expect(script).toContain('if(h.queue.message_lane_reasons){');
+    expect(script).toContain(
+      'var mreasons=Object.keys(h.queue.message_lane_reasons);',
+    );
+    expect(script).toContain(
+      'el=document.getElementById("sys-queue-msg-reason-"+mrk);',
+    );
+    expect(script).toContain(
+      'if(el)el.textContent=String(h.queue.message_lane_reasons[mrk]||0);',
+    );
+  });
+
+  it('refreshes task_lane_reasons rollup for every reason key', () => {
+    const script = allPageScripts().system;
+
+    expect(script).toContain('if(h.queue.task_lane_reasons){');
+    expect(script).toContain(
+      'var treasons=Object.keys(h.queue.task_lane_reasons);',
+    );
+    expect(script).toContain(
+      'el=document.getElementById("sys-queue-task-reason-"+trk);',
+    );
+    expect(script).toContain(
+      'if(el)el.textContent=String(h.queue.task_lane_reasons[trk]||0);',
+    );
+  });
 });
