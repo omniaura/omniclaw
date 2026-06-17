@@ -1,7 +1,10 @@
 import { describe, it, expect, afterEach } from 'bun:test';
 
 import { startWebServer, type WebServerHandle } from './server.js';
-import { chatPlatformFromJid, formatChatRelativeTime } from './conversations.js';
+import {
+  chatPlatformFromJid,
+  formatChatRelativeTime,
+} from './conversations.js';
 import type { WebStateProvider, QueueStats } from './types.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 
