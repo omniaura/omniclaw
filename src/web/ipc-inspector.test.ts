@@ -4,7 +4,12 @@ import type { WebStateProvider, QueueStats } from './types.js';
 import type { GroupQueueDetail } from '../group-queue.js';
 import type { IpcEvent } from './ipc-events.js';
 import { startWebServer, type WebServerHandle } from './server.js';
-import { renderIpcInspector } from './ipc-inspector.js';
+import {
+  classifyIpcEventSeverity,
+  countIpcEventSeverities,
+  formatRecentEventsValue,
+  renderIpcInspector,
+} from './ipc-inspector.js';
 
 // ---- Helpers ----
 
@@ -153,6 +158,68 @@ describe('renderIpcInspector', () => {
   it('shows zero retrying when no groups are retrying', () => {
     const html = renderIpcInspector(makeState({ getQueueDetails: () => [] }));
     expect(html).toContain('id="stat-retrying">0<');
+  });
+
+  it('shows recent events stat without breakdown when only ok events present', () => {
+    // sampleEvents are task_created + message_sent — both classify as ok.
+    const html = renderIpcInspector(makeState());
+    expect(html).toContain('id="stat-events">2<');
+  });
+
+  it('shows recent events stat with inline error count when errors present', () => {
+    const events: IpcEvent[] = [
+      {
+        id: 3,
+        kind: 'task_error',
+        timestamp: '2026-03-06T12:00:02.000Z',
+        sourceGroup: 'agent-alpha',
+        summary: 'Task crashed',
+      },
+      {
+        id: 2,
+        kind: 'ipc_error',
+        timestamp: '2026-03-06T12:00:01.000Z',
+        sourceGroup: 'agent-alpha',
+        summary: 'IPC failure',
+      },
+      {
+        id: 1,
+        kind: 'message_sent',
+        timestamp: '2026-03-06T12:00:00.000Z',
+        sourceGroup: 'agent-beta',
+        summary: 'ok',
+      },
+    ];
+    const html = renderIpcInspector(makeState({ getIpcEvents: () => events }));
+    expect(html).toContain('id="stat-events">3 (2 err)<');
+  });
+
+  it('shows recent events stat with both error and warn counts when both present', () => {
+    const events: IpcEvent[] = [
+      {
+        id: 3,
+        kind: 'task_error',
+        timestamp: '2026-03-06T12:00:02.000Z',
+        sourceGroup: 'agent-alpha',
+        summary: 'fail',
+      },
+      {
+        id: 2,
+        kind: 'message_suppressed',
+        timestamp: '2026-03-06T12:00:01.000Z',
+        sourceGroup: 'agent-alpha',
+        summary: 'rate limited',
+      },
+      {
+        id: 1,
+        kind: 'message_sent',
+        timestamp: '2026-03-06T12:00:00.000Z',
+        sourceGroup: 'agent-beta',
+        summary: 'ok',
+      },
+    ];
+    const html = renderIpcInspector(makeState({ getIpcEvents: () => events }));
+    expect(html).toContain('id="stat-events">3 (1 err, 1 warn)<');
   });
 
   it('shows empty state when no groups', () => {
@@ -546,6 +613,85 @@ describe('renderIpcInspector', () => {
     expect(html).not.toContain('onmouseover=alert(1)');
     expect(html).toContain('reason-unknown');
     expect(html).toContain('>unknown<');
+  });
+});
+
+describe('classifyIpcEventSeverity', () => {
+  it('classifies error kinds', () => {
+    expect(classifyIpcEventSeverity('task_error')).toBe('error');
+    expect(classifyIpcEventSeverity('ipc_error')).toBe('error');
+    expect(classifyIpcEventSeverity('message_blocked')).toBe('error');
+  });
+
+  it('classifies warn kinds', () => {
+    expect(classifyIpcEventSeverity('message_suppressed')).toBe('warn');
+  });
+
+  it('classifies neutral kinds as ok', () => {
+    expect(classifyIpcEventSeverity('message_sent')).toBe('ok');
+    expect(classifyIpcEventSeverity('task_created')).toBe('ok');
+    expect(classifyIpcEventSeverity('task_cancelled')).toBe('ok');
+    expect(classifyIpcEventSeverity('group_registered')).toBe('ok');
+  });
+
+  it('treats empty kinds as ok', () => {
+    expect(classifyIpcEventSeverity('')).toBe('ok');
+  });
+});
+
+describe('countIpcEventSeverities', () => {
+  function ev(id: number, kind: string): IpcEvent {
+    return {
+      id,
+      kind: kind as IpcEvent['kind'],
+      timestamp: '2026-03-06T12:00:00.000Z',
+      sourceGroup: 'g',
+      summary: '',
+    };
+  }
+
+  it('returns zeros for an empty event list', () => {
+    expect(countIpcEventSeverities([])).toEqual({ error: 0, warn: 0, ok: 0 });
+  });
+
+  it('counts errors, warnings, and ok events independently', () => {
+    const events = [
+      ev(1, 'message_sent'),
+      ev(2, 'task_error'),
+      ev(3, 'message_blocked'),
+      ev(4, 'message_suppressed'),
+      ev(5, 'task_created'),
+    ];
+    expect(countIpcEventSeverities(events)).toEqual({
+      error: 2,
+      warn: 1,
+      ok: 2,
+    });
+  });
+});
+
+describe('formatRecentEventsValue', () => {
+  it('returns the bare total when no errors or warnings present', () => {
+    expect(formatRecentEventsValue(0, { error: 0, warn: 0, ok: 0 })).toBe('0');
+    expect(formatRecentEventsValue(7, { error: 0, warn: 0, ok: 7 })).toBe('7');
+  });
+
+  it('appends error annotation when errors are present', () => {
+    expect(formatRecentEventsValue(10, { error: 3, warn: 0, ok: 7 })).toBe(
+      '10 (3 err)',
+    );
+  });
+
+  it('appends warn annotation when warns are present', () => {
+    expect(formatRecentEventsValue(10, { error: 0, warn: 2, ok: 8 })).toBe(
+      '10 (2 warn)',
+    );
+  });
+
+  it('chains error and warn annotations when both are present', () => {
+    expect(formatRecentEventsValue(10, { error: 3, warn: 2, ok: 5 })).toBe(
+      '10 (3 err, 2 warn)',
+    );
   });
 });
 

@@ -85,7 +85,7 @@ Source: `src/web/ipc-inspector.ts` (`renderIpcInspectorContent`).
 | `pending msgs`   | Sum of message-lane pending counts. Matches `/system`.                                   |
 | `pending tasks`  | Sum of task-lane pending counts.                                                         |
 | `retrying`       | `retryingGroups (totalRetries)` when any group is retrying, else `0`.                    |
-| `recent events`  | Number of events in the timeline below (capped at 50).                                   |
+| `recent events`  | Number of events in the timeline below (capped at 50). Suffixed with `(X err)` or `(X err, Y warn)` when any error or suppressed events fall in the window. |
 
 ### Group queue table (per-row)
 
