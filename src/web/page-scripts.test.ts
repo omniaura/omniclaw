@@ -231,6 +231,38 @@ describe('conversations page script', () => {
     const script = allPageScripts().conversations;
     expect(script).toContain('function updateChatListTime(jid,timestamp){');
   });
+
+  it('renders the SSE chat-row update as a relative bucket, not a locale date', () => {
+    // Regression guard for the PR #811 review: the server-rendered sidebar
+    // ships relative labels ("5m ago"), but if the live SSE handler overwrites
+    // the same cell with `new Date(timestamp).toLocaleString()`, the row flips
+    // back to a long absolute string the moment a new message arrives. The
+    // handler must mirror the server bucket logic and target the dedicated
+    // .chat-time element rather than the generic second .chat-meta.
+    const script = allPageScripts().conversations;
+    expect(script).toContain('function chatRelTime(iso){');
+    expect(script).toContain('"now"');
+    expect(script).toContain('"m ago"');
+    expect(script).toContain('"h ago"');
+    expect(script).toContain('"d ago"');
+    expect(script).toContain('item.querySelector(".chat-time")');
+    expect(script).toContain('timeEl.textContent=chatRelTime(timestamp)');
+    // Absolute time is preserved as the hover title so operators can still
+    // recover the exact wall-clock time on demand.
+    expect(script).toContain('function chatAbsTime(iso){');
+    expect(script).toContain('if(isNaN(d.getTime()))return ""');
+    expect(script).toContain('var absTime=chatAbsTime(timestamp)');
+    expect(script).toContain('if(absTime)timeEl.setAttribute("title",absTime)');
+    expect(script).toContain('else timeEl.removeAttribute("title")');
+    // The old behaviour (overwriting the second .chat-meta with a locale
+    // string) must be gone, otherwise the bug returns.
+    expect(script).not.toContain(
+      'metas[1].textContent=new Date(timestamp).toLocaleString()',
+    );
+    expect(script).not.toContain(
+      'timeEl.setAttribute("title",new Date(timestamp).toLocaleString())',
+    );
+  });
 });
 
 describe('system page script', () => {
