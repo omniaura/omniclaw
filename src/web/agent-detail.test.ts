@@ -473,6 +473,150 @@ describe('renderAgentDetailContent', () => {
     expect(html).toContain('exec-offline');
   });
 
+  it('derives executing status and omits reason when actively running', () => {
+    const state = makeState({
+      getQueueDetails: () => [
+        {
+          folderKey: 'test-agent',
+          messageLane: {
+            active: true,
+            idle: false,
+            pendingCount: 0,
+            containerName: 'test-agent-msg',
+            reason: 'running',
+          },
+          taskLane: {
+            active: false,
+            pendingCount: 0,
+            containerName: null,
+            activeTask: null,
+            reason: 'no-work',
+          },
+          retryCount: 0,
+        },
+      ],
+    });
+    const data = buildAgentDetailData('test-agent', state)!;
+    expect(data.execStatus).toBe('executing');
+    expect(data.execReason).toBe('running');
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('exec-executing');
+    expect(html).toContain('data-exec-status="executing"');
+    // Reason badge is suppressed for active states (label already conveys it).
+    expect(html).not.toContain('lane-reason');
+  });
+
+  it('surfaces structured reason for idle agent (cooling-down)', () => {
+    const state = makeState({
+      getQueueDetails: () => [
+        {
+          folderKey: 'test-agent',
+          messageLane: {
+            active: false,
+            idle: true,
+            pendingCount: 0,
+            containerName: 'test-agent-msg',
+            reason: 'cooling-down',
+          },
+          taskLane: {
+            active: false,
+            pendingCount: 0,
+            containerName: null,
+            activeTask: null,
+            reason: 'no-work',
+          },
+          retryCount: 0,
+        },
+      ],
+    });
+    const data = buildAgentDetailData('test-agent', state)!;
+    expect(data.execStatus).toBe('idle');
+    expect(data.execReason).toBe('cooling-down');
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('exec-idle');
+    expect(html).toContain('reason-cooling-down');
+    expect(html).toContain('data-exec-reason="cooling-down"');
+  });
+
+  it('surfaces back-pressure reason for queued agent with pending work', () => {
+    const state = makeState({
+      getQueueDetails: () => [
+        {
+          folderKey: 'test-agent',
+          messageLane: {
+            active: false,
+            idle: false,
+            pendingCount: 3,
+            containerName: null,
+            reason: 'back-pressure',
+          },
+          taskLane: {
+            active: false,
+            pendingCount: 0,
+            containerName: null,
+            activeTask: null,
+            reason: 'no-work',
+          },
+          retryCount: 0,
+        },
+      ],
+    });
+    const data = buildAgentDetailData('test-agent', state)!;
+    expect(data.execStatus).toBe('queued');
+    expect(data.execReason).toBe('back-pressure');
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('exec-queued');
+    expect(html).toContain('reason-back-pressure');
+  });
+
+  it('renders disabled badge when agent is explicitly disabled', () => {
+    const state = makeState({
+      getAgents: () => ({
+        'test-agent': makeAgent({ enabled: false }),
+      }),
+      // Even with active queue state, disabled override wins.
+      getQueueDetails: () => [
+        {
+          folderKey: 'test-agent',
+          messageLane: {
+            active: true,
+            idle: false,
+            pendingCount: 0,
+            containerName: 'test-agent-msg',
+            reason: 'running',
+          },
+          taskLane: {
+            active: false,
+            pendingCount: 0,
+            containerName: null,
+            activeTask: null,
+            reason: 'no-work',
+          },
+          retryCount: 0,
+        },
+      ],
+    });
+    const data = buildAgentDetailData('test-agent', state)!;
+    expect(data.execStatus).toBe('disabled');
+    expect(data.execReason).toBeNull();
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('exec-disabled');
+    expect(html).not.toContain('lane-reason');
+  });
+
+  it('falls back to offline with no reason for remote agents', () => {
+    const data = buildAgentDetailData(
+      'peer-1:remote:agent',
+      makeState(),
+      remotePeers,
+    )!;
+    expect(data.execStatus).toBe('offline');
+    expect(data.execReason).toBeNull();
+    const html = renderAgentDetailContent(data, 'peer-1:remote:agent');
+    expect(html).toContain('exec-offline');
+    expect(html).not.toContain('lane-reason');
+  });
+
   it('renders task toggle buttons for local agents', () => {
     const data = buildAgentDetailData('test-agent', makeState())!;
     const html = renderAgentDetailContent(data, 'test-agent');

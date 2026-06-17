@@ -2,10 +2,17 @@ import { createHash } from 'crypto';
 
 import { sanitizeTelegramAvatarUrl } from '../telegram-avatar.js';
 import type { RemotePeerAgents } from '../discovery/types.js';
+import type { MessageLaneReason } from '../group-queue.js';
 import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 import { buildAgentChannelData } from './agent-channels.js';
+import {
+  getAgentExecReason,
+  getAgentExecStatus,
+  renderExecStatusBadge,
+  type AgentExecStatus,
+} from './agents-page.js';
 
 function imageRev(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12);
@@ -82,6 +89,19 @@ export interface AgentDetailData {
     name: string;
     last_message_time: string;
   }>;
+  /**
+   * Server-derived execution status for the header badge. Mirrors the
+   * /agents list so the initial render matches the live poll instead of
+   * flashing "offline" before the first /api/ipc/queue response.
+   */
+  execStatus: AgentExecStatus;
+  /**
+   * Structured message-lane reason code (e.g. "cooling-down", "back-pressure",
+   * "retrying"). Surfaced alongside the status badge for non-active states so
+   * operators can see *why* an idle/queued agent is in its current state.
+   * Null when the agent has no queue detail entry or the state is active.
+   */
+  execReason: MessageLaneReason | null;
 }
 
 /** Build enriched agent detail data from the state provider. */
@@ -123,6 +143,8 @@ export function buildAgentDetailData(
       })),
       tasks: [],
       recentChats: [],
+      execStatus: 'offline',
+      execReason: null,
     };
   }
 
@@ -163,6 +185,21 @@ export function buildAgentDetailData(
       last_message_time: c.last_message_time,
     }));
 
+  // Server-derived live status. `disabled` is an operator override that
+  // takes precedence over the queue-derived status, matching the agents-list
+  // row treatment. Queue details may be empty (e.g. test stubs), in which
+  // case `getAgentExecStatus` returns "offline" and the badge falls back to
+  // the same value the previous hardcoded render produced.
+  const queueDetails = state.getQueueDetails();
+  let execStatus: AgentExecStatus;
+  let execReason: MessageLaneReason | null = null;
+  if (agent.enabled === false) {
+    execStatus = 'disabled';
+  } else {
+    execStatus = getAgentExecStatus(agent.folder, queueDetails);
+    execReason = getAgentExecReason(agent.folder, queueDetails);
+  }
+
   return {
     id: agent.id,
     name: agent.name,
@@ -185,6 +222,8 @@ export function buildAgentDetailData(
     channels,
     tasks,
     recentChats,
+    execStatus,
+    execReason,
   };
 }
 
@@ -319,7 +358,9 @@ export function renderAgentDetailContent(
       ? `<img class="ad-avatar" src="${avatarSrc}" alt="${esc(data.name)}" onerror="this.style.display='none'">`
       : `<div class="ad-avatar-placeholder">${esc(data.name.charAt(0).toUpperCase())}</div>`) +
     `<div class="ad-header-info">` +
-    `<h2 class="ad-name">${esc(data.name)} <span id="ad-exec-status" class="badge badge-sm ${data.enabled === false ? 'exec-disabled' : 'exec-offline'}">${data.enabled === false ? 'disabled' : 'offline'}</span></h2>` +
+    `<h2 class="ad-name">${esc(data.name)} <span id="ad-exec-status" class="ad-exec-status-wrap" data-exec-status="${data.execStatus}"${data.execReason ? ` data-exec-reason="${data.execReason}"` : ''}>` +
+    renderExecStatusBadge(data.execStatus, data.execReason) +
+    `</span></h2>` +
     `<div class="ad-meta">` +
     `<span class="badge ${backendBadge}">${esc(data.backend)}</span>` +
     `<span class="badge">${esc(data.agentRuntime)}</span>` +

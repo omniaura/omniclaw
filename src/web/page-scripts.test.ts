@@ -324,3 +324,16 @@ describe('system page script', () => {
     );
   });
 });
+
+describe('agent-detail page script', () => {
+  it('preserves the SSR disabled badge by skipping queue-derived renders', () => {
+    const script = allPageScripts()['agent-detail'];
+
+    // /api/ipc/queue has no enabled flag, so the poll cannot re-derive the
+    // disabled override. update() must bail when the badge is already
+    // disabled and wait for the enable button's full page reload.
+    expect(script).toContain(
+      'if(statusEl.getAttribute("data-exec-status")==="disabled")return;',
+    );
+  });
+});
