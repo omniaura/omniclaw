@@ -112,6 +112,66 @@ describe('network page script', () => {
       'window.__cleanup=function(){if(pollTimer)clearInterval(pollTimer);stopRemoteLogs(true);};',
     );
   });
+
+  it('routes refreshed peer rows through renderPeerOnlineCell so the last-seen chip survives /api/discovery/peers refreshes', () => {
+    const script = allPageScripts().network;
+
+    // Both helpers must be defined client-side.
+    expect(script).toContain('function formatPeerLastSeen(lastSeen,nowMs){');
+    expect(script).toContain('function renderPeerOnlineCell(peer){');
+    // renderPeerRows must use the new cell renderer instead of inlining the
+    // bare dot — otherwise refreshPeers() rebuilds rows without the chip.
+    expect(script).toContain("+'<td>'+renderPeerOnlineCell(peer)+'</td>'");
+    expect(script).not.toContain(
+      "+'<td>'+(peer.online?'<span style=\"color:var(--green)\">●</span>':'<span style=\"color:var(--text-muted)\">○</span>')+'</td>'",
+    );
+  });
+
+  it('client formatPeerLastSeen matches the server thresholds (sub-minute, hour, day, 30d, future-clamp)', () => {
+    const script = allPageScripts().network;
+    const start = script.indexOf('function formatPeerLastSeen(');
+    expect(start).toBeGreaterThan(-1);
+    // Capture the function definition through its closing brace + Date fallback line.
+    const end = script.indexOf(
+      'return new Date(t).toLocaleDateString();',
+      start,
+    );
+    expect(end).toBeGreaterThan(-1);
+    const body = script.slice(start, end);
+
+    expect(body).toContain('if(!lastSeen)return "";');
+    expect(body).toContain('if(isNaN(t))return "";');
+    // Future-dated timestamps clamp to "now" (Math.max(0, now - t)).
+    expect(body).toContain('var diff=Math.max(0,now-t);');
+    expect(body).toContain('if(diff<60000)return "now";');
+    expect(body).toContain(
+      'if(diff<3600000)return Math.floor(diff/60000)+"m ago";',
+    );
+    expect(body).toContain(
+      'if(diff<86400000)return Math.floor(diff/3600000)+"h ago";',
+    );
+    expect(body).toContain(
+      'if(diff<30*86400000)return Math.floor(diff/86400000)+"d ago";',
+    );
+  });
+
+  it('renderPeerOnlineCell omits the chip when online or when lastSeen is missing, and escapes the title attribute', () => {
+    const script = allPageScripts().network;
+    const start = script.indexOf('function renderPeerOnlineCell(peer){');
+    expect(start).toBeGreaterThan(-1);
+    const end = script.indexOf('function renderPeerRows(peers){', start);
+    expect(end).toBeGreaterThan(-1);
+    const body = script.slice(start, end);
+
+    // Online → bare dot, no chip lookup.
+    expect(body).toContain('if(peer.online)return dot;');
+    // Offline + no lastSeen (or unparseable) → bare dot.
+    expect(body).toContain('if(!rel)return dot;');
+    // Title attribute escapes the raw ISO so a crafted lastSeen can't break out of the tag.
+    expect(body).toContain('window.__esc(peer.lastSeen)');
+    expect(body).toContain('class="peer-last-seen"');
+    expect(body).toContain('window.__esc(rel)');
+  });
 });
 
 describe('conversations page script', () => {
