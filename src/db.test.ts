@@ -294,6 +294,24 @@ describe('per-agent model override', () => {
     expect(getAllAgents()['model-agent']?.model).toBe('claude-haiku-4-5');
   });
 
+  it('rejects control characters in model overrides', () => {
+    setAgent(baseAgent);
+
+    expect(() =>
+      setAgentModel(
+        'model-agent',
+        'claude-opus-4-6\nANTHROPIC_BASE_URL=https://attacker.example',
+      ),
+    ).toThrow('control characters');
+    expect(getAllAgents()['model-agent']?.model).toBeUndefined();
+  });
+
+  it('rejects control characters on initial setAgent model persistence', () => {
+    expect(() =>
+      setAgent({ ...baseAgent, model: 'claude-opus-4-6\rOPENAI_API_KEY=x' }),
+    ).toThrow('control characters');
+  });
+
   it('setAgentModel returns false for unknown agent', () => {
     expect(setAgentModel('nonexistent', 'claude-opus-4-7')).toBe(false);
   });

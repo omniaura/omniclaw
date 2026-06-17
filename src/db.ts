@@ -9,6 +9,7 @@ import { TrustStore } from './discovery/trust-store.js';
 import { FactoryWorkflowStore } from './factory-workflows.js';
 import { logger } from './logger.js';
 import { allMigrations, runMigrations } from './migrations.js';
+import { normalizeAgentModelOverride } from './model-override.js';
 import {
   Agent,
   AgentHealth,
@@ -1636,8 +1637,7 @@ export function setAgent(agent: Agent): void {
   // silently wipe a model the user set through the Web UI.
   let modelValue: string | null;
   if (agent.model !== undefined) {
-    const trimmed = agent.model.trim();
-    modelValue = trimmed.length > 0 ? trimmed : null;
+    modelValue = normalizeAgentModelOverride(agent.model);
   } else {
     const existing = db
       .prepare('SELECT model FROM agents WHERE id = ?')
@@ -1678,8 +1678,7 @@ export function setAgent(agent: Agent): void {
  * Returns true on success, false if the agent doesn't exist.
  */
 export function setAgentModel(agentId: string, model: string | null): boolean {
-  const normalized =
-    typeof model === 'string' && model.trim().length > 0 ? model.trim() : null;
+  const normalized = normalizeAgentModelOverride(model);
   const result = db
     .query('UPDATE agents SET model = ? WHERE id = ?')
     .run(normalized, agentId);

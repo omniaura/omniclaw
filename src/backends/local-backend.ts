@@ -28,6 +28,7 @@ import {
   TIMEZONE,
 } from '../config.js';
 import { logger } from '../logger.js';
+import { normalizeAgentModelOverride } from '../model-override.js';
 import { validateAdditionalMounts } from '../mount-security.js';
 import { assertPathWithin } from '../path-security.js';
 import { ContainerProcess } from '../types.js';
@@ -469,7 +470,7 @@ export function buildVolumeMounts(
   // Per-agent model override (from SQLite). Wins over any host .env value so
   // operators can configure model per agent without editing .env. Maps to the
   // runtime's expected env var; an empty string clears any inherited value.
-  const modelOverride = options?.model?.trim();
+  const modelOverride = normalizeAgentModelOverride(options?.model);
   if (modelOverride) {
     const modelEnvVar = modelEnvVarForRuntime(agentRuntime);
     filteredLines = filteredLines.filter(
