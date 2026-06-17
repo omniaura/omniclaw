@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { MessageFlags } from 'discord.js';
+import fs from 'fs';
+import path from 'path';
 
 import {
   jidToChannelId,
@@ -8,6 +10,7 @@ import {
   isImageAttachment,
 } from './discord.js';
 import { _initTestDatabase, setAgent, setChannelSubscription } from '../db.js';
+import { GROUPS_DIR } from '../config.js';
 import {
   downloadBinaryAttachment,
   downloadTextAttachment,
@@ -622,6 +625,339 @@ describe('Discord slash flows', () => {
       content:
         'I acknowledged the command, but failed to queue it. Check OmniClaw logs for details.',
       ephemeral: true,
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Codex / OpenCode / per-channel slash sync coverage (#639).
+  //
+  // The post-#635 architecture derives slash command groups from canonical
+  // `channelSubscriptions` via the `slashCommandGroups` callback. The cases
+  // below pin behavior for non-Claude runtimes (Codex, OpenCode), for the
+  // subscription-derived channel-folder lookup, and for the full
+  // registration → invoke → routing path that PR #635's review (Cody)
+  // explicitly asked for. Tests share a folder cleanup set so concurrent
+  // workers don't leak fixtures under the canonical `groups/` directory.
+  // ---------------------------------------------------------------------------
+  describe('non-Claude runtime + channel-folder sync', () => {
+    const createdFolders = new Set<string>();
+
+    afterEach(() => {
+      for (const folder of createdFolders) {
+        const absolute = path.join(GROUPS_DIR, folder);
+        if (fs.existsSync(absolute)) {
+          fs.rmSync(absolute, { recursive: true, force: true });
+        }
+      }
+      createdFolders.clear();
+    });
+
+    function writeDiscordCommandFile(
+      relativeFolder: string,
+      commandName: string,
+      prompt = 'Run the {{topic}} flow for {{repo}}',
+    ): void {
+      createdFolders.add(relativeFolder);
+      const folder = path.join(GROUPS_DIR, relativeFolder);
+      fs.mkdirSync(folder, { recursive: true });
+      fs.writeFileSync(
+        path.join(folder, 'discord-commands.json'),
+        JSON.stringify(
+          {
+            commands: [
+              {
+                name: commandName,
+                description: 'Per-channel test flow',
+                prompt,
+                options: [
+                  {
+                    name: 'repo',
+                    description: 'Repository to target',
+                    type: 'string',
+                    defaultValue: 'omniclaw',
+                  },
+                  {
+                    name: 'topic',
+                    description: 'What to drive',
+                    type: 'string',
+                    defaultValue: 'triage',
+                  },
+                ],
+              },
+            ],
+          },
+          null,
+          2,
+        ),
+      );
+    }
+
+    function mockGuildCommandsApi(
+      channel: DiscordChannel,
+      setCommands: (commands: unknown[]) => Promise<void>,
+    ): void {
+      const fetchGuild = mock(async () => ({
+        commands: { set: setCommands },
+      }));
+      (
+        channel as unknown as {
+          connected: boolean;
+          client: {
+            guilds: { fetch: (guildId: string) => Promise<unknown> };
+          };
+        }
+      ).connected = true;
+      (
+        channel as unknown as {
+          client: {
+            guilds: { fetch: (guildId: string) => Promise<unknown> };
+          };
+        }
+      ).client = { guilds: { fetch: fetchGuild } };
+    }
+
+    it('syncs builtin slash commands for a Codex-runtime bot', async () => {
+      const setCommands = mock(async (_commands: unknown[]) => {});
+      const channel = new DiscordChannel({
+        token: 'test-token-not-used',
+        botId: 'CODEX',
+        slashCommandGroups: () => [
+          {
+            name: 'Dex',
+            folder: 'dex-discord',
+            trigger: '@Dex',
+            added_at: '2026-05-01T00:00:00.000Z',
+            discordBotId: 'CODEX',
+            discordGuildId: '753336633083953213',
+            backend: 'apple-container',
+            agentRuntime: 'codex',
+          },
+        ],
+      });
+      mockGuildCommandsApi(channel, setCommands);
+
+      await channel.refreshSlashCommands();
+
+      expect(setCommands).toHaveBeenCalledTimes(1);
+      const commands = setCommands.mock.calls[0]?.[0] as Array<{
+        name: string;
+      }>;
+      // mergemaster is a builtin so it should appear for any runtime.
+      expect(commands.map((c) => c.name)).toContain('mergemaster');
+    });
+
+    it('syncs builtin slash commands for an OpenCode-runtime bot', async () => {
+      const setCommands = mock(async (_commands: unknown[]) => {});
+      const channel = new DiscordChannel({
+        token: 'test-token-not-used',
+        botId: 'OPENCODE',
+        slashCommandGroups: () => [
+          {
+            name: 'Otto',
+            folder: 'otto-discord',
+            trigger: '@Otto',
+            added_at: '2026-05-01T00:00:00.000Z',
+            discordBotId: 'OPENCODE',
+            discordGuildId: '753336633083953213',
+            backend: 'apple-container',
+            agentRuntime: 'opencode',
+          },
+        ],
+      });
+      mockGuildCommandsApi(channel, setCommands);
+
+      await channel.refreshSlashCommands();
+
+      expect(setCommands).toHaveBeenCalledTimes(1);
+      const commands = setCommands.mock.calls[0]?.[0] as Array<{
+        name: string;
+      }>;
+      expect(commands.map((c) => c.name)).toContain('mergemaster');
+    });
+
+    it('picks up custom commands from a subscription-derived channel folder', async () => {
+      const setCommands = mock(async (_commands: unknown[]) => {});
+      const guildId = '753336633083953214';
+      const channelId = '1474995286903361773';
+      const channelFolder = path.join(
+        'servers',
+        guildId,
+        'channels',
+        channelId,
+      );
+      writeDiscordCommandFile(channelFolder, 'channeltest');
+
+      const channel = new DiscordChannel({
+        token: 'test-token-not-used',
+        botId: 'CODEX',
+        slashCommandGroups: () => [
+          {
+            name: 'Dex',
+            folder: 'dex-discord',
+            trigger: '@Dex',
+            added_at: '2026-05-01T00:00:00.000Z',
+            discordBotId: 'CODEX',
+            discordGuildId: guildId,
+            channelFolder,
+            backend: 'apple-container',
+            agentRuntime: 'codex',
+          },
+        ],
+      });
+      mockGuildCommandsApi(channel, setCommands);
+
+      await channel.refreshSlashCommands();
+
+      expect(setCommands).toHaveBeenCalledTimes(1);
+      const commands = setCommands.mock.calls[0]?.[0] as Array<{
+        name: string;
+      }>;
+      expect(commands.map((c) => c.name)).toContain('channeltest');
+    });
+
+    it('falls back to legacy single-bot registeredGroups when slashCommandGroups is absent', async () => {
+      const setCommands = mock(async (_commands: unknown[]) => {});
+      const channel = new DiscordChannel({
+        token: 'test-token-not-used',
+        botId: 'PRIMARY',
+        registeredGroups: () => ({
+          'dc:1474995286903361776': {
+            name: 'Clayton',
+            folder: 'clayton-discord',
+            trigger: '@Clayton',
+            added_at: '2026-05-01T00:00:00.000Z',
+            discordBotId: 'PRIMARY',
+            discordGuildId: '753336633083953215',
+            backend: 'apple-container',
+            agentRuntime: 'claude-agent-sdk',
+          },
+        }),
+      });
+      mockGuildCommandsApi(channel, setCommands);
+
+      await channel.refreshSlashCommands();
+
+      expect(setCommands).toHaveBeenCalledTimes(1);
+      const commands = setCommands.mock.calls[0]?.[0] as Array<{
+        name: string;
+      }>;
+      expect(commands.map((c) => c.name)).toContain('mergemaster');
+    });
+
+    it('routes a derived channel-folder slash command end-to-end (register → invoke → synthetic message)', async () => {
+      // Cody's follow-up on #635: prove the derived channel-folder slash
+      // command path works for *execution*, not only registration. Wires a
+      // Codex subscription with a custom `channeltest` command in its
+      // derived channel folder, then asserts both that the slash sync
+      // includes it and that invoking it dispatches a synthetic message
+      // with the rendered prompt to onSyntheticMessage.
+      const guildId = '753336633083953216';
+      const channelId = '1474995286903361777';
+      const channelFolder = path.join(
+        'servers',
+        guildId,
+        'channels',
+        channelId,
+      );
+      writeDiscordCommandFile(
+        channelFolder,
+        'channeltest',
+        'Drive {{topic}} on {{repo}}.',
+      );
+
+      let synthetic: { trigger?: string; content?: string } | undefined;
+      const setCommands = mock(async (_commands: unknown[]) => {});
+      const codexGroup: RegisteredGroup = {
+        name: 'Dex',
+        folder: 'dex-discord',
+        trigger: '@Dex',
+        added_at: '2026-05-01T00:00:00.000Z',
+        discordBotId: 'CODEX',
+        discordGuildId: guildId,
+        channelFolder,
+        backend: 'apple-container',
+        agentRuntime: 'codex',
+      };
+      const channel = new DiscordChannel({
+        token: 'test-token-not-used',
+        botId: 'CODEX',
+        slashCommandGroups: () => [codexGroup],
+        onSyntheticMessage: (message) => {
+          synthetic = {
+            trigger: codexGroup.trigger,
+            content: message.content,
+          };
+        },
+      });
+      mockGuildCommandsApi(channel, setCommands);
+
+      // Registration path: confirm the derived channel-folder command is
+      // sent to Discord.
+      setAgent({
+        id: 'dex-discord',
+        name: 'Dex',
+        folder: 'dex-discord',
+        backend: 'apple-container',
+        agentRuntime: 'codex',
+        isAdmin: false,
+        createdAt: '2026-05-01T00:00:00.000Z',
+      });
+      setChannelSubscription({
+        channelJid: `dc:${channelId}`,
+        agentId: 'dex-discord',
+        trigger: '@Dex',
+        requiresTrigger: true,
+        priority: 0,
+        isPrimary: true,
+        discordBotId: 'CODEX',
+        discordGuildId: guildId,
+        channelFolder,
+        createdAt: '2026-05-01T00:00:00.000Z',
+      });
+      await channel.refreshSlashCommands();
+      const registered = setCommands.mock.calls[0]?.[0] as Array<{
+        name: string;
+      }>;
+      expect(registered.map((c) => c.name)).toContain('channeltest');
+
+      // Execution path: invoking the command must reach onSyntheticMessage
+      // with the rendered prompt prefixed by the group trigger.
+      const interaction = {
+        id: '1499999999999999999',
+        commandName: 'channeltest',
+        channelId,
+        guildId,
+        inGuild: () => true,
+        member: { displayName: 'Future Trees' },
+        user: {
+          id: '217828620029132802',
+          globalName: 'Future Trees',
+          username: 'futuretrees',
+        },
+        channel: { name: 'channel-test' },
+        options: {
+          getString: (name: string) =>
+            name === 'repo' ? 'omniclaw' : name === 'topic' ? 'triage' : null,
+          getInteger: () => null,
+          getBoolean: () => null,
+        },
+        deferReply: mock(async () => {}),
+        editReply: mock(async () => {}),
+        followUp: mock(async () => {}),
+      };
+
+      await (
+        channel as unknown as {
+          handleSlashCommand: (input: typeof interaction) => Promise<void>;
+        }
+      ).handleSlashCommand(interaction);
+
+      expect(interaction.editReply).toHaveBeenCalledWith({
+        content: 'Queued "/channeltest" for Dex.',
+      });
+      expect(synthetic).toBeDefined();
+      expect(synthetic?.content).toBe('@Dex Drive triage on omniclaw.');
+      expect(interaction.followUp).not.toHaveBeenCalled();
     });
   });
 });
