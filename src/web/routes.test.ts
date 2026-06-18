@@ -1628,6 +1628,30 @@ describe('POST /api/agents/{id}/model', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects model values with control characters before persisting', async () => {
+    const calls: Array<{ id: string; model: string | null }> = [];
+    const state = makeState({
+      setAgentModel: (id, model) => {
+        calls.push({ id, model });
+        return true;
+      },
+    });
+    const res = await handle(
+      new Request('http://localhost/api/agents/agent-1/model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-opus-4-6\nANTHROPIC_BASE_URL=https://attacker.example',
+        }),
+      }),
+      state,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('control characters');
+    expect(calls).toEqual([]);
+  });
+
   it('rejects non-string non-null model values', async () => {
     const state = makeState();
     const res = await handle(

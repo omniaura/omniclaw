@@ -545,6 +545,36 @@ describe('LocalBackend', () => {
       }
     });
 
+    it('rejects unsafe model overrides before writing the env file', () => {
+      const fixture = createFixture();
+      try {
+        fs.writeFileSync(
+          path.join(fixture.tempProjectRoot, '.env'),
+          'ANTHROPIC_API_KEY=host-secret\n',
+        );
+
+        expect(() =>
+          buildVolumeMounts(
+            { folder: fixture.groupFolder, name: 'Claude Test' } as any,
+            false,
+            false,
+            fixture.altRuntimeFolder,
+            'claude-agent-sdk',
+            undefined,
+            fixture.pathOverrides,
+            {
+              model:
+                'claude-opus-4-6\nANTHROPIC_BASE_URL=https://attacker.example',
+            },
+          ),
+        ).toThrow('control characters');
+
+        expect(fs.existsSync(path.join(fixture.altEnvDir, 'env'))).toBe(false);
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
     it('leaves .env CLAUDE_MODEL untouched when no override is provided', () => {
       const fixture = createFixture();
       try {

@@ -41,6 +41,10 @@ import {
 import { sanitizeTelegramAvatarUrl } from '../telegram-avatar.js';
 import { readJsonBody, RequestBodyTooLargeError } from '../request-body.js';
 import { normalizePreprocessScriptPath } from '../task-preprocessor.js';
+import {
+  InvalidAgentModelOverrideError,
+  normalizeAgentModelOverride,
+} from '../model-override.js';
 
 /** Optional discovery context — set by the orchestrator when discovery is enabled. */
 let discoveryContext: DiscoveryRouteContext | null = null;
@@ -1300,8 +1304,6 @@ async function handleSetAgentEnabled(
   return json({ ok: true, agentId, enabled: body.enabled });
 }
 
-const MAX_MODEL_LENGTH = 200;
-
 async function handleSetAgentModel(
   agentId: string,
   req: Request,
@@ -1324,21 +1326,17 @@ async function handleSetAgentModel(
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
-  // null / empty string clears the override.
   let model: string | null;
   if (body.model === null || body.model === undefined) {
     model = null;
   } else if (typeof body.model === 'string') {
-    const trimmed = body.model.trim();
-    if (trimmed.length === 0) {
-      model = null;
-    } else if (trimmed.length > MAX_MODEL_LENGTH) {
-      return json(
-        { error: `"model" must be ${MAX_MODEL_LENGTH} characters or fewer` },
-        400,
-      );
-    } else {
-      model = trimmed;
+    try {
+      model = normalizeAgentModelOverride(body.model);
+    } catch (err) {
+      if (err instanceof InvalidAgentModelOverrideError) {
+        return json({ error: err.message }, 400);
+      }
+      throw err;
     }
   } else {
     return json({ error: '"model" must be a string or null' }, 400);
