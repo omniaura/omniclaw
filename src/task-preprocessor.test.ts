@@ -10,13 +10,18 @@ import {
 import type { ScheduledTask } from './types.js';
 
 let workflowsDir: string;
+let cleanupPaths: string[];
 
 beforeEach(() => {
   workflowsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-pre-'));
+  cleanupPaths = [];
 });
 
 afterEach(() => {
   fs.rmSync(workflowsDir, { recursive: true, force: true });
+  for (const cleanupPath of cleanupPaths) {
+    fs.rmSync(cleanupPath, { recursive: true, force: true });
+  }
 });
 
 function task(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
@@ -308,5 +313,22 @@ it('does nothing when no preprocessor is configured', () => {
   ).toEqual({
     action: 'run',
     prompt: 'sync connector packages',
+  });
+});
+
+it('resolves default group workflow directory when no override is supplied', () => {
+  const groupFolder = 'task-preprocessor-default-test';
+  const groupDir = path.resolve('groups', groupFolder);
+  const defaultWorkflowsDir = path.resolve(groupDir, 'task-workflows');
+  fs.mkdirSync(defaultWorkflowsDir, { recursive: true });
+  cleanupPaths.push(groupDir);
+  fs.writeFileSync(
+    path.join(defaultWorkflowsDir, 'workflow.ts'),
+    'console.log(JSON.stringify({ action: "skip", reason: "default dir" }));',
+  );
+
+  expect(runTaskPreprocessor(task({ group_folder: groupFolder }))).toEqual({
+    action: 'skip',
+    reason: 'default dir',
   });
 });
