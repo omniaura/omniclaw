@@ -267,20 +267,49 @@ describe('formatTaskLastRun', () => {
 });
 
 describe('lastRunOutcomeClass', () => {
-  it('maps success to run-success', () => {
-    expect(lastRunOutcomeClass('success')).toBe('run-success');
+  it('maps the done outcome state to run-success regardless of last_result', () => {
+    // Schedulers write summary strings like "Completed" / "Run 1 done" /
+    // a result excerpt into last_result. The colored badge needs to follow the
+    // normalized outcome state instead, otherwise those rows render uncolored
+    // even though the run clearly succeeded (#858).
+    expect(lastRunOutcomeClass('done', 'Completed')).toBe('run-success');
+    expect(lastRunOutcomeClass('done', 'Run 1 done')).toBe('run-success');
+    expect(lastRunOutcomeClass('done')).toBe('run-success');
   });
 
-  it('maps error to run-error', () => {
-    expect(lastRunOutcomeClass('error')).toBe('run-error');
+  it('maps the blocked outcome state to run-error', () => {
+    expect(lastRunOutcomeClass('blocked', 'Error: connection refused')).toBe(
+      'run-error',
+    );
+    expect(lastRunOutcomeClass('blocked')).toBe('run-error');
   });
 
-  it('returns empty string for null', () => {
+  it('maps the abandoned outcome state to run-error', () => {
+    expect(lastRunOutcomeClass('abandoned', 'Error: Execution timed out')).toBe(
+      'run-error',
+    );
+  });
+
+  it('returns an empty class for the skipped outcome state', () => {
+    // Skipped runs are intentional no-ops — neither success nor failure — so
+    // the row should render neutral. The outcome-state badge already conveys
+    // "skipped" on its own.
+    expect(lastRunOutcomeClass('skipped', 'Skipped by preprocessor: foo')).toBe(
+      '',
+    );
+  });
+
+  it('falls back to the legacy last_result token when no outcome state is set', () => {
+    expect(lastRunOutcomeClass(null, 'success')).toBe('run-success');
+    expect(lastRunOutcomeClass(null, 'error')).toBe('run-error');
+    expect(lastRunOutcomeClass(undefined, 'success')).toBe('run-success');
+  });
+
+  it('returns an empty class when both inputs are missing or unrecognized', () => {
+    expect(lastRunOutcomeClass(null, null)).toBe('');
     expect(lastRunOutcomeClass(null)).toBe('');
-  });
-
-  it('returns empty string for unknown values', () => {
-    expect(lastRunOutcomeClass('weird')).toBe('');
+    expect(lastRunOutcomeClass(null, 'Completed')).toBe('');
+    expect(lastRunOutcomeClass(null, 'weird')).toBe('');
   });
 });
 
@@ -365,6 +394,64 @@ describe('renderAgentDetailContent', () => {
     const html = renderAgentDetailContent(data, 'test-agent');
     expect(html).toContain('run-error');
     expect(html).toContain('2h ago');
+  });
+
+  it('colors a scheduler "Completed" summary row green via last_outcome_state', () => {
+    // The scheduler writes a free-text summary into last_result
+    // (`'Completed'` for one-shots, `result.slice(0, 200)` for streamed
+    // results, `'Error: ...'` for failures — see updateTaskAfterRun in
+    // task-scheduler.ts) and the normalized state into last_outcome_state.
+    // Before #858 the row coloring keyed off last_result === 'success', so
+    // these real-world rows rendered neutral. The badge should now be
+    // green via last_outcome_state alone.
+    const state = makeState({
+      getTasks: () => [
+        makeTask({
+          last_run: new Date(Date.now() - 5 * 60_000).toISOString(),
+          last_result: 'Completed',
+          last_outcome_state: 'done',
+          last_outcome_reason: undefined,
+        }),
+      ],
+    });
+    const data = buildAgentDetailData('test-agent', state)!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('run-success');
+    expect(html).not.toContain('run-error');
+  });
+
+  it('colors a scheduler "Error: ..." summary row red via last_outcome_state', () => {
+    const state = makeState({
+      getTasks: () => [
+        makeTask({
+          last_run: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+          last_result: 'Error: container failed to start',
+          last_outcome_state: 'blocked',
+          last_outcome_reason: 'container failed to start',
+        }),
+      ],
+    });
+    const data = buildAgentDetailData('test-agent', state)!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('run-error');
+    expect(html).not.toContain('run-success');
+  });
+
+  it('leaves a skipped row neutral so only the outcome badge conveys the state', () => {
+    const state = makeState({
+      getTasks: () => [
+        makeTask({
+          last_run: new Date(Date.now() - 10 * 60_000).toISOString(),
+          last_result: 'Skipped by preprocessor: nothing to do',
+          last_outcome_state: 'skipped',
+          last_outcome_reason: 'nothing to do',
+        }),
+      ],
+    });
+    const data = buildAgentDetailData('test-agent', state)!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).not.toContain('run-success');
+    expect(html).not.toContain('run-error');
   });
 
   it('uses correct colspan for empty-tasks row when local agent', () => {
