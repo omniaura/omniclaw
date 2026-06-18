@@ -317,12 +317,14 @@ it('does nothing when no preprocessor is configured', () => {
 });
 
 it('resolves default group workflow directory when no override is supplied', () => {
-  const groupFolder = 'task-preprocessor-default-test';
-  const groupDir = path.resolve('groups', groupFolder);
+  const groupDir = fs.mkdtempSync(
+    path.resolve('groups', 'task-preprocessor-default-test-'),
+  );
+  const groupFolder = path.basename(groupDir);
   const defaultWorkflowsDir = path.resolve(groupDir, 'task-workflows');
   fs.mkdirSync(defaultWorkflowsDir, { recursive: true });
   cleanupPaths.push(groupDir);
-  fs.writeFileSync(
+
     path.join(defaultWorkflowsDir, 'workflow.ts'),
     'console.log(JSON.stringify({ action: "skip", reason: "default dir" }));',
   );
