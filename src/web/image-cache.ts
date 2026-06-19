@@ -467,14 +467,18 @@ export async function serveCachedRemoteImage(
       );
     } else if (options.fetchImpl) {
       // Caller-provided fetch is only safe for direct-IP URLs, where there is
-      // no hostname to re-resolve after validation.
+      // no hostname to re-resolve after validation. Keep redirects disabled so
+      // a validated public IP cannot bounce the fetch into private networks.
       upstream = await options.fetchImpl(url, {
         signal: AbortSignal.timeout(REMOTE_IMAGE_FETCH_TIMEOUT_MS),
+        redirect: 'manual',
       });
     } else {
-      // Direct-IP URL: already validated above, safe to fetch directly.
+      // Direct-IP URL: already validated above, safe to fetch directly as long
+      // as redirects cannot bypass validation.
       upstream = await fetch(url, {
         signal: AbortSignal.timeout(REMOTE_IMAGE_FETCH_TIMEOUT_MS),
+        redirect: 'manual',
       });
     }
 
