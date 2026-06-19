@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { describe, expect, it } from 'bun:test';
 
 import type { RemotePeerAgents } from '../discovery/types.js';
+import type { GroupQueueDetail } from '../group-queue.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 import {
   renderDashboardContent,
@@ -63,6 +64,7 @@ function makeState(options?: {
   chats?: Array<{ jid: string; name: string; last_message_time: string }>;
   tasks?: ScheduledTask[];
   queueStats?: ReturnType<WebStateProvider['getQueueStats']>;
+  queueDetails?: GroupQueueDetail[];
 }): WebStateProvider {
   const agents = options?.agents ?? [makeAgent()];
   const agentMap = Object.fromEntries(agents.map((agent) => [agent.id, agent]));
@@ -81,7 +83,7 @@ function makeState(options?: {
         maxActive: 1,
         maxIdle: 1,
       },
-    getQueueDetails: () => [],
+    getQueueDetails: () => options?.queueDetails ?? [],
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
     getTaskRunPhaseEvents: () => [],
@@ -111,6 +113,32 @@ function makeState(options?: {
     },
     resolveChatImage: async () => null,
     resolveDiscordGuildImage: async () => null,
+  };
+}
+
+function makeRunningTaskDetail(
+  overrides: { folderKey?: string; taskId?: string; runningMs?: number } = {},
+): GroupQueueDetail {
+  return {
+    folderKey: overrides.folderKey ?? 'groups/local-agent',
+    messageLane: {
+      active: false,
+      idle: false,
+      pendingCount: 0,
+      containerName: null,
+    },
+    taskLane: {
+      active: true,
+      pendingCount: 0,
+      containerName: null,
+      activeTask: {
+        taskId: overrides.taskId ?? 'task-active',
+        promptPreview: '',
+        startedAt: Date.now(),
+        runningMs: overrides.runningMs ?? 1000,
+      },
+    },
+    retryCount: 0,
   };
 }
 
@@ -147,6 +175,53 @@ describe('renderDashboardContent', () => {
     expect(html).toContain('id="stat-active">0/7</div>');
     expect(html).toContain('id="stat-idle">3/4</div>');
     expect(html).toContain('id="stat-tasks">1</div>');
+  });
+
+  it('annotates active tasks card with running count when tasks are in flight', () => {
+    const html = renderDashboardContent(
+      makeState({
+        tasks: [
+          makeTask({ id: 'task-a', status: 'active' }),
+          makeTask({ id: 'task-b', status: 'active' }),
+          makeTask({ id: 'task-c', status: 'active' }),
+        ],
+        queueDetails: [
+          makeRunningTaskDetail({ folderKey: 'g1', taskId: 'task-a' }),
+          makeRunningTaskDetail({ folderKey: 'g2', taskId: 'task-b' }),
+        ],
+      }),
+    );
+
+    expect(html).toContain('id="stat-tasks">3 (2 running)</div>');
+  });
+
+  it('omits the running annotation when no task lane is active', () => {
+    const html = renderDashboardContent(
+      makeState({
+        tasks: [makeTask({ status: 'active' })],
+        queueDetails: [
+          {
+            folderKey: 'g1',
+            messageLane: {
+              active: false,
+              idle: true,
+              pendingCount: 0,
+              containerName: null,
+            },
+            taskLane: {
+              active: false,
+              pendingCount: 0,
+              containerName: null,
+              activeTask: null,
+            },
+            retryCount: 0,
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain('id="stat-tasks">1</div>');
+    expect(html).not.toContain('running)');
   });
 
   it('serializes local and remote topology data with stable avatar cache-busting hashes', () => {

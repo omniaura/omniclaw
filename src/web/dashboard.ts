@@ -18,12 +18,23 @@ export function renderDashboardContent(
   const stats = state.getQueueStats();
   const agentData = buildAgentChannelData(state, remotePeers);
   const tasks = state.getTasks();
+  const queueDetails = state.getQueueDetails();
 
   const activeContainers = Math.max(
     0,
     stats.activeContainers - stats.idleContainers,
   );
   const activeTasks = tasks.filter((t) => t.status === 'active').length;
+  // Count tasks currently executing (task lane has an in-flight activeTask).
+  // Surfaced inline on the "active tasks" card so the operator can tell at a
+  // glance whether enabled tasks are sitting idle or actually running right
+  // now, without opening /ipc or /system.
+  const runningTasks = queueDetails.reduce(
+    (sum, g) => sum + (g.taskLane.activeTask ? 1 : 0),
+    0,
+  );
+  const activeTasksValue =
+    runningTasks > 0 ? `${activeTasks} (${runningTasks} running)` : `${activeTasks}`;
 
   // Serialize agent topology data for canvas renderer
   const topoData = escapeJsonForHtml(
@@ -74,7 +85,7 @@ export function renderDashboardContent(
     `<div class="stat-card"><div class="label">agents</div><div class="value" id="stat-agents">${agentData.length}</div></div>` +
     `<div class="stat-card"><div class="label">active containers</div><div class="value" id="stat-active">${activeContainers}/${stats.maxActive}</div></div>` +
     `<div class="stat-card"><div class="label">idle containers</div><div class="value" id="stat-idle">${stats.idleContainers}/${stats.maxIdle}</div></div>` +
-    `<div class="stat-card"><div class="label">active tasks</div><div class="value" id="stat-tasks">${activeTasks}</div></div>` +
+    `<div class="stat-card"><div class="label">active tasks</div><div class="value" id="stat-tasks">${activeTasksValue}</div></div>` +
     `</div>` +
     `<div class="topo-section">` +
     `<div class="section-header"><h2>agent topology</h2>` +
