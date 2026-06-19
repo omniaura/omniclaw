@@ -1267,7 +1267,8 @@ function refreshTasks(){
       var sl=scheduleLabel(task.schedule_type,task.schedule_value);
       var nr=task.next_run?relTime(task.next_run):"\\u2014";
       var lr=task.last_run?relTime(task.last_run):"\\u2014";
-      var lrc=task.last_result==="success"?"run-success":task.last_result==="error"?"run-error":"";
+      var los=task.last_outcome_state;
+      var lrc=los==="done"?"run-success":(los==="blocked"||los==="abandoned")?"run-error":los?"":task.last_result==="success"?"run-success":task.last_result==="error"?"run-error":"";
       return '<tr data-task-id="'+window.__esc(task.id)+'" data-status="'+window.__esc(task.status)+'">'
         +'<td><span class="badge '+sc+'">'+window.__esc(task.status)+'</span></td>'
         +'<td class="td-agent" title="'+window.__esc(task.chat_jid)+'">'+window.__esc(task.group_folder)+'</td>'

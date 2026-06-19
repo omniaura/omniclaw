@@ -392,6 +392,71 @@ describe('renderTaskTableRows — outcome badge', () => {
     expect(html).toContain('data-outcome-state="blocked"');
     expect(html).toContain('title="awaiting user reply"');
   });
+
+  it('colors a row whose last_result is a scheduler summary string (#858)', () => {
+    // The scheduler writes free-text summary strings into last_result
+    // (`'Completed'`, `result.slice(0, 200)`, `'Error: ...'` — see
+    // updateTaskAfterRun in task-scheduler.ts). Before #858 the row coloring
+    // only fired on the exact tokens `success` / `error`, so these
+    // real-world rows rendered uncolored. The normalized last_outcome_state
+    // is now the source of truth for the row color.
+    const html = renderTaskTableRows([
+      makeTask({
+        id: 'task-summary-done',
+        last_run: '2026-05-08T11:55:00.000Z',
+        last_result: 'Completed',
+        last_outcome_state: 'done',
+      }),
+    ]);
+
+    expect(html).toContain('run-success');
+    expect(html).not.toContain('run-error');
+  });
+
+  it('colors an "Error: ..." summary row red via last_outcome_state', () => {
+    const html = renderTaskTableRows([
+      makeTask({
+        id: 'task-summary-error',
+        last_run: '2026-05-08T11:55:00.000Z',
+        last_result: 'Error: container failed to start',
+        last_outcome_state: 'blocked',
+      }),
+    ]);
+
+    expect(html).toContain('run-error');
+    expect(html).not.toContain('run-success');
+  });
+
+  it('falls back to the legacy success/error tokens when no outcome state is set', () => {
+    // Pre-normalization rows (older scheduler runs) carry the bare tokens in
+    // last_result and a null last_outcome_state. Their coloring should still
+    // work so we don't regress historical rows.
+    const html = renderTaskTableRows([
+      makeTask({
+        id: 'task-legacy-success',
+        last_run: '2026-05-08T11:55:00.000Z',
+        last_result: 'success',
+      }),
+    ]);
+
+    expect(html).toContain('run-success');
+  });
+
+  it('leaves a row whose last_result is a non-token summary uncolored when no outcome state is set', () => {
+    // Sanity check: the legacy fallback only matches the bare tokens — a
+    // free-text last_result with no normalized state shouldn't pick up a
+    // color, matching the pre-#858 behavior for that edge case.
+    const html = renderTaskTableRows([
+      makeTask({
+        id: 'task-no-state',
+        last_run: '2026-05-08T11:55:00.000Z',
+        last_result: 'Completed',
+      }),
+    ]);
+
+    expect(html).not.toContain('run-success');
+    expect(html).not.toContain('run-error');
+  });
 });
 
 describe('renderTasksContent', () => {
