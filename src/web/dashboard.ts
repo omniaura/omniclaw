@@ -34,7 +34,9 @@ export function renderDashboardContent(
     0,
   );
   const activeTasksValue =
-    runningTasks > 0 ? `${activeTasks} (${runningTasks} running)` : `${activeTasks}`;
+    runningTasks > 0
+      ? `${activeTasks} (${runningTasks} running)`
+      : `${activeTasks}`;
 
   // Serialize agent topology data for canvas renderer
   const topoData = escapeJsonForHtml(
