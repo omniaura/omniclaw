@@ -384,6 +384,18 @@ describe('startAdminApi', () => {
       error: expect.stringContaining('JSON'),
     });
 
+    const oversized = await fetch(`${baseUrl}/agents`, {
+      method: 'POST',
+      body: JSON.stringify({
+        id: 'too-large',
+        padding: 'x'.repeat(1024 * 1024),
+      }),
+    });
+    expect(oversized.status).toBe(413);
+    expect(await readJson(oversized)).toMatchObject({
+      error: expect.stringContaining('Request body exceeded'),
+    });
+
     const missing = await fetch(`${baseUrl}/does-not-exist`);
     expect(missing.status).toBe(404);
     expect(await readJson(missing)).toEqual({ error: 'Not found' });

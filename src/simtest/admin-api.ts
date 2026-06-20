@@ -9,8 +9,11 @@ import type { IpcEventKind } from '../web/ipc-events.js';
 import type { WsEventType } from '../web/types.js';
 import type { WebServerHandle } from '../web/server.js';
 import { calculateNextRun } from '../schedule-utils.js';
+import { readJsonBody, RequestBodyTooLargeError } from '../request-body.js';
 import type { SimDiscoveryEnvironment } from './discovery-sim.js';
 import type { FakeState } from './fake-state.js';
+
+const MAX_ADMIN_JSON_BODY_BYTES = 1024 * 1024;
 
 export interface AdminApiConfig {
   port: number;
@@ -63,7 +66,12 @@ export function startAdminApi(
         result.headers.set('Access-Control-Allow-Origin', '*');
         return result;
       } catch (err) {
-        const status = isInvalidJsonError(err) ? 400 : 500;
+        const status =
+          err instanceof RequestBodyTooLargeError
+            ? 413
+            : isInvalidJsonError(err)
+              ? 400
+              : 500;
         const response = json(
           { error: err instanceof Error ? err.message : String(err) },
           status,
@@ -162,7 +170,7 @@ async function handleAdminRequest(
     const instanceId = decodeURIComponent(
       path.slice('/remote-peers/'.length, -'/logs'.length),
     );
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readAdminJsonBody<Record<string, unknown>>(req);
     if (typeof body.level !== 'string' || typeof body.msg !== 'string') {
       return json({ error: '"level" and "msg" are required' }, 400);
     }
@@ -187,7 +195,7 @@ async function handleAdminRequest(
 
   // ---- Agents ----
   if (path === '/agents' && method === 'POST') {
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readAdminJsonBody<Record<string, unknown>>(req);
     if (!body.id || typeof body.id !== 'string') {
       return json({ error: '"id" is required' }, 400);
     }
@@ -207,7 +215,7 @@ async function handleAdminRequest(
 
   // ---- Subscriptions ----
   if (path === '/subscriptions' && method === 'POST') {
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readAdminJsonBody<Record<string, unknown>>(req);
     if (!body.channelJid || !body.agentId) {
       return json({ error: '"channelJid" and "agentId" are required' }, 400);
     }
@@ -224,7 +232,7 @@ async function handleAdminRequest(
 
   // ---- Chats ----
   if (path === '/chats' && method === 'POST') {
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readAdminJsonBody<Record<string, unknown>>(req);
     if (!body.jid || !body.name) {
       return json({ error: '"jid" and "name" are required' }, 400);
     }
@@ -234,7 +242,7 @@ async function handleAdminRequest(
 
   // ---- Messages ----
   if (path === '/messages' && method === 'POST') {
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readAdminJsonBody<Record<string, unknown>>(req);
     if (!body.chatJid || !body.sender || !body.content) {
       return json(
         { error: '"chatJid", "sender", and "content" are required' },
@@ -252,7 +260,7 @@ async function handleAdminRequest(
 
   // ---- Tasks ----
   if (path === '/tasks' && method === 'POST') {
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readAdminJsonBody<Record<string, unknown>>(req);
     if (!body.id || typeof body.id !== 'string') {
       return json({ error: '"id" is required' }, 400);
     }
@@ -292,7 +300,7 @@ async function handleAdminRequest(
   }
   if (path.startsWith('/tasks/') && method === 'PATCH') {
     const id = decodeURIComponent(path.slice('/tasks/'.length));
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readAdminJsonBody<Record<string, unknown>>(req);
     try {
       const existing = state.getTaskById(id);
       if (!existing) {
@@ -389,7 +397,7 @@ async function handleAdminRequest(
 
   // ---- Task Run Logs ----
   if (path === '/task-runs' && method === 'POST') {
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readAdminJsonBody<Record<string, unknown>>(req);
     if (!body.taskId) return json({ error: '"taskId" is required' }, 400);
     state.addTaskRunLog(body.taskId as string, {
       run_at: new Date().toISOString(),
@@ -411,7 +419,7 @@ async function handleAdminRequest(
 
   // ---- IPC Events ----
   if (path === '/ipc-events' && method === 'POST') {
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readAdminJsonBody<Record<string, unknown>>(req);
     if (!body.kind || !body.sourceGroup || !body.summary) {
       return json(
         { error: '"kind", "sourceGroup", and "summary" are required' },
@@ -445,7 +453,7 @@ async function handleAdminRequest(
 
   // ---- Queue Stats ----
   if (path === '/queue-stats' && method === 'POST') {
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readAdminJsonBody<Record<string, unknown>>(req);
     state.setQueueStats(body);
     broadcast(webServer, 'agent_status', { queueStats: state.queueStats });
     return json(state.queueStats);
@@ -453,7 +461,7 @@ async function handleAdminRequest(
 
   // ---- Queue Details ----
   if (path === '/queue-details' && method === 'POST') {
-    const body = await req.json();
+    const body = await readAdminJsonBody<unknown>(req);
     if (!Array.isArray(body))
       return json({ error: 'Expected array of GroupQueueDetail' }, 400);
     state.setQueueDetails(body);
@@ -462,7 +470,7 @@ async function handleAdminRequest(
 
   // ---- Broadcast arbitrary event ----
   if (path === '/broadcast' && method === 'POST') {
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readAdminJsonBody<Record<string, unknown>>(req);
     if (!body.type) return json({ error: '"type" is required' }, 400);
     broadcast(webServer, body.type as WsEventType, body.data ?? {});
     return json({ ok: true, type: body.type });
@@ -706,6 +714,10 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function readAdminJsonBody<T>(req: Request): Promise<T> {
+  return readJsonBody<T>(req, MAX_ADMIN_JSON_BODY_BYTES);
 }
 
 const VALID_IPC_EVENT_KINDS = [
