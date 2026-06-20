@@ -214,4 +214,52 @@ describe('FakeState', () => {
       '# Main Agent\n\nThis is the main agent context.',
     );
   });
+
+  it('updates agent enabled/model state and handles missing agents', () => {
+    expect(state.setAgentEnabled('main', false)).toBe(true);
+    expect(state.getAgents().main?.enabled).toBe(false);
+    expect(state.setAgentEnabled('missing-agent', true)).toBe(false);
+
+    expect(state.setAgentModel('main', '  gpt-5.5  ')).toBe(true);
+    expect(state.getAgents().main?.model).toBe('gpt-5.5');
+
+    expect(state.setAgentModel('main', '   ')).toBe(true);
+    expect(state.getAgents().main?.model).toBeUndefined();
+
+    expect(state.setAgentModel('main', null)).toBe(true);
+    expect(state.getAgents().main?.model).toBeUndefined();
+    expect(state.setAgentModel('missing-agent', 'opus')).toBe(false);
+  });
+
+  it('updates existing chats and records new chat timestamps deterministically', () => {
+    state.addChat('sim:general', '#renamed-general');
+    expect(
+      state.getChats().find((chat) => chat.jid === 'sim:general'),
+    ).toMatchObject({
+      name: '#renamed-general',
+    });
+
+    state.addChat('sim:new-channel', '#new-channel');
+    expect(
+      state.getChats().find((chat) => chat.jid === 'sim:new-channel'),
+    ).toMatchObject({
+      jid: 'sim:new-channel',
+      name: '#new-channel',
+    });
+  });
+
+  it('mutates queue state and returns limited run logs for missing tasks', () => {
+    expect(state.getTaskRunLogs('missing-task')).toEqual([]);
+
+    state.setQueueStats({ activeContainers: 9, maxIdle: 2 });
+    expect(state.getQueueStats()).toMatchObject({
+      activeContainers: 9,
+      idleContainers: 1,
+      maxActive: 10,
+      maxIdle: 2,
+    });
+
+    state.setQueueDetails([]);
+    expect(state.getQueueDetails()).toEqual([]);
+  });
 });
