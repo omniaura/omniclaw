@@ -2090,8 +2090,10 @@ function refreshPeers(){
     .then(function(peers){
       var online=peers.filter(function(p){return p.online;}).length;
       var trusted=peers.filter(function(p){return p.status==="trusted";}).length;
+      var trustedOffline=peers.filter(function(p){return p.status==="trusted"&&!p.online;}).length;
+      var trustedText=trustedOffline>0?(trusted+" ("+trustedOffline+" offline)"):String(trusted);
       var oe=document.getElementById("stat-peers-online");if(oe)oe.textContent=String(online);
-      var te=document.getElementById("stat-peers-trusted");if(te)te.textContent=String(trusted);
+      var te=document.getElementById("stat-peers-trusted");if(te)te.textContent=trustedText;
       var body=document.getElementById("peers-tbody");if(body)body.innerHTML=renderPeerRows(peers);
     }).catch(function(){});
 }

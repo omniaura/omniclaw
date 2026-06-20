@@ -32,6 +32,7 @@ import { renderConversationsContent } from './conversations.js';
 import { renderContextViewerContent } from './context-viewer.js';
 import { renderIpcInspectorContent } from './ipc-inspector.js';
 import {
+  formatTrustedStatValue,
   renderNetworkContent,
   renderPeerRows,
   renderPendingRequests,
@@ -1179,7 +1180,7 @@ function patchNetwork(client: SseClient): void {
     `<div class="value" id="stat-peers-online">${pageState.peers.filter((peer) => peer.online).length}</div>`,
   );
   client.stream.patchElements(
-    `<div class="value" id="stat-peers-trusted">${pageState.peers.filter((peer) => peer.status === 'trusted').length}</div>`,
+    `<div class="value" id="stat-peers-trusted">${formatTrustedStatValue(pageState.peers)}</div>`,
   );
   client.stream.patchElements(
     `<span class="badge" id="pending-count">${pageState.pendingRequests.length}</span>`,
