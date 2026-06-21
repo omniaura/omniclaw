@@ -1,6 +1,6 @@
 # OmniClaw Roadmap
 
-Last updated: 2026-06-13
+Last updated: 2026-06-21
 
 > **Maintenance:** run `bash scripts/check-roadmap-refs.sh` after editing to catch
 > Planned Work entries that point at closed/merged issues without an explicit
@@ -26,7 +26,7 @@ Last updated: 2026-06-13
 | WhatsApp | baileys     | Stable   | Original channel, reconnect handling, auth  |
 | Discord  | discord.js  | Stable   | Mentions, threads, reactions, slash flows   |
 | Telegram | grammY      | Stable   | Multi-bot support, no trigger prefix needed |
-| Slack    | @slack/bolt | Early    | Multi-bot routing, Socket Mode              |
+| Slack    | @slack/bolt | Stable   | AI-app modernization, native streamed responses, multi-bot routing, Socket Mode |
 
 ### Backends
 
