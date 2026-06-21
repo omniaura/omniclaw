@@ -21,11 +21,11 @@ Last updated: 2026-06-21
 
 ### Channels
 
-| Channel  | Adapter     | Maturity | Notes                                       |
-| -------- | ----------- | -------- | ------------------------------------------- |
-| WhatsApp | baileys     | Stable   | Original channel, reconnect handling, auth  |
-| Discord  | discord.js  | Stable   | Mentions, threads, reactions, slash flows   |
-| Telegram | grammY      | Stable   | Multi-bot support, no trigger prefix needed |
+| Channel  | Adapter     | Maturity | Notes                                                                           |
+| -------- | ----------- | -------- | ------------------------------------------------------------------------------- |
+| WhatsApp | baileys     | Stable   | Original channel, reconnect handling, auth                                      |
+| Discord  | discord.js  | Stable   | Mentions, threads, reactions, slash flows                                       |
+| Telegram | grammY      | Stable   | Multi-bot support, no trigger prefix needed                                     |
 | Slack    | @slack/bolt | Stable   | AI-app modernization, native streamed responses, multi-bot routing, Socket Mode |
 
 ### Backends
