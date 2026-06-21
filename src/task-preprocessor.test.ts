@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { GROUPS_DIR, TASK_WORKFLOWS_DIR } from './config.js';
 import {
   normalizePreprocessScriptPath,
   runTaskPreprocessor,
@@ -309,4 +310,39 @@ it('does nothing when no preprocessor is configured', () => {
     action: 'run',
     prompt: 'sync connector packages',
   });
+});
+
+it('rejects whitespace-only preprocess_script values at execution time', () => {
+  expect(
+    runTaskPreprocessor(task({ preprocess_script: '   ' }), { workflowsDir }),
+  ).toEqual({
+    action: 'error',
+    error: 'preprocess_script must be a non-empty path',
+  });
+});
+
+it('resolves the default group task-workflows directory when no override is provided', () => {
+  const groupFolder = `preprocessor-test-${process.pid}`;
+  const groupWorkflowsDir = path.join(
+    GROUPS_DIR,
+    groupFolder,
+    TASK_WORKFLOWS_DIR,
+  );
+  fs.mkdirSync(groupWorkflowsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(groupWorkflowsDir, 'workflow.ts'),
+    'console.log(JSON.stringify({ action: "skip", reason: "default dir" }));',
+  );
+
+  try {
+    expect(runTaskPreprocessor(task({ group_folder: groupFolder }))).toEqual({
+      action: 'skip',
+      reason: 'default dir',
+    });
+  } finally {
+    fs.rmSync(path.join(GROUPS_DIR, groupFolder), {
+      recursive: true,
+      force: true,
+    });
+  }
 });
