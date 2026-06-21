@@ -18,12 +18,31 @@ export function renderDashboardContent(
   const stats = state.getQueueStats();
   const agentData = buildAgentChannelData(state, remotePeers);
   const tasks = state.getTasks();
+  const queueDetails = state.getQueueDetails();
 
   const activeContainers = Math.max(
     0,
     stats.activeContainers - stats.idleContainers,
   );
   const activeTasks = tasks.filter((t) => t.status === 'active').length;
+  // Count local agents currently in flight on either lane (processing a
+  // message or running a scheduled task). Surfaced inline on the "agents"
+  // card so the operator can tell at a glance how much of the fleet is
+  // actively doing work right now, without drilling into /agents or /system.
+  // Remote peer agents are excluded because we do not track their lane state
+  // locally; the bare count keeps reflecting the total fleet size.
+  const workingAgents = queueDetails.reduce(
+    (sum, g) =>
+      sum +
+      ((g.messageLane.active && !g.messageLane.idle) || g.taskLane.active
+        ? 1
+        : 0),
+    0,
+  );
+  const agentsValue =
+    workingAgents > 0
+      ? `${agentData.length} (${workingAgents} working)`
+      : `${agentData.length}`;
 
   // Serialize agent topology data for canvas renderer
   const topoData = escapeJsonForHtml(
@@ -71,7 +90,7 @@ export function renderDashboardContent(
     // Main area: stats + topology
     `<div class="dash-main">` +
     `<div class="stats-grid">` +
-    `<div class="stat-card"><div class="label">agents</div><div class="value" id="stat-agents">${agentData.length}</div></div>` +
+    `<div class="stat-card"><div class="label">agents</div><div class="value" id="stat-agents">${agentsValue}</div></div>` +
     `<div class="stat-card"><div class="label">active containers</div><div class="value" id="stat-active">${activeContainers}/${stats.maxActive}</div></div>` +
     `<div class="stat-card"><div class="label">idle containers</div><div class="value" id="stat-idle">${stats.idleContainers}/${stats.maxIdle}</div></div>` +
     `<div class="stat-card"><div class="label">active tasks</div><div class="value" id="stat-tasks">${activeTasks}</div></div>` +

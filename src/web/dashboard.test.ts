@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { describe, expect, it } from 'bun:test';
 
 import type { RemotePeerAgents } from '../discovery/types.js';
+import type { GroupQueueDetail } from '../group-queue.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 import {
   renderDashboardContent,
@@ -63,6 +64,7 @@ function makeState(options?: {
   chats?: Array<{ jid: string; name: string; last_message_time: string }>;
   tasks?: ScheduledTask[];
   queueStats?: ReturnType<WebStateProvider['getQueueStats']>;
+  queueDetails?: GroupQueueDetail[];
 }): WebStateProvider {
   const agents = options?.agents ?? [makeAgent()];
   const agentMap = Object.fromEntries(agents.map((agent) => [agent.id, agent]));
@@ -81,7 +83,7 @@ function makeState(options?: {
         maxActive: 1,
         maxIdle: 1,
       },
-    getQueueDetails: () => [],
+    getQueueDetails: () => options?.queueDetails ?? [],
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
     getTaskRunPhaseEvents: () => [],
@@ -111,6 +113,73 @@ function makeState(options?: {
     },
     resolveChatImage: async () => null,
     resolveDiscordGuildImage: async () => null,
+  };
+}
+
+function makeMessageRunningDetail(
+  overrides: { folderKey?: string; runningMs?: number } = {},
+): GroupQueueDetail {
+  return {
+    folderKey: overrides.folderKey ?? 'groups/local-agent',
+    messageLane: {
+      active: true,
+      idle: false,
+      pendingCount: 0,
+      containerName: null,
+      runningMs: overrides.runningMs ?? 1500,
+    },
+    taskLane: {
+      active: false,
+      pendingCount: 0,
+      containerName: null,
+      activeTask: null,
+    },
+    retryCount: 0,
+  };
+}
+
+function makeTaskRunningDetail(
+  overrides: { folderKey?: string; taskId?: string; runningMs?: number } = {},
+): GroupQueueDetail {
+  return {
+    folderKey: overrides.folderKey ?? 'groups/other-agent',
+    messageLane: {
+      active: false,
+      idle: false,
+      pendingCount: 0,
+      containerName: null,
+    },
+    taskLane: {
+      active: true,
+      pendingCount: 0,
+      containerName: null,
+      activeTask: {
+        taskId: overrides.taskId ?? 'task-active',
+        promptPreview: '',
+        startedAt: 1_700_000_000_000,
+        runningMs: overrides.runningMs ?? 1000,
+      },
+    },
+    retryCount: 0,
+  };
+}
+
+function makeIdleDetail(folderKey: string): GroupQueueDetail {
+  return {
+    folderKey,
+    messageLane: {
+      active: false,
+      idle: true,
+      pendingCount: 0,
+      containerName: null,
+    },
+    taskLane: {
+      active: false,
+      pendingCount: 0,
+      containerName: null,
+      activeTask: null,
+    },
+    retryCount: 0,
   };
 }
 
@@ -147,6 +216,74 @@ describe('renderDashboardContent', () => {
     expect(html).toContain('id="stat-active">0/7</div>');
     expect(html).toContain('id="stat-idle">3/4</div>');
     expect(html).toContain('id="stat-tasks">1</div>');
+  });
+
+  it('annotates agents card with working count when any lane is in flight', () => {
+    const html = renderDashboardContent(
+      makeState({
+        agents: [
+          makeAgent({ id: 'a1', folder: 'groups/a1' }),
+          makeAgent({ id: 'a2', folder: 'groups/a2' }),
+          makeAgent({ id: 'a3', folder: 'groups/a3' }),
+        ],
+        queueDetails: [
+          makeMessageRunningDetail({ folderKey: 'groups/a1' }),
+          makeTaskRunningDetail({ folderKey: 'groups/a2' }),
+          makeIdleDetail('groups/a3'),
+        ],
+      }),
+    );
+
+    expect(html).toContain('id="stat-agents">3 (2 working)</div>');
+  });
+
+  it('omits the working annotation when no agent lane is active', () => {
+    const html = renderDashboardContent(
+      makeState({
+        agents: [
+          makeAgent({ id: 'a1', folder: 'groups/a1' }),
+          makeAgent({ id: 'a2', folder: 'groups/a2' }),
+        ],
+        queueDetails: [
+          makeIdleDetail('groups/a1'),
+          makeIdleDetail('groups/a2'),
+        ],
+      }),
+    );
+
+    expect(html).toContain('id="stat-agents">2</div>');
+    expect(html).not.toContain('working)');
+  });
+
+  it('does not count idle-waiting message lanes as working', () => {
+    // A lane with active=true but idle=true is a warm container in cooldown,
+    // not actively processing — it should not be counted as working.
+    const html = renderDashboardContent(
+      makeState({
+        agents: [makeAgent({ id: 'a1', folder: 'groups/a1' })],
+        queueDetails: [
+          {
+            folderKey: 'groups/a1',
+            messageLane: {
+              active: true,
+              idle: true,
+              pendingCount: 0,
+              containerName: 'omni-a1',
+            },
+            taskLane: {
+              active: false,
+              pendingCount: 0,
+              containerName: null,
+              activeTask: null,
+            },
+            retryCount: 0,
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain('id="stat-agents">1</div>');
+    expect(html).not.toContain('working)');
   });
 
   it('serializes local and remote topology data with stable avatar cache-busting hashes', () => {
