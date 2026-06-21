@@ -323,11 +323,9 @@ it('rejects whitespace-only preprocess_script values at execution time', () => {
 
 it('resolves the default group task-workflows directory when no override is provided', () => {
   const groupFolder = `preprocessor-test-${process.pid}`;
-  const groupWorkflowsDir = path.join(
-    GROUPS_DIR,
-    groupFolder,
-    TASK_WORKFLOWS_DIR,
-  );
+  const groupWorkflowsDir = path.isAbsolute(TASK_WORKFLOWS_DIR)
+    ? TASK_WORKFLOWS_DIR
+    : path.join(GROUPS_DIR, groupFolder, TASK_WORKFLOWS_DIR);
   fs.mkdirSync(groupWorkflowsDir, { recursive: true });
   fs.writeFileSync(
     path.join(groupWorkflowsDir, 'workflow.ts'),
@@ -340,9 +338,14 @@ it('resolves the default group task-workflows directory when no override is prov
       reason: 'default dir',
     });
   } finally {
-    fs.rmSync(path.join(GROUPS_DIR, groupFolder), {
-      recursive: true,
-      force: true,
-    });
+    fs.rmSync(
+      path.isAbsolute(TASK_WORKFLOWS_DIR)
+        ? groupWorkflowsDir
+        : path.join(GROUPS_DIR, groupFolder),
+      {
+        recursive: true,
+        force: true,
+      },
+    );
   }
 });
