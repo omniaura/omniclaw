@@ -262,7 +262,12 @@ describe('network identity detection', () => {
       ),
     ).toBe(true);
     expect(spawnSpy).toHaveBeenCalledWith(
-      ['/usr/sbin/system_profiler', 'SPAirPortDataType', '-detailLevel', 'mini'],
+      [
+        '/usr/sbin/system_profiler',
+        'SPAirPortDataType',
+        '-detailLevel',
+        'mini',
+      ],
       expect.any(Object),
     );
     expect(spawnSpy).toHaveBeenCalledWith(
@@ -280,18 +285,20 @@ describe('network identity detection', () => {
     const hangingProcess = createHangingProcess();
     const originalSetTimeout = globalThis.setTimeout;
     let timeoutCalls = 0;
-    timeoutSpy = spyOn(globalThis, 'setTimeout').mockImplementation(
-      ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
-        timeoutCalls += 1;
-        if (timeoutCalls === 1) {
-          queueMicrotask(() => {
-            if (typeof handler === 'function') handler(...args);
-          });
-          return 0 as unknown as ReturnType<typeof setTimeout>;
-        }
-        return originalSetTimeout(handler, timeout, ...args);
-      }) as typeof setTimeout,
-    );
+    timeoutSpy = spyOn(globalThis, 'setTimeout').mockImplementation(((
+      handler: TimerHandler,
+      timeout?: number,
+      ...args: unknown[]
+    ) => {
+      timeoutCalls += 1;
+      if (timeoutCalls === 1) {
+        queueMicrotask(() => {
+          if (typeof handler === 'function') handler(...args);
+        });
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }
+      return originalSetTimeout(handler, timeout, ...args);
+    }) as typeof setTimeout);
     spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
       if (cmd[0] === 'iwgetid') {
         return hangingProcess;
