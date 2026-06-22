@@ -19,6 +19,7 @@ const encoder = new TextEncoder();
 describe('network identity detection', () => {
   const originalPlatform = process.platform;
   let spawnSpy: any = null;
+  let timeoutSpy: any = null;
   let warnSpy: any = null;
 
   beforeEach(() => {
@@ -34,8 +35,10 @@ describe('network identity detection', () => {
       configurable: true,
     });
     spawnSpy?.mockRestore();
+    timeoutSpy?.mockRestore();
     warnSpy?.mockRestore();
     spawnSpy = null;
+    timeoutSpy = null;
     warnSpy = null;
   });
 
@@ -231,6 +234,85 @@ describe('network identity detection', () => {
     ).toBe(true);
   });
 
+  it('logs generic spawn errors and continues through macOS fallbacks', async () => {
+    spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
+      if (cmd.includes('-listallhardwareports')) {
+        throw new Error('spawn failed before process creation');
+      }
+
+      if (cmd[0] === '/usr/sbin/system_profiler') {
+        return createProcess({ stdout: '' });
+      }
+
+      if (cmd[0] === '/usr/bin/wdutil') {
+        return createProcess({ stdout: '' });
+      }
+
+      throw new Error(`Unexpected command: ${cmd.join(' ')}`);
+    }) as typeof Bun.spawn);
+
+    warnSpy = spyOn(logger, 'warn');
+
+    const result = await detectCurrentNetwork();
+
+    expect(result).toBeNull();
+    expect(
+      warnSpy.mock.calls.some((call: unknown[]) =>
+        String(call[1]).includes('Network identity command failed'),
+      ),
+    ).toBe(true);
+    expect(spawnSpy).toHaveBeenCalledWith(
+      ['/usr/sbin/system_profiler', 'SPAirPortDataType', '-detailLevel', 'mini'],
+      expect.any(Object),
+    );
+    expect(spawnSpy).toHaveBeenCalledWith(
+      ['/usr/bin/wdutil', 'info'],
+      expect.any(Object),
+    );
+  });
+
+  it('kills timed-out linux probes and continues to the next detector', async () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'linux',
+      configurable: true,
+    });
+
+    const hangingProcess = createHangingProcess();
+    const originalSetTimeout = globalThis.setTimeout;
+    let timeoutCalls = 0;
+    timeoutSpy = spyOn(globalThis, 'setTimeout').mockImplementation(
+      ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+        timeoutCalls += 1;
+        if (timeoutCalls === 1) {
+          queueMicrotask(() => {
+            if (typeof handler === 'function') handler(...args);
+          });
+          return 0 as unknown as ReturnType<typeof setTimeout>;
+        }
+        return originalSetTimeout(handler, timeout, ...args);
+      }) as typeof setTimeout,
+    );
+    spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
+      if (cmd[0] === 'iwgetid') {
+        return hangingProcess;
+      }
+
+      if (cmd[0] === 'nmcli') {
+        return createProcess({ stdout: 'yes:Fallback Linux\n' });
+      }
+
+      throw new Error(`Unexpected command: ${cmd.join(' ')}`);
+    }) as typeof Bun.spawn);
+
+    const result = await detectCurrentNetwork();
+
+    expect(result).toEqual({
+      id: 'wifi:Fallback Linux',
+      label: 'Fallback Linux',
+    });
+    expect(hangingProcess.kill).toHaveBeenCalledTimes(1);
+  });
+
   it('retries networksetup via PATH when the absolute macOS binary is unavailable', async () => {
     spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((cmd: string[]) => {
       if (cmd[0] === '/usr/sbin/networksetup') {
@@ -339,6 +421,15 @@ function createProcess({
     stdout: createStream(stdout),
     stderr: createStream(stderr),
     exited: Promise.resolve(exitCode),
+    kill: mock(() => {}),
+  } as unknown as ReturnType<typeof Bun.spawn>;
+}
+
+function createHangingProcess() {
+  return {
+    stdout: new ReadableStream<Uint8Array>(),
+    stderr: new ReadableStream<Uint8Array>(),
+    exited: new Promise<number>(() => {}),
     kill: mock(() => {}),
   } as unknown as ReturnType<typeof Bun.spawn>;
 }
