@@ -339,6 +339,75 @@ describe('renderAgentsContent', () => {
     expect(html).toContain('>flags<');
     expect(html).toContain('>actions<');
   });
+
+  it('annotates local count with disabled rollup when an agent is disabled', () => {
+    const agents = {
+      'agent-1': makeAgent(),
+      'agent-2': makeAgent({
+        id: 'agent-2',
+        name: 'Agent 2',
+        folder: 'agent-2',
+        enabled: false,
+      }),
+      'agent-3': makeAgent({
+        id: 'agent-3',
+        name: 'Agent 3',
+        folder: 'agent-3',
+        enabled: false,
+      }),
+    };
+
+    const html = renderAgentsContent(makeState(agents));
+
+    expect(html).toContain('3 local (2 disabled)');
+    expect(html).toContain('3 total');
+  });
+
+  it('omits the disabled rollup when no local agent is disabled', () => {
+    const agents = {
+      'agent-1': makeAgent(),
+      'agent-2': makeAgent({
+        id: 'agent-2',
+        name: 'Agent 2',
+        folder: 'agent-2',
+      }),
+    };
+
+    const html = renderAgentsContent(makeState(agents));
+
+    expect(html).toContain('2 local</span>');
+    expect(html).not.toContain('disabled)');
+  });
+
+  it('excludes remote agents from the disabled rollup even when their enabled flag is false', () => {
+    const agents = {
+      'agent-1': makeAgent({ enabled: false }),
+    };
+    const remotePeers = [
+      {
+        instanceId: 'peer-1',
+        instanceName: 'remote-mac',
+        online: true,
+        host: '192.168.1.10',
+        port: 4444,
+        agents: [
+          {
+            id: 'remote-agent',
+            name: 'Remote',
+            folder: 'remote',
+            backend: 'docker' as const,
+            agentRuntime: 'opencode' as const,
+            channels: [],
+          },
+        ],
+      },
+    ];
+
+    const html = renderAgentsContent(makeState(agents), remotePeers);
+
+    expect(html).toContain('1 local (1 disabled)');
+    expect(html).toContain('1 remote');
+  });
 });
 
 describe('renderAgentsPage', () => {
