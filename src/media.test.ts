@@ -272,11 +272,14 @@ describe('downloadTextAttachment', () => {
         Promise.resolve(new Response(createStream(['pinned-text']))),
     );
 
-    const text = await downloadTextAttachment('https://cdn.example.test/a.txt', {
-      validateRemoteUrl: true,
-      lookupHostAddresses: async () => ['203.0.113.10'],
-      fetchWithPinnedDnsImpl: pinnedFetch,
-    });
+    const text = await downloadTextAttachment(
+      'https://cdn.example.test/a.txt',
+      {
+        validateRemoteUrl: true,
+        lookupHostAddresses: async () => ['203.0.113.10'],
+        fetchWithPinnedDnsImpl: pinnedFetch,
+      },
+    );
 
     expect(text).toBe('pinned-text');
     expect(pinnedFetch).toHaveBeenCalledWith(
