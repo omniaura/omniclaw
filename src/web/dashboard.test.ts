@@ -183,7 +183,6 @@ function makeIdleDetail(folderKey: string): GroupQueueDetail {
   };
 }
 
-
 function extractTopoData(html: string): Array<Record<string, unknown>> {
   const match = html.match(
     /<script type="application\/json" id="topo-data">([\s\S]*?)<\/script>/,
