@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { sanitizeTelegramAvatarUrl } from '../telegram-avatar.js';
 import type { RemotePeerAgents } from '../discovery/types.js';
 import type { MessageLaneReason } from '../group-queue.js';
+import type { TaskOutcomeState } from '../types.js';
 import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
@@ -38,11 +39,25 @@ export function formatTaskLastRun(
 }
 
 /**
- * Map a task's `last_result` into the same outcome CSS class used by `/tasks`
+ * Map a task's outcome into the same CSS class used by `/tasks`
  * (`run-success` / `run-error`). Keeps the success/error colors aligned
  * across surfaces.
+ *
+ * The scheduler stores a normalized {@link TaskOutcomeState} in
+ * `last_outcome_state` *and* a free-text summary in `last_result`
+ * (e.g. `Completed`, `Error: ...`, or a result excerpt). The normalized state
+ * is the source of truth — when present it drives the color, so summary-string
+ * rows still pick up the badge. `last_result` is only consulted for older
+ * pre-normalization rows where the state was never written but the legacy
+ * `success` / `error` tokens were (see #858).
  */
-export function lastRunOutcomeClass(result: string | null): string {
+export function lastRunOutcomeClass(
+  state: TaskOutcomeState | null | undefined,
+  result?: string | null,
+): string {
+  if (state === 'done') return 'run-success';
+  if (state === 'blocked' || state === 'abandoned') return 'run-error';
+  if (state) return '';
   if (result === 'success') return 'run-success';
   if (result === 'error') return 'run-error';
   return '';
@@ -83,6 +98,7 @@ export interface AgentDetailData {
     next_run: string | null;
     last_run: string | null;
     last_result: string | null;
+    last_outcome_state: TaskOutcomeState | null;
   }>;
   recentChats: Array<{
     jid: string;
@@ -173,6 +189,7 @@ export function buildAgentDetailData(
       next_run: t.next_run,
       last_run: t.last_run,
       last_result: t.last_result,
+      last_outcome_state: t.last_outcome_state ?? null,
     }));
 
   // Find recent chats for this agent's channels
@@ -294,7 +311,10 @@ export function renderAgentDetailContent(
               ? new Date(t.next_run).toLocaleString()
               : '\u2014';
             const lastRunLabel = formatTaskLastRun(t.last_run);
-            const lastRunClass = lastRunOutcomeClass(t.last_result);
+            const lastRunClass = lastRunOutcomeClass(
+              t.last_outcome_state,
+              t.last_result,
+            );
             const lastRunTitle = t.last_run
               ? `${new Date(t.last_run).toLocaleString()}${t.last_result ? ` \u2014 ${t.last_result}` : ''}`
               : 'never run';

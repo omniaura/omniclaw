@@ -400,6 +400,25 @@ export function renderAgentsContent(
 
   const localCount = agentData.filter((a) => !a.remoteInstanceId).length;
   const remoteCount = agentData.filter((a) => a.remoteInstanceId).length;
+  // Count operator-disabled local agents. Disabled is a silent state — the
+  // agent won't dispatch messages or run scheduled tasks, but inbound messages
+  // are still persisted, so it's easy for an operator to miss when scanning
+  // the per-row status badge column. Surfacing the rollup inline on the
+  // `local` count answers "is part of my fleet intentionally dark?" without
+  // scanning the table. Remote agents are excluded because their enabled state
+  // lives on the owning host. Matches the disabled-status derivation in
+  // {@link buildAgentRowsHtml}.
+  const localAgentsMap = state.getAgents();
+  const disabledLocalCount = agentData.reduce(
+    (sum, a) =>
+      sum +
+      (!a.remoteInstanceId && localAgentsMap[a.id]?.enabled === false ? 1 : 0),
+    0,
+  );
+  const localValue =
+    disabledLocalCount > 0
+      ? `${localCount} local (${disabledLocalCount} disabled)`
+      : `${localCount} local`;
 
   const backendOptions = backends
     .map((b) => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`)
@@ -420,7 +439,7 @@ export function renderAgentsContent(
     `<h2>Agents</h2>` +
     `<div class="ap-counts">` +
     `<span class="ap-count">${agentData.length} total</span>` +
-    `<span class="ap-count">${localCount} local</span>` +
+    `<span class="ap-count">${localValue}</span>` +
     (remoteCount > 0
       ? `<span class="ap-count">${remoteCount} remote</span>`
       : '') +

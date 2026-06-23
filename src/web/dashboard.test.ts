@@ -116,11 +116,33 @@ function makeState(options?: {
   };
 }
 
-function makeRunningTaskDetail(
-  overrides: { folderKey?: string; taskId?: string; runningMs?: number } = {},
+function makeMessageRunningDetail(
+  overrides: { folderKey?: string; runningMs?: number } = {},
 ): GroupQueueDetail {
   return {
     folderKey: overrides.folderKey ?? 'groups/local-agent',
+    messageLane: {
+      active: true,
+      idle: false,
+      pendingCount: 0,
+      containerName: null,
+      runningMs: overrides.runningMs ?? 1500,
+    },
+    taskLane: {
+      active: false,
+      pendingCount: 0,
+      containerName: null,
+      activeTask: null,
+    },
+    retryCount: 0,
+  };
+}
+
+function makeTaskRunningDetail(
+  overrides: { folderKey?: string; taskId?: string; runningMs?: number } = {},
+): GroupQueueDetail {
+  return {
+    folderKey: overrides.folderKey ?? 'groups/other-agent',
     messageLane: {
       active: false,
       idle: false,
@@ -134,13 +156,33 @@ function makeRunningTaskDetail(
       activeTask: {
         taskId: overrides.taskId ?? 'task-active',
         promptPreview: '',
-        startedAt: Date.now(),
+        startedAt: 1_700_000_000_000,
         runningMs: overrides.runningMs ?? 1000,
       },
     },
     retryCount: 0,
   };
 }
+
+function makeIdleDetail(folderKey: string): GroupQueueDetail {
+  return {
+    folderKey,
+    messageLane: {
+      active: false,
+      idle: true,
+      pendingCount: 0,
+      containerName: null,
+    },
+    taskLane: {
+      active: false,
+      pendingCount: 0,
+      containerName: null,
+      activeTask: null,
+    },
+    retryCount: 0,
+  };
+}
+
 
 function extractTopoData(html: string): Array<Record<string, unknown>> {
   const match = html.match(
@@ -186,8 +228,8 @@ describe('renderDashboardContent', () => {
           makeTask({ id: 'task-c', status: 'active' }),
         ],
         queueDetails: [
-          makeRunningTaskDetail({ folderKey: 'g1', taskId: 'task-a' }),
-          makeRunningTaskDetail({ folderKey: 'g2', taskId: 'task-b' }),
+          makeTaskRunningDetail({ folderKey: 'g1', taskId: 'task-a' }),
+          makeTaskRunningDetail({ folderKey: 'g2', taskId: 'task-b' }),
         ],
       }),
     );
@@ -199,14 +241,65 @@ describe('renderDashboardContent', () => {
     const html = renderDashboardContent(
       makeState({
         tasks: [makeTask({ status: 'active' })],
+        queueDetails: [makeIdleDetail('g1')],
+      }),
+    );
+
+    expect(html).toContain('id="stat-tasks">1</div>');
+    expect(html).not.toContain('running)');
+  });
+
+  it('annotates agents card with working count when any lane is in flight', () => {
+    const html = renderDashboardContent(
+      makeState({
+        agents: [
+          makeAgent({ id: 'a1', folder: 'groups/a1' }),
+          makeAgent({ id: 'a2', folder: 'groups/a2' }),
+          makeAgent({ id: 'a3', folder: 'groups/a3' }),
+        ],
+        queueDetails: [
+          makeMessageRunningDetail({ folderKey: 'groups/a1' }),
+          makeTaskRunningDetail({ folderKey: 'groups/a2' }),
+          makeIdleDetail('groups/a3'),
+        ],
+      }),
+    );
+
+    expect(html).toContain('id="stat-agents">3 (2 working)</div>');
+  });
+
+  it('omits the working annotation when no agent lane is active', () => {
+    const html = renderDashboardContent(
+      makeState({
+        agents: [
+          makeAgent({ id: 'a1', folder: 'groups/a1' }),
+          makeAgent({ id: 'a2', folder: 'groups/a2' }),
+        ],
+        queueDetails: [
+          makeIdleDetail('groups/a1'),
+          makeIdleDetail('groups/a2'),
+        ],
+      }),
+    );
+
+    expect(html).toContain('id="stat-agents">2</div>');
+    expect(html).not.toContain('working)');
+  });
+
+  it('does not count idle-waiting message lanes as working', () => {
+    // A lane with active=true but idle=true is a warm container in cooldown,
+    // not actively processing — it should not be counted as working.
+    const html = renderDashboardContent(
+      makeState({
+        agents: [makeAgent({ id: 'a1', folder: 'groups/a1' })],
         queueDetails: [
           {
-            folderKey: 'g1',
+            folderKey: 'groups/a1',
             messageLane: {
-              active: false,
+              active: true,
               idle: true,
               pendingCount: 0,
-              containerName: null,
+              containerName: 'omni-a1',
             },
             taskLane: {
               active: false,
@@ -220,8 +313,8 @@ describe('renderDashboardContent', () => {
       }),
     );
 
-    expect(html).toContain('id="stat-tasks">1</div>');
-    expect(html).not.toContain('running)');
+    expect(html).toContain('id="stat-agents">1</div>');
+    expect(html).not.toContain('working)');
   });
 
   it('serializes local and remote topology data with stable avatar cache-busting hashes', () => {

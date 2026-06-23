@@ -99,7 +99,7 @@ RUN bun install -g @anthropic-ai/claude-code
 # Copy the native binary into /usr/local/bin and wrap it there instead of executing out of
 # /root/.bun directly. Linux ARM64 also cannot download Chrome for Testing, so those builds
 # must install system Chromium and force agent-browser to launch it explicitly.
-ARG AGENT_BROWSER_VERSION=0.28.0
+ARG AGENT_BROWSER_VERSION=0.29.1
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 COPY agent-browser-wrapper.sh /tmp/agent-browser-wrapper
 RUN echo 'trustedDependencies = ["agent-browser"]' >> /root/.bunfig.toml \
@@ -123,7 +123,7 @@ RUN echo 'trustedDependencies = ["agent-browser"]' >> /root/.bunfig.toml \
 
 # Install OpenCode CLI (alternative agent runtime)
 # Download directly from GitHub releases to avoid DNS issues with opencode.ai.
-ARG OPENCODE_VERSION=1.17.8
+ARG OPENCODE_VERSION=1.17.9
 RUN ARCH="$(dpkg --print-architecture)" \
     && OC_ARCH=$([ "$ARCH" = "amd64" ] && echo "x64" || echo "arm64") \
     && curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz" \

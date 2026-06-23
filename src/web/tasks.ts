@@ -9,6 +9,7 @@ import type { WebStateProvider } from './types.js';
 import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 import { buildAgentChannelData } from './agent-channels.js';
+import { lastRunOutcomeClass } from './agent-detail.js';
 
 /** Render the task manager content (no shell wrapper — for SPA nav). */
 export function renderTasksContent(state: WebStateProvider): string {
@@ -145,12 +146,10 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
       const lastRun = task.last_run
         ? formatRelativeTime(task.last_run)
         : '\u2014';
-      const lastResultClass =
-        task.last_result === 'success'
-          ? 'run-success'
-          : task.last_result === 'error'
-            ? 'run-error'
-            : '';
+      const lastResultClass = lastRunOutcomeClass(
+        task.last_outcome_state ?? null,
+        task.last_result,
+      );
       const outcomeBadge = renderOutcomeStateBadge(
         task.last_outcome_state ?? null,
         task.last_outcome_reason ?? null,

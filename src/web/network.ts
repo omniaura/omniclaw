@@ -20,6 +20,31 @@ export interface NetworkPageState {
   pendingRequests: PairRequest[];
 }
 
+/**
+ * Count trusted peers that are not currently reachable. Operators care about
+ * this separately from the raw trusted total because a trusted peer that
+ * silently drops off the LAN is the kind of thing they want to notice
+ * without having to scan the discovered-peers table.
+ */
+export function countTrustedOffline(peers: PeerView[]): number {
+  let n = 0;
+  for (const p of peers) if (p.status === 'trusted' && !p.online) n++;
+  return n;
+}
+
+/**
+ * Format the value cell of the `trusted` stat card. Renders the bare trusted
+ * count by default, and appends an inline `(N offline)` annotation when any
+ * trusted peer is offline — mirroring the `N (M qualifier)` convention used
+ * by the dashboard active-tasks card and the IPC inspector recent-events
+ * rollup so the surface looks consistent across pages.
+ */
+export function formatTrustedStatValue(peers: PeerView[]): string {
+  const trusted = peers.filter((p) => p.status === 'trusted').length;
+  const offline = countTrustedOffline(peers);
+  return offline > 0 ? `${trusted} (${offline} offline)` : `${trusted}`;
+}
+
 /** Render just the network page content (no shell wrapper). */
 export function renderNetworkContent(pageState: NetworkPageState): string {
   const {
@@ -37,8 +62,8 @@ export function renderNetworkContent(pageState: NetworkPageState): string {
     ? 'Discovery controls are unavailable in this environment.'
     : 'Trusted networks gate discovery when present. Leave the list empty to allow discovery anywhere the toggle is on.';
 
-  const trustedCount = peers.filter((p) => p.status === 'trusted').length;
   const onlineCount = peers.filter((p) => p.online).length;
+  const trustedValue = formatTrustedStatValue(peers);
 
   return (
     `<div data-init="window.__initPage && window.__initPage('network')" id="network-root" data-discovery-available="${discoveryAvailable ? 'true' : 'false'}">` +
@@ -47,7 +72,7 @@ export function renderNetworkContent(pageState: NetworkPageState): string {
     `<div class="stat-card"><div class="label">instance</div><div class="value" style="font-size:0.85rem">${escapeHtml(instanceName)}</div></div>` +
     `<div class="stat-card"><div class="label">discovery</div><div class="value" id="discovery-runtime-status">${discoveryEnabled ? '<span style="color:var(--green)">active</span>' : '<span style="color:var(--text-muted)">disabled</span>'}</div></div>` +
     `<div class="stat-card"><div class="label">peers online</div><div class="value" id="stat-peers-online">${onlineCount}</div></div>` +
-    `<div class="stat-card"><div class="label">trusted</div><div class="value" id="stat-peers-trusted">${trustedCount}</div></div>` +
+    `<div class="stat-card"><div class="label">trusted</div><div class="value" id="stat-peers-trusted">${trustedValue}</div></div>` +
     `</div>` +
     // Instance ID
     `<div style="margin-bottom:1.5rem;padding:0.75rem 1rem;background:var(--surface);border-radius:8px;border:1px solid var(--border)">` +

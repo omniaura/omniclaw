@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  countTrustedOffline,
   formatPeerLastSeen,
+  formatTrustedStatValue,
   renderNetworkContent,
   renderNetworkPage,
   renderPeerOnlineCell,
@@ -396,6 +398,101 @@ describe('renderPeerOnlineCell', () => {
     expect(html).toContain('class="peer-last-seen"');
     expect(html).toContain(`title="${lastSeen}"`);
     expect(html).toContain('<span style="color:var(--text-muted)">○</span>');
+  });
+});
+
+describe('countTrustedOffline', () => {
+  it('returns 0 when no peers are trusted', () => {
+    expect(countTrustedOffline([])).toBe(0);
+    expect(
+      countTrustedOffline([
+        makePeer({ instanceId: 'a', status: 'discovered', online: false }),
+        makePeer({ instanceId: 'b', status: 'pending', online: false }),
+      ]),
+    ).toBe(0);
+  });
+
+  it('only counts trusted peers that are offline', () => {
+    expect(
+      countTrustedOffline([
+        makePeer({ instanceId: 'a', status: 'trusted', online: true }),
+        makePeer({ instanceId: 'b', status: 'trusted', online: false }),
+        makePeer({ instanceId: 'c', status: 'trusted', online: false }),
+        makePeer({ instanceId: 'd', status: 'pending', online: false }),
+        makePeer({ instanceId: 'e', status: 'discovered', online: false }),
+        makePeer({ instanceId: 'f', status: 'revoked', online: false }),
+      ]),
+    ).toBe(2);
+  });
+});
+
+describe('formatTrustedStatValue', () => {
+  it('returns the bare trusted count when none are offline', () => {
+    expect(formatTrustedStatValue([])).toBe('0');
+    expect(
+      formatTrustedStatValue([
+        makePeer({ instanceId: 'a', status: 'trusted', online: true }),
+        makePeer({ instanceId: 'b', status: 'trusted', online: true }),
+      ]),
+    ).toBe('2');
+  });
+
+  it('appends an offline annotation when trusted peers are offline', () => {
+    expect(
+      formatTrustedStatValue([
+        makePeer({ instanceId: 'a', status: 'trusted', online: true }),
+        makePeer({ instanceId: 'b', status: 'trusted', online: false }),
+        makePeer({ instanceId: 'c', status: 'trusted', online: false }),
+      ]),
+    ).toBe('3 (2 offline)');
+  });
+
+  it('ignores non-trusted peers when computing the annotation', () => {
+    expect(
+      formatTrustedStatValue([
+        makePeer({ instanceId: 'a', status: 'trusted', online: true }),
+        makePeer({ instanceId: 'b', status: 'pending', online: false }),
+        makePeer({ instanceId: 'c', status: 'discovered', online: false }),
+      ]),
+    ).toBe('1');
+  });
+});
+
+describe('renderNetworkContent trusted offline annotation', () => {
+  it('annotates the trusted stat card with offline count when any trusted peer is offline', () => {
+    const html = renderNetworkContent({
+      instanceId: 'local-id',
+      instanceName: 'Main Node',
+      discoveryAvailable: true,
+      discoveryEnabled: true,
+      runtime: makeRuntime(),
+      peers: [
+        makePeer({ instanceId: 'a', status: 'trusted', online: true }),
+        makePeer({ instanceId: 'b', status: 'trusted', online: false }),
+        makePeer({ instanceId: 'c', status: 'trusted', online: false }),
+      ],
+      pendingRequests: [],
+    });
+
+    expect(html).toContain('id="stat-peers-trusted">3 (2 offline)</div>');
+  });
+
+  it('omits the offline annotation when every trusted peer is online', () => {
+    const html = renderNetworkContent({
+      instanceId: 'local-id',
+      instanceName: 'Main Node',
+      discoveryAvailable: true,
+      discoveryEnabled: true,
+      runtime: makeRuntime(),
+      peers: [
+        makePeer({ instanceId: 'a', status: 'trusted', online: true }),
+        makePeer({ instanceId: 'b', status: 'trusted', online: true }),
+      ],
+      pendingRequests: [],
+    });
+
+    expect(html).toContain('id="stat-peers-trusted">2</div>');
+    expect(html).not.toContain('offline)');
   });
 });
 

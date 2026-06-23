@@ -156,6 +156,43 @@ describe('serveCachedRemoteImage', () => {
     }
   });
 
+  it('does not follow direct-IP redirects to unvalidated targets', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+    const fetchCalls: RequestInit[] = [];
+
+    clearTestImageCache(testImageCacheDir);
+
+    try {
+      const response = await serveCachedRemoteImage(
+        'redirect-cache-key',
+        async () => 'http://93.184.216.34/avatar.png',
+        {
+          cacheDir: testImageCacheDir,
+          fetchImpl: (async (_input, init) => {
+            fetchCalls.push(init ?? {});
+            return new Response(null, {
+              status: 302,
+              headers: {
+                location: 'http://127.0.0.1:8080/private.png',
+              },
+            });
+          }) as RemoteImageFetch,
+        },
+      );
+
+      expect(response).toBeNull();
+      expect(fetchCalls).toHaveLength(1);
+      expect(fetchCalls[0].redirect).toBe('manual');
+      expect(fs.readdirSync(testImageCacheDir)).toEqual([]);
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+    }
+  });
+
   it('rejects active content types from upstream responses', async () => {
     const testImageCacheDir = path.join(
       DATA_DIR,
