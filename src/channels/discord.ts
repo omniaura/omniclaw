@@ -1162,7 +1162,9 @@ export class DiscordChannel implements Channel {
             (a.size ?? Infinity) <= MAX_TEXT_DOWNLOAD_BYTES
           ) {
             try {
-              const text = await downloadTextAttachment(a.url);
+              const text = await downloadTextAttachment(a.url, {
+                validateRemoteUrl: true,
+              });
               parts.push(formatTextFileMarker(safeName, text));
             } catch (err) {
               logger.error(

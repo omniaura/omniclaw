@@ -790,6 +790,54 @@ describe('SlackChannel.downloadSlackFile', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('rejects non-Slack hosts before sending the bot token', async () => {
+    const channel = new SlackChannel({
+      botId: 'TEST',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    const originalFetch = globalThis.fetch;
+    const mockFetch = mock(() => Promise.resolve(new Response(null)));
+    globalThis.fetch = mockFetch as any;
+
+    try {
+      await expect(
+        (channel as any).downloadSlackFile('https://evil.test/file', 1024),
+      ).rejects.toThrow('Rejected non-Slack file URL');
+      expect(mockFetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects non-HTTPS Slack file URLs before fetch', async () => {
+    const channel = new SlackChannel({
+      botId: 'TEST',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    const originalFetch = globalThis.fetch;
+    const mockFetch = mock(() => Promise.resolve(new Response(null)));
+    globalThis.fetch = mockFetch as any;
+
+    try {
+      await expect(
+        (channel as any).downloadSlackFile('http://files.slack.com/file', 1024),
+      ).rejects.toThrow('Rejected non-Slack file URL');
+      expect(mockFetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe('SlackChannel.processFileAttachments', () => {
