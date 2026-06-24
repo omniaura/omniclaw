@@ -63,6 +63,28 @@ export function lastRunOutcomeClass(
   return '';
 }
 
+/**
+ * Format the count shown next to the `scheduled tasks` section header,
+ * appending an inline `(N paused)` rollup when at least one of the agent's
+ * tasks is paused. Mirrors the operator observability pattern used by
+ * `/agents` local-count disabled rollup (#892), the dashboard agents working
+ * rollup (#884), and the `/network` trusted-offline rollup (#880): the bare
+ * total stays prominent, the rollup answers the cross-task "is part of this
+ * agent's task list intentionally off?" question without scanning every row.
+ *
+ * Completed tasks are excluded — paused vs active is the operator-visible
+ * decision; a completed one-shot is not "off", it's finished. Empty/all-active
+ * lists render bare so the header stays terse.
+ */
+export function formatScheduledTasksCount(
+  tasks: ReadonlyArray<{ status: string }>,
+): string {
+  const total = tasks.length;
+  let paused = 0;
+  for (const t of tasks) if (t.status === 'paused') paused++;
+  return paused > 0 ? `${total} (${paused} paused)` : `${total}`;
+}
+
 export interface AgentDetailData {
   id: string;
   name: string;
@@ -434,7 +456,7 @@ export function renderAgentDetailContent(
     `</table></div></div>` +
     // Tasks section
     `<div class="ad-section">` +
-    `<h3 class="ad-section-title">scheduled tasks <span class="ad-count">${data.tasks.length}</span></h3>` +
+    `<h3 class="ad-section-title">scheduled tasks <span class="ad-count">${formatScheduledTasksCount(data.tasks)}</span></h3>` +
     `<div class="ad-table-wrap"><table>` +
     `<thead><tr><th>status</th><th>prompt</th><th>schedule</th><th>next run</th><th>last run</th>${isLocal ? '<th></th>' : ''}</tr></thead>` +
     `<tbody>${tasksHtml}</tbody>` +
