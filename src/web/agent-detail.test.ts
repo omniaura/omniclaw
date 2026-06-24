@@ -6,6 +6,7 @@ import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
 import type { RemotePeerAgents } from '../discovery/types.js';
 import {
   buildAgentDetailData,
+  formatScheduledTasksCount,
   formatTaskLastRun,
   lastRunOutcomeClass,
   renderAgentDetailContent,
@@ -266,6 +267,32 @@ describe('formatTaskLastRun', () => {
   });
 });
 
+describe('formatScheduledTasksCount', () => {
+  it('returns bare total when no task is paused', () => {
+    expect(
+      formatScheduledTasksCount([
+        { status: 'active' },
+        { status: 'active' },
+        { status: 'completed' },
+      ]),
+    ).toBe('3');
+  });
+
+  it('appends paused rollup when at least one task is paused', () => {
+    expect(
+      formatScheduledTasksCount([
+        { status: 'active' },
+        { status: 'paused' },
+        { status: 'paused' },
+      ]),
+    ).toBe('3 (2 paused)');
+  });
+
+  it('returns "0" for an empty task list without a parenthetical', () => {
+    expect(formatScheduledTasksCount([])).toBe('0');
+  });
+});
+
 describe('lastRunOutcomeClass', () => {
   it('maps the done outcome state to run-success regardless of last_result', () => {
     // Schedulers write summary strings like "Completed" / "Run 1 done" /
@@ -357,6 +384,27 @@ describe('renderAgentDetailContent', () => {
     expect(html).toContain('Run the daily check');
     expect(html).toContain('status-active');
     expect(html).toContain('cron');
+  });
+
+  it('annotates the scheduled tasks count with a paused rollup when a task is paused', () => {
+    const state = makeState({
+      getTasks: () => [
+        makeTask({ id: 'task-001', status: 'active' }),
+        makeTask({ id: 'task-002', status: 'paused' }),
+      ],
+    });
+    const data = buildAgentDetailData('test-agent', state)!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain(
+      'scheduled tasks <span class="ad-count">2 (1 paused)</span>',
+    );
+  });
+
+  it('omits the paused rollup when no task is paused', () => {
+    const data = buildAgentDetailData('test-agent', makeState())!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('scheduled tasks <span class="ad-count">1</span>');
+    expect(html).not.toContain('paused)');
   });
 
   it('renders last-run column with em-dash when task has never run', () => {
