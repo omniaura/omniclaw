@@ -1,8 +1,13 @@
 import { describe, it, expect } from 'bun:test';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Effect, Layer } from 'effect';
 import {
   UserRegistryService,
   UserRegistryServiceLive,
+  makeUserRegistryServiceAtPath,
   formatMention,
   UserRegistryError,
   type UserInfo,
@@ -17,6 +22,33 @@ function runWithRegistry<E, A>(
   effect: Effect.Effect<A, E, UserRegistryService>,
 ) {
   return Effect.runPromise(Effect.provide(effect, UserRegistryServiceLive));
+}
+
+function runWithRegistryAtPath<E, A>(
+  registryPath: string,
+  effect: Effect.Effect<A, E, UserRegistryService>,
+  now?: () => Date,
+) {
+  return Effect.runPromise(
+    Effect.provide(
+      effect,
+      Layer.effect(
+        UserRegistryService,
+        makeUserRegistryServiceAtPath(registryPath, now),
+      ),
+    ),
+  );
+}
+
+async function withTempRegistry<T>(
+  callback: (registryPath: string, rootDir: string) => Promise<T>,
+): Promise<T> {
+  const rootDir = await mkdtemp(join(tmpdir(), 'omniclaw-user-registry-'));
+  try {
+    return await callback(join(rootDir, 'ipc', 'user_registry.json'), rootDir);
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+  }
 }
 
 const alice: UserInfo = {
@@ -157,6 +189,142 @@ describe('UserRegistryService', () => {
         }),
       );
       expect(result.length).toBe(2);
+    });
+  });
+
+  describe('load/save', () => {
+    it('creates the registry directory when loading with no file', async () => {
+      await withTempRegistry(async (registryPath, rootDir) => {
+        await runWithRegistryAtPath(
+          registryPath,
+          Effect.gen(function* (_) {
+            const svc = yield* _(UserRegistryService);
+            yield* _(svc.load());
+            return yield* _(svc.getUser('Alice'));
+          }),
+        );
+
+        expect(existsSync(join(rootDir, 'ipc'))).toBe(true);
+      });
+    });
+
+    it('loads users from disk and supports normalized lookups', async () => {
+      await withTempRegistry(async (registryPath) => {
+        await mkdir(join(registryPath, '..'), { recursive: true });
+        await writeFile(
+          registryPath,
+          JSON.stringify({ alice }, null, 2),
+          'utf-8',
+        );
+
+        const result = await runWithRegistryAtPath(
+          registryPath,
+          Effect.gen(function* (_) {
+            const svc = yield* _(UserRegistryService);
+            yield* _(svc.load());
+            return yield* _(svc.getUser(' ALICE '));
+          }),
+        );
+
+        expect(result).toEqual(alice);
+      });
+    });
+
+    it('saves current users as pretty-printed JSON', async () => {
+      await withTempRegistry(async (registryPath) => {
+        const now = () => new Date('2026-06-24T12:34:56.789Z');
+
+        await runWithRegistryAtPath(
+          registryPath,
+          Effect.gen(function* (_) {
+            const svc = yield* _(UserRegistryService);
+            yield* _(svc.load());
+            yield* _(svc.upsertUser(alice));
+            yield* _(svc.save());
+          }),
+          now,
+        );
+
+        const savedData = await readFile(registryPath, 'utf-8');
+        const saved = JSON.parse(savedData);
+        expect(Object.keys(saved)).toEqual(['alice']);
+        expect(saved.alice.id).toBe('123456');
+        expect(saved.alice.lastSeen).toBe('2026-06-24T12:34:56.789Z');
+        expect(savedData).toBe(JSON.stringify(saved, null, 2));
+      });
+    });
+
+    it('wraps invalid JSON load failures', async () => {
+      await withTempRegistry(async (registryPath) => {
+        await runWithRegistryAtPath(
+          registryPath,
+          Effect.gen(function* (_) {
+            const svc = yield* _(UserRegistryService);
+            yield* _(svc.load());
+          }),
+        );
+        await writeFile(registryPath, '{ invalid json', 'utf-8');
+
+        const error = await runWithRegistryAtPath(
+          registryPath,
+          Effect.gen(function* (_) {
+            const svc = yield* _(UserRegistryService);
+            return yield* _(Effect.flip(svc.load()));
+          }),
+        );
+
+        expect(error).toMatchObject({
+          _tag: 'UserRegistryError',
+          message: 'Failed to load user registry',
+        });
+        expect(error.cause).toBeInstanceOf(SyntaxError);
+      });
+    });
+
+    it('wraps registry directory creation failures', async () => {
+      const rootDir = await mkdtemp(join(tmpdir(), 'omniclaw-user-registry-'));
+      try {
+        const blockerPath = join(rootDir, 'blocker');
+        await writeFile(blockerPath, 'not a directory', 'utf-8');
+
+        const error = await runWithRegistryAtPath(
+          join(blockerPath, 'ipc', 'user_registry.json'),
+          Effect.gen(function* (_) {
+            const svc = yield* _(UserRegistryService);
+            return yield* _(Effect.flip(svc.load()));
+          }),
+        );
+
+        expect(error).toMatchObject({
+          _tag: 'UserRegistryError',
+          message: 'Failed to load user registry',
+        });
+        expect(error.cause).toBeInstanceOf(Error);
+      } finally {
+        await rm(rootDir, { force: true, recursive: true });
+      }
+    });
+
+    it('wraps write failures', async () => {
+      const rootDir = await mkdtemp(join(tmpdir(), 'omniclaw-user-registry-'));
+      try {
+        const error = await runWithRegistryAtPath(
+          rootDir,
+          Effect.gen(function* (_) {
+            const svc = yield* _(UserRegistryService);
+            yield* _(svc.upsertUser(alice));
+            return yield* _(Effect.flip(svc.save()));
+          }),
+        );
+
+        expect(error).toMatchObject({
+          _tag: 'UserRegistryError',
+          message: 'Failed to save user registry',
+        });
+        expect(error.cause).toBeInstanceOf(Error);
+      } finally {
+        await rm(rootDir, { force: true, recursive: true });
+      }
     });
   });
 });
