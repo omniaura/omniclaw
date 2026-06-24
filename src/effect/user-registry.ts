@@ -150,6 +150,17 @@ export const makeUserRegistryServiceAtPath = (
 
     const save = (): Effect.Effect<void, UserRegistryError> =>
       Effect.gen(function* (_) {
+        const dir = join(registryPath, '..');
+        if (!existsSync(dir)) {
+          yield* _(
+            Effect.tryPromise({
+              try: () => mkdir(dir, { recursive: true }),
+              catch: (error) =>
+                new UserRegistryError('Failed to save user registry', error),
+            }),
+          );
+        }
+
         const registry = yield* _(Ref.get(registryRef));
         const data = JSON.stringify(registry, null, 2);
         yield* _(

@@ -254,6 +254,28 @@ describe('UserRegistryService', () => {
       });
     });
 
+    it('saves without prior load (first-run upsert + save creates dir)', async () => {
+      await withTempRegistry(async (registryPath, rootDir) => {
+        const now = () => new Date('2026-06-24T00:00:00.000Z');
+
+        await runWithRegistryAtPath(
+          registryPath,
+          Effect.gen(function* (_) {
+            const svc = yield* _(UserRegistryService);
+            yield* _(svc.upsertUser(alice));
+            yield* _(svc.save());
+          }),
+          now,
+        );
+
+        expect(existsSync(join(rootDir, 'ipc'))).toBe(true);
+        const savedData = await readFile(registryPath, 'utf-8');
+        const saved = JSON.parse(savedData);
+        expect(saved.alice.id).toBe('123456');
+        expect(saved.alice.lastSeen).toBe('2026-06-24T00:00:00.000Z');
+      });
+    });
+
     it('wraps invalid JSON load failures', async () => {
       await withTempRegistry(async (registryPath) => {
         await runWithRegistryAtPath(
