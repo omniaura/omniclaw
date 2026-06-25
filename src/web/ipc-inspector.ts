@@ -32,12 +32,30 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
   let pendingTasks = 0;
   let retryingGroups = 0;
   let totalRetries = 0;
+  // Count groups with either lane currently in flight. Matches the
+  // dashboard "agents (N working)" definition so the two surfaces agree:
+  // - messageLane active and not idle (processing a message), or
+  // - taskLane active (running a scheduled task).
+  // Idle-waiting message lanes (active && idle — warm container in
+  // cooldown) are intentionally excluded; they are "ready" but not "doing
+  // work", mirroring getAgentExecStatus.
+  let activeGroups = 0;
   for (const g of queueDetails) {
     pendingMessages += g.messageLane.pendingCount;
     pendingTasks += g.taskLane.pendingCount;
     if (g.retryCount > 0) retryingGroups++;
     totalRetries += g.retryCount;
+    if (
+      (g.messageLane.active && !g.messageLane.idle) ||
+      g.taskLane.active
+    ) {
+      activeGroups++;
+    }
   }
+  const groupsTrackedValue =
+    activeGroups > 0
+      ? `${queueDetails.length} (${activeGroups} active)`
+      : `${queueDetails.length}`;
 
   const groupRows = queueDetails
     .map((g) => {
@@ -117,7 +135,7 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
     `<div class="stats-grid">` +
     `<div class="stat-card"><div class="label">processing</div><div class="value" id="stat-processing">${Math.max(0, stats.activeContainers - stats.idleContainers)}/${stats.maxActive}</div></div>` +
     `<div class="stat-card"><div class="label">idle</div><div class="value" id="stat-ipc-idle">${stats.idleContainers}/${stats.maxIdle}</div></div>` +
-    `<div class="stat-card"><div class="label">groups tracked</div><div class="value" id="stat-groups">${queueDetails.length}</div></div>` +
+    `<div class="stat-card"><div class="label">groups tracked</div><div class="value" id="stat-groups">${groupsTrackedValue}</div></div>` +
     `<div class="stat-card"><div class="label">pending msgs</div><div class="value" id="stat-pending-messages">${pendingMessages}</div></div>` +
     `<div class="stat-card"><div class="label">pending tasks</div><div class="value" id="stat-pending-tasks">${pendingTasks}</div></div>` +
     `<div class="stat-card"><div class="label">retrying</div><div class="value" id="stat-retrying">${retryingGroups > 0 ? `${retryingGroups} (${totalRetries})` : '0'}</div></div>` +
