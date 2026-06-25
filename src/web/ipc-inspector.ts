@@ -45,10 +45,7 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
     pendingTasks += g.taskLane.pendingCount;
     if (g.retryCount > 0) retryingGroups++;
     totalRetries += g.retryCount;
-    if (
-      (g.messageLane.active && !g.messageLane.idle) ||
-      g.taskLane.active
-    ) {
+    if ((g.messageLane.active && !g.messageLane.idle) || g.taskLane.active) {
       activeGroups++;
     }
   }
