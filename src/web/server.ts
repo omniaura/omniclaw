@@ -60,6 +60,7 @@ const PORT_ZERO_FALLBACK_START = 40000;
 const PORT_ZERO_FALLBACK_SPAN = 20000;
 const MAX_PEER_AUTH_BODY_BYTES = 1024 * 1024;
 const MAX_LOGIN_BODY_BYTES = 1024 * 1024;
+const SAFE_WEB_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 interface RequestBodyHashResult {
   hash: string;
@@ -96,6 +97,67 @@ function randomFallbackPort(): number {
     PORT_ZERO_FALLBACK_START +
     Math.floor(Math.random() * PORT_ZERO_FALLBACK_SPAN)
   );
+}
+
+function isUnsafeWebMethod(method: string): boolean {
+  return !SAFE_WEB_METHODS.has(method.toUpperCase());
+}
+
+function isTrustedRequestOrigin(
+  requestOrigin: string,
+  url: URL,
+  corsOrigin?: string,
+): boolean {
+  let parsedOrigin: URL;
+  try {
+    parsedOrigin = new URL(requestOrigin);
+  } catch {
+    return false;
+  }
+
+  if (parsedOrigin.origin === url.origin) return true;
+  if (!corsOrigin) return false;
+
+  try {
+    return parsedOrigin.origin === new URL(corsOrigin).origin;
+  } catch {
+    return false;
+  }
+}
+
+function isCrossSiteBrowserMutation(
+  req: Request,
+  url: URL,
+  corsOrigin?: string,
+): boolean {
+  if (!isUnsafeWebMethod(req.method)) return false;
+
+  const fetchSite = req.headers.get('Sec-Fetch-Site')?.toLowerCase();
+  if (fetchSite === 'cross-site') return true;
+
+  const origin = req.headers.get('Origin');
+  if (origin && !isTrustedRequestOrigin(origin, url, corsOrigin)) {
+    return true;
+  }
+
+  return false;
+}
+
+function makeCsrfRejection(pathname: string): Response {
+  if (pathname.startsWith('/api/')) {
+    return new Response(
+      JSON.stringify({ error: 'Cross-site request blocked' }),
+      {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
+  return new Response('Cross-site request blocked', {
+    status: 403,
+    headers: { 'Content-Type': 'text/plain' },
+  });
 }
 
 async function hashRequestBodyWithLimit(
@@ -207,6 +269,7 @@ export function startWebServer(
     // --- Peer auth: trusted remote OmniClaw instances bypass Basic Auth ---
     const isPeerRequest =
       isPeerRoute(url.pathname) && req.headers.has('X-OmniClaw-Instance');
+    let isAuthenticatedPeerRequest = false;
     if (isPeerRequest && trustStore) {
       // Read the body from a clone so checkPeerAuth can verify the claimed
       // body hash against the bytes actually received without consuming the
@@ -227,6 +290,7 @@ export function startWebServer(
           headers: corsOrigin ? makeCorsHeaders(corsOrigin) : {},
         });
       }
+      isAuthenticatedPeerRequest = true;
       // Peer is authenticated — skip auth, fall through to routing
     } else if (sessionStore && sessionPassword) {
       // --- Session-based auth (WEB_PASSWORD) ---
@@ -770,6 +834,13 @@ export function startWebServer(
         status: 204,
         headers: makeCorsHeaders(corsOrigin),
       });
+    }
+
+    if (
+      !isAuthenticatedPeerRequest &&
+      isCrossSiteBrowserMutation(req, url, corsOrigin)
+    ) {
+      return makeCsrfRejection(url.pathname);
     }
 
     const result = handleRequest(req, state, sseClients.size);
