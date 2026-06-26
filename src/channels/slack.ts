@@ -1065,6 +1065,7 @@ export class SlackChannel implements Channel {
 
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${this.opts.token}` },
+      redirect: 'manual',
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) {

@@ -762,6 +762,43 @@ describe('SlackChannel.downloadSlackFile', () => {
         'https://files.slack.com/files-pri/T123/download/photo.png',
       );
       expect(callArgs[1].headers.Authorization).toBe(`Bearer ${token}`);
+      expect(callArgs[1].redirect).toBe('manual');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not follow redirects with the bot token', async () => {
+    const channel = new SlackChannel({
+      botId: 'TEST',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    });
+
+    const originalFetch = globalThis.fetch;
+    const mockFetch = mock(() =>
+      Promise.resolve(
+        new Response(null, {
+          status: 302,
+          headers: { Location: 'https://evil.test/file' },
+        }),
+      ),
+    );
+    globalThis.fetch = mockFetch as any;
+
+    try {
+      await expect(
+        (channel as any).downloadSlackFile('https://files.slack.com/x', 1024),
+      ).rejects.toThrow('302');
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const callArgs = mockFetch.mock.calls[0] as unknown as [
+        string,
+        RequestInit,
+      ];
+      expect(callArgs[1].redirect).toBe('manual');
     } finally {
       globalThis.fetch = originalFetch;
     }
