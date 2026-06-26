@@ -4122,6 +4122,10 @@ async function main(): Promise<void> {
                 onChatMetadata: (chatJid, timestamp, name) =>
                   storeChatMetadata(chatJid, timestamp, name),
                 registeredGroups: () => registeredGroups,
+                slashCommandGroups: buildSlashCommandGroupsFromSubscriptions,
+                onSyntheticMessage: (message) => storeAndBroadcast(message),
+                onSessionCommand: (command, chatJid, group, sessionOpts) =>
+                  handleSessionCommand(command, chatJid, group, sessionOpts),
                 autoRegister: async (chatJid, channelName) =>
                   autoRegisterChannel(chatJid, channelName, 'slack', bot.id),
                 onReaction: async (

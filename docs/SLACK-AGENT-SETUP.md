@@ -55,6 +55,21 @@ If you already have a Slack app from before PR #829 landed:
 
 The non-assistant code paths keep working with the old manifest; you just won't see the agent pane until you reinstall.
 
+## Slash commands
+
+Slack slash commands are declared in the app manifest (Slack has no runtime registration API like Discord). The manifest in `config-examples/slack-app-manifest.json` ships the same flow surface as Discord: `/session`, `/research-driver`, `/implement-driver`, `/issue-driver`, `/mergemaster`, `/product-driver`, `/qa-driver`, `/scheduler`, `/taskbooker`.
+
+Each command lands in `SlackChannel.handleSlashCommand` which:
+
+- Acks immediately (Slack's 3s deadline).
+- Resolves the channel to a registered OmniClaw group.
+- For session commands (`/session`, plus legacy `/resume` / `/sessions`), runs the host session handler and replies ephemerally.
+- For flow commands, parses the trailing `text` (`key=value` overrides plus free-form text into the first required option), renders the prompt template, and pushes a synthetic message through the same `onSyntheticMessage` path the Discord adapter uses.
+
+To define custom slash commands per group, add the entries to your Slack app manifest with the same names you already use in `groups/<folder>/discord-commands.json` — the host reuses the same flow registry for both channels.
+
+Session commands (`/session …`) require workspace-admin status on Slack — parity with Discord's `Manage Channels` requirement.
+
 ## Multi-bot installs
 
 For workspaces running multiple OmniClaw bots (the `SLACK_BOT_IDS` / `SLACK_BOT_*_TOKEN` mode in `.env.example`), create one Slack app per bot from the same manifest. Tweak `display_information.name`, `features.bot_user.display_name`, and `features.assistant_view.assistant_description` per bot so each shows up distinctly in the AI Apps picker.
