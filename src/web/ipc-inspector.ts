@@ -5,6 +5,7 @@ import {
   type MessageLaneReason,
   type TaskLaneReason,
 } from '../group-queue.js';
+import type { IpcEvent } from './ipc-events.js';
 import { renderShell, escapeHtml, formatDurationCompact } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 
@@ -21,6 +22,60 @@ const TASK_REASON_CODES = new Set<TaskLaneReason>([
   'back-pressure',
   'no-work',
 ]);
+
+export type IpcEventSeverity = 'error' | 'warn' | 'ok';
+
+export interface IpcEventSeverityCounts {
+  error: number;
+  warn: number;
+  ok: number;
+}
+
+/**
+ * Classify an IPC event kind into a severity bucket. Matches the inline
+ * coloring rules used by the event timeline and the live poll script:
+ *
+ * - `error` — anything whose kind mentions `error` or `blocked`
+ * - `warn`  — anything whose kind mentions `suppressed`
+ * - `ok`    — everything else (`message_sent`, `task_created`, etc.)
+ */
+export function classifyIpcEventSeverity(kind: string): IpcEventSeverity {
+  const k = kind || '';
+  if (k.includes('error') || k.includes('blocked')) return 'error';
+  if (k.includes('suppressed')) return 'warn';
+  return 'ok';
+}
+
+/**
+ * Roll up severity counts across a slice of events. Used by the "recent
+ * events" stat card so operators can see at a glance how many of the
+ * latest events were errors or suppressed/blocked entries without
+ * scanning the timeline.
+ */
+export function countIpcEventSeverities(
+  events: ReadonlyArray<IpcEvent>,
+): IpcEventSeverityCounts {
+  const counts: IpcEventSeverityCounts = { error: 0, warn: 0, ok: 0 };
+  for (const e of events) counts[classifyIpcEventSeverity(e.kind)]++;
+  return counts;
+}
+
+/**
+ * Format the "recent events" stat card value, appending an inline error /
+ * warn annotation when either is non-zero. Mirrors the `retrying` card's
+ * `1 (2)` style so the parenthetical breakdown stays consistent across
+ * the /ipc stat row.
+ */
+export function formatRecentEventsValue(
+  total: number,
+  counts: IpcEventSeverityCounts,
+): string {
+  const parts: string[] = [];
+  if (counts.error > 0) parts.push(`${counts.error} err`);
+  if (counts.warn > 0) parts.push(`${counts.warn} warn`);
+  if (parts.length === 0) return String(total);
+  return `${total} (${parts.join(', ')})`;
+}
 
 /** Render IPC inspector content (no shell). */
 export function renderIpcInspectorContent(state: WebStateProvider): string {
@@ -103,14 +158,11 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
     })
     .join('\n');
 
+  const eventCounts = countIpcEventSeverities(events);
+
   const eventRows = events
     .map((e) => {
-      const kindClass =
-        e.kind.includes('error') || e.kind.includes('blocked')
-          ? 'event-error'
-          : e.kind.includes('suppressed')
-            ? 'event-warn'
-            : 'event-ok';
+      const kindClass = `event-${classifyIpcEventSeverity(e.kind)}`;
       const time = new Date(e.timestamp).toLocaleTimeString('en-US', {
         hour12: false,
         hour: '2-digit',
@@ -136,7 +188,7 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
     `<div class="stat-card"><div class="label">pending msgs</div><div class="value" id="stat-pending-messages">${pendingMessages}</div></div>` +
     `<div class="stat-card"><div class="label">pending tasks</div><div class="value" id="stat-pending-tasks">${pendingTasks}</div></div>` +
     `<div class="stat-card"><div class="label">retrying</div><div class="value" id="stat-retrying">${retryingGroups > 0 ? `${retryingGroups} (${totalRetries})` : '0'}</div></div>` +
-    `<div class="stat-card"><div class="label">recent events</div><div class="value" id="stat-events">${events.length}</div></div>` +
+    `<div class="stat-card"><div class="label">recent events</div><div class="value" id="stat-events">${formatRecentEventsValue(events.length, eventCounts)}</div></div>` +
     `</div>` +
     `<section><h2>group queue state</h2>` +
     (queueDetails.length > 0

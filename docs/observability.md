@@ -77,15 +77,15 @@ Source: `src/web/ipc-inspector.ts` (`renderIpcInspectorContent`).
 
 ### Stat cards (top row)
 
-| Card             | Meaning                                                                                  |
-| ---------------- | ---------------------------------------------------------------------------------------- |
-| `processing`     | `(activeContainers - idleContainers) / maxActive`. Pin at max → container slot pressure. |
-| `idle`           | `idleContainers / maxIdle`. Warm pool size.                                              |
-| `groups tracked` | Same as `/system → queue → groups`.                                                      |
-| `pending msgs`   | Sum of message-lane pending counts. Matches `/system`.                                   |
-| `pending tasks`  | Sum of task-lane pending counts.                                                         |
-| `retrying`       | `retryingGroups (totalRetries)` when any group is retrying, else `0`.                    |
-| `recent events`  | Number of events in the timeline below (capped at 50).                                   |
+| Card             | Meaning                                                                                                                                                     |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `processing`     | `(activeContainers - idleContainers) / maxActive`. Pin at max → container slot pressure.                                                                    |
+| `idle`           | `idleContainers / maxIdle`. Warm pool size.                                                                                                                 |
+| `groups tracked` | Same as `/system → queue → groups`.                                                                                                                         |
+| `pending msgs`   | Sum of message-lane pending counts. Matches `/system`.                                                                                                      |
+| `pending tasks`  | Sum of task-lane pending counts.                                                                                                                            |
+| `retrying`       | `retryingGroups (totalRetries)` when any group is retrying, else `0`.                                                                                       |
+| `recent events`  | Number of events in the timeline below (capped at 50). Suffixed with `(X err)` or `(X err, Y warn)` when any error or suppressed events fall in the window. |
 
 ### Group queue table (per-row)
 
