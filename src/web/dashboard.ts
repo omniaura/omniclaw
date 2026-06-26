@@ -5,24 +5,10 @@ import { renderShell, escapeHtml, escapeJsonForHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 import { buildAgentChannelData } from './agent-channels.js';
 import type { RemotePeerAgents } from '../discovery/types.js';
+import { formatActiveTaskStatsFromState } from './task-stats.js';
 
 function imageRev(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12);
-}
-
-export function formatDashboardActiveTasksValue(
-  state: Pick<WebStateProvider, 'getTasks' | 'getQueueDetails'>,
-): string {
-  const activeTasks = state
-    .getTasks()
-    .filter((task) => task.status === 'active').length;
-  const runningTasks = state
-    .getQueueDetails()
-    .reduce((sum, g) => sum + (g.taskLane.activeTask ? 1 : 0), 0);
-
-  return runningTasks > 0
-    ? `${activeTasks} (${runningTasks} running)`
-    : `${activeTasks}`;
 }
 
 /** Render the dashboard content (no shell wrapper). */
@@ -38,7 +24,7 @@ export function renderDashboardContent(
     0,
     stats.activeContainers - stats.idleContainers,
   );
-  const activeTasksValue = formatDashboardActiveTasksValue(state);
+  const activeTasksValue = formatActiveTaskStatsFromState(state);
   // Count local agents currently in flight on either lane (processing a
   // message or running a scheduled task). Surfaced inline on the "agents"
   // card so the operator can tell at a glance how much of the fleet is

@@ -1239,15 +1239,33 @@ document.getElementById("tm-run-close").addEventListener("click",function(){
   document.getElementById("tm-run-panel").style.display="none";
 });
 
+function countRunningTasks(queueDetails){
+  if(!Array.isArray(queueDetails))return 0;
+  return queueDetails.reduce(function(sum,detail){
+    return sum+(detail&&detail.taskLane&&detail.taskLane.activeTask?1:0);
+  },0);
+}
+
+function formatActiveTaskStats(active,running,overdue){
+  var parts=[];
+  if(overdue>0)parts.push(overdue+" overdue");
+  if(running>0)parts.push(running+" running");
+  return active+" active"+(parts.length>0?" ("+parts.join(", ")+")":"");
+}
+
 // ---- Refresh tasks from API ----
 function refreshTasks(){
-  fetch("/api/tasks")
-  .then(function(r){return r.json();})
-  .then(function(tasks){
+  Promise.all([
+    fetch("/api/tasks").then(function(r){return r.json();}),
+    fetch("/api/ipc/queue").then(function(r){return r.ok?r.json():[];}).catch(function(){return [];})
+  ])
+  .then(function(results){
+    var tasks=results[0],queueDetails=results[1];
     // Update stats
-    var total=tasks.length,active=0,paused=0,completed=0,overdue=0;
+    var total=tasks.length,active=0,paused=0,completed=0,executing=0,overdue=0,running=countRunningTasks(queueDetails);
     var now=Date.now();
     tasks.forEach(function(t){
+      if(t.status!=="completed"&&t.executing_since!=null)executing++;
       if(t.status==="active"){
         active++;
         if(t.next_run){
@@ -1258,10 +1276,11 @@ function refreshTasks(){
       else if(t.status==="paused")paused++;
       else if(t.status==="completed")completed++;
     });
-    var activeLabel=overdue>0?active+' active ('+overdue+' overdue)':active+' active';
+    var activeLabel=formatActiveTaskStats(active,running,overdue);
     var stats=document.querySelector(".tasks-stats");
     if(stats)stats.innerHTML='<span class="tasks-stat">'+total+' total</span>'
       +'<span class="tasks-stat stat-active">'+activeLabel+'</span>'
+      +(executing>0?'<span class="tasks-stat stat-executing">'+executing+' executing</span>':'')
       +'<span class="tasks-stat stat-paused">'+paused+' paused</span>'
       +'<span class="tasks-stat stat-completed">'+completed+' completed</span>';
 

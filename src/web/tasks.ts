@@ -10,39 +10,29 @@ import { renderShell, escapeHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 import { buildAgentChannelData } from './agent-channels.js';
 import { lastRunOutcomeClass } from './agent-detail.js';
+import {
+  countActiveTasks,
+  countOverdueActiveTasks,
+  countRunningTasks,
+  formatActiveTaskStats,
+} from './task-stats.js';
 
 /** Render the task manager content (no shell wrapper — for SPA nav). */
 export function renderTasksContent(state: WebStateProvider): string {
   const tasks = state.getTasks();
   const agentData = buildAgentChannelData(state);
 
-  const activeTasks = tasks.filter((t) => t.status === 'active').length;
+  const activeTasks = countActiveTasks(tasks);
+  const runningTasks = countRunningTasks(state.getQueueDetails());
   const pausedTasks = tasks.filter((t) => t.status === 'paused').length;
   const completedTasks = tasks.filter((t) => t.status === 'completed').length;
   const executingTasks = tasks.filter(
     (t) => t.status !== 'completed' && t.executing_since != null,
   ).length;
-  // Count active tasks whose `next_run` has already passed. The scheduler
-  // normally advances `next_run` after each tick, so an active task with a
-  // past `next_run` means the scheduler is either backed up, was offline,
-  // or the run lease hasn't been picked up yet. Surfacing the rollup on the
-  // `active` chip answers "is the scheduler keeping up?" without making the
-  // operator scan the `next run` column row-by-row.
-  //
-  // Tasks with `next_run = null` (paused/completed/once-fired) are skipped
-  // since "overdue" only makes sense relative to a scheduled time. Parse
-  // failures are treated as not-overdue to avoid noisy counts from
-  // legacy/malformed rows.
-  const now = Date.now();
-  const overdueActiveTasks = tasks.reduce((sum, t) => {
-    if (t.status !== 'active' || !t.next_run) return sum;
-    const nextRunMs = Date.parse(t.next_run);
-    return Number.isFinite(nextRunMs) && nextRunMs < now ? sum + 1 : sum;
-  }, 0);
-  const activeValue =
-    overdueActiveTasks > 0
-      ? `${activeTasks} active (${overdueActiveTasks} overdue)`
-      : `${activeTasks} active`;
+  const activeValue = formatActiveTaskStats(activeTasks, runningTasks, {
+    includeActiveLabel: true,
+    overdueTasks: countOverdueActiveTasks(tasks),
+  });
 
   // Build agent/channel options for create/edit forms
   const agentOptions = agentData
