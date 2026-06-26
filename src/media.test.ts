@@ -244,6 +244,51 @@ describe('downloadTextAttachment', () => {
       downloadTextAttachment('https://example.test/file.txt'),
     ).rejects.toThrow(`Download exceeded ${MAX_TEXT_DOWNLOAD_BYTES} bytes`);
   });
+
+  it('rejects validated remote URLs that resolve to private addresses', async () => {
+    const fetchMock = mock(() =>
+      Promise.resolve(new Response(createStream(['should-not-fetch']))),
+    ) as unknown as typeof globalThis.fetch;
+    globalThis.fetch = fetchMock;
+
+    await expect(
+      downloadTextAttachment('https://example.test/private.txt', {
+        validateRemoteUrl: true,
+        lookupHostAddresses: async () => ['127.0.0.1'],
+      }),
+    ).rejects.toThrow(
+      'Remote attachment URL rejected: resolved private address is not allowed',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('pins DNS when downloading validated hostname URLs', async () => {
+    const fetchMock = mock(() =>
+      Promise.resolve(new Response(createStream(['should-not-fetch']))),
+    ) as unknown as typeof globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    const pinnedFetch = mock(
+      (_url: string, _address: string, _timeoutMs: number) =>
+        Promise.resolve(new Response(createStream(['pinned-text']))),
+    );
+
+    const text = await downloadTextAttachment(
+      'https://cdn.example.test/a.txt',
+      {
+        validateRemoteUrl: true,
+        lookupHostAddresses: async () => ['203.0.113.10'],
+        fetchWithPinnedDnsImpl: pinnedFetch,
+      },
+    );
+
+    expect(text).toBe('pinned-text');
+    expect(pinnedFetch).toHaveBeenCalledWith(
+      'https://cdn.example.test/a.txt',
+      '203.0.113.10',
+      15_000,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

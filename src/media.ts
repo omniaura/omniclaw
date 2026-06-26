@@ -195,9 +195,9 @@ export async function downloadBinaryAttachment(
  */
 export async function downloadTextAttachment(
   url: string,
-  options?: { maxBytes?: number; timeoutMs?: number },
+  options?: AttachmentDownloadOptions,
 ): Promise<string> {
-  const response = await fetchWithTimeout(url, options);
+  const response = await fetchAttachment(url, options);
   if (!response.ok) {
     throw new Error(`Download failed with status ${response.status}`);
   }

@@ -57,6 +57,8 @@ const TASK_TITLE_MAX_CHARS = 80;
 // so progress updates always render instead of being silently rejected.
 const TASK_DETAILS_MAX_CHARS = 160;
 
+const SLACK_FILE_HOSTS = new Set(['files.slack.com']);
+
 // Rotating status shown under the assistant thread while the agent works.
 const STATUS_LOADING_MESSAGES = [
   'Thinking it through…',
@@ -76,6 +78,19 @@ function splitMarkdown(text: string): string[] {
 /** Split text at Slack's plain-text message limit (hard split, no break preference). */
 function splitMessage(text: string, maxLen = TEXT_LIMIT): string[] {
   return splitMessageShared(text, maxLen, false);
+}
+
+function assertSlackFileUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error('Invalid Slack file URL');
+  }
+
+  if (parsed.protocol !== 'https:' || !SLACK_FILE_HOSTS.has(parsed.hostname)) {
+    throw new Error(`Rejected non-Slack file URL: ${parsed.hostname || url}`);
+  }
 }
 
 /** A `markdown` block renders standard markdown (GFM) instead of legacy mrkdwn. */
@@ -1046,8 +1061,11 @@ export class SlackChannel implements Channel {
     url: string,
     maxBytes: number,
   ): Promise<Buffer> {
+    assertSlackFileUrl(url);
+
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${this.opts.token}` },
+      redirect: 'manual',
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) {
