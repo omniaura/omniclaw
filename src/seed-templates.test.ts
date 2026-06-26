@@ -319,4 +319,18 @@ describe('reconcileSeededFiles', () => {
     expect(result.updated).toHaveLength(0);
     expect(result.current).toHaveLength(0);
   });
+
+  it('records errors when a discovered CLAUDE.md cannot be read', () => {
+    fs.mkdirSync(path.join(tmpDir, 'broken-channel', 'CLAUDE.md'), {
+      recursive: true,
+    });
+
+    const result = reconcileSeededFiles(tmpDir, true);
+
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0].path).toContain(
+      path.join('broken-channel', 'CLAUDE.md'),
+    );
+    expect(result.errors[0].error).toBeTruthy();
+  });
 });
