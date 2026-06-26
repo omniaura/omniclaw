@@ -1025,18 +1025,30 @@ export class SlackChannel implements Channel {
   }
 
   /**
-   * Look up a flow by name from the configured slash command groups, falling
-   * back to the broader registered groups list so manifest-only commands
-   * still work in dev setups.
+   * Look up a flow by name from the configured slash command groups. When
+   * `slashCommandGroups` is supplied the bot operator has explicitly narrowed
+   * which groups this bot may run commands for (subscription/multi-bot
+   * scoping), so a group that isn't in the eligible list must not be allowed
+   * to fall back to its own flow definitions — that would defeat the gate.
+   * Falls back to the broader registered groups list only when no narrowing
+   * is configured (single-bot dev setups).
    */
   private findFlowForGroup(
     group: RegisteredGroup,
     commandName: string,
   ): DiscordFlowDefinition | undefined {
-    const eligible = this.opts.slashCommandGroups
-      ? this.opts.slashCommandGroups()
-      : Object.values(this.opts.registeredGroups());
-    const scoped = eligible.find((g) => g.folder === group.folder) || group;
+    let scoped: RegisteredGroup | undefined;
+    if (this.opts.slashCommandGroups) {
+      scoped = this.opts
+        .slashCommandGroups()
+        .find((g) => g.folder === group.folder);
+      if (!scoped) return undefined;
+    } else {
+      scoped =
+        Object.values(this.opts.registeredGroups()).find(
+          (g) => g.folder === group.folder,
+        ) || group;
+    }
     return getDiscordFlowDefinitionsForGroup(scoped).find(
       (flow) => flow.name === commandName,
     );
@@ -1046,8 +1058,11 @@ export class SlackChannel implements Channel {
    * Slack permission gate for session commands. We approximate Discord's
    * "Manage Channels" requirement with workspace-admin status — easier to
    * reason about across channel types and aligns with how operators set up
-   * Slack workspaces. Soft-fails open on API errors so a transient outage
-   * doesn't lock everyone out (logged at warn).
+   * Slack workspaces. Fails CLOSED on lookup errors so a transient outage
+   * cannot grant elevated session-management access to a non-admin (the
+   * Discord side hard-blocks too via `memberPermissions`, and the session
+   * commands mutate runtime state — privilege escalation, not availability,
+   * is the worse failure mode).
    */
   private async userIsWorkspaceAdmin(userId: string): Promise<boolean> {
     if (!userId) return false;
@@ -1060,8 +1075,11 @@ export class SlackChannel implements Channel {
         user?.is_admin || user?.is_owner || user?.is_primary_owner,
       );
     } catch (err) {
-      logger.warn({ err, userId }, 'Slack users.info failed for admin check');
-      return true;
+      logger.warn(
+        { err, userId },
+        'Slack users.info failed for admin check — denying',
+      );
+      return false;
     }
   }
 

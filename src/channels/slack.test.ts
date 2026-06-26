@@ -1152,12 +1152,20 @@ describe('SlackChannel slash command routing', () => {
     text?: string;
   };
 
-  const slashClient = (admin = true) => ({
+  const slashClient = (
+    options: { admin?: boolean; lookupFails?: boolean } = {},
+  ) => ({
     users: {
       info: mock(() =>
-        Promise.resolve({
-          user: { is_admin: admin, is_owner: false, is_primary_owner: false },
-        }),
+        options.lookupFails
+          ? Promise.reject(new Error('users.info exploded'))
+          : Promise.resolve({
+              user: {
+                is_admin: options.admin !== false,
+                is_owner: false,
+                is_primary_owner: false,
+              },
+            }),
       ),
     },
     conversations: {
@@ -1170,6 +1178,13 @@ describe('SlackChannel slash command routing', () => {
     onSessionCommand?: ReturnType<typeof mock>;
     multiBotMode?: boolean;
     admin?: boolean;
+    adminLookupFails?: boolean;
+    slashCommandGroups?: () => Array<{
+      name: string;
+      folder: string;
+      trigger: string;
+      added_at: string;
+    }>;
   }) => {
     const channel = new SlackChannel({
       botId: opts.multiBotMode ? 'CLAYTON' : 'default',
@@ -1192,12 +1207,14 @@ describe('SlackChannel slash command routing', () => {
           added_at: new Date().toISOString(),
         },
       }),
+      slashCommandGroups: opts.slashCommandGroups,
       onSyntheticMessage: opts.onSyntheticMessage,
       onSessionCommand: opts.onSessionCommand,
     });
-    (channel as unknown as { client: unknown }).client = slashClient(
-      opts.admin !== false,
-    );
+    (channel as unknown as { client: unknown }).client = slashClient({
+      admin: opts.admin !== false,
+      lookupFails: opts.adminLookupFails === true,
+    });
     return channel;
   };
 
@@ -1411,5 +1428,65 @@ describe('SlackChannel slash command routing', () => {
     expect(onSyntheticMessage).not.toHaveBeenCalled();
     const reply = respond.mock.calls[0][0] as RespondCall;
     expect(reply.text).toContain('not registered');
+  });
+
+  it('rejects flow commands when slashCommandGroups excludes the group', async () => {
+    const onSyntheticMessage = mock(() => {});
+    const respond = mock(async (_: RespondCall) => {});
+    // slashCommandGroups returns a *different* group than the channel resolves
+    // to — typical of subscription-scoped multi-bot setups where this bot does
+    // not own the channel's commands. Must not fall back to the channel group.
+    const channel = buildSlashChannel({
+      onSyntheticMessage,
+      slashCommandGroups: () => [
+        {
+          name: 'OtherBot',
+          folder: 'other-bot',
+          trigger: '@OtherBot',
+          added_at: new Date().toISOString(),
+        },
+      ],
+    });
+
+    await (
+      channel as unknown as {
+        handleSlashCommand: (
+          c: ReturnType<typeof slashCommand>,
+          r: typeof respond,
+        ) => Promise<void>;
+      }
+    ).handleSlashCommand(
+      slashCommand({ text: 'investigate the foo bug' }),
+      respond,
+    );
+
+    expect(onSyntheticMessage).not.toHaveBeenCalled();
+    const reply = respond.mock.calls[0][0] as RespondCall;
+    expect(reply.text).toContain('not a configured flow');
+  });
+
+  it('refuses /session commands when users.info lookup fails', async () => {
+    const onSessionCommand = mock(() => ({ message: 'should not run' }));
+    const channel = buildSlashChannel({
+      onSessionCommand,
+      adminLookupFails: true,
+    });
+    const respond = mock(async (_: RespondCall) => {});
+
+    await (
+      channel as unknown as {
+        handleSlashCommand: (
+          c: ReturnType<typeof slashCommand>,
+          r: typeof respond,
+        ) => Promise<void>;
+      }
+    ).handleSlashCommand(
+      slashCommand({ command: '/session', text: 'list' }),
+      respond,
+    );
+
+    expect(onSessionCommand).not.toHaveBeenCalled();
+    const reply = respond.mock.calls[0][0] as RespondCall;
+    expect(reply.text).toContain('workspace admins');
   });
 });
