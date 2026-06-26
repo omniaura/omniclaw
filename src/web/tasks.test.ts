@@ -561,9 +561,7 @@ describe('renderTasksContent', () => {
 
   it('ignores unparseable next_run values when computing overdue count', () => {
     const html = renderTasksContent(
-      makeState([
-        makeTask({ id: 'task-bad', next_run: 'not-a-date' }),
-      ]),
+      makeState([makeTask({ id: 'task-bad', next_run: 'not-a-date' })]),
     );
 
     expect(html).toContain('>1 active</span>');
