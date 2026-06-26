@@ -421,6 +421,32 @@ export function getAllChats(): ChatInfo[] {
 }
 
 /**
+ * Return a per-chat message count for the trailing 24h window. Uses the
+ * idx_timestamp index to keep the scan bounded to recent rows. Result is a
+ * Map keyed by chat_jid; chats with no recent messages are omitted.
+ *
+ * The `now` parameter is injectable for deterministic testing.
+ */
+export function getChat24hMessageCounts(
+  now: Date = new Date(),
+): Map<string, number> {
+  const since = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+  const rows = db
+    .prepare(
+      `
+    SELECT chat_jid, COUNT(*) AS n
+    FROM messages
+    WHERE timestamp > ?
+    GROUP BY chat_jid
+  `,
+    )
+    .all(since) as Array<{ chat_jid: string; n: number }>;
+  const out = new Map<string, number>();
+  for (const r of rows) out.set(r.chat_jid, r.n);
+  return out;
+}
+
+/**
  * Get the Discord guild ID for a chat JID from stored metadata.
  */
 export function getChatGuildId(chatJid: string): string | undefined {

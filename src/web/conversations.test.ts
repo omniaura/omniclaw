@@ -4,6 +4,7 @@ import { startWebServer, type WebServerHandle } from './server.js';
 import {
   chatPlatformFromJid,
   formatChatRelativeTime,
+  formatActivityCount,
 } from './conversations.js';
 import type { WebStateProvider, QueueStats } from './types.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
@@ -381,6 +382,77 @@ describe('conversations page', () => {
     expect(html).not.toContain('Invalid Date');
     expect(html).not.toContain('title="Invalid Date"');
   });
+
+  it('shows 24h activity badge for chats with recent messages', async () => {
+    const state = makeState({
+      getChat24hMessageCounts: () =>
+        new Map<string, number>([
+          ['dc:123', 7],
+          ['dc:456', 42],
+        ]),
+    });
+    handle = startWebServer(testConfig(), state);
+    const res = await authedFetch('/conversations');
+    const html = await res.text();
+    expect(html).toContain('class="chat-activity-badge"');
+    expect(html).toContain('>7</span>');
+    expect(html).toContain('>42</span>');
+    expect(html).toContain('7 messages in the last 24h');
+    expect(html).toContain('42 messages in the last 24h');
+  });
+
+  it('omits activity badge for chats with no recent messages', async () => {
+    const state = makeState({
+      getChat24hMessageCounts: () => new Map<string, number>([['dc:123', 3]]),
+    });
+    handle = startWebServer(testConfig(), state);
+    const res = await authedFetch('/conversations');
+    const html = await res.text();
+    // dc:456 has no recent activity entry — the badge element should appear
+    // exactly once (for dc:123).
+    const matches = html.match(/class="chat-activity-badge"/g) ?? [];
+    expect(matches.length).toBe(1);
+    expect(html).toContain('>3</span>');
+  });
+
+  it('renders no activity badges when provider does not implement counts', async () => {
+    // Default state stub omits getChat24hMessageCounts entirely — the page
+    // must keep rendering instead of throwing.
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/conversations');
+    const html = await res.text();
+    expect(html).not.toContain('class="chat-activity-badge"');
+  });
+
+  it('uses singular "message" wording for a single recent message', async () => {
+    const state = makeState({
+      getChat24hMessageCounts: () => new Map<string, number>([['dc:123', 1]]),
+    });
+    handle = startWebServer(testConfig(), state);
+    const res = await authedFetch('/conversations');
+    const html = await res.text();
+    expect(html).toContain('1 message in the last 24h');
+    expect(html).not.toContain('1 messages in the last 24h');
+  });
+
+  it('formats large 24h counts compactly (k suffix)', async () => {
+    const state = makeState({
+      getChat24hMessageCounts: () =>
+        new Map<string, number>([
+          ['dc:123', 1234],
+          ['dc:456', 12_500],
+        ]),
+    });
+    handle = startWebServer(testConfig(), state);
+    const res = await authedFetch('/conversations');
+    const html = await res.text();
+    // Compact display keeps the badge narrow even on chatty chats.
+    expect(html).toContain('>1.2k</span>');
+    expect(html).toContain('>13k</span>');
+    // Title attr still carries the precise count for the tooltip.
+    expect(html).toContain('1234 messages in the last 24h');
+    expect(html).toContain('12500 messages in the last 24h');
+  });
 });
 
 describe('formatChatRelativeTime helper', () => {
@@ -432,6 +504,28 @@ describe('formatChatRelativeTime helper', () => {
 
   it('returns the raw input for unparseable strings', () => {
     expect(formatChatRelativeTime('not-a-date', NOW)).toBe('not-a-date');
+  });
+});
+
+describe('formatActivityCount', () => {
+  it('renders small counts verbatim', () => {
+    expect(formatActivityCount(0)).toBe('0');
+    expect(formatActivityCount(1)).toBe('1');
+    expect(formatActivityCount(42)).toBe('42');
+    expect(formatActivityCount(999)).toBe('999');
+  });
+
+  it('renders 1k–9.9k with one decimal, trimming trailing zero', () => {
+    expect(formatActivityCount(1000)).toBe('1k');
+    expect(formatActivityCount(1200)).toBe('1.2k');
+    expect(formatActivityCount(1234)).toBe('1.2k');
+    expect(formatActivityCount(9_900)).toBe('9.9k');
+  });
+
+  it('renders 10k+ rounded to the nearest thousand', () => {
+    expect(formatActivityCount(12_500)).toBe('13k');
+    expect(formatActivityCount(99_499)).toBe('99k');
+    expect(formatActivityCount(150_000)).toBe('150k');
   });
 });
 

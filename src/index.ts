@@ -77,6 +77,7 @@ import {
   getAllChannelRoutes,
   getAllChannelSubscriptions,
   getAllChats,
+  getChat24hMessageCounts,
   getAllGuildRosters,
   getAllRegisteredGroups,
   getAllSessions,
@@ -3525,6 +3526,7 @@ async function main(): Promise<void> {
       return limit ? msgs.slice(0, limit) : msgs;
     },
     getChats: () => getAllChats(),
+    getChat24hMessageCounts: () => getChat24hMessageCounts(),
     getQueueStats: () => queue.getStats(),
     getQueueDetails: () => queue.getDetailedStats(),
     getIpcEvents: (count) => ipcEvents.recent(count),
