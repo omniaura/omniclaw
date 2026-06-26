@@ -130,6 +130,103 @@ describe('createSimDiscoveryEnvironment', () => {
     await reader!.cancel();
   });
 
+  it('proxies deterministic remote stats for a trusted peer', async () => {
+    const env = createSimDiscoveryEnvironment(new FakeState());
+
+    const statsReq = new Request(
+      'http://localhost/api/discovery/peers/peer-remote-1/stats',
+    );
+    const statsRes = (await handleDiscoveryRequest(
+      statsReq,
+      new URL(statsReq.url),
+      env.context,
+    )) as Response;
+    const stats = (await statsRes.json()) as {
+      agents: number;
+      activeTasks: number;
+      pausedTasks: number;
+      completedTasks: number;
+    };
+
+    expect(statsRes.status).toBe(200);
+    expect(stats.agents).toBeGreaterThan(0);
+    expect(stats.activeTasks).toBeGreaterThan(0);
+    expect(stats.pausedTasks).toBeGreaterThan(0);
+    expect(stats.completedTasks).toBeGreaterThanOrEqual(0);
+  });
+
+  it('writes and reads remote context layers through the proxy routes', async () => {
+    const env = createSimDiscoveryEnvironment(new FakeState());
+
+    const writeReq = new Request(
+      'http://localhost/api/discovery/peers/peer-remote-1/context/file',
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          path: 'remote/CLAUDE.md',
+          content: '# Remote Context\nKeep builds deterministic.',
+        }),
+      },
+    );
+    const writeRes = (await handleDiscoveryRequest(
+      writeReq,
+      new URL(writeReq.url),
+      env.context,
+    )) as Response;
+
+    expect(writeRes.status).toBe(200);
+    expect(await writeRes.json()).toEqual({ ok: true });
+
+    const layersReq = new Request(
+      'http://localhost/api/discovery/peers/peer-remote-1/context/layers?folder=remote%2FCLAUDE.md',
+    );
+    const layersRes = (await handleDiscoveryRequest(
+      layersReq,
+      new URL(layersReq.url),
+      env.context,
+    )) as Response;
+    const layers = (await layersRes.json()) as {
+      channel: { path: string; content: string; exists: boolean };
+    };
+
+    expect(layersRes.status).toBe(200);
+    expect(layers.channel).toEqual({
+      path: 'remote/CLAUDE.md',
+      content: '# Remote Context\nKeep builds deterministic.',
+      exists: true,
+    });
+  });
+
+  it('denies proxy access to peers that are not trusted', async () => {
+    const env = createSimDiscoveryEnvironment(new FakeState());
+
+    env.addRemotePeer({
+      instanceId: 'peer-pending',
+      name: 'Pending Peer',
+      host: 'pending-sim.local',
+      address: '192.168.1.83',
+      channelFolder: 'pending',
+      status: 'pending',
+    });
+
+    const agentsReq = new Request(
+      'http://localhost/api/discovery/peers/peer-pending/agents',
+    );
+    const agentsRes = (await handleDiscoveryRequest(
+      agentsReq,
+      new URL(agentsReq.url),
+      env.context,
+    )) as Response;
+
+    expect(agentsRes.status).toBe(403);
+    expect(await agentsRes.json()).toEqual({ error: 'Peer is not trusted' });
+    expect(
+      env
+        .getNetworkPageState()
+        .peers.find((peer) => peer.instanceId === 'peer-pending'),
+    ).toMatchObject({ status: 'pending', online: true });
+  });
+
   it('supports deterministic runtime toggles in network page state', () => {
     const env = createSimDiscoveryEnvironment(new FakeState());
     const runtime = env.context.runtime as unknown as {
