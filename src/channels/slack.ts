@@ -740,11 +740,18 @@ export class SlackChannel implements Channel {
     }
 
     const parsed = parseSlackCommandText(command.text || '', flow);
+    const missingRequired = (flow.options || []).some(
+      (opt) => opt.required && parsed.optionValues[opt.name] === undefined,
+    );
     const renderedPrompt = renderDiscordFlowPrompt(
       flow,
       parsed.optionValues,
     ).trim();
-    if (!renderedPrompt) {
+    // renderDiscordFlowPrompt substitutes a missing required option with '',
+    // which can still produce a non-empty prompt from the surrounding template
+    // text. Guard on the parsed option values too so e.g. /research-driver with
+    // no goal does not queue a blank-goal run.
+    if (missingRequired || !renderedPrompt) {
       await respond({
         response_type: 'ephemeral',
         text: `\`/${commandName}\` needs more input — supply the required option(s).`,

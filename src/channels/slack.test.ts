@@ -1268,6 +1268,29 @@ describe('SlackChannel slash command routing', () => {
     expect(synthetic.content).toContain('investigate the foo bug');
   });
 
+  it('rejects a flow command missing a required option without queueing', async () => {
+    const onSyntheticMessage = mock(() => {});
+    const channel = buildSlashChannel({ onSyntheticMessage });
+    const respond = mock(async (_: RespondCall) => {});
+
+    await (
+      channel as unknown as {
+        handleSlashCommand: (
+          c: ReturnType<typeof slashCommand>,
+          r: typeof respond,
+        ) => Promise<void>;
+      }
+    ).handleSlashCommand(
+      slashCommand({ command: '/research-driver', text: '' }),
+      respond,
+    );
+
+    expect(onSyntheticMessage).not.toHaveBeenCalled();
+    const reply = respond.mock.calls[0][0] as RespondCall;
+    expect(reply.response_type).toBe('ephemeral');
+    expect(reply.text).toContain('needs more input');
+  });
+
   it('uses scoped JIDs when running in multi-bot mode', async () => {
     const onSyntheticMessage = mock(() => {});
     const channel = buildSlashChannel({

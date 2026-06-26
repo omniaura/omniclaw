@@ -22,6 +22,18 @@
         "should_escape": false
       },
       {
+        "command": "/resume",
+        "description": "Legacy alias for /session resume",
+        "usage_hint": "<session-id>",
+        "should_escape": false
+      },
+      {
+        "command": "/sessions",
+        "description": "Legacy alias for /session list",
+        "usage_hint": "[limit=...]",
+        "should_escape": false
+      },
+      {
         "command": "/implement-driver",
         "description": "Take a scoped issue through a PR-ready patch",
         "usage_hint": "<goal> [repo=...]",
