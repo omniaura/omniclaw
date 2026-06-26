@@ -3,6 +3,7 @@ import path from 'path';
 import { App, Assistant } from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
 import type { AnyChunk, KnownBlock } from '@slack/web-api';
+import type { ReactionAddedEvent } from '@slack/types';
 
 import { logger } from '../logger.js';
 import {
@@ -262,35 +263,9 @@ export class SlackChannel implements Channel {
 
     // Register reaction handler (for share-request approvals etc.)
     this.app.event('reaction_added', async ({ event }) => {
-      const channelId =
-        event.item.type === 'message' ? event.item.channel : null;
-      if (!channelId) return;
-
-      // Ignore reactions from this bot itself — Slack delivers reaction_added
-      // events for our own reactions when we use `reactions.add` from
-      // share-request approval flows, and they would otherwise re-enter
-      // the message loop as @-mention noise.
-      if (this.botUserId && event.user === this.botUserId) return;
-
-      const chatJid = channelIdToJid(
-        channelId,
-        this.multiBotMode ? this.botId : undefined,
+      await this.handleReactionAdded(event).catch((err: unknown) =>
+        logger.error({ err }, 'Error handling Slack reaction_added'),
       );
-      const messageId = event.item.type === 'message' ? event.item.ts : null;
-      if (!messageId) return;
-
-      const emoji = `:${event.reaction}:`;
-
-      const { name: userName, isBot } = await resolveSlackUserIdentity(
-        this.client,
-        event.user,
-        event.user,
-      );
-
-      this.opts.onReaction?.(chatJid, messageId, emoji, userName, {
-        id: event.user,
-        isBot,
-      });
     });
 
     // Slack AI-app assistant threads (the "agent" split-pane experience).
@@ -877,6 +852,47 @@ export class SlackChannel implements Channel {
       this.threadRootExcerpts.set(key, '');
       return null;
     }
+  }
+
+  /**
+   * Process a `reaction_added` event. Exposed (via the public-shaped method)
+   * for tests; the bolt event handler in `connect()` delegates straight here.
+   *
+   * Filters that must precede dispatch:
+   *   1. drop reactions added by this bot itself (otherwise our own
+   *      `reactions.add` calls from approval flows would loop back in),
+   *   2. drop reactions on messages NOT authored by this bot — reactions on
+   *      human/teammate messages would wake the warm container with a
+   *      synthetic trigger that costs an inference round-trip just to no-op.
+   *      Mirrors the Discord adapter's `reaction.message.author?.id` check.
+   */
+  async handleReactionAdded(event: ReactionAddedEvent): Promise<void> {
+    const channelId =
+      event.item.type === 'message' ? event.item.channel : null;
+    if (!channelId) return;
+
+    if (this.botUserId && event.user === this.botUserId) return;
+    if (this.botUserId && event.item_user !== this.botUserId) return;
+
+    const chatJid = channelIdToJid(
+      channelId,
+      this.multiBotMode ? this.botId : undefined,
+    );
+    const messageId = event.item.type === 'message' ? event.item.ts : null;
+    if (!messageId) return;
+
+    const emoji = `:${event.reaction}:`;
+
+    const { name: userName, isBot } = await resolveSlackUserIdentity(
+      this.client,
+      event.user,
+      event.user,
+    );
+
+    this.opts.onReaction?.(chatJid, messageId, emoji, userName, {
+      id: event.user,
+      isBot,
+    });
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

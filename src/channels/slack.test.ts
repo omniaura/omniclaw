@@ -158,6 +158,112 @@ describe('SlackChannel.ownsJid', () => {
   });
 });
 
+describe('SlackChannel.handleReactionAdded', () => {
+  const makeClient = () => ({
+    users: {
+      info: mock(({ user }: { user: string }) =>
+        Promise.resolve({
+          user: {
+            name: user,
+            profile: { display_name: user },
+            is_bot: false,
+          },
+        }),
+      ),
+    },
+  });
+
+  const makeChannel = (onReaction: ReturnType<typeof mock>) => {
+    const channel = new SlackChannel({
+      botId: 'CLAYTON',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      multiBotMode: true,
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({
+        'slack:CLAYTON:C123': {
+          name: 'Clayton',
+          folder: 'clayton-discord',
+          trigger: '@Clayton',
+          added_at: new Date().toISOString(),
+        },
+      }),
+      onReaction,
+    });
+    (channel as any).botUserId = 'UCLAYTON';
+    (channel as any).client = makeClient();
+    return channel;
+  };
+
+  const reactionEvent = (over: Record<string, unknown> = {}) => ({
+    type: 'reaction_added' as const,
+    user: 'UPEYTON',
+    reaction: 'fire',
+    item_user: 'UCLAYTON',
+    item: {
+      type: 'message' as const,
+      channel: 'C123',
+      ts: '1700000000.000100',
+    },
+    event_ts: '1700000000.000200',
+    ...over,
+  });
+
+  it('fires onReaction for a reaction on this bot’s own message', async () => {
+    const onReaction = mock(() => {});
+    const channel = makeChannel(onReaction);
+
+    await (channel as any).handleReactionAdded(reactionEvent());
+
+    expect(onReaction).toHaveBeenCalledTimes(1);
+    const args = (onReaction.mock.calls[0] as unknown as [
+      string,
+      string,
+      string,
+      string,
+      { id: string; isBot: boolean },
+    ]);
+    expect(args[0]).toBe('slack:CLAYTON:C123');
+    expect(args[1]).toBe('1700000000.000100');
+    expect(args[2]).toBe(':fire:');
+    expect(args[4]).toEqual({ id: 'UPEYTON', isBot: false });
+  });
+
+  it('drops reactions on messages authored by a teammate (not this bot)', async () => {
+    const onReaction = mock(() => {});
+    const channel = makeChannel(onReaction);
+
+    await (channel as any).handleReactionAdded(
+      reactionEvent({ item_user: 'UOTHERBOT' }),
+    );
+
+    expect(onReaction).not.toHaveBeenCalled();
+  });
+
+  it('drops reactions on messages authored by a human', async () => {
+    const onReaction = mock(() => {});
+    const channel = makeChannel(onReaction);
+
+    await (channel as any).handleReactionAdded(
+      reactionEvent({ item_user: 'UPEYTON' }),
+    );
+
+    expect(onReaction).not.toHaveBeenCalled();
+  });
+
+  it('drops reactions added by this bot itself', async () => {
+    const onReaction = mock(() => {});
+    const channel = makeChannel(onReaction);
+
+    await (channel as any).handleReactionAdded(
+      reactionEvent({ user: 'UCLAYTON' }),
+    );
+
+    expect(onReaction).not.toHaveBeenCalled();
+  });
+});
+
 describe('SlackChannel.handleMessage multi-bot mention routing', () => {
   const makeClient = () => ({
     users: {
