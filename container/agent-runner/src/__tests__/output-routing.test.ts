@@ -29,4 +29,18 @@ describe('output routing', () => {
       result: null,
     });
   });
+
+  it('routes visible error outputs through the turn snapshot', () => {
+    const output = withOutputChatJid(
+      { status: 'error', result: null, error: 'runtime failed' },
+      'dc:turn-origin',
+    );
+
+    expect(output).toEqual({
+      status: 'error',
+      result: null,
+      error: 'runtime failed',
+      chatJid: 'dc:turn-origin',
+    });
+  });
 });

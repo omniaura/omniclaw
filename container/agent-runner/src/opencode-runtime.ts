@@ -50,8 +50,9 @@ const OUTPUT_END_MARKER = '---OMNICLAW_OUTPUT_END---';
 // ---------------------------------------------------------------------------
 
 function writeOutput(output: ContainerOutput): void {
+  const enriched = withOutputChatJid(output, turnOutputChatJid);
   console.log(OUTPUT_START_MARKER);
-  console.log(JSON.stringify(output));
+  console.log(JSON.stringify(enriched));
   console.log(OUTPUT_END_MARKER);
 }
 
