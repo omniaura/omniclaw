@@ -870,8 +870,12 @@ export class SlackChannel implements Channel {
     const channelId = event.item.type === 'message' ? event.item.channel : null;
     if (!channelId) return;
 
-    if (this.botUserId && event.user === this.botUserId) return;
-    if (this.botUserId && event.item_user !== this.botUserId) return;
+    // Fail closed: without a confirmed bot identity we cannot prove the
+    // reacted-to message belongs to this agent — drop rather than wake the
+    // container with a synthetic trigger.
+    if (!this.botUserId) return;
+    if (event.user === this.botUserId) return;
+    if (event.item_user !== this.botUserId) return;
 
     const chatJid = channelIdToJid(
       channelId,

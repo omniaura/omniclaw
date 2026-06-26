@@ -262,6 +262,16 @@ describe('SlackChannel.handleReactionAdded', () => {
 
     expect(onReaction).not.toHaveBeenCalled();
   });
+
+  it('fails closed and drops reactions when botUserId is unset', async () => {
+    const onReaction = mock(() => {});
+    const channel = makeChannel(onReaction);
+    (channel as any).botUserId = null;
+
+    await (channel as any).handleReactionAdded(reactionEvent());
+
+    expect(onReaction).not.toHaveBeenCalled();
+  });
 });
 
 describe('SlackChannel.handleMessage multi-bot mention routing', () => {
