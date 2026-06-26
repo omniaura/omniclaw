@@ -422,6 +422,58 @@ describe('basic auth', () => {
     expect(res.status).toBe(401);
   });
 
+  it('rejects cross-site browser POSTs even with valid Basic credentials', async () => {
+    let runCalls = 0;
+    handle = startWebServer(
+      testConfig(),
+      makeState({
+        runTaskNow: () => {
+          runCalls += 1;
+          return { ok: true };
+        },
+      }),
+    );
+
+    const res = await authedFetch('/api/tasks/task-001/run', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://attacker.example',
+        'Sec-Fetch-Site': 'cross-site',
+      },
+    });
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: 'Cross-site request blocked',
+    });
+    expect(runCalls).toBe(0);
+  });
+
+  it('allows same-origin browser POSTs with valid Basic credentials', async () => {
+    let runCalls = 0;
+    handle = startWebServer(
+      testConfig(),
+      makeState({
+        runTaskNow: () => {
+          runCalls += 1;
+          return { ok: true };
+        },
+      }),
+    );
+
+    const res = await authedFetch('/api/tasks/task-001/run', {
+      method: 'POST',
+      headers: {
+        Origin: `http://localhost:${handle.port}`,
+        'Sec-Fetch-Site': 'same-origin',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true, id: 'task-001' });
+    expect(runCalls).toBe(1);
+  });
+
   it('skips auth when no credentials are configured', async () => {
     handle = startWebServer(testConfig({ auth: undefined }), makeState());
     const pageRes = await fetch(url('/'));
