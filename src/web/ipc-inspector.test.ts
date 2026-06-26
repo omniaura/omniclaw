@@ -128,8 +128,83 @@ describe('renderIpcInspector', () => {
     expect(html).toContain('1/5');
     // Idle
     expect(html).toContain('1/3');
-    // Groups tracked
-    expect(html).toContain('>2<');
+    // Groups tracked = 2 total, with agent-alpha actively running
+    // (message lane active+!idle, task lane active). agent-beta's
+    // message lane is in cooldown (active+idle) so it does not count.
+    expect(html).toContain('id="stat-groups">2 (1 active)<');
+  });
+
+  it('omits groups tracked annotation when no group is active', () => {
+    const detail: GroupQueueDetail = {
+      folderKey: 'agent-quiet',
+      messageLane: {
+        active: true,
+        idle: true,
+        pendingCount: 0,
+        containerName: 'ctr-quiet-msg',
+        reason: 'cooling-down',
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work',
+      },
+      retryCount: 0,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [detail] }),
+    );
+    // Exact-match closing `<` rules out any `1 (N active)` annotation;
+    // we don't `not.toContain('active)')` because unrelated CSS/JS in the
+    // shell (e.g. `:active)` selectors) can legitimately use that substring.
+    expect(html).toContain('id="stat-groups">1<');
+  });
+
+  it('does not count idle-waiting (cooldown) lanes as active', () => {
+    const cooldown: GroupQueueDetail = {
+      folderKey: 'agent-cool',
+      messageLane: {
+        // Warm container in cooldown: active=true, idle=true.
+        active: true,
+        idle: true,
+        pendingCount: 0,
+        containerName: 'ctr-cool-msg',
+        reason: 'cooling-down',
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work',
+      },
+      retryCount: 0,
+    };
+    const running: GroupQueueDetail = {
+      folderKey: 'agent-run',
+      messageLane: {
+        active: true,
+        idle: false,
+        pendingCount: 1,
+        containerName: 'ctr-run-msg',
+        reason: 'running',
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work',
+      },
+      retryCount: 0,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [cooldown, running] }),
+    );
+    // 2 total groups, only the running one counts as active.
+    expect(html).toContain('id="stat-groups">2 (1 active)<');
   });
 
   it('shows aggregate pending messages stat card', () => {
