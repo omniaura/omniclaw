@@ -27,7 +27,10 @@ import {
   renderAgentDetailContent,
   buildAgentDetailData,
 } from './agent-detail.js';
-import { renderDashboardContent } from './dashboard.js';
+import {
+  formatDashboardActiveTasksValue,
+  renderDashboardContent,
+} from './dashboard.js';
 import { renderConversationsContent } from './conversations.js';
 import { renderContextViewerContent } from './context-viewer.js';
 import { renderIpcInspectorContent } from './ipc-inspector.js';
@@ -1112,12 +1115,10 @@ function patchLogs(client: SseClient): void {
 function patchStats(client: SseClient, state: WebStateProvider): void {
   if (!client.subscriptions.has('stats')) return;
   const stats = state.getQueueStats();
-  const tasks = state.getTasks();
   const activeContainers = Math.max(
     0,
     stats.activeContainers - stats.idleContainers,
   );
-  const activeTasks = tasks.filter((task) => task.status === 'active').length;
 
   client.stream.patchElements(
     `<div class="value" id="stat-agents">${Object.keys(state.getAgents()).length}</div>`,
@@ -1129,7 +1130,7 @@ function patchStats(client: SseClient, state: WebStateProvider): void {
     `<div class="value" id="stat-idle">${stats.idleContainers}/${stats.maxIdle}</div>`,
   );
   client.stream.patchElements(
-    `<div class="value" id="stat-tasks">${activeTasks}</div>`,
+    `<div class="value" id="stat-tasks">${formatDashboardActiveTasksValue(state)}</div>`,
   );
 }
 

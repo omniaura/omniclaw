@@ -10,6 +10,21 @@ function imageRev(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12);
 }
 
+export function formatDashboardActiveTasksValue(
+  state: Pick<WebStateProvider, 'getTasks' | 'getQueueDetails'>,
+): string {
+  const activeTasks = state
+    .getTasks()
+    .filter((task) => task.status === 'active').length;
+  const runningTasks = state
+    .getQueueDetails()
+    .reduce((sum, g) => sum + (g.taskLane.activeTask ? 1 : 0), 0);
+
+  return runningTasks > 0
+    ? `${activeTasks} (${runningTasks} running)`
+    : `${activeTasks}`;
+}
+
 /** Render the dashboard content (no shell wrapper). */
 export function renderDashboardContent(
   state: WebStateProvider,
@@ -17,26 +32,13 @@ export function renderDashboardContent(
 ): string {
   const stats = state.getQueueStats();
   const agentData = buildAgentChannelData(state, remotePeers);
-  const tasks = state.getTasks();
   const queueDetails = state.getQueueDetails();
 
   const activeContainers = Math.max(
     0,
     stats.activeContainers - stats.idleContainers,
   );
-  const activeTasks = tasks.filter((t) => t.status === 'active').length;
-  // Count tasks currently executing (task lane has an in-flight activeTask).
-  // Surfaced inline on the "active tasks" card so the operator can tell at a
-  // glance whether enabled tasks are sitting idle or actually running right
-  // now, without opening /ipc or /system.
-  const runningTasks = queueDetails.reduce(
-    (sum, g) => sum + (g.taskLane.activeTask ? 1 : 0),
-    0,
-  );
-  const activeTasksValue =
-    runningTasks > 0
-      ? `${activeTasks} (${runningTasks} running)`
-      : `${activeTasks}`;
+  const activeTasksValue = formatDashboardActiveTasksValue(state);
   // Count local agents currently in flight on either lane (processing a
   // message or running a scheduled task). Surfaced inline on the "agents"
   // card so the operator can tell at a glance how much of the fleet is
