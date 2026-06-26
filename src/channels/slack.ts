@@ -4,6 +4,7 @@ import { App, Assistant } from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
 import type { AnyChunk, KnownBlock } from '@slack/web-api';
 
+import { buildTriggerPattern } from '../config.js';
 import { logger } from '../logger.js';
 import {
   MAX_BINARY_DOWNLOAD_BYTES,
@@ -51,6 +52,7 @@ const TEXT_LIMIT = 4000;
 const MARKDOWN_BLOCK_LIMIT = 11500;
 const THREAD_ROOT_CACHE_MAX = 1000;
 const SEEN_MESSAGE_CACHE_MAX = 500;
+const PROACTIVE_THREAD_CACHE_MAX = 1000;
 const THREAD_EXCERPT_MAX_CHARS = 140;
 const TASK_TITLE_MAX_CHARS = 80;
 // Slack caps each task_update chunk at 256 chars; keep title + details under it
@@ -217,6 +219,13 @@ export class SlackChannel implements Channel {
   private threadRootByTs = new Map<string, string>();
   /** Cached excerpts of thread root messages, keyed by `channelId:thread_ts`. */
   private threadRootExcerpts = new Map<string, string>();
+  /**
+   * Thread roots (`channelId:thread_ts`) where this bot has been engaged via an
+   * @-mention. Once engaged, subsequent plain replies in the thread are treated
+   * as triggered so the agent stays proactive instead of going silent until the
+   * next explicit mention.
+   */
+  private proactiveThreads = new Set<string>();
   /** Dedup of processed messages (`channelId:ts`) across message/app_mention events. */
   private seenMessages = new Set<string>();
   /**
@@ -841,6 +850,18 @@ export class SlackChannel implements Channel {
     }
   }
 
+  /** Mark a thread root as one this bot is actively engaged in. */
+  private markProactiveThread(channelId: string, threadTs: string): void {
+    const key = `${channelId}:${threadTs}`;
+    // Re-insert to keep most-recently-engaged threads at the tail for eviction.
+    this.proactiveThreads.delete(key);
+    this.proactiveThreads.add(key);
+    if (this.proactiveThreads.size > PROACTIVE_THREAD_CACHE_MAX) {
+      const oldest = this.proactiveThreads.values().next().value;
+      if (oldest !== undefined) this.proactiveThreads.delete(oldest);
+    }
+  }
+
   /** Dedup across message + app_mention deliveries of the same message. */
   private markSeen(key: string): boolean {
     if (this.seenMessages.has(key)) return false;
@@ -1016,6 +1037,46 @@ export class SlackChannel implements Channel {
         'Message from unregistered Slack channel — ignoring',
       );
       return;
+    }
+
+    // Proactive threads: once this bot is @-mentioned inside a thread, keep
+    // responding to subsequent plain replies in that thread without requiring a
+    // re-mention — the thread experience stays conversational. Channel threads
+    // only; assistant threads (the AI-app pane) are already a 1:1 conversation
+    // and always proactive.
+    if (!opts.assistantThread) {
+      const threadRoot = event.thread_ts || event.ts;
+      const threadKey = `${channelId}:${threadRoot}`;
+      const triggerHandle = group.trigger
+        ? group.trigger.replace(/^@/, '').toLowerCase()
+        : null;
+      const triggerPattern = group.trigger
+        ? buildTriggerPattern(group.trigger)
+        : null;
+      const mentionsThisBot =
+        (!!this.botUserId && mentions.some((m) => m.id === this.botUserId)) ||
+        (!!triggerHandle &&
+          mentions.some((m) => m.name.toLowerCase() === triggerHandle)) ||
+        (!!triggerPattern && triggerPattern.test(content));
+
+      if (mentionsThisBot) {
+        // Engage (or refresh) proactive mode for this thread root. Marking the
+        // root ts means every reply under it resolves to the same key.
+        this.markProactiveThread(channelId, threadRoot);
+      } else if (
+        event.thread_ts &&
+        event.thread_ts !== event.ts &&
+        group.trigger &&
+        this.proactiveThreads.has(threadKey)
+      ) {
+        // Plain reply in a thread we're engaged in — prepend the trigger so the
+        // subscription filter wakes this agent just like an explicit mention.
+        content = `${group.trigger} ${content}`;
+        logger.info(
+          { chatJid, threadTs: event.thread_ts, sender: senderName },
+          'Auto-triggering in engaged Slack thread',
+        );
+      }
     }
 
     // Process file attachments (images, documents, etc.)

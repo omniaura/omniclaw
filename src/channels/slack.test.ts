@@ -723,6 +723,87 @@ describe('SlackChannel.handleMessage extras', () => {
       '1700000000.000100',
     );
   });
+
+  it('stays proactive in a thread after the bot is mentioned at the root', async () => {
+    const onMessage = mock(() => {});
+    const channel = makeInboundChannel(onMessage);
+    (channel as any).client = makeInboundClient('hey <@UBOT> look at this');
+
+    // Root message mentions the bot — engages proactive mode for the thread.
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000100',
+      text: 'hey <@UBOT> look at this',
+      user: 'UPEYTON',
+    });
+    expect(
+      (channel as any).proactiveThreads.has('C123:1700000000.000100'),
+    ).toBe(true);
+
+    // Plain follow-up reply (no mention) should be auto-triggered.
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000200',
+      thread_ts: '1700000000.000100',
+      text: 'any update?',
+      user: 'UPEYTON',
+    });
+
+    const last = onMessage.mock.calls.at(-1) as unknown as [string, any];
+    expect(last[1].content).toBe(
+      '@bot [Thread reply to: "hey <@UBOT> look at this"] any update?',
+    );
+  });
+
+  it('does not auto-trigger plain replies in threads the bot was not mentioned in', async () => {
+    const onMessage = mock(() => {});
+    const channel = makeInboundChannel(onMessage);
+    (channel as any).client = makeInboundClient('unrelated discussion');
+
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000200',
+      thread_ts: '1700000000.000100',
+      text: 'any update?',
+      user: 'UPEYTON',
+    });
+
+    const msg = (onMessage.mock.calls[0] as unknown as [string, any])[1];
+    expect(msg.content).toBe(
+      '[Thread reply to: "unrelated discussion"] any update?',
+    );
+  });
+
+  it('engages proactive mode when the bot is mentioned mid-thread', async () => {
+    const onMessage = mock(() => {});
+    const channel = makeInboundChannel(onMessage);
+    (channel as any).client = makeInboundClient('root');
+
+    // Reply that mentions the bot — engages without double-prepending.
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000200',
+      thread_ts: '1700000000.000100',
+      text: '<@UBOT> can you help',
+      user: 'UPEYTON',
+    });
+    expect(
+      (channel as any).proactiveThreads.has('C123:1700000000.000100'),
+    ).toBe(true);
+    const engaged = (onMessage.mock.calls[0] as unknown as [string, any])[1];
+    expect(engaged.content).not.toStartWith('@bot ');
+
+    // Subsequent plain reply is now auto-triggered.
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000300',
+      thread_ts: '1700000000.000100',
+      text: 'thanks',
+      user: 'UPEYTON',
+    });
+    const last = onMessage.mock.calls.at(-1) as unknown as [string, any];
+    expect(last[1].content).toStartWith('@bot ');
+  });
 });
 
 // --- Slack media download helpers ---
