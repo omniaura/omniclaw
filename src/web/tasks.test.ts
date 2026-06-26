@@ -524,6 +524,49 @@ describe('renderTasksContent', () => {
 
     expect(html).not.toContain('stat-executing');
   });
+
+  it('annotates the active stat with overdue count when active tasks are past their next_run', () => {
+    const pastIso = new Date(Date.now() - 60_000).toISOString();
+    const futureIso = new Date(Date.now() + 3_600_000).toISOString();
+    const html = renderTasksContent(
+      makeState([
+        // overdue active task — counted
+        makeTask({ id: 'task-overdue', next_run: pastIso }),
+        // active task scheduled in the future — not overdue
+        makeTask({ id: 'task-future', next_run: futureIso }),
+        // paused tasks are never overdue, even if next_run is in the past
+        makeTask({ id: 'task-paused', status: 'paused', next_run: pastIso }),
+      ]),
+    );
+
+    expect(html).toContain('2 active (1 overdue)');
+    // Filter chip and paused/completed counts unchanged
+    expect(html).toContain('data-filter="active"');
+    expect(html).toContain('1 paused');
+  });
+
+  it('omits the overdue annotation when no active task is overdue', () => {
+    const futureIso = new Date(Date.now() + 3_600_000).toISOString();
+    const html = renderTasksContent(
+      makeState([
+        makeTask({ id: 'task-future', next_run: futureIso }),
+        makeTask({ id: 'task-null-next', next_run: null }),
+      ]),
+    );
+
+    // Bare count — no parenthetical
+    expect(html).toContain('>2 active</span>');
+    expect(html).not.toContain('overdue');
+  });
+
+  it('ignores unparseable next_run values when computing overdue count', () => {
+    const html = renderTasksContent(
+      makeState([makeTask({ id: 'task-bad', next_run: 'not-a-date' })]),
+    );
+
+    expect(html).toContain('>1 active</span>');
+    expect(html).not.toContain('overdue');
+  });
 });
 
 describe('renderRunningBadge', () => {

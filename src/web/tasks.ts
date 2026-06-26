@@ -22,6 +22,27 @@ export function renderTasksContent(state: WebStateProvider): string {
   const executingTasks = tasks.filter(
     (t) => t.status !== 'completed' && t.executing_since != null,
   ).length;
+  // Count active tasks whose `next_run` has already passed. The scheduler
+  // normally advances `next_run` after each tick, so an active task with a
+  // past `next_run` means the scheduler is either backed up, was offline,
+  // or the run lease hasn't been picked up yet. Surfacing the rollup on the
+  // `active` chip answers "is the scheduler keeping up?" without making the
+  // operator scan the `next run` column row-by-row.
+  //
+  // Tasks with `next_run = null` (paused/completed/once-fired) are skipped
+  // since "overdue" only makes sense relative to a scheduled time. Parse
+  // failures are treated as not-overdue to avoid noisy counts from
+  // legacy/malformed rows.
+  const now = Date.now();
+  const overdueActiveTasks = tasks.reduce((sum, t) => {
+    if (t.status !== 'active' || !t.next_run) return sum;
+    const nextRunMs = Date.parse(t.next_run);
+    return Number.isFinite(nextRunMs) && nextRunMs < now ? sum + 1 : sum;
+  }, 0);
+  const activeValue =
+    overdueActiveTasks > 0
+      ? `${activeTasks} active (${overdueActiveTasks} overdue)`
+      : `${activeTasks} active`;
 
   // Build agent/channel options for create/edit forms
   const agentOptions = agentData
@@ -47,7 +68,7 @@ export function renderTasksContent(state: WebStateProvider): string {
     // Stats row
     `<div class="tasks-stats">` +
     `<span class="tasks-stat">${tasks.length} total</span>` +
-    `<span class="tasks-stat stat-active">${activeTasks} active</span>` +
+    `<span class="tasks-stat stat-active">${activeValue}</span>` +
     (executingTasks > 0
       ? `<span class="tasks-stat stat-executing">${executingTasks} executing</span>`
       : '') +
