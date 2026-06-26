@@ -11,18 +11,13 @@ import {
 import type { ScheduledTask } from './types.js';
 
 let workflowsDir: string;
-let cleanupPaths: string[];
 
 beforeEach(() => {
   workflowsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-pre-'));
-  cleanupPaths = [];
 });
 
 afterEach(() => {
   fs.rmSync(workflowsDir, { recursive: true, force: true });
-  for (const cleanupPath of cleanupPaths) {
-    fs.rmSync(cleanupPath, { recursive: true, force: true });
-  }
 });
 
 function task(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
