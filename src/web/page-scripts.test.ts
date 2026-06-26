@@ -90,7 +90,7 @@ describe('tasks page script', () => {
       "var activeLabel=overdue>0?active+' active ('+overdue+' overdue)':active+' active';",
     );
     expect(script).toContain(
-      '+\'<span class="tasks-stat stat-active">\'+activeLabel+\'</span>\'',
+      "+'<span class=\"tasks-stat stat-active\">'+activeLabel+'</span>'",
     );
     expect(script).toContain('if(isFinite(nr)&&nr<now)overdue++;');
   });
