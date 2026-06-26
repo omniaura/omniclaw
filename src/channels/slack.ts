@@ -17,9 +17,19 @@ import {
   isTextByExtension,
   readStreamWithByteLimit,
 } from '../media.js';
+import {
+  getDiscordFlowDefinitionsForGroup,
+  renderDiscordFlowPrompt,
+  SESSION_COMMAND_NAMES,
+  SYSTEM_COMMAND_NAMES,
+  type DiscordFlowDefinition,
+  type DiscordSessionCommand,
+} from '../discord-command-flows.js';
 import { parseScopedSlackJid } from '../slack-jid.js';
+import { parseSlackCommandText } from '../slack-command-flows.js';
 import type {
   Channel,
+  NewMessage,
   OnChatMetadata,
   OnInboundMessage,
   OutboundMessageStream,
@@ -173,6 +183,18 @@ interface SlackStreamTarget {
   recipient?: { recipient_user_id: string; recipient_team_id: string };
 }
 
+export interface SlackSessionCommandResult {
+  message: string;
+}
+
+export interface SlackSessionCommandOptions {
+  sessionId?: string;
+  name?: string;
+  resumeFrom?: string;
+  limit?: number;
+  deprecatedAlias?: 'resume' | 'sessions';
+}
+
 export interface SlackChannelOpts {
   botId: string;
   token: string; // Bot token (xoxb-...)
@@ -182,6 +204,29 @@ export interface SlackChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  /**
+   * Sources the groups whose flow definitions are eligible for slash commands
+   * on this bot. Defaults to all registered groups when omitted, but typical
+   * wiring narrows it to channels actually subscribed to this bot so commands
+   * stay scoped to the right agent.
+   */
+  slashCommandGroups?: () => RegisteredGroup[];
+  /**
+   * Re-entry hook for slash-command-rendered prompts. Matches the Discord
+   * surface — the host turns the synthesised message into a regular agent run.
+   */
+  onSyntheticMessage?: (message: NewMessage) => void | Promise<void>;
+  /**
+   * Host-side session machinery (new/resume/list/end/rename/current). Shared
+   * with Discord — the same handler renders the user-visible message that the
+   * slash command responds with.
+   */
+  onSessionCommand?: (
+    command: DiscordSessionCommand,
+    chatJid: string,
+    group: RegisteredGroup,
+    options?: SlackSessionCommandOptions,
+  ) => SlackSessionCommandResult;
   onReaction?: (
     chatJid: string,
     messageId: string,
@@ -291,6 +336,32 @@ export class SlackChannel implements Channel {
         id: event.user,
         isBot,
       });
+    });
+
+    // Single regex matcher catches every slash command this bot is wired up
+    // to in its app manifest. Bolt rejects unknown commands at the gateway
+    // anyway, so the regex is effectively a permissive entry point that lets
+    // us dispatch into the shared flow registry. (One handler keeps the
+    // 50-commands-per-app Slack cap from biting our `App` setup, and avoids
+    // per-flow registration churn — manifest is the source of truth.)
+    this.app.command(/.*/, async (args) => {
+      const { ack, command, respond } = args;
+      try {
+        await ack();
+      } catch (err) {
+        logger.warn({ err }, 'Slack slash command ack failed');
+      }
+      await this.handleSlashCommand(command, respond).catch((err: unknown) =>
+        logger.error(
+          {
+            err,
+            command: command.command,
+            channelId: command.channel_id,
+            userId: command.user_id,
+          },
+          'Error handling Slack slash command',
+        ),
+      );
     });
 
     // Slack AI-app assistant threads (the "agent" split-pane experience).
@@ -608,6 +679,390 @@ export class SlackChannel implements Channel {
       },
     });
     this.app.assistant(assistant);
+  }
+
+  /**
+   * Slash command entry point: resolves the command to a registered flow
+   * (or a system session command) and either queues the rendered prompt
+   * as a synthetic message or runs the host session handler directly. The
+   * ephemeral reply is the user-visible acknowledgement.
+   */
+  private async handleSlashCommand(
+    command: import('@slack/bolt').SlashCommand,
+    respond: import('@slack/bolt').RespondFn,
+  ): Promise<void> {
+    const commandName = (command.command || '').replace(/^\//, '');
+    if (!commandName) {
+      await respond({
+        response_type: 'ephemeral',
+        text: 'Unknown Slack slash command.',
+      });
+      return;
+    }
+
+    const channelId = command.channel_id;
+    const chatJid = channelIdToJid(
+      channelId,
+      this.multiBotMode ? this.botId : undefined,
+    );
+    const legacyChatJid = channelIdToJid(channelId);
+
+    const groups = this.opts.registeredGroups();
+    const group =
+      groups[chatJid] ||
+      (this.allowLegacyJidRouting ? groups[legacyChatJid] : undefined);
+    if (!group) {
+      await respond({
+        response_type: 'ephemeral',
+        text: 'This channel is not registered to an OmniClaw agent yet. Send a message to register it first.',
+      });
+      return;
+    }
+
+    if (SYSTEM_COMMAND_NAMES.has(commandName)) {
+      await this.handleSlashSystemCommand(
+        commandName,
+        command,
+        chatJid,
+        group,
+        respond,
+      );
+      return;
+    }
+
+    const flow = this.findFlowForGroup(group, commandName);
+    if (!flow) {
+      await respond({
+        response_type: 'ephemeral',
+        text: `\`/${commandName}\` is not a configured flow for this channel. Add it to the workspace command list and resync your Slack app manifest.`,
+      });
+      return;
+    }
+
+    const parsed = parseSlackCommandText(command.text || '', flow);
+    const renderedPrompt = renderDiscordFlowPrompt(
+      flow,
+      parsed.optionValues,
+    ).trim();
+    if (!renderedPrompt) {
+      await respond({
+        response_type: 'ephemeral',
+        text: `\`/${commandName}\` needs more input — supply the required option(s).`,
+      });
+      return;
+    }
+
+    if (!this.opts.onSyntheticMessage) {
+      await respond({
+        response_type: 'ephemeral',
+        text: 'Slash commands are not wired to an agent runtime in this deployment.',
+      });
+      return;
+    }
+
+    const ackHint = parsed.unknownOptions.length
+      ? `Queued \`/${commandName}\` for ${group.name}. Ignored unknown options: ${parsed.unknownOptions.map((k) => `\`${k}\``).join(', ')}.`
+      : `Queued \`/${commandName}\` for ${group.name}.`;
+
+    await respond({ response_type: 'ephemeral', text: ackHint });
+
+    const timestamp = new Date().toISOString();
+    const synthetic: NewMessage = {
+      id: `slash-${command.trigger_id || `${commandName}-${Date.now()}`}`,
+      chat_jid: chatJid,
+      sender: `slack:${command.user_id}`,
+      sender_name: command.user_name || 'Slack user',
+      content: group.trigger
+        ? `${group.trigger} ${renderedPrompt}`
+        : renderedPrompt,
+      timestamp,
+      is_from_me: false,
+      sender_platform: 'slack',
+      sender_user_id: command.user_id,
+    };
+
+    try {
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        command.channel_name || chatJid,
+      );
+      if (this.allowLegacyJidRouting) {
+        this.opts.onChatMetadata(
+          legacyChatJid,
+          timestamp,
+          command.channel_name || chatJid,
+        );
+      }
+      await this.opts.onSyntheticMessage(synthetic);
+      logger.info(
+        {
+          command: commandName,
+          chatJid,
+          group: group.folder,
+          userId: command.user_id,
+        },
+        'Slack slash flow queued',
+      );
+    } catch (err) {
+      logger.error(
+        { err, command: commandName, chatJid, group: group.folder },
+        'Failed to queue Slack slash flow',
+      );
+      await respond({
+        response_type: 'ephemeral',
+        text: 'I acknowledged the command, but failed to queue it. Check OmniClaw logs for details.',
+      });
+    }
+  }
+
+  /**
+   * Host-handled session lifecycle (`/session …`, plus the `/resume` /
+   * `/sessions` aliases for parity with Discord). These never reach an
+   * agent — they mutate the host's session map and reply ephemerally.
+   */
+  private async handleSlashSystemCommand(
+    commandName: string,
+    command: import('@slack/bolt').SlashCommand,
+    chatJid: string,
+    group: RegisteredGroup,
+    respond: import('@slack/bolt').RespondFn,
+  ): Promise<void> {
+    if (!this.opts.onSessionCommand) {
+      await respond({
+        response_type: 'ephemeral',
+        text: 'Session commands are not configured.',
+      });
+      return;
+    }
+
+    const resolved = this.resolveSlashSessionCommand(
+      commandName,
+      command.text || '',
+    );
+    if (!resolved) {
+      await respond({
+        response_type: 'ephemeral',
+        text: `Unknown session command. Try \`/session list\`.`,
+      });
+      return;
+    }
+
+    const allowed = await this.userIsWorkspaceAdmin(command.user_id);
+    if (!allowed) {
+      await respond({
+        response_type: 'ephemeral',
+        text: 'Session commands are restricted to workspace admins.',
+      });
+      return;
+    }
+
+    try {
+      const result = this.opts.onSessionCommand(
+        resolved.command,
+        chatJid,
+        group,
+        resolved.options,
+      );
+      await respond({ response_type: 'ephemeral', text: result.message });
+    } catch (err) {
+      logger.error(
+        { err, commandName, chatJid, group: group.folder },
+        'Slack session command failed',
+      );
+      await respond({
+        response_type: 'ephemeral',
+        text: 'Session command failed. Check OmniClaw logs.',
+      });
+    }
+  }
+
+  /**
+   * Map a slash command + text into the session handler's argument shape.
+   * Recognises the same surface Discord exposes — `session new`, `session
+   * resume`, etc. plus the legacy `/resume` and `/sessions` aliases.
+   */
+  private resolveSlashSessionCommand(
+    commandName: string,
+    text: string,
+  ): {
+    command: DiscordSessionCommand;
+    options: SlackSessionCommandOptions;
+  } | null {
+    if (commandName === 'resume') {
+      const dummyFlow: DiscordFlowDefinition = {
+        name: 'resume',
+        description: '',
+        prompt: '',
+        options: [
+          { name: 'session_id', description: 'Session ID', type: 'string' },
+        ],
+        system: true,
+      };
+      const parsed = parseSlackCommandText(text, dummyFlow);
+      return {
+        command: 'resume',
+        options: {
+          sessionId:
+            (parsed.optionValues.session_id as string | undefined) ?? undefined,
+          deprecatedAlias: 'resume',
+        },
+      };
+    }
+
+    if (commandName === 'sessions') {
+      return { command: 'list', options: { deprecatedAlias: 'sessions' } };
+    }
+
+    if (commandName !== 'session') return null;
+
+    // The /session command surface mirrors the Discord subcommand layout —
+    // first text token is the subcommand, remaining text is key=value or
+    // free-form positional (mapped onto the right option by the parser).
+    const parsedHead = parseSlackCommandText(text, {
+      name: 'session',
+      description: '',
+      prompt: '',
+      system: true,
+      subcommands: [
+        {
+          name: 'new',
+          description: '',
+          prompt: '',
+          system: true,
+          options: [
+            { name: 'name', description: '', type: 'string' },
+            { name: 'resume_from', description: '', type: 'string' },
+          ],
+        },
+        {
+          name: 'resume',
+          description: '',
+          prompt: '',
+          system: true,
+          options: [{ name: 'session_id', description: '', type: 'string' }],
+        },
+        {
+          name: 'list',
+          description: '',
+          prompt: '',
+          system: true,
+          options: [{ name: 'limit', description: '', type: 'integer' }],
+        },
+        { name: 'current', description: '', prompt: '', system: true },
+        {
+          name: 'end',
+          description: '',
+          prompt: '',
+          system: true,
+          options: [{ name: 'session_id', description: '', type: 'string' }],
+        },
+        {
+          name: 'rename',
+          description: '',
+          prompt: '',
+          system: true,
+          options: [
+            { name: 'session_id', description: '', type: 'string' },
+            { name: 'name', description: '', type: 'string' },
+          ],
+        },
+      ],
+    });
+
+    if (!parsedHead.subcommand) return null;
+    const opts = parsedHead.optionValues;
+    switch (parsedHead.subcommand) {
+      case 'new':
+        return {
+          command: 'new',
+          options: {
+            name: (opts.name as string | undefined) ?? undefined,
+            resumeFrom: (opts.resume_from as string | undefined) ?? undefined,
+          },
+        };
+      case 'resume':
+        return {
+          command: 'resume',
+          options: {
+            sessionId: (opts.session_id as string | undefined) ?? undefined,
+          },
+        };
+      case 'list':
+        return {
+          command: 'list',
+          options: {
+            limit: (opts.limit as number | undefined) ?? undefined,
+          },
+        };
+      case 'current':
+        return { command: 'current', options: {} };
+      case 'end':
+        return {
+          command: 'end',
+          options: {
+            sessionId: (opts.session_id as string | undefined) ?? undefined,
+          },
+        };
+      case 'rename':
+        return {
+          command: 'rename',
+          options: {
+            sessionId: (opts.session_id as string | undefined) ?? undefined,
+            name: (opts.name as string | undefined) ?? undefined,
+          },
+        };
+      default:
+        return SESSION_COMMAND_NAMES.has(
+          parsedHead.subcommand as DiscordSessionCommand,
+        )
+          ? {
+              command: parsedHead.subcommand as DiscordSessionCommand,
+              options: {},
+            }
+          : null;
+    }
+  }
+
+  /**
+   * Look up a flow by name from the configured slash command groups, falling
+   * back to the broader registered groups list so manifest-only commands
+   * still work in dev setups.
+   */
+  private findFlowForGroup(
+    group: RegisteredGroup,
+    commandName: string,
+  ): DiscordFlowDefinition | undefined {
+    const eligible = this.opts.slashCommandGroups
+      ? this.opts.slashCommandGroups()
+      : Object.values(this.opts.registeredGroups());
+    const scoped = eligible.find((g) => g.folder === group.folder) || group;
+    return getDiscordFlowDefinitionsForGroup(scoped).find(
+      (flow) => flow.name === commandName,
+    );
+  }
+
+  /**
+   * Slack permission gate for session commands. We approximate Discord's
+   * "Manage Channels" requirement with workspace-admin status — easier to
+   * reason about across channel types and aligns with how operators set up
+   * Slack workspaces. Soft-fails open on API errors so a transient outage
+   * doesn't lock everyone out (logged at warn).
+   */
+  private async userIsWorkspaceAdmin(userId: string): Promise<boolean> {
+    if (!userId) return false;
+    try {
+      const info = await this.client.users.info({ user: userId });
+      const user = info.user as
+        | { is_admin?: boolean; is_owner?: boolean; is_primary_owner?: boolean }
+        | undefined;
+      return Boolean(
+        user?.is_admin || user?.is_owner || user?.is_primary_owner,
+      );
+    } catch (err) {
+      logger.warn({ err, userId }, 'Slack users.info failed for admin check');
+      return true;
+    }
   }
 
   /**

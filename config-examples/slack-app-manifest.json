@@ -14,6 +14,62 @@
       "display_name": "omniclaw",
       "always_online": true
     },
+    "slash_commands": [
+      {
+        "command": "/session",
+        "description": "Manage the active agent session for this channel",
+        "usage_hint": "new | resume | list | current | end | rename [options]",
+        "should_escape": false
+      },
+      {
+        "command": "/implement-driver",
+        "description": "Take a scoped issue through a PR-ready patch",
+        "usage_hint": "<goal> [repo=...]",
+        "should_escape": false
+      },
+      {
+        "command": "/issue-driver",
+        "description": "Triage, dedupe, and file actionable issues",
+        "usage_hint": "[goal] [repo=...] [duration_minutes=...]",
+        "should_escape": false
+      },
+      {
+        "command": "/mergemaster",
+        "description": "Delegate and merge work for a limited window",
+        "usage_hint": "[repo=...] [goal=...] [duration_minutes=...]",
+        "should_escape": false
+      },
+      {
+        "command": "/product-driver",
+        "description": "Drive product discovery and issue creation",
+        "usage_hint": "[goal] [repo=...] [duration_minutes=...]",
+        "should_escape": false
+      },
+      {
+        "command": "/qa-driver",
+        "description": "Verify behavior, PRs, and release readiness",
+        "usage_hint": "<goal> [repo=...] [duration_minutes=...]",
+        "should_escape": false
+      },
+      {
+        "command": "/research-driver",
+        "description": "Run technical/product research and propose paths",
+        "usage_hint": "<goal> [repo=...] [duration_minutes=...]",
+        "should_escape": false
+      },
+      {
+        "command": "/scheduler",
+        "description": "Draft and queue scheduled follow-up work",
+        "usage_hint": "<goal> [repo=...] [duration_minutes=...]",
+        "should_escape": false
+      },
+      {
+        "command": "/taskbooker",
+        "description": "Have the agent book and delegate a work plan",
+        "usage_hint": "<goal> [repo=...] [duration_minutes=...]",
+        "should_escape": false
+      }
+    ],
     "assistant_view": {
       "assistant_description": "General-purpose coding agent — chat, schedule tasks, work across your stack.",
       "suggested_prompts": [

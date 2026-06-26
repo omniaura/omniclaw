@@ -8,6 +8,7 @@ mock.module('@slack/bolt', () => ({
   App: class MockApp {
     message() {}
     event() {}
+    command() {}
     assistant() {}
     async start() {}
     async stop() {}
@@ -1140,5 +1141,275 @@ describe('Slack media directory security', () => {
     );
     expect(filePath).not.toContain('..');
     expect(path.dirname(filePath)).toBe(mediaDir);
+  });
+});
+
+// --- Slack slash command routing ---
+
+describe('SlackChannel slash command routing', () => {
+  type RespondCall = {
+    response_type?: 'ephemeral' | 'in_channel';
+    text?: string;
+  };
+
+  const slashClient = (admin = true) => ({
+    users: {
+      info: mock(() =>
+        Promise.resolve({
+          user: { is_admin: admin, is_owner: false, is_primary_owner: false },
+        }),
+      ),
+    },
+    conversations: {
+      info: mock(() => Promise.resolve({ channel: { name: 'test-channel' } })),
+    },
+  });
+
+  const buildSlashChannel = (opts: {
+    onSyntheticMessage?: ReturnType<typeof mock>;
+    onSessionCommand?: ReturnType<typeof mock>;
+    multiBotMode?: boolean;
+    admin?: boolean;
+  }) => {
+    const channel = new SlackChannel({
+      botId: opts.multiBotMode ? 'CLAYTON' : 'default',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      multiBotMode: opts.multiBotMode === true,
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({
+        'slack:C123': {
+          name: 'Clayton',
+          folder: 'clayton-discord',
+          trigger: '@Clayton',
+          added_at: new Date().toISOString(),
+        },
+        'slack:CLAYTON:C123': {
+          name: 'Clayton',
+          folder: 'clayton-discord',
+          trigger: '@Clayton',
+          added_at: new Date().toISOString(),
+        },
+      }),
+      onSyntheticMessage: opts.onSyntheticMessage,
+      onSessionCommand: opts.onSessionCommand,
+    });
+    (channel as unknown as { client: unknown }).client = slashClient(
+      opts.admin !== false,
+    );
+    return channel;
+  };
+
+  const slashCommand = (overrides: Partial<Record<string, string>> = {}) => ({
+    token: 'verif',
+    command: '/research-driver',
+    text: '',
+    response_url: 'https://hooks.slack.com/x',
+    trigger_id: 'trg-1',
+    user_id: 'UPEYTON',
+    user_name: 'peyton',
+    team_id: 'T1',
+    team_domain: 'omniaura',
+    channel_id: 'C123',
+    channel_name: 'test-channel',
+    api_app_id: 'A1',
+    ...overrides,
+  });
+
+  it('queues a flow slash command as a synthetic message', async () => {
+    const onSyntheticMessage = mock(() => {});
+    const channel = buildSlashChannel({ onSyntheticMessage });
+    const respond = mock(async (_: RespondCall) => {});
+
+    await (
+      channel as unknown as {
+        handleSlashCommand: (
+          c: ReturnType<typeof slashCommand>,
+          r: typeof respond,
+        ) => Promise<void>;
+      }
+    ).handleSlashCommand(
+      slashCommand({ text: 'investigate the foo bug' }),
+      respond,
+    );
+
+    expect(respond).toHaveBeenCalledTimes(1);
+    expect((respond.mock.calls[0][0] as RespondCall).response_type).toBe(
+      'ephemeral',
+    );
+
+    expect(onSyntheticMessage).toHaveBeenCalledTimes(1);
+    const synthetic = (
+      onSyntheticMessage.mock.calls[0] as unknown as [
+        { content: string; chat_jid: string; sender_platform: string },
+      ]
+    )[0];
+    expect(synthetic.sender_platform).toBe('slack');
+    expect(synthetic.chat_jid).toBe('slack:C123');
+    expect(synthetic.content).toContain('@Clayton');
+    expect(synthetic.content).toContain('investigate the foo bug');
+  });
+
+  it('uses scoped JIDs when running in multi-bot mode', async () => {
+    const onSyntheticMessage = mock(() => {});
+    const channel = buildSlashChannel({
+      onSyntheticMessage,
+      multiBotMode: true,
+    });
+    const respond = mock(async (_: RespondCall) => {});
+
+    await (
+      channel as unknown as {
+        handleSlashCommand: (
+          c: ReturnType<typeof slashCommand>,
+          r: typeof respond,
+        ) => Promise<void>;
+      }
+    ).handleSlashCommand(
+      slashCommand({ text: 'investigate the foo bug' }),
+      respond,
+    );
+
+    const synthetic = (
+      onSyntheticMessage.mock.calls[0] as unknown as [{ chat_jid: string }]
+    )[0];
+    expect(synthetic.chat_jid).toBe('slack:CLAYTON:C123');
+  });
+
+  it('routes /session list to the host session handler', async () => {
+    const onSessionCommand = mock(() => ({ message: 'No sessions.' }));
+    const channel = buildSlashChannel({ onSessionCommand });
+    const respond = mock(async (_: RespondCall) => {});
+
+    await (
+      channel as unknown as {
+        handleSlashCommand: (
+          c: ReturnType<typeof slashCommand>,
+          r: typeof respond,
+        ) => Promise<void>;
+      }
+    ).handleSlashCommand(
+      slashCommand({ command: '/session', text: 'list limit=5' }),
+      respond,
+    );
+
+    expect(onSessionCommand).toHaveBeenCalledTimes(1);
+    const [cmd, chatJid, group, options] = onSessionCommand.mock
+      .calls[0] as unknown as [
+      string,
+      string,
+      { folder: string },
+      { limit?: number },
+    ];
+    expect(cmd).toBe('list');
+    expect(chatJid).toBe('slack:C123');
+    expect(group.folder).toBe('clayton-discord');
+    expect(options.limit).toBe(5);
+
+    const reply = respond.mock.calls[0][0] as RespondCall;
+    expect(reply.response_type).toBe('ephemeral');
+    expect(reply.text).toBe('No sessions.');
+  });
+
+  it('routes the legacy /resume alias with deprecation metadata', async () => {
+    const onSessionCommand = mock(() => ({ message: 'Resumed.' }));
+    const channel = buildSlashChannel({ onSessionCommand });
+    const respond = mock(async (_: RespondCall) => {});
+
+    await (
+      channel as unknown as {
+        handleSlashCommand: (
+          c: ReturnType<typeof slashCommand>,
+          r: typeof respond,
+        ) => Promise<void>;
+      }
+    ).handleSlashCommand(
+      slashCommand({
+        command: '/resume',
+        text: '123e4567-e89b-12d3-a456-426614174000',
+      }),
+      respond,
+    );
+
+    expect(onSessionCommand).toHaveBeenCalledTimes(1);
+    const [cmd, , , options] = onSessionCommand.mock.calls[0] as unknown as [
+      string,
+      string,
+      unknown,
+      { sessionId?: string; deprecatedAlias?: string },
+    ];
+    expect(cmd).toBe('resume');
+    expect(options.sessionId).toBe('123e4567-e89b-12d3-a456-426614174000');
+    expect(options.deprecatedAlias).toBe('resume');
+  });
+
+  it('rejects unknown slash commands with an ephemeral hint', async () => {
+    const onSyntheticMessage = mock(() => {});
+    const channel = buildSlashChannel({ onSyntheticMessage });
+    const respond = mock(async (_: RespondCall) => {});
+
+    await (
+      channel as unknown as {
+        handleSlashCommand: (
+          c: ReturnType<typeof slashCommand>,
+          r: typeof respond,
+        ) => Promise<void>;
+      }
+    ).handleSlashCommand(
+      slashCommand({ command: '/not-a-flow', text: '' }),
+      respond,
+    );
+
+    expect(onSyntheticMessage).not.toHaveBeenCalled();
+    const reply = respond.mock.calls[0][0] as RespondCall;
+    expect(reply.text).toContain('not a configured flow');
+  });
+
+  it('refuses /session commands for non-admin users', async () => {
+    const onSessionCommand = mock(() => ({ message: 'should not run' }));
+    const channel = buildSlashChannel({
+      onSessionCommand,
+      admin: false,
+    });
+    const respond = mock(async (_: RespondCall) => {});
+
+    await (
+      channel as unknown as {
+        handleSlashCommand: (
+          c: ReturnType<typeof slashCommand>,
+          r: typeof respond,
+        ) => Promise<void>;
+      }
+    ).handleSlashCommand(
+      slashCommand({ command: '/session', text: 'list' }),
+      respond,
+    );
+
+    expect(onSessionCommand).not.toHaveBeenCalled();
+    const reply = respond.mock.calls[0][0] as RespondCall;
+    expect(reply.text).toContain('workspace admins');
+  });
+
+  it('refuses to queue commands from unregistered channels', async () => {
+    const onSyntheticMessage = mock(() => {});
+    const channel = buildSlashChannel({ onSyntheticMessage });
+    const respond = mock(async (_: RespondCall) => {});
+
+    await (
+      channel as unknown as {
+        handleSlashCommand: (
+          c: ReturnType<typeof slashCommand>,
+          r: typeof respond,
+        ) => Promise<void>;
+      }
+    ).handleSlashCommand(
+      slashCommand({ channel_id: 'C-UNKNOWN', text: 'goal=something' }),
+      respond,
+    );
+
+    expect(onSyntheticMessage).not.toHaveBeenCalled();
+    const reply = respond.mock.calls[0][0] as RespondCall;
+    expect(reply.text).toContain('not registered');
   });
 });
