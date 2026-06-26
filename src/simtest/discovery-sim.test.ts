@@ -319,6 +319,114 @@ describe('createSimDiscoveryEnvironment', () => {
     }
   });
 
+  it('exposes deterministic trust-store helpers for peer state transitions', () => {
+    const env = createSimDiscoveryEnvironment(new FakeState());
+    const trustStore = env.context.trustStore as unknown as {
+      completePendingEncryptedPairing: () => never;
+      getPeerSecret: (instanceId: string) => string | null;
+      getAllPeers: () => Array<{ instanceId: string; status: string }>;
+      isPeerTrusted: (instanceId: string) => boolean;
+      markPeerPending: (
+        instanceId: string,
+        name: string,
+        host: string | null,
+        port: number | null,
+      ) => { instanceId: string; status: string; sharedSecret: string | null };
+      updatePeerLastSeen: (instanceId: string) => void;
+      revokePeer: (instanceId: string) => void;
+    };
+
+    expect(trustStore.isPeerTrusted('peer-remote-1')).toBe(true);
+    expect(trustStore.getPeerSecret('peer-remote-1')).toBe(
+      'sim-secret-peer-remote-1',
+    );
+    expect(trustStore.getPeerSecret('missing-peer')).toBeNull();
+
+    const pending = trustStore.markPeerPending(
+      'peer-pending',
+      'Pending Peer',
+      null,
+      null,
+    );
+    expect(pending).toMatchObject({
+      instanceId: 'peer-pending',
+      status: 'pending',
+      sharedSecret: null,
+    });
+    expect(trustStore.isPeerTrusted('peer-pending')).toBe(false);
+
+    trustStore.updatePeerLastSeen('peer-pending');
+    trustStore.updatePeerLastSeen('missing-peer');
+
+    trustStore.revokePeer('peer-pending');
+    expect(
+      trustStore.getAllPeers().map((peer) => peer.instanceId),
+    ).not.toContain('peer-pending');
+    expect(() => trustStore.completePendingEncryptedPairing()).toThrow(
+      'Encrypted pairing callbacks are not simulated',
+    );
+  });
+
+  it('simulates remote context reads, writes, and metadata hashes', async () => {
+    const env = createSimDiscoveryEnvironment(new FakeState());
+    const createPeerClient = env.context.createPeerClient;
+    expect(createPeerClient).toBeDefined();
+    const peerClient = createPeerClient!(
+      {
+        instanceId: 'peer-remote-1',
+        host: 'remote-sim.local',
+        port: 3100,
+        sharedSecret: 'sim-secret-peer-remote-1',
+      },
+      env.context,
+    ) as unknown as {
+      getContextLayers: (params: Record<string, string>) => Promise<{
+        channel: {
+          content: string | null;
+          exists: boolean;
+          path: string | null;
+        };
+      }>;
+      listContextFiles: () => Promise<
+        Array<{ path: string; hash: string; size: number; mtime: string }>
+      >;
+      writeContextFile: (
+        layerPath: string,
+        content: string,
+      ) => Promise<{ ok: boolean }>;
+    };
+
+    const missing = await peerClient.getContextLayers({});
+    expect(missing.channel).toEqual({
+      path: null,
+      content: null,
+      exists: false,
+    });
+
+    await expect(
+      peerClient.writeContextFile('remote', '# Remote Override'),
+    ).resolves.toEqual({ ok: true });
+
+    const layers = await peerClient.getContextLayers({ folder: 'remote' });
+    expect(layers.channel).toEqual({
+      path: 'remote',
+      content: '# Remote Override',
+      exists: true,
+    });
+
+    const files = await peerClient.listContextFiles();
+    expect(files).toContainEqual(
+      expect.objectContaining({
+        path: 'remote',
+        hash: 'bcf62d8b12fdaafb34efcf83fa1acf09c396634bc8bd6173a4c790a759217ac6',
+        size: 17,
+      }),
+    );
+    expect(files.find((file) => file.path === 'remote')?.mtime).toMatch(
+      /^\d{4}-\d{2}-\d{2}T/,
+    );
+  });
+
   it('resets simulated peers and rejects mutations for missing peers', () => {
     const env = createSimDiscoveryEnvironment(new FakeState());
 
