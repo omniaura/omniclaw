@@ -83,11 +83,18 @@ describe('tasks page script', () => {
     expect(script).toContain('sb.disabled=false;');
   });
 
-  it('mirrors the overdue rollup on the active chip when refreshing', () => {
+  it('mirrors active stat rollups when refreshing', () => {
     const script = allPageScripts().tasks;
 
     expect(script).toContain(
-      "var activeLabel=overdue>0?active+' active ('+overdue+' overdue)':active+' active';",
+      'function formatActiveTaskStats(active,running,overdue){',
+    );
+    expect(script).toContain('fetch("/api/ipc/queue")');
+    expect(script).toContain(
+      'var activeLabel=formatActiveTaskStats(active,running,overdue);',
+    );
+    expect(script).toContain(
+      "+(executing>0?'<span class=\"tasks-stat stat-executing\">'+executing+' executing</span>':'')",
     );
     expect(script).toContain(
       "+'<span class=\"tasks-stat stat-active\">'+activeLabel+'</span>'",

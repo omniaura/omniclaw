@@ -27,10 +27,7 @@ import {
   renderAgentDetailContent,
   buildAgentDetailData,
 } from './agent-detail.js';
-import {
-  formatDashboardActiveTasksValue,
-  renderDashboardContent,
-} from './dashboard.js';
+import { renderDashboardContent } from './dashboard.js';
 import { renderConversationsContent } from './conversations.js';
 import { renderContextViewerContent } from './context-viewer.js';
 import { renderIpcInspectorContent } from './ipc-inspector.js';
@@ -47,6 +44,7 @@ import { serializeLogRecord } from './log-stream.js';
 import { renderSystemContent } from './system.js';
 import { renderSettingsContent } from './settings.js';
 import { renderTasksContent } from './tasks.js';
+import { formatActiveTaskStatsFromState } from './task-stats.js';
 import { renderLogsContent } from './logs.js';
 import { renderAgentsContent, buildAgentRowsHtml } from './agents-page.js';
 import {
@@ -1201,7 +1199,7 @@ function patchStats(client: SseClient, state: WebStateProvider): void {
     `<div class="value" id="stat-idle">${stats.idleContainers}/${stats.maxIdle}</div>`,
   );
   client.stream.patchElements(
-    `<div class="value" id="stat-tasks">${formatDashboardActiveTasksValue(state)}</div>`,
+    `<div class="value" id="stat-tasks">${formatActiveTaskStatsFromState(state)}</div>`,
   );
 }
 

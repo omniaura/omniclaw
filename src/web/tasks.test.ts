@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
+import type { GroupQueueDetail } from '../group-queue.js';
 import { handleRequest } from './routes.js';
 import {
   formatRunningAge,
@@ -45,7 +46,36 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
   };
 }
 
-function makeState(tasks: ScheduledTask[] = [makeTask()]): WebStateProvider {
+function makeTaskRunningDetail(
+  overrides: { folderKey?: string; taskId?: string } = {},
+): GroupQueueDetail {
+  return {
+    folderKey: overrides.folderKey ?? 'test-agent',
+    messageLane: {
+      active: false,
+      idle: true,
+      pendingCount: 0,
+      containerName: null,
+    },
+    taskLane: {
+      active: true,
+      pendingCount: 0,
+      containerName: null,
+      activeTask: {
+        taskId: overrides.taskId ?? 'task-001',
+        promptPreview: 'Run the daily check',
+        startedAt: 1_700_000_000_000,
+        runningMs: 15_000,
+      },
+    },
+    retryCount: 0,
+  };
+}
+
+function makeState(
+  tasks: ScheduledTask[] = [makeTask()],
+  queueDetails: GroupQueueDetail[] = [],
+): WebStateProvider {
   return {
     getAgents: () => ({ 'agent-1': makeAgent() }),
     getChannelSubscriptions: () => ({
@@ -77,7 +107,7 @@ function makeState(tasks: ScheduledTask[] = [makeTask()]): WebStateProvider {
       maxActive: 8,
       maxIdle: 4,
     }),
-    getQueueDetails: () => [],
+    getQueueDetails: () => queueDetails,
     getIpcEvents: () => [],
     getTaskRunLogs: () => [],
     getTaskRunPhaseEvents: () => [],
@@ -543,6 +573,26 @@ describe('renderTasksContent', () => {
     // Filter chip and paused/completed counts unchanged
     expect(html).toContain('data-filter="active"');
     expect(html).toContain('1 paused');
+  });
+
+  it('combines overdue and running annotations on the active stat', () => {
+    const pastIso = new Date(Date.now() - 60_000).toISOString();
+    const futureIso = new Date(Date.now() + 3_600_000).toISOString();
+    const html = renderTasksContent(
+      makeState(
+        [
+          makeTask({ id: 'task-overdue', next_run: pastIso }),
+          makeTask({ id: 'task-future', next_run: futureIso }),
+          makeTask({ id: 'task-unscheduled', next_run: null }),
+        ],
+        [
+          makeTaskRunningDetail({ taskId: 'task-overdue' }),
+          makeTaskRunningDetail({ folderKey: 'other-agent', taskId: 'task-2' }),
+        ],
+      ),
+    );
+
+    expect(html).toContain('3 active (1 overdue, 2 running)');
   });
 
   it('omits the overdue annotation when no active task is overdue', () => {
