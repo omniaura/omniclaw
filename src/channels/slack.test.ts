@@ -217,13 +217,13 @@ describe('SlackChannel.handleReactionAdded', () => {
     await (channel as any).handleReactionAdded(reactionEvent());
 
     expect(onReaction).toHaveBeenCalledTimes(1);
-    const args = (onReaction.mock.calls[0] as unknown as [
+    const args = onReaction.mock.calls[0] as unknown as [
       string,
       string,
       string,
       string,
       { id: string; isBot: boolean },
-    ]);
+    ];
     expect(args[0]).toBe('slack:CLAYTON:C123');
     expect(args[1]).toBe('1700000000.000100');
     expect(args[2]).toBe(':fire:');

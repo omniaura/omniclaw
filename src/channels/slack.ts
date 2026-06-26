@@ -867,8 +867,7 @@ export class SlackChannel implements Channel {
    *      Mirrors the Discord adapter's `reaction.message.author?.id` check.
    */
   async handleReactionAdded(event: ReactionAddedEvent): Promise<void> {
-    const channelId =
-      event.item.type === 'message' ? event.item.channel : null;
+    const channelId = event.item.type === 'message' ? event.item.channel : null;
     if (!channelId) return;
 
     if (this.botUserId && event.user === this.botUserId) return;
