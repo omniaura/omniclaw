@@ -333,6 +333,139 @@ describe('serveCachedRemoteImage', () => {
       logger.warn = originalWarn;
     }
   });
+
+  it('sanitizes non-Error fetch rejections without leaking implementation details', async () => {
+    const originalWarn = logger.warn;
+    const records: Array<Record<string, unknown>> = [];
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+    logger.warn = ((fieldsOrMsg: Record<string, unknown> | string) => {
+      if (typeof fieldsOrMsg !== 'string') {
+        records.push(fieldsOrMsg);
+      }
+    }) as unknown as typeof logger.warn;
+
+    try {
+      const response = await serveCachedRemoteImage(
+        'non-error-rejection-key',
+        async () => 'https://93.184.216.34/avatar.png?token=secret',
+        {
+          cacheDir: testImageCacheDir,
+          fetchImpl: (async () => {
+            throw 'raw network failure';
+          }) as RemoteImageFetch,
+        },
+      );
+
+      expect(response).toBeNull();
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        imageUrl: 'https://93.184.216.34/avatar.png',
+        errorName: 'UnknownError',
+      });
+      expect(records[0]).not.toHaveProperty('errorMessage');
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+      logger.warn = originalWarn;
+    }
+  });
+
+  it('treats malformed cache metadata as a miss and refreshes upstream', async () => {
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+
+    try {
+      const cacheHash = createHash('sha256')
+        .update('malformed-meta-key')
+        .digest('hex');
+
+      const dataPath = path.join(testImageCacheDir, `${cacheHash}.bin`);
+      const metaPath = path.join(testImageCacheDir, `${cacheHash}.json`);
+
+      fs.mkdirSync(testImageCacheDir, { recursive: true });
+      fs.writeFileSync(dataPath, new Uint8Array([1, 2, 3]));
+      fs.writeFileSync(metaPath, '{');
+
+      const response = await serveCachedRemoteImage(
+        'malformed-meta-key',
+        async () => 'https://93.184.216.34/refreshed.png',
+        {
+          cacheDir: testImageCacheDir,
+          fetchImpl: (async () =>
+            new Response(new Uint8Array([4, 5, 6]), {
+              headers: { 'content-type': 'image/png' },
+            })) as RemoteImageFetch,
+        },
+      );
+
+      expect(response).not.toBeNull();
+      expect(new Uint8Array(await response!.arrayBuffer())).toEqual(
+        new Uint8Array([4, 5, 6]),
+      );
+      expect(new Uint8Array(fs.readFileSync(dataPath))).toEqual(
+        new Uint8Array([4, 5, 6]),
+      );
+      expect(JSON.parse(fs.readFileSync(metaPath, 'utf-8'))).toMatchObject({
+        contentType: 'image/png',
+      });
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+    }
+  });
+
+  it('rejects successful image responses with no body', async () => {
+    const originalWarn = logger.warn;
+    const records: Array<Record<string, unknown>> = [];
+    const testImageCacheDir = path.join(
+      DATA_DIR,
+      'image-cache-image-cache-test',
+      randomUUID(),
+    );
+
+    clearTestImageCache(testImageCacheDir);
+    logger.warn = ((fieldsOrMsg: Record<string, unknown> | string) => {
+      if (typeof fieldsOrMsg !== 'string') {
+        records.push(fieldsOrMsg);
+      }
+    }) as unknown as typeof logger.warn;
+
+    try {
+      const response = await serveCachedRemoteImage(
+        'empty-body-key',
+        async () => 'https://93.184.216.34/empty.png',
+        {
+          cacheDir: testImageCacheDir,
+          fetchImpl: (async () =>
+            new Response(null, {
+              status: 200,
+              headers: { 'content-type': 'image/png' },
+            })) as RemoteImageFetch,
+        },
+      );
+
+      expect(response).toBeNull();
+      expect(records).toContainEqual(
+        expect.objectContaining({
+          cacheKey: 'empty-body-key',
+          imageUrl: 'https://93.184.216.34/empty.png',
+        }),
+      );
+      expect(fs.readdirSync(testImageCacheDir)).toEqual([]);
+    } finally {
+      clearTestImageCache(testImageCacheDir);
+      logger.warn = originalWarn;
+    }
+  });
 });
 
 /** Build a fake fetch that returns a streamed body of the given size. */
@@ -426,6 +559,24 @@ describe('readStreamWithCap', () => {
     const result = await readStreamWithCap(stream, 100);
     expect(result).not.toBeNull();
     expect(result!.length).toBe(90);
+  });
+
+  it('cancels the reader and releases the lock when the cap is exceeded', async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(101));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+
+    const result = await readStreamWithCap(stream, 100);
+
+    expect(result).toBeNull();
+    expect(cancelled).toBe(true);
+    expect(stream.locked).toBe(false);
   });
 });
 
