@@ -231,7 +231,7 @@ describe('FakeState', () => {
     expect(state.setAgentModel('missing-agent', 'opus')).toBe(false);
   });
 
-  it('updates existing chats and records new chat timestamps deterministically', () => {
+  it('updates existing chats and records new chats', () => {
     state.addChat('sim:general', '#renamed-general');
     expect(
       state.getChats().find((chat) => chat.jid === 'sim:general'),
