@@ -1,3 +1,5 @@
+import { timingSafeEqual } from 'node:crypto';
+
 import { z } from 'zod';
 
 import { logger } from './logger.js';
@@ -39,6 +41,27 @@ const taskActionSchema = z.object({
   action: z.enum(['pause', 'resume', 'cancel', 'run-now']),
 });
 
+interface ControlPlaneAuthOptions {
+  bearerToken?: string;
+}
+
+function getConfiguredBearerToken(options?: ControlPlaneAuthOptions) {
+  const token = options?.bearerToken?.trim();
+  return token && token.length > 0 ? token : null;
+}
+
+function hasValidBearerToken(req: Request, expectedToken: string): boolean {
+  const authorization = req.headers.get('authorization');
+  if (!authorization?.startsWith('Bearer ')) return false;
+
+  const providedToken = authorization.slice('Bearer '.length).trim();
+  const provided = Buffer.from(providedToken);
+  const expected = Buffer.from(expectedToken);
+  return (
+    provided.length === expected.length && timingSafeEqual(provided, expected)
+  );
+}
+
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
     status,
@@ -74,13 +97,27 @@ function executeTaskAction(
   }
 }
 
-export function createControlPlaneFetch(deps: ControlPlaneDeps) {
+export function createControlPlaneFetch(
+  deps: ControlPlaneDeps,
+  options?: ControlPlaneAuthOptions,
+) {
+  const bearerToken = getConfiguredBearerToken(options);
+
   return async function fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const pathname = url.pathname;
 
     if (req.method === 'GET' && pathname === '/healthz') {
       return json({ ok: true, now: new Date().toISOString() });
+    }
+
+    if (pathname.startsWith('/api/control-plane/')) {
+      if (!bearerToken) {
+        return json({ ok: false, error: 'control_plane_auth_required' }, 503);
+      }
+      if (!hasValidBearerToken(req, bearerToken)) {
+        return json({ ok: false, error: 'unauthorized' }, 401);
+      }
     }
 
     if (req.method === 'GET' && pathname === '/api/control-plane/state') {
@@ -125,16 +162,22 @@ export function createControlPlaneFetch(deps: ControlPlaneDeps) {
 export interface ControlPlaneServerOptions {
   hostname: string;
   port: number;
+  bearerToken?: string;
 }
 
 export function startControlPlaneServer(
   deps: ControlPlaneDeps,
   options: ControlPlaneServerOptions,
 ): ReturnType<typeof Bun.serve> {
+  const bearerToken = getConfiguredBearerToken(options);
+  if (!bearerToken) {
+    throw new Error('Control plane bearer token is required');
+  }
+
   const server = Bun.serve({
     hostname: options.hostname,
     port: options.port,
-    fetch: createControlPlaneFetch(deps),
+    fetch: createControlPlaneFetch(deps, { bearerToken }),
   });
 
   logger.info(

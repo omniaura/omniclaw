@@ -11,6 +11,7 @@ import type { RegisteredGroup, ScheduledTask } from './types.js';
 const RealDate = Date;
 const realBunServe = Bun.serve;
 const realLoggerInfo = logger.info;
+const controlPlaneToken = 'test-control-token';
 
 function installFixedDate(iso: string) {
   const fixedTime = new RealDate(iso).getTime();
@@ -94,6 +95,18 @@ function makeDeps(overrides: Partial<ControlPlaneDeps> = {}): ControlPlaneDeps {
   };
 }
 
+function makeFetch(overrides: Partial<ControlPlaneDeps> = {}) {
+  return createControlPlaneFetch(makeDeps(overrides), {
+    bearerToken: controlPlaneToken,
+  });
+}
+
+function controlPlaneRequest(path: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+  headers.set('authorization', `Bearer ${controlPlaneToken}`);
+  return new Request(`http://localhost${path}`, { ...init, headers });
+}
+
 describe('control-plane routes', () => {
   it('serves health endpoint', async () => {
     installFixedDate('2026-04-23T12:34:56.000Z');
@@ -107,10 +120,8 @@ describe('control-plane routes', () => {
   });
 
   it('returns state summary and queue snapshot', async () => {
-    const fetch = createControlPlaneFetch(makeDeps());
-    const res = await fetch(
-      new Request('http://localhost/api/control-plane/state'),
-    );
+    const fetch = makeFetch();
+    const res = await fetch(controlPlaneRequest('/api/control-plane/state'));
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -125,10 +136,10 @@ describe('control-plane routes', () => {
 
   it('runs task action endpoints', async () => {
     const pauseTask = mock(() => ({ ok: true as const }));
-    const fetch = createControlPlaneFetch(makeDeps({ pauseTask }));
+    const fetch = makeFetch({ pauseTask });
 
     const res = await fetch(
-      new Request('http://localhost/api/control-plane/tasks/task-1/pause', {
+      controlPlaneRequest('/api/control-plane/tasks/task-1/pause', {
         method: 'POST',
       }),
     );
@@ -143,11 +154,9 @@ describe('control-plane routes', () => {
       makeTask('task-b', 'paused'),
       makeTask('task-c', 'completed'),
     ]);
-    const fetch = createControlPlaneFetch(makeDeps({ getTasks }));
+    const fetch = makeFetch({ getTasks });
 
-    const res = await fetch(
-      new Request('http://localhost/api/control-plane/tasks'),
-    );
+    const res = await fetch(controlPlaneRequest('/api/control-plane/tasks'));
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean; tasks: ScheduledTask[] };
@@ -161,12 +170,12 @@ describe('control-plane routes', () => {
   });
 
   it('maps missing tasks to 404 on actions', async () => {
-    const fetch = createControlPlaneFetch(
-      makeDeps({ runTaskNow: () => ({ ok: false, reason: 'not_found' }) }),
-    );
+    const fetch = makeFetch({
+      runTaskNow: () => ({ ok: false, reason: 'not_found' }),
+    });
 
     const res = await fetch(
-      new Request('http://localhost/api/control-plane/tasks/ghost/run-now', {
+      controlPlaneRequest('/api/control-plane/tasks/ghost/run-now', {
         method: 'POST',
       }),
     );
@@ -175,12 +184,12 @@ describe('control-plane routes', () => {
   });
 
   it('maps invalid task state to 409 on actions', async () => {
-    const fetch = createControlPlaneFetch(
-      makeDeps({ pauseTask: () => ({ ok: false, reason: 'invalid_state' }) }),
-    );
+    const fetch = makeFetch({
+      pauseTask: () => ({ ok: false, reason: 'invalid_state' }),
+    });
 
     const res = await fetch(
-      new Request('http://localhost/api/control-plane/tasks/task-a/pause', {
+      controlPlaneRequest('/api/control-plane/tasks/task-a/pause', {
         method: 'POST',
       }),
     );
@@ -189,12 +198,12 @@ describe('control-plane routes', () => {
   });
 
   it('maps other task action failures to 400', async () => {
-    const fetch = createControlPlaneFetch(
-      makeDeps({ cancelTask: () => ({ ok: false, reason: 'not_allowed' }) }),
-    );
+    const fetch = makeFetch({
+      cancelTask: () => ({ ok: false, reason: 'not_allowed' }),
+    });
 
     const res = await fetch(
-      new Request('http://localhost/api/control-plane/tasks/task-a/cancel', {
+      controlPlaneRequest('/api/control-plane/tasks/task-a/cancel', {
         method: 'POST',
       }),
     );
@@ -205,10 +214,10 @@ describe('control-plane routes', () => {
 
   it('returns 404 for unsupported methods on task actions', async () => {
     const runTaskNow = mock(() => ({ ok: true as const }));
-    const fetch = createControlPlaneFetch(makeDeps({ runTaskNow }));
+    const fetch = makeFetch({ runTaskNow });
 
     const res = await fetch(
-      new Request('http://localhost/api/control-plane/tasks/task-a/run-now'),
+      controlPlaneRequest('/api/control-plane/tasks/task-a/run-now'),
     );
 
     expect(res.status).toBe(404);
@@ -216,14 +225,43 @@ describe('control-plane routes', () => {
   });
 
   it('returns 404 for unknown routes', async () => {
-    const fetch = createControlPlaneFetch(makeDeps());
+    const fetch = makeFetch();
 
-    const res = await fetch(
-      new Request('http://localhost/api/control-plane/missing'),
-    );
+    const res = await fetch(controlPlaneRequest('/api/control-plane/missing'));
 
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ ok: false, error: 'not_found' });
+  });
+
+  it('rejects control-plane API routes without bearer auth', async () => {
+    const runTaskNow = mock(() => ({ ok: true as const }));
+    const fetch = makeFetch({ runTaskNow });
+
+    const res = await fetch(
+      new Request('http://localhost/api/control-plane/tasks/task-a/run-now', {
+        method: 'POST',
+      }),
+    );
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ ok: false, error: 'unauthorized' });
+    expect(runTaskNow).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when control-plane auth is not configured', async () => {
+    const getTasks = mock(() => [makeTask('task-a', 'active')]);
+    const fetch = createControlPlaneFetch(makeDeps({ getTasks }));
+
+    const res = await fetch(
+      new Request('http://localhost/api/control-plane/tasks'),
+    );
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: 'control_plane_auth_required',
+    });
+    expect(getTasks).not.toHaveBeenCalled();
   });
 });
 
@@ -248,6 +286,7 @@ describe('startControlPlaneServer', () => {
     const server = startControlPlaneServer(deps, {
       hostname: '127.0.0.1',
       port: 4312,
+      bearerToken: controlPlaneToken,
     });
 
     expect(serveMockFn).toHaveBeenCalledTimes(1);
@@ -256,7 +295,7 @@ describe('startControlPlaneServer', () => {
     expect(serveOptions?.port).toBe(4312);
     const res = (await serveOptions!.fetch!.call(
       fakeServer,
-      new Request('http://localhost/api/control-plane/tasks'),
+      controlPlaneRequest('/api/control-plane/tasks'),
       fakeServer,
     )) as Response;
     expect(res.status).toBe(200);
@@ -270,5 +309,22 @@ describe('startControlPlaneServer', () => {
       },
       'Control plane HTTP server started',
     );
+  });
+
+  it('refuses to start without a configured bearer token', () => {
+    const serveMockFn = mock((options: Parameters<typeof Bun.serve>[0]) => ({
+      hostname: options.hostname,
+      port: options.port,
+      stop: mock(),
+    }));
+    Bun.serve = serveMockFn as unknown as typeof Bun.serve;
+
+    expect(() =>
+      startControlPlaneServer(makeDeps(), {
+        hostname: '0.0.0.0',
+        port: 4312,
+      }),
+    ).toThrow('Control plane bearer token is required');
+    expect(serveMockFn).not.toHaveBeenCalled();
   });
 });
