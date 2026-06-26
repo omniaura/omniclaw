@@ -1245,15 +1245,23 @@ function refreshTasks(){
   .then(function(r){return r.json();})
   .then(function(tasks){
     // Update stats
-    var total=tasks.length,active=0,paused=0,completed=0;
+    var total=tasks.length,active=0,paused=0,completed=0,overdue=0;
+    var now=Date.now();
     tasks.forEach(function(t){
-      if(t.status==="active")active++;
+      if(t.status==="active"){
+        active++;
+        if(t.next_run){
+          var nr=Date.parse(t.next_run);
+          if(isFinite(nr)&&nr<now)overdue++;
+        }
+      }
       else if(t.status==="paused")paused++;
       else if(t.status==="completed")completed++;
     });
+    var activeLabel=overdue>0?active+' active ('+overdue+' overdue)':active+' active';
     var stats=document.querySelector(".tasks-stats");
     if(stats)stats.innerHTML='<span class="tasks-stat">'+total+' total</span>'
-      +'<span class="tasks-stat stat-active">'+active+' active</span>'
+      +'<span class="tasks-stat stat-active">'+activeLabel+'</span>'
       +'<span class="tasks-stat stat-paused">'+paused+' paused</span>'
       +'<span class="tasks-stat stat-completed">'+completed+' completed</span>';
 

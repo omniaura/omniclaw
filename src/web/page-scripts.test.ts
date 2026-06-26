@@ -82,6 +82,18 @@ describe('tasks page script', () => {
     );
     expect(script).toContain('sb.disabled=false;');
   });
+
+  it('mirrors the overdue rollup on the active chip when refreshing', () => {
+    const script = allPageScripts().tasks;
+
+    expect(script).toContain(
+      "var activeLabel=overdue>0?active+' active ('+overdue+' overdue)':active+' active';",
+    );
+    expect(script).toContain(
+      '+\'<span class="tasks-stat stat-active">\'+activeLabel+\'</span>\'',
+    );
+    expect(script).toContain('if(isFinite(nr)&&nr<now)overdue++;');
+  });
 });
 
 describe('context page script', () => {
