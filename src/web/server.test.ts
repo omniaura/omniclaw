@@ -13,6 +13,7 @@ import {
 } from './routes.js';
 import type { WebStateProvider, QueueStats } from './types.js';
 import type { Agent, ChannelSubscription, ScheduledTask } from '../types.js';
+import type { GroupQueueDetail } from '../group-queue.js';
 import { logger } from '../logger.js';
 
 // ---- Test fixtures ----
@@ -167,6 +168,30 @@ function makeState(
     setAgentEnabled: () => true,
     setAgentModel: () => true,
     ...overrides,
+  };
+}
+
+function makeTaskRunningDetail(): GroupQueueDetail {
+  return {
+    folderKey: 'test-agent',
+    messageLane: {
+      active: false,
+      idle: true,
+      pendingCount: 0,
+      containerName: null,
+    },
+    taskLane: {
+      active: true,
+      pendingCount: 0,
+      containerName: null,
+      activeTask: {
+        taskId: 'task-001',
+        promptPreview: 'Run the daily check',
+        startedAt: 1_700_000_000_000,
+        runningMs: 15_000,
+      },
+    },
+    retryCount: 0,
   };
 }
 
@@ -1239,6 +1264,37 @@ describe('SSE', () => {
     const payload = await readUntilContains(reader, 'sse log');
     expect(payload).toContain('selector #log-container');
     expect(payload).toContain('sse log');
+    reader.releaseLock();
+  });
+
+  it('preserves running task count in stats patches', async () => {
+    handle = startWebServer(
+      testConfig(),
+      makeState({
+        getQueueDetails: () => [makeTaskRunningDetail()],
+      }),
+    );
+
+    const res = await authedFetch('/api/events?channels=stats', {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toBeTruthy();
+
+    const reader = res.body!.getReader();
+    handle.broadcast({
+      type: 'agent_status',
+      data: {
+        activeContainers: 2,
+        idleContainers: 1,
+        maxActive: 8,
+        maxIdle: 4,
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    const payload = await readUntilContains(reader, 'id="stat-tasks"');
+    expect(payload).toContain('id="stat-tasks">1 (1 running)</div>');
     reader.releaseLock();
   });
 

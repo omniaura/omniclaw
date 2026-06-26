@@ -218,6 +218,36 @@ describe('renderDashboardContent', () => {
     expect(html).toContain('id="stat-tasks">1</div>');
   });
 
+  it('annotates active tasks card with running count when tasks are in flight', () => {
+    const html = renderDashboardContent(
+      makeState({
+        tasks: [
+          makeTask({ id: 'task-a', status: 'active' }),
+          makeTask({ id: 'task-b', status: 'active' }),
+          makeTask({ id: 'task-c', status: 'active' }),
+        ],
+        queueDetails: [
+          makeTaskRunningDetail({ folderKey: 'g1', taskId: 'task-a' }),
+          makeTaskRunningDetail({ folderKey: 'g2', taskId: 'task-b' }),
+        ],
+      }),
+    );
+
+    expect(html).toContain('id="stat-tasks">3 (2 running)</div>');
+  });
+
+  it('omits the running annotation when no task lane is active', () => {
+    const html = renderDashboardContent(
+      makeState({
+        tasks: [makeTask({ status: 'active' })],
+        queueDetails: [makeIdleDetail('g1')],
+      }),
+    );
+
+    expect(html).toContain('id="stat-tasks">1</div>');
+    expect(html).not.toContain('running)');
+  });
+
   it('annotates agents card with working count when any lane is in flight', () => {
     const html = renderDashboardContent(
       makeState({
