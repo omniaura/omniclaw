@@ -30,6 +30,7 @@ import {
   redactActivityOutput,
   TOOL_OUTPUT_SNIPPET_CHARS,
 } from './activity-format.js';
+import { getOriginChatJid, withOutputChatJid } from './output-routing.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -70,6 +71,7 @@ function resolveIpcInputDir(isScheduledTask?: boolean): string {
 
 let ipcInputDir = resolveIpcInputDir(false);
 let currentChatJid = '';
+let turnOutputChatJid = '';
 const currentChatFile =
   process.env.OMNICLAW_CURRENT_CHAT_FILE ||
   path.join('/tmp', `current_chat_jid-${process.pid}`);
@@ -81,6 +83,10 @@ function setCurrentChat(chatJid: string): void {
   } catch {
     /* ignore */
   }
+}
+
+function snapshotTurnOutputChat(chatJid: string): void {
+  turnOutputChatJid = chatJid;
 }
 
 function drainIpcInput(): IpcDrainResult {
@@ -464,25 +470,33 @@ async function runOpenCodePrompt(
           if (output) {
             const text = `▸ ${toolName}: ${input}\n\`\`\`\n${output}\n\`\`\``;
             log(`[tool] ${toolName}(${input}) -> ${output}`);
-            writeOutput({
-              status: 'success',
-              result: text,
-              newSessionId: sessionId,
-              intermediate: true,
-              ...(currentChatJid ? { chatJid: currentChatJid } : {}),
-            });
+            writeOutput(
+              withOutputChatJid(
+                {
+                  status: 'success',
+                  result: text,
+                  newSessionId: sessionId,
+                  intermediate: true,
+                },
+                turnOutputChatJid,
+              ),
+            );
             loggedToolIds.add(id);
             loggedPartCount++;
           } else if (!loggedToolIds.has(`pending:${id}`)) {
             const text = `▸ ${toolName}: ${input}`;
             log(`[tool] ${toolName}(${input}) ...`);
-            writeOutput({
-              status: 'success',
-              result: text,
-              newSessionId: sessionId,
-              intermediate: true,
-              ...(currentChatJid ? { chatJid: currentChatJid } : {}),
-            });
+            writeOutput(
+              withOutputChatJid(
+                {
+                  status: 'success',
+                  result: text,
+                  newSessionId: sessionId,
+                  intermediate: true,
+                },
+                turnOutputChatJid,
+              ),
+            );
             loggedToolIds.add(`pending:${id}`);
             loggedPartCount++;
           }
@@ -534,13 +548,16 @@ async function runOpenCodePrompt(
     // (OpenCode doesn't expose granular tool-call streaming via SDK prompt,
     //  so we just emit the final result)
 
-    const output: ContainerOutput = {
-      status: 'success',
-      result: responseText,
-      newSessionId: sessionId,
-    };
-    if (currentChatJid) output.chatJid = currentChatJid;
-    writeOutput(output);
+    writeOutput(
+      withOutputChatJid(
+        {
+          status: 'success',
+          result: responseText,
+          newSessionId: sessionId,
+        },
+        turnOutputChatJid,
+      ),
+    );
 
     return {
       sessionId,
@@ -642,8 +659,12 @@ export async function runOpenCodeRuntime(
   }
   fs.mkdirSync(ipcInputDir, { recursive: true });
 
-  // Initialize current chat JID
+  const originChatJid = getOriginChatJid(containerInput);
+
+  // Initialize current chat JID. Runtime output uses a per-turn snapshot so
+  // mid-turn sibling IPC cannot reroute the final reply.
   setCurrentChat(containerInput.chatJid);
+  snapshotTurnOutputChat(originChatJid);
 
   // Build env for the opencode server — strip secrets that OpenCode doesn't
   // need. OpenCode authenticates via auth.json, not env vars. Including
@@ -799,6 +820,7 @@ export async function runOpenCodeRuntime(
   // Query loop: send prompt → wait for IPC → repeat
   try {
     while (true) {
+      snapshotTurnOutputChat(turnOutputChatJid || currentChatJid);
       log(`Sending prompt (session: ${sessionId}, ${prompt.length} chars)...`);
 
       const result = await runOpenCodePrompt(
@@ -837,12 +859,16 @@ export async function runOpenCodeRuntime(
           continue;
         }
 
-        writeOutput({
-          status: 'success',
-          result: responsePlan.finalText,
-          newSessionId: sessionId,
-          ...(currentChatJid ? { chatJid: currentChatJid } : {}),
-        });
+        writeOutput(
+          withOutputChatJid(
+            {
+              status: 'success',
+              result: responsePlan.finalText,
+              newSessionId: sessionId,
+            },
+            turnOutputChatJid,
+          ),
+        );
       }
 
       // Emit session update so host can track it
@@ -860,6 +886,7 @@ export async function runOpenCodeRuntime(
         `Got new message (${nextMessage.length} chars), sending follow-up prompt`,
       );
       prompt = nextMessage;
+      snapshotTurnOutputChat(currentChatJid);
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

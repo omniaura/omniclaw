@@ -31,6 +31,7 @@ import {
   redactActivityOutput,
   TOOL_OUTPUT_SNIPPET_CHARS,
 } from './activity-format.js';
+import { getOriginChatJid, withOutputChatJid } from './output-routing.js';
 
 interface JsonRpcRequest {
   id: string | number;
@@ -366,13 +367,17 @@ function handleServerRequest(
       type: `${request.method} declined`,
     });
     if (activity) {
-      writeOutput({
-        status: 'success',
-        result: activity,
-        newSessionId: session.threadId,
-        intermediate: true,
-        ...(currentChatJid ? { chatJid: currentChatJid } : {}),
-      });
+      writeOutput(
+        withOutputChatJid(
+          {
+            status: 'success',
+            result: activity,
+            newSessionId: session.threadId,
+            intermediate: true,
+          },
+          turnOutputChatJid,
+        ),
+      );
     }
     writeJsonRpcMessage(session, {
       id: request.id,
@@ -459,13 +464,17 @@ function handleNotification(
     }
     const activity = renderCodexActivity(item);
     if (activity) {
-      writeOutput({
-        status: 'success',
-        result: activity,
-        newSessionId: session.threadId,
-        intermediate: true,
-        ...(currentChatJid ? { chatJid: currentChatJid } : {}),
-      });
+      writeOutput(
+        withOutputChatJid(
+          {
+            status: 'success',
+            result: activity,
+            newSessionId: session.threadId,
+            intermediate: true,
+          },
+          turnOutputChatJid,
+        ),
+      );
     }
     return;
   }
@@ -872,6 +881,7 @@ async function runCodexTurn(
 
 let ipcInputDir = resolveIpcInputDir(false);
 let currentChatJid = '';
+let turnOutputChatJid = '';
 const currentChatFile =
   process.env.OMNICLAW_CURRENT_CHAT_FILE ||
   path.join('/tmp', `current_chat_jid-${process.pid}`);
@@ -883,6 +893,10 @@ function setCurrentChat(chatJid: string): void {
   } catch {
     /* ignore */
   }
+}
+
+function snapshotTurnOutputChat(chatJid: string): void {
+  turnOutputChatJid = chatJid;
 }
 
 function drainIpcInput(): IpcDrainResult {
@@ -1073,7 +1087,9 @@ export async function runCodexRuntime(
   ipcInputDir = resolveIpcInputDir(containerInput.isScheduledTask);
   fs.mkdirSync(ipcInputDir, { recursive: true });
 
+  const originChatJid = getOriginChatJid(containerInput);
   setCurrentChat(containerInput.chatJid);
+  snapshotTurnOutputChat(originChatJid);
 
   const codexEnv = buildCodexEnv(containerInput);
   const hasApiKey = Boolean(codexEnv.CODEX_API_KEY || codexEnv.OPENAI_API_KEY);
@@ -1123,6 +1139,7 @@ export async function runCodexRuntime(
     }
 
     while (true) {
+      snapshotTurnOutputChat(turnOutputChatJid || currentChatJid);
       const { shutdown } = drainIpcInput();
       if (shutdown) {
         log('Shutdown signal detected before prompt, exiting');
@@ -1150,12 +1167,16 @@ export async function runCodexRuntime(
         break;
       }
 
-      writeOutput({
-        status: 'success',
-        result: turn.text,
-        newSessionId: threadId,
-        ...(currentChatJid ? { chatJid: currentChatJid } : {}),
-      });
+      writeOutput(
+        withOutputChatJid(
+          {
+            status: 'success',
+            result: turn.text,
+            newSessionId: threadId,
+          },
+          turnOutputChatJid,
+        ),
+      );
 
       log('Prompt completed, waiting for next IPC message...');
       const nextMessage = await waitForIpcMessage();
@@ -1168,6 +1189,7 @@ export async function runCodexRuntime(
         `Got new message (${nextMessage.length} chars), sending follow-up prompt`,
       );
       prompt = nextMessage;
+      snapshotTurnOutputChat(currentChatJid);
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

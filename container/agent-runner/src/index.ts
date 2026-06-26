@@ -33,6 +33,7 @@ import type {
   IpcDrainResult,
   IpcMessage,
 } from '@omniclaw/protocol';
+import { getOriginChatJid, withOutputChatJid } from './output-routing.js';
 
 type ExternalMcpServerConfig =
   | {
@@ -422,10 +423,7 @@ const OUTPUT_START_MARKER = '---OMNICLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---OMNICLAW_OUTPUT_END---';
 
 function writeOutput(output: ContainerOutput): void {
-  // Inject current chatJid so the host can route responses to the correct channel
-  const enriched = currentChatJidValue
-    ? { ...output, chatJid: currentChatJidValue }
-    : output;
+  const enriched = withOutputChatJid(output, turnOutputChatJidValue);
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(enriched));
   console.log(OUTPUT_END_MARKER);
@@ -928,6 +926,7 @@ function formatTranscriptMarkdown(
 // In shared-VM mode, multiple runner processes share /tmp, so this must be per exec.
 const CURRENT_CHAT_FILE = resolveCurrentChatFile();
 let currentChatJidValue = '';
+let turnOutputChatJidValue = '';
 
 function setCurrentChat(chatJid: string): void {
   currentChatJidValue = chatJid;
@@ -936,6 +935,10 @@ function setCurrentChat(chatJid: string): void {
   } catch {
     /* ignore */
   }
+}
+
+function snapshotTurnOutputChat(chatJid: string): void {
+  turnOutputChatJidValue = chatJid;
 }
 
 /**
@@ -1678,8 +1681,12 @@ Please review these changes to understand your new capabilities and fixes.
     );
   }
 
-  // Initialize current chat JID from container input
+  const originChatJid = getOriginChatJid(containerInput);
+
+  // Initialize current chat JID from container input. Final/intermediate output
+  // uses a per-turn snapshot so mid-turn sibling IPC cannot reroute replies.
   setCurrentChat(containerInput.chatJid);
+  snapshotTurnOutputChat(originChatJid);
 
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
@@ -1709,6 +1716,7 @@ Please review these changes to understand your new capabilities and fixes.
   let resumeAt: string | undefined = containerInput.resumeAt;
   try {
     while (true) {
+      snapshotTurnOutputChat(turnOutputChatJidValue || currentChatJidValue);
       log(
         `Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`,
       );
@@ -1771,6 +1779,7 @@ Please review these changes to understand your new capabilities and fixes.
 
       log(`Got new message (${nextMessage.length} chars), starting new query`);
       prompt = nextMessage;
+      snapshotTurnOutputChat(currentChatJidValue);
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

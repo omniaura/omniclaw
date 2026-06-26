@@ -25,6 +25,7 @@ import type {
   IpcDrainResult,
   IpcMessage,
 } from '@omniclaw/protocol';
+import { getOriginChatJid, withOutputChatJid } from './output-routing.js';
 
 const OUTPUT_START_MARKER = '---OMNICLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---OMNICLAW_OUTPUT_END---';
@@ -41,7 +42,7 @@ function log(message: string): void {
 }
 
 function writeOutput(output: ContainerOutput, chatJid: string): void {
-  const enriched = chatJid ? { ...output, chatJid } : output;
+  const enriched = withOutputChatJid(output, chatJid);
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(enriched));
   console.log(OUTPUT_END_MARKER);
@@ -61,6 +62,7 @@ function resolveCurrentChatFile(): string {
 
 let ipcInputDir = resolveIpcInputDir(false);
 let currentChatJid = '';
+let turnOutputChatJid = '';
 const currentChatFile = resolveCurrentChatFile();
 
 function setCurrentChat(chatJid: string): void {
@@ -70,6 +72,10 @@ function setCurrentChat(chatJid: string): void {
   } catch {
     /* ignore */
   }
+}
+
+function snapshotTurnOutputChat(chatJid: string): void {
+  turnOutputChatJid = chatJid;
 }
 
 function drainIpcInput(): IpcDrainResult {
@@ -332,7 +338,9 @@ export async function runCursorSdkRuntime(
   }
   fs.mkdirSync(ipcInputDir, { recursive: true });
 
+  const originChatJid = getOriginChatJid(containerInput);
   setCurrentChat(containerInput.chatJid);
+  snapshotTurnOutputChat(originChatJid);
 
   const apiKey =
     containerInput.secrets?.CURSOR_API_KEY?.trim() ||
@@ -345,7 +353,7 @@ export async function runCursorSdkRuntime(
         error:
           'CURSOR_API_KEY is not set (add to host .env or container secrets).',
       },
-      currentChatJid,
+      turnOutputChatJid,
     );
     process.exit(1);
   }
@@ -408,7 +416,7 @@ export async function runCursorSdkRuntime(
           result: null,
           intermediate: true,
         },
-        currentChatJid,
+        turnOutputChatJid,
       );
       log('heartbeat');
     }, HEARTBEAT_INTERVAL_MS);
@@ -460,6 +468,7 @@ export async function runCursorSdkRuntime(
     startHeartbeat();
 
     while (true) {
+      snapshotTurnOutputChat(turnOutputChatJid || currentChatJid);
       log(
         `Cursor send (session id: ${sessionId || 'new'}, cwd: ${groupFolder})`,
       );
@@ -500,7 +509,7 @@ export async function runCursorSdkRuntime(
                 intermediate: true,
                 newSessionId: sdkAgent.agentId,
               },
-              currentChatJid,
+              turnOutputChatJid,
             );
           }
         }
@@ -525,7 +534,7 @@ export async function runCursorSdkRuntime(
             error: message,
             newSessionId: sdkAgent.agentId,
           },
-          currentChatJid,
+          turnOutputChatJid,
         );
         stopHeartbeat();
         process.exit(1);
@@ -545,7 +554,7 @@ export async function runCursorSdkRuntime(
             intermediate: false,
             newSessionId: sdkAgent.agentId,
           },
-          currentChatJid,
+          turnOutputChatJid,
         );
       } else {
         const errDetail =
@@ -557,7 +566,7 @@ export async function runCursorSdkRuntime(
             error: errDetail,
             newSessionId: sdkAgent.agentId,
           },
-          currentChatJid,
+          turnOutputChatJid,
         );
         stopHeartbeat();
         process.exit(1);
@@ -569,7 +578,7 @@ export async function runCursorSdkRuntime(
           result: null,
           newSessionId: sessionId,
         },
-        currentChatJid,
+        turnOutputChatJid,
       );
 
       log('Waiting for next IPC message...');
@@ -579,6 +588,7 @@ export async function runCursorSdkRuntime(
         break;
       }
       prompt = nextMessage;
+      snapshotTurnOutputChat(currentChatJid);
     }
 
     stopHeartbeat();
@@ -591,13 +601,13 @@ export async function runCursorSdkRuntime(
           result: null,
           error: `Cursor SDK: ${err.message}`,
         },
-        currentChatJid,
+        turnOutputChatJid,
       );
     } else {
       const message = err instanceof Error ? err.message : String(err);
       writeOutput(
         { status: 'error', result: null, error: message },
-        currentChatJid,
+        turnOutputChatJid,
       );
     }
     process.exit(1);
