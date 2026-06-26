@@ -19,6 +19,9 @@ export function renderTasksContent(state: WebStateProvider): string {
   const activeTasks = tasks.filter((t) => t.status === 'active').length;
   const pausedTasks = tasks.filter((t) => t.status === 'paused').length;
   const completedTasks = tasks.filter((t) => t.status === 'completed').length;
+  const executingTasks = tasks.filter(
+    (t) => t.status !== 'completed' && t.executing_since != null,
+  ).length;
 
   // Build agent/channel options for create/edit forms
   const agentOptions = agentData
@@ -45,6 +48,9 @@ export function renderTasksContent(state: WebStateProvider): string {
     `<div class="tasks-stats">` +
     `<span class="tasks-stat">${tasks.length} total</span>` +
     `<span class="tasks-stat stat-active">${activeTasks} active</span>` +
+    (executingTasks > 0
+      ? `<span class="tasks-stat stat-executing">${executingTasks} executing</span>`
+      : '') +
     `<span class="tasks-stat stat-paused">${pausedTasks} paused</span>` +
     `<span class="tasks-stat stat-completed">${completedTasks} completed</span>` +
     `</div>` +
@@ -126,6 +132,7 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
           : task.status === 'paused'
             ? 'status-paused'
             : 'status-completed';
+      const runningBadge = renderRunningBadge(task);
       const toggleLabel = task.status === 'active' ? 'Pause' : 'Resume';
       const toggleStatus = task.status === 'active' ? 'paused' : 'active';
       const runButton =
@@ -157,7 +164,7 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
 
       return (
         `<tr data-task-id="${escapeHtml(task.id)}" data-status="${escapeHtml(task.status)}">` +
-        `<td><span class="badge ${statusClass}">${escapeHtml(task.status)}</span></td>` +
+        `<td><span class="badge ${statusClass}">${escapeHtml(task.status)}</span>${runningBadge}</td>` +
         `<td class="td-agent" title="${escapeHtml(task.chat_jid)}">${escapeHtml(task.group_folder)}</td>` +
         `<td class="td-prompt" title="${escapeHtml(task.prompt)}">${escapeHtml(promptShort)}</td>` +
         `<td class="td-sched"><span class="sched-type badge badge-sm">${escapeHtml(task.schedule_type)}</span> ` +
@@ -270,6 +277,41 @@ function renderTaskModal(
     `<button type="submit" class="btn btn-primary" id="${prefix}-submit">${submitLabel}</button>` +
     `</div></form></div></div>`
   );
+}
+
+/**
+ * Render the running-now badge for a task that's currently executing.
+ * Returns an empty string when the task is completed, paused without an
+ * active run, or has no `executing_since` timestamp.
+ */
+export function renderRunningBadge(task: ScheduledTask): string {
+  if (task.status === 'completed') return '';
+  if (!task.executing_since) return '';
+  const runningMs = computeRunningMs(task.executing_since);
+  if (runningMs == null || runningMs < 0) return '';
+  const label = formatRunningAge(runningMs);
+  return (
+    `<span class="lane-age" title="running for ${escapeHtml(label)} (since ${escapeHtml(task.executing_since)})">` +
+    `running ${escapeHtml(label)}</span>`
+  );
+}
+
+function computeRunningMs(executingSince: string): number | null {
+  try {
+    const startedAt = new Date(executingSince).getTime();
+    if (!Number.isFinite(startedAt)) return null;
+    return Date.now() - startedAt;
+  } catch {
+    return null;
+  }
+}
+
+/** Format a running duration with ms / s / m / h buckets. */
+export function formatRunningAge(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
+  return `${(ms / 3_600_000).toFixed(1)}h`;
 }
 
 /** Format a schedule value into a human-readable label. */
