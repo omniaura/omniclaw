@@ -286,7 +286,7 @@ describe('network identity detection', () => {
     const originalSetTimeout = globalThis.setTimeout;
     let timeoutCalls = 0;
     timeoutSpy = spyOn(globalThis, 'setTimeout').mockImplementation(((
-      handler: TimerHandler,
+      handler: Parameters<typeof setTimeout>[0],
       timeout?: number,
       ...args: unknown[]
     ) => {
