@@ -52,10 +52,6 @@ describe('SharedVmManager', () => {
       process.env.OMNICLAW_EXTRA_DIR = originalExtraDir;
     }
     fs.rmSync(extraDir, { recursive: true, force: true });
-    fs.rmSync(path.join(DATA_DIR, 'opencode-data'), {
-      recursive: true,
-      force: true,
-    });
   });
 
   it('returns an existing live container without spawning a new one', async () => {
@@ -155,6 +151,7 @@ describe('SharedVmManager', () => {
   it('includes the optional OpenCode data mount when the cache exists', async () => {
     const manager = new SharedVmManager();
     const opencodeDataDir = path.join(DATA_DIR, 'opencode-data');
+    const opencodeDataDirExisted = fs.existsSync(opencodeDataDir);
     fs.mkdirSync(opencodeDataDir, { recursive: true });
     const nowSpy = spyOn(Date, 'now').mockReturnValue(333);
     const spawnSpy = spyOn(Bun, 'spawn').mockImplementation((() =>
@@ -170,6 +167,9 @@ describe('SharedVmManager', () => {
       );
     } finally {
       nowSpy.mockRestore();
+      if (!opencodeDataDirExisted) {
+        fs.rmdirSync(opencodeDataDir);
+      }
     }
   });
 
