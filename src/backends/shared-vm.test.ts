@@ -176,31 +176,29 @@ describe('SharedVmManager', () => {
   it('stops only running orphaned shared VMs', async () => {
     const manager = new SharedVmManager();
     (manager as any).containerName = 'omniclaw-shared-claude-current';
-    const shellSpy = spyOn(Bun, '$').mockImplementation(
-      (() => ({
-        quiet: () => ({
-          text: () =>
-            JSON.stringify([
-              {
-                status: 'running',
-                configuration: { id: 'omniclaw-shared-claude-old' },
-              },
-              {
-                status: 'stopped',
-                configuration: { id: 'omniclaw-shared-claude-stopped' },
-              },
-              {
-                status: 'running',
-                configuration: { id: 'omniclaw-shared-claude-current' },
-              },
-              {
-                status: 'running',
-                configuration: { id: 'unrelated-container' },
-              },
-            ]),
-        }),
-      })) as unknown as typeof Bun.$,
-    );
+    const shellSpy = spyOn(Bun, '$').mockImplementation((() => ({
+      quiet: () => ({
+        text: () =>
+          JSON.stringify([
+            {
+              status: 'running',
+              configuration: { id: 'omniclaw-shared-claude-old' },
+            },
+            {
+              status: 'stopped',
+              configuration: { id: 'omniclaw-shared-claude-stopped' },
+            },
+            {
+              status: 'running',
+              configuration: { id: 'omniclaw-shared-claude-current' },
+            },
+            {
+              status: 'running',
+              configuration: { id: 'unrelated-container' },
+            },
+          ]),
+      }),
+    })) as unknown as typeof Bun.$);
     const spawnSpy = spyOn(Bun, 'spawn').mockImplementation((() =>
       makeProcess(0)) as unknown as typeof Bun.spawn);
 
@@ -217,13 +215,11 @@ describe('SharedVmManager', () => {
 
   it('swallows orphan cleanup shell failures', async () => {
     const manager = new SharedVmManager();
-    const shellSpy = spyOn(Bun, '$').mockImplementation(
-      (() => ({
-        quiet: () => {
-          throw new Error('runtime unavailable');
-        },
-      })) as unknown as typeof Bun.$,
-    );
+    const shellSpy = spyOn(Bun, '$').mockImplementation((() => ({
+      quiet: () => {
+        throw new Error('runtime unavailable');
+      },
+    })) as unknown as typeof Bun.$);
     const spawnSpy = spyOn(Bun, 'spawn');
 
     await expect(manager.cleanupOrphans()).resolves.toBeUndefined();
