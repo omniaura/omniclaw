@@ -11,7 +11,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { LOCAL_RUNTIME, SHARED_CLAUDE_VM_MEMORY } from '../config.js';
+import { DATA_DIR, LOCAL_RUNTIME, SHARED_CLAUDE_VM_MEMORY } from '../config.js';
 import { SharedVmManager } from './shared-vm.js';
 
 function makeProcess(
@@ -52,6 +52,10 @@ describe('SharedVmManager', () => {
       process.env.OMNICLAW_EXTRA_DIR = originalExtraDir;
     }
     fs.rmSync(extraDir, { recursive: true, force: true });
+    fs.rmSync(path.join(DATA_DIR, 'opencode-data'), {
+      recursive: true,
+      force: true,
+    });
   });
 
   it('returns an existing live container without spawning a new one', async () => {
@@ -146,5 +150,98 @@ describe('SharedVmManager', () => {
       'stop',
       'omniclaw-shared-claude-stop-me',
     ]);
+  });
+
+  it('includes the optional OpenCode data mount when the cache exists', async () => {
+    const manager = new SharedVmManager();
+    const opencodeDataDir = path.join(DATA_DIR, 'opencode-data');
+    fs.mkdirSync(opencodeDataDir, { recursive: true });
+    const nowSpy = spyOn(Date, 'now').mockReturnValue(333);
+    const spawnSpy = spyOn(Bun, 'spawn').mockImplementation((() =>
+      makeProcess(0)) as unknown as typeof Bun.spawn);
+
+    try {
+      await expect(manager.ensureRunning()).resolves.toBe(
+        'omniclaw-shared-claude-333',
+      );
+
+      expect(spawnSpy.mock.calls[0]?.[0]).toContain(
+        `${opencodeDataDir}:/data/opencode-data`,
+      );
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('stops only running orphaned shared VMs', async () => {
+    const manager = new SharedVmManager();
+    (manager as any).containerName = 'omniclaw-shared-claude-current';
+    const shellSpy = spyOn(Bun, '$').mockImplementation(
+      (() => ({
+        quiet: () => ({
+          text: () =>
+            JSON.stringify([
+              {
+                status: 'running',
+                configuration: { id: 'omniclaw-shared-claude-old' },
+              },
+              {
+                status: 'stopped',
+                configuration: { id: 'omniclaw-shared-claude-stopped' },
+              },
+              {
+                status: 'running',
+                configuration: { id: 'omniclaw-shared-claude-current' },
+              },
+              {
+                status: 'running',
+                configuration: { id: 'unrelated-container' },
+              },
+            ]),
+        }),
+      })) as unknown as typeof Bun.$,
+    );
+    const spawnSpy = spyOn(Bun, 'spawn').mockImplementation((() =>
+      makeProcess(0)) as unknown as typeof Bun.spawn);
+
+    await expect(manager.cleanupOrphans()).resolves.toBeUndefined();
+
+    expect(shellSpy).toHaveBeenCalledTimes(1);
+    expect(spawnSpy).toHaveBeenCalledTimes(1);
+    expect(spawnSpy.mock.calls[0]?.[0]).toEqual([
+      LOCAL_RUNTIME,
+      'stop',
+      'omniclaw-shared-claude-old',
+    ]);
+  });
+
+  it('swallows orphan cleanup shell failures', async () => {
+    const manager = new SharedVmManager();
+    const shellSpy = spyOn(Bun, '$').mockImplementation(
+      (() => ({
+        quiet: () => {
+          throw new Error('runtime unavailable');
+        },
+      })) as unknown as typeof Bun.$,
+    );
+    const spawnSpy = spyOn(Bun, 'spawn');
+
+    await expect(manager.cleanupOrphans()).resolves.toBeUndefined();
+
+    expect(shellSpy).toHaveBeenCalledTimes(1);
+    expect(spawnSpy).not.toHaveBeenCalled();
+  });
+
+  it('swallows stop failures after clearing the current container', async () => {
+    const manager = new SharedVmManager();
+    (manager as any).containerName = 'omniclaw-shared-claude-throw-stop';
+    const spawnSpy = spyOn(Bun, 'spawn').mockImplementation((() => {
+      throw new Error('stop failed');
+    }) as unknown as typeof Bun.spawn);
+
+    await expect(manager.stop()).resolves.toBeUndefined();
+
+    expect(manager.getName()).toBeNull();
+    expect(spawnSpy).toHaveBeenCalledTimes(1);
   });
 });
