@@ -48,6 +48,22 @@ describe('logs page script', () => {
       'window.__cleanup=function(){obs.disconnect();if(sidebarObs)sidebarObs.disconnect();clearTimeout(searchTimer);};',
     );
   });
+
+  it('pre-fills the search box from a ?q= deep-link query param', () => {
+    const script = allPageScripts().logs;
+
+    expect(script).toContain(
+      'var initialQuery=new URLSearchParams(location.search).get("q");',
+    );
+    expect(script).toContain('searchInput.value=initialQuery;');
+    expect(script).toContain('searchTerm=initialQuery;');
+    // The seeded query must trigger a filter pass so pre-existing (synced)
+    // lines are filtered immediately, not only when the next SSE line lands.
+    const start = script.indexOf('if(initialQuery){');
+    const end = script.indexOf('}catch(_qe){}', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(script.slice(start, end)).toContain('applyFilters();');
+  });
 });
 
 describe('tasks page script', () => {

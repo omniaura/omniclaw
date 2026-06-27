@@ -423,10 +423,40 @@ describe('renderIpcInspector', () => {
       makeState({ getQueueDetails: () => [detail] }),
     );
     expect(html).toContain('class="last-error-link"');
-    expect(html).toContain('href="/logs"');
+    // The last-error link deep-links to the logs page pre-filtered to this
+    // group via ?q=, so an operator lands on the failing group's lines.
+    expect(html).toContain('href="/logs?q=agent-epsilon"');
     expect(html).toContain('connect ECONNREFUSED 127.0.0.1:5432');
     // Age should be rendered in seconds (~2.5s)
     expect(html).toMatch(/last-error-age">[0-9.]+s<\/span>/);
+  });
+
+  it('URL-encodes the group key in the last-error deep-link', () => {
+    const detail: GroupQueueDetail = {
+      folderKey: 'team a/proj b',
+      messageLane: {
+        active: false,
+        idle: false,
+        pendingCount: 1,
+        containerName: null,
+        reason: 'retrying',
+        lastError: { message: 'boom', at: Date.now() },
+      },
+      taskLane: {
+        active: false,
+        pendingCount: 0,
+        containerName: null,
+        activeTask: null,
+        reason: 'no-work',
+      },
+      retryCount: 1,
+    };
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => [detail] }),
+    );
+    // Spaces and slashes in the folder key must be percent-encoded so the
+    // href stays a single, well-formed query value.
+    expect(html).toContain('href="/logs?q=team%20a%2Fproj%20b"');
   });
 
   it('HTML-escapes lastError messages to prevent injection', () => {

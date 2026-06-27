@@ -144,6 +144,7 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
       const lastErrorCell = renderLastErrorCell(
         g.messageLane.lastError,
         g.taskLane.lastError,
+        g.folderKey,
       );
       return `<tr>
         <td class="folder-key">${escapeHtml(g.folderKey)}</td>
@@ -217,18 +218,32 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
 function renderLastErrorCell(
   msgErr: { message: string; at: number } | null | undefined,
   taskErr: { message: string; at: number } | null | undefined,
+  groupKey: string,
 ): string {
   if (!msgErr && !taskErr) return '\u2014';
   const showLabels = !!msgErr && !!taskErr;
   const segments: string[] = [];
-  if (msgErr) segments.push(renderLastError(msgErr, showLabels ? 'msg' : ''));
+  if (msgErr)
+    segments.push(renderLastError(msgErr, groupKey, showLabels ? 'msg' : ''));
   if (taskErr)
-    segments.push(renderLastError(taskErr, showLabels ? 'task' : ''));
+    segments.push(renderLastError(taskErr, groupKey, showLabels ? 'task' : ''));
   return segments.join('');
+}
+
+/**
+ * Deep-link to the logs page pre-filtered to a group's lines. The logs page
+ * reads `?q=` and seeds its search box, so an operator clicking a last-error
+ * lands on that group's logs instead of an unfiltered stream. `groupKey` is
+ * URL-encoded (it can carry path-like separators) and the whole href is then
+ * HTML-escaped for the attribute context.
+ */
+function logsDeepLink(groupKey: string): string {
+  return groupKey ? `/logs?q=${encodeURIComponent(groupKey)}` : '/logs';
 }
 
 function renderLastError(
   err: { message: string; at: number } | null | undefined,
+  groupKey: string,
   laneLabel: string = '',
 ): string {
   if (!err) return '\u2014';
@@ -237,7 +252,7 @@ function renderLastError(
     ? `<span class="last-error-lane">${escapeHtml(laneLabel)}</span>`
     : '';
   return (
-    `<a href="/logs" class="last-error-link" title="${escapeHtml(err.message)}">` +
+    `<a href="${escapeHtml(logsDeepLink(groupKey))}" class="last-error-link" title="${escapeHtml(err.message)}">` +
     label +
     `<span class="last-error-text">${escapeHtml(err.message)}</span>` +
     `<span class="last-error-age">${formatDurationCompact(ageMs)}</span>` +
