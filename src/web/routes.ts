@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { GROUPS_DIR } from '../config.js';
-import { assertPathWithin } from '../path-security.js';
+import { assertPathWithin, rejectTraversalSegments } from '../path-security.js';
 import type { ScheduledTask } from '../types.js';
 import type { WebStateProvider } from './types.js';
 import {
@@ -535,6 +535,14 @@ async function handleCreateTask(
   if (!group_folder || typeof group_folder !== 'string') {
     return json(
       { error: 'Missing or invalid "group_folder" (string required)' },
+      400,
+    );
+  }
+  try {
+    rejectTraversalSegments(group_folder, 'scheduled task group_folder');
+  } catch (err) {
+    return json(
+      { error: err instanceof Error ? err.message : String(err) },
       400,
     );
   }
