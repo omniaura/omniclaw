@@ -202,17 +202,6 @@ async function runTask(
     return;
   }
 
-  // Skip runs when the owning agent is disabled via the web UI off-switch.
-  // next_run was already advanced before this call, so when the agent is
-  // re-enabled, future ticks pick the task up at its next scheduled time.
-  if (deps.isAgentEnabled && !deps.isAgentEnabled(task.group_folder)) {
-    runtime.logger.info(
-      { taskId: task.id, agentFolder: task.group_folder },
-      'Task skipped — agent is disabled',
-    );
-    return;
-  }
-
   try {
     rejectTraversalSegments(task.group_folder, 'scheduled task group folder');
   } catch (err) {
@@ -231,6 +220,17 @@ async function runTask(
     runtime.logger.warn(
       { taskId: task.id, groupFolder: task.group_folder, err: folderError },
       'Refusing scheduled task with unsafe group folder',
+    );
+    return;
+  }
+
+  // Skip runs when the owning agent is disabled via the web UI off-switch.
+  // next_run was already advanced before this call, so when the agent is
+  // re-enabled, future ticks pick the task up at its next scheduled time.
+  if (deps.isAgentEnabled && !deps.isAgentEnabled(task.group_folder)) {
+    runtime.logger.info(
+      { taskId: task.id, agentFolder: task.group_folder },
+      'Task skipped — agent is disabled',
     );
     return;
   }

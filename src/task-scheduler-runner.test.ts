@@ -338,6 +338,7 @@ describe('startSchedulerLoop task execution', () => {
     const logTaskRunMock = mock(() => {});
     const resolveBackendMock = mock(() => ({ runAgent: mock(() => {}) }));
     const markTaskExecutingMock = mock(() => {});
+    const isAgentEnabledMock = mock(() => true);
     const enqueuedRuns: Array<Promise<void>> = [];
     const originalSetTimeout = globalThis.setTimeout;
 
@@ -369,6 +370,7 @@ describe('startSchedulerLoop task execution', () => {
           notifyIdle: mock(() => {}),
           closeStdin: mock(() => {}),
         } as unknown as SchedulerDependencies['queue'],
+        isAgentEnabled: isAgentEnabledMock,
         onProcess: mock(() => {}),
         sendMessage: mock(async () => undefined),
         findChannel: () => undefined,
@@ -402,6 +404,7 @@ describe('startSchedulerLoop task execution', () => {
 
       expect(resolveBackendMock).not.toHaveBeenCalled();
       expect(markTaskExecutingMock).not.toHaveBeenCalled();
+      expect(isAgentEnabledMock).not.toHaveBeenCalled();
       expect(logTaskRunMock).toHaveBeenCalledWith(
         expect.objectContaining({
           task_id: 'task-unsafe-folder',
