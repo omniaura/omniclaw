@@ -1,8 +1,6 @@
 import { createHash, createHmac, randomUUID } from 'crypto';
 
 import { describe, it, expect, afterEach, mock } from 'bun:test';
-import fs from 'fs';
-import path from 'path';
 
 import {
   isTrustedLanDiscoveryAdminRequest,
@@ -210,8 +208,6 @@ const authHeader = `Basic ${btoa(`${testAuth.username}:${testAuth.password}`)}`;
 const peerSecret = 'peer-shared-secret-32-bytes-long!';
 const originalFetch = globalThis.fetch;
 const originalWebUiSolid = process.env.WEB_UI_SOLID;
-const solidOutputDir = path.join(process.cwd(), 'webui', '.output', 'server');
-const solidOutputFile = path.join(solidOutputDir, 'index.mjs');
 
 let handle: WebServerHandle | null = null;
 
@@ -231,10 +227,6 @@ afterEach(async () => {
   } else {
     process.env.WEB_UI_SOLID = originalWebUiSolid;
   }
-  fs.rmSync(path.join(process.cwd(), 'webui', '.output'), {
-    recursive: true,
-    force: true,
-  });
   resetDiscoveryContextForTests();
 });
 
@@ -492,11 +484,6 @@ describe('basic auth', () => {
 
   it('rejects cross-site SolidStart page POSTs before proxying', async () => {
     process.env.WEB_UI_SOLID = 'true';
-    fs.mkdirSync(solidOutputDir, { recursive: true });
-    fs.writeFileSync(
-      solidOutputFile,
-      'globalThis.__solidServerLoaded = true;\n',
-    );
     const proxyFetch = mock(
       async () => new Response('proxied unsafe page mutation', { status: 299 }),
     );
