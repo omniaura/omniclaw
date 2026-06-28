@@ -21,6 +21,12 @@ type SolidHandler = (req: Request) => Promise<Response>;
 let solidHandler: SolidHandler | null = null;
 let solidPort: number | null = null;
 
+const SOLID_PROXY_REQUEST_HEADER_ALLOWLIST = new Set([
+  'accept',
+  'accept-language',
+  'content-type',
+]);
+
 /**
  * Initialize the SolidStart handler by importing the compiled output.
  * The SolidStart build (bun preset) starts its own server on an internal port.
@@ -52,7 +58,7 @@ export async function initSolidHandler(
     solidHandler = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
       const targetUrl = `http://127.0.0.1:${internalPort}${url.pathname}${url.search}`;
-      const headers = new Headers(req.headers);
+      const headers = buildSolidProxyRequestHeaders(req.headers);
       headers.set('host', `127.0.0.1:${internalPort}`);
       // Disable compression to avoid double-encoding when proxying
       headers.set('accept-encoding', 'identity');
@@ -94,6 +100,16 @@ export function isMainProcessRoute(pathname: string): boolean {
     pathname === '/ws' ||
     pathname.startsWith('/api/')
   );
+}
+
+function buildSolidProxyRequestHeaders(input: Headers): Headers {
+  const headers = new Headers();
+  for (const [key, value] of input) {
+    if (SOLID_PROXY_REQUEST_HEADER_ALLOWLIST.has(key.toLowerCase())) {
+      headers.set(key, value);
+    }
+  }
+  return headers;
 }
 
 /**

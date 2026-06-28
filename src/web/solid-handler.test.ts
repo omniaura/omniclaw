@@ -126,7 +126,15 @@ describe('solid-handler', () => {
       new Request('http://public.test/dashboard?tab=agents', {
         method: 'POST',
         headers: {
+          accept: 'text/html',
+          'accept-language': 'en-US',
           'accept-encoding': 'gzip',
+          authorization: 'Basic secret',
+          connection: 'keep-alive',
+          cookie: 'omniclaw_session=secret',
+          'content-type': 'text/plain',
+          te: 'trailers',
+          upgrade: 'websocket',
           'x-test': 'present',
         },
         body: 'hello world',
@@ -151,8 +159,16 @@ describe('solid-handler', () => {
 
     const headers = init.headers as Headers;
     expect(headers.get('host')).toBe(`127.0.0.1:${internalPort}`);
+    expect(headers.get('accept')).toBe('text/html');
     expect(headers.get('accept-encoding')).toBe('identity');
-    expect(headers.get('x-test')).toBe('present');
+    expect(headers.get('accept-language')).toBe('en-US');
+    expect(headers.get('content-type')).toBe('text/plain');
+    expect(headers.get('authorization')).toBeNull();
+    expect(headers.get('connection')).toBeNull();
+    expect(headers.get('cookie')).toBeNull();
+    expect(headers.get('te')).toBeNull();
+    expect(headers.get('upgrade')).toBeNull();
+    expect(headers.get('x-test')).toBeNull();
 
     const getResponse = await handler!(
       new Request('http://public.test/settings', { method: 'GET' }),
