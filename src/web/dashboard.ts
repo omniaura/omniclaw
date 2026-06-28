@@ -5,7 +5,11 @@ import { renderShell, escapeHtml, escapeJsonForHtml } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 import { buildAgentChannelData } from './agent-channels.js';
 import type { RemotePeerAgents } from '../discovery/types.js';
-import { formatActiveTaskStatsFromState } from './task-stats.js';
+import {
+  formatActiveTaskStatsFromState,
+  countWorkingAgents,
+  formatAgentsValue,
+} from './task-stats.js';
 
 function imageRev(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12);
@@ -31,18 +35,10 @@ export function renderDashboardContent(
   // actively doing work right now, without drilling into /agents or /system.
   // Remote peer agents are excluded because we do not track their lane state
   // locally; the bare count keeps reflecting the total fleet size.
-  const workingAgents = queueDetails.reduce(
-    (sum, g) =>
-      sum +
-      ((g.messageLane.active && !g.messageLane.idle) || g.taskLane.active
-        ? 1
-        : 0),
-    0,
+  const agentsValue = formatAgentsValue(
+    agentData.length,
+    countWorkingAgents(queueDetails),
   );
-  const agentsValue =
-    workingAgents > 0
-      ? `${agentData.length} (${workingAgents} working)`
-      : `${agentData.length}`;
 
   // Serialize agent topology data for canvas renderer
   const topoData = escapeJsonForHtml(
