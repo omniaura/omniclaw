@@ -322,7 +322,7 @@ describe('startSchedulerLoop task execution', () => {
   it('refuses persisted tasks with traversal group folders before dispatch', async () => {
     const task: ScheduledTask = {
       id: 'task-unsafe-folder',
-      group_folder: '../outside',
+      group_folder: 'agent/../outside',
       chat_jid: 'main@g.us',
       prompt: 'unsafe folder',
       schedule_type: 'interval',

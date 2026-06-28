@@ -540,6 +540,31 @@ describe('web routes unit tests', () => {
     ).toBe(false);
   });
 
+  it('rejects group folders with embedded traversal on task creation', async () => {
+    const state = makeState();
+    const res = await handle(
+      new Request('http://localhost/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          group_folder: 'agent/../outside',
+          chat_jid: 'dc:123',
+          prompt: 'Unsafe embedded folder',
+          schedule_type: 'interval',
+          schedule_value: '60000',
+        }),
+      }),
+      state,
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await jsonBody(res)) as { error: string };
+    expect(body.error).toContain('Path traversal detected');
+    expect(
+      state.getTasks().some((task) => task.prompt === 'Unsafe embedded folder'),
+    ).toBe(false);
+  });
+
   it('rejects invalid preprocess_script extensions on task creation', async () => {
     const res = await handle(
       new Request('http://localhost/api/tasks', {

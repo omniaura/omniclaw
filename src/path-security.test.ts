@@ -64,6 +64,18 @@ describe('rejectTraversalSegments', () => {
     );
   });
 
+  it('rejects traversal that normalizes within the path', () => {
+    expect(() => rejectTraversalSegments('agent/../outside', 'test')).toThrow(
+      /Path traversal/,
+    );
+  });
+
+  it('rejects trailing traversal that normalizes to current path', () => {
+    expect(() => rejectTraversalSegments('agent/..', 'test')).toThrow(
+      /Path traversal/,
+    );
+  });
+
   it('rejects traversal that normalizes to parent', () => {
     expect(() => rejectTraversalSegments('a/b/../../..', 'test')).toThrow(
       /Path traversal/,

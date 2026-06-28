@@ -35,11 +35,9 @@ export const rejectTraversalSegmentsEffect = (
   relativePath: string,
   label: string,
 ): Effect.Effect<void, PathTraversalError> => {
-  // Normalize to handle different separators and resolve ./ segments
-  const normalized = path.normalize(relativePath);
-
-  // Split into segments and check for any '..' component
-  const segments = normalized.split(path.sep);
+  // Check raw path components before normalization so `a/../b` cannot hide
+  // traversal by canceling itself out.
+  const segments = relativePath.split(/[\\/]+/);
   if (segments.includes('..')) {
     return Effect.fail(
       new PathTraversalError({
