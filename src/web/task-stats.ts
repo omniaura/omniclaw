@@ -6,6 +6,41 @@ export function countActiveTasks(tasks: readonly ScheduledTask[]): number {
   return tasks.filter((task) => task.status === 'active').length;
 }
 
+/**
+ * Count local agents currently in flight on either lane — actively processing a
+ * message (message lane active and not idle-waiting) or running a scheduled task
+ * (task lane active). Mirrors the "working" annotation on the dashboard agents
+ * card so the static render and the live SSE stats patch agree.
+ */
+export function countWorkingAgents(
+  queueDetails: readonly GroupQueueDetail[],
+): number {
+  return queueDetails.reduce(
+    (sum, g) =>
+      sum +
+      ((g.messageLane.active && !g.messageLane.idle) || g.taskLane.active
+        ? 1
+        : 0),
+    0,
+  );
+}
+
+/**
+ * Format the dashboard "agents" stat-card value: the total agent count plus a
+ * "(N working)" annotation when any agent lane is in flight. Shared by the
+ * static dashboard render and the live SSE stats patch so the two never diverge
+ * (the live patch previously dropped the annotation, resetting the card to a
+ * bare count on the first update).
+ */
+export function formatAgentsValue(
+  totalAgents: number,
+  workingAgents: number,
+): string {
+  return workingAgents > 0
+    ? `${totalAgents} (${workingAgents} working)`
+    : `${totalAgents}`;
+}
+
 export function countRunningTasks(
   queueDetails: readonly GroupQueueDetail[],
 ): number {

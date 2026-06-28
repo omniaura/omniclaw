@@ -1298,6 +1298,69 @@ describe('SSE', () => {
     reader.releaseLock();
   });
 
+  it('preserves agents working-count annotation in stats patches', async () => {
+    // Default makeState() exposes two agents; one task lane is running, so the
+    // live stats patch must show "2 (1 working)" — matching the static
+    // dashboard render — rather than resetting the card to a bare count.
+    handle = startWebServer(
+      testConfig(),
+      makeState({
+        getQueueDetails: () => [makeTaskRunningDetail()],
+      }),
+    );
+
+    const res = await authedFetch('/api/events?channels=stats', {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toBeTruthy();
+
+    const reader = res.body!.getReader();
+    handle.broadcast({
+      type: 'agent_status',
+      data: {
+        activeContainers: 2,
+        idleContainers: 1,
+        maxActive: 8,
+        maxIdle: 4,
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    const payload = await readUntilContains(reader, 'id="stat-agents"');
+    expect(payload).toContain('id="stat-agents">2 (1 working)</div>');
+    reader.releaseLock();
+  });
+
+  it('omits the working annotation in stats patches when no lane is active', async () => {
+    // No queue details → no agent is in flight, so the live patch must render a
+    // bare count with no "(N working)" suffix.
+    handle = startWebServer(testConfig(), makeState());
+
+    const res = await authedFetch('/api/events?channels=stats', {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toBeTruthy();
+
+    const reader = res.body!.getReader();
+    handle.broadcast({
+      type: 'agent_status',
+      data: {
+        activeContainers: 2,
+        idleContainers: 1,
+        maxActive: 8,
+        maxIdle: 4,
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    const payload = await readUntilContains(reader, 'id="stat-agents"');
+    expect(payload).toContain('id="stat-agents">2</div>');
+    expect(payload).not.toContain('working)');
+    reader.releaseLock();
+  });
+
   it('replays buffered logs to newly connected SSE clients', async () => {
     handle = startWebServer(testConfig(), makeState());
 
