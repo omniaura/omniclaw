@@ -12,6 +12,7 @@ import os from 'os';
 import path from 'path';
 
 import { LOCAL_RUNTIME, SHARED_CLAUDE_VM_MEMORY } from '../config.js';
+import { logger } from '../logger.js';
 import { SharedVmManager } from './shared-vm.js';
 
 function makeProcess(
@@ -33,6 +34,12 @@ function makeProcess(
     exited: Promise.resolve(exitCode),
     kill: mock(() => {}),
   } as unknown as ReturnType<typeof Bun.spawn>;
+}
+
+function makeShellResult(text: string): Awaited<ReturnType<typeof Bun.$>> {
+  return {
+    text: () => text,
+  } as unknown as Awaited<ReturnType<typeof Bun.$>>;
 }
 
 describe('SharedVmManager', () => {
@@ -146,5 +153,94 @@ describe('SharedVmManager', () => {
       'stop',
       'omniclaw-shared-claude-stop-me',
     ]);
+  });
+
+  it('cleans up only running orphaned shared VMs', async () => {
+    const manager = new SharedVmManager();
+    (manager as any).containerName = 'omniclaw-shared-claude-current';
+    const shellSpy = spyOn(Bun, '$').mockImplementation(
+      (() => ({
+        quiet: async () =>
+          makeShellResult(
+            JSON.stringify([
+              {
+                status: 'running',
+                configuration: { id: 'omniclaw-shared-claude-current' },
+              },
+              {
+                status: 'running',
+                configuration: { id: 'omniclaw-shared-claude-orphan-a' },
+              },
+              {
+                status: 'stopped',
+                configuration: { id: 'omniclaw-shared-claude-stopped' },
+              },
+              {
+                status: 'running',
+                configuration: { id: 'unrelated-container' },
+              },
+              {
+                status: 'running',
+                configuration: { id: 'omniclaw-shared-claude-orphan-b' },
+              },
+            ]),
+          ),
+      })) as unknown as typeof Bun.$,
+    );
+    const spawnSpy = spyOn(Bun, 'spawn').mockImplementation((() =>
+      makeProcess(0)) as unknown as typeof Bun.spawn);
+
+    await expect(manager.cleanupOrphans()).resolves.toBeUndefined();
+
+    expect(shellSpy).toHaveBeenCalledTimes(1);
+    expect(spawnSpy.mock.calls.map((call) => call[0])).toEqual([
+      [LOCAL_RUNTIME, 'stop', 'omniclaw-shared-claude-orphan-a'],
+      [LOCAL_RUNTIME, 'stop', 'omniclaw-shared-claude-orphan-b'],
+    ]);
+  });
+
+  it('logs and continues when orphan cleanup cannot list containers', async () => {
+    const manager = new SharedVmManager();
+    const failure = new Error('runtime list failed');
+    spyOn(Bun, '$').mockImplementation(
+      (() => ({
+        quiet: async () => {
+          throw failure;
+        },
+      })) as unknown as typeof Bun.$,
+    );
+    const spawnSpy = spyOn(Bun, 'spawn');
+    const warnSpy = spyOn(logger, 'warn').mockImplementation(() => {});
+
+    await expect(manager.cleanupOrphans()).resolves.toBeUndefined();
+
+    expect(spawnSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      { err: failure },
+      'Failed to clean up orphaned shared VMs',
+    );
+  });
+
+  it('restarts when cached container state cannot be parsed as alive', async () => {
+    const manager = new SharedVmManager();
+    (manager as any).containerName = 'omniclaw-shared-claude-stale';
+    const nowSpy = spyOn(Date, 'now').mockReturnValue(333);
+    spyOn(Bun, '$').mockImplementation(
+      (() => ({
+        quiet: async () => makeShellResult('not-json'),
+      })) as unknown as typeof Bun.$,
+    );
+    const spawnSpy = spyOn(Bun, 'spawn').mockImplementation((() =>
+      makeProcess(0)) as unknown as typeof Bun.spawn);
+
+    try {
+      await expect(manager.ensureRunning()).resolves.toBe(
+        'omniclaw-shared-claude-333',
+      );
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+      expect(manager.getName()).toBe('omniclaw-shared-claude-333');
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });
