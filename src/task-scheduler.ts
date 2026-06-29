@@ -35,6 +35,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
+import { rejectTraversalSegments } from './path-security.js';
 import { ResumePositionStore } from './resume-position-store.js';
 import { writeScheduledRunHandoff } from './task-handoffs.js';
 import { runTaskPreprocessor } from './task-preprocessor.js';
@@ -197,6 +198,28 @@ async function runTask(
     runtime.logger.info(
       { taskId: task.id, status: freshTask?.status ?? 'deleted' },
       'Task no longer active, skipping',
+    );
+    return;
+  }
+
+  try {
+    rejectTraversalSegments(task.group_folder, 'scheduled task group folder');
+  } catch (err) {
+    const folderError = err instanceof Error ? err.message : String(err);
+    appendPhaseEvent('group_resolved', 'error', false, folderError);
+    runtime.logTaskRun({
+      task_id: task.id,
+      run_at: runAt,
+      duration_ms: 0,
+      status: 'error',
+      result: null,
+      error: folderError,
+      outcome_state: 'abandoned',
+      outcome_reason: folderError,
+    });
+    runtime.logger.warn(
+      { taskId: task.id, groupFolder: task.group_folder, err: folderError },
+      'Refusing scheduled task with unsafe group folder',
     );
     return;
   }

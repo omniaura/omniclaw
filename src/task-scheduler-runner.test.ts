@@ -319,6 +319,105 @@ describe('startSchedulerLoop task execution', () => {
     }
   });
 
+  it('refuses persisted tasks with traversal group folders before dispatch', async () => {
+    const task: ScheduledTask = {
+      id: 'task-unsafe-folder',
+      group_folder: 'agent/../outside',
+      chat_jid: 'main@g.us',
+      prompt: 'unsafe folder',
+      schedule_type: 'interval',
+      schedule_value: '300000',
+      context_mode: 'isolated',
+      next_run: '2026-01-01T00:00:00.000Z',
+      last_run: null,
+      last_result: null,
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+      executing_since: null,
+    };
+    const logTaskRunMock = mock(() => {});
+    const resolveBackendMock = mock(() => ({ runAgent: mock(() => {}) }));
+    const markTaskExecutingMock = mock(() => {});
+    const isAgentEnabledMock = mock(() => true);
+    const enqueuedRuns: Array<Promise<void>> = [];
+    const originalSetTimeout = globalThis.setTimeout;
+
+    (globalThis as { setTimeout: typeof setTimeout }).setTimeout = ((
+      _fn: Parameters<typeof setTimeout>[0],
+    ) => ({ id: 'poll' })) as unknown as typeof setTimeout;
+
+    try {
+      const deps: SchedulerDependencies = {
+        registeredGroups: () => ({}),
+        getGroupForTask: () => {
+          throw new Error('should not resolve group');
+        },
+        getSessions: () => ({}),
+        resumePositionStore: {
+          get: () => undefined,
+          set: () => {},
+          getAll: () => ({}),
+          clear: () => {},
+        },
+        queue: {
+          enqueueTask: (
+            _jid: string,
+            _taskId: string,
+            run: () => Promise<void>,
+          ) => {
+            enqueuedRuns.push(run());
+          },
+          notifyIdle: mock(() => {}),
+          closeStdin: mock(() => {}),
+        } as unknown as SchedulerDependencies['queue'],
+        isAgentEnabled: isAgentEnabledMock,
+        onProcess: mock(() => {}),
+        sendMessage: mock(async () => undefined),
+        findChannel: () => undefined,
+      };
+
+      startSchedulerLoop(deps, {
+        calculateNextRun: mock(() => '2026-01-01T00:05:00.000Z'),
+        resolveBackend: resolveBackendMock,
+        writeTasksSnapshot: mock(() => {}),
+        advanceTaskNextRun: mock(() => {}),
+        markTaskExecuting: markTaskExecutingMock,
+        clearTaskExecuting: mock(() => {}),
+        getStaleExecutingTasks: mock(() => []),
+        getOrphanedOnceTasks: mock(() => []),
+        hasSuccessfulRun: mock(() => false),
+        getAllTasks: mock(() => [task]),
+        getDueTasks: mock(() => [task]),
+        getTaskById: mock(() => task),
+        logTaskRun: logTaskRunMock,
+        appendTaskRunPhaseEvent: mock(() => {}),
+        updateTaskAfterRun: mock(() => {}),
+        writeScheduledRunHandoff: mock(() => 'handoff.json'),
+        runTaskPreprocessor: (task: ScheduledTask) => ({
+          action: 'run',
+          prompt: task.prompt,
+        }),
+        logger: createLoggerMock(),
+      } as any);
+
+      await Promise.all(enqueuedRuns);
+
+      expect(resolveBackendMock).not.toHaveBeenCalled();
+      expect(markTaskExecutingMock).not.toHaveBeenCalled();
+      expect(isAgentEnabledMock).not.toHaveBeenCalled();
+      expect(logTaskRunMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          task_id: 'task-unsafe-folder',
+          status: 'error',
+          outcome_state: 'abandoned',
+        }),
+      );
+    } finally {
+      (globalThis as { setTimeout: typeof setTimeout }).setTimeout =
+        originalSetTimeout;
+    }
+  });
+
   it('skips agent dispatch when a deterministic preprocessor returns skip', async () => {
     const task: ScheduledTask = {
       id: 'task-skip',
