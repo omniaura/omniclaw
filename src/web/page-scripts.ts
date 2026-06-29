@@ -1067,7 +1067,8 @@ document.getElementById("tmc-form").addEventListener("submit",function(e){
     prompt:document.getElementById("tmc-prompt").value,
     schedule_type:document.getElementById("tmc-schedule-type").value,
     schedule_value:schedVal,
-    context_mode:document.getElementById("tmc-context-mode").value};
+    context_mode:document.getElementById("tmc-context-mode").value,
+    preprocess_script:document.getElementById("tmc-preprocess").value.trim()};
   fetch("/api/tasks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
   .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})
   .then(function(t){
@@ -1094,6 +1095,7 @@ function openEditModal(taskId){
     document.getElementById("tme-prompt").value=t.prompt;
     document.getElementById("tme-schedule-type").value=t.schedule_type;
     document.getElementById("tme-context-mode").value=t.context_mode;
+    document.getElementById("tme-preprocess").value=t.preprocess_script||"";
     setScheduleInputs("tme",t.schedule_type,t.schedule_value);
     editModal.classList.add("open");
   })
@@ -1134,7 +1136,8 @@ document.getElementById("tme-form").addEventListener("submit",function(e){
   var payload={
     prompt:document.getElementById("tme-prompt").value,
     schedule_type:document.getElementById("tme-schedule-type").value,
-    schedule_value:schedVal};
+    schedule_value:schedVal,
+    preprocess_script:document.getElementById("tme-preprocess").value.trim()};
   fetch("/api/tasks/"+encodeURIComponent(editingTaskId),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
   .then(function(r){if(!r.ok)return r.json().then(function(d){throw new Error(d.error);});return r.json();})
   .then(function(t){

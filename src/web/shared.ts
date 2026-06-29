@@ -275,6 +275,7 @@ function shellCSS(): string {
     `.badge-docker{background:rgba(52,211,153,.1);color:var(--green)}`,
     `.badge-cursor-sdk{background:rgba(245,158,11,.12);color:var(--yellow)}`,
     `.badge-sm{font-size:9px;padding:0 5px}`,
+    `.badge-preprocess{background:color-mix(in srgb,var(--accent) 22%,transparent);color:var(--accent);cursor:help}`,
     `.badge-admin{background:rgba(167,139,250,.1);color:#a78bfa}`,
     `.status-active{background:rgba(52,211,153,.1);color:var(--green)}`,
     `.status-paused{background:rgba(251,191,36,.1);color:var(--yellow)}`,
@@ -355,6 +356,8 @@ function shellCSS(): string {
     `.form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:var(--accent)}`,
     `.form-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:.75rem}`,
     `.form-error{color:var(--red);font-size:11px;margin-top:4px}`,
+    `.form-hint{font-size:10px;color:var(--text-dim);margin-top:4px;line-height:1.4}`,
+    `.form-optional{text-transform:none;letter-spacing:0;color:var(--text-dim);font-weight:normal}`,
 
     // --- Keyboard Shortcut Help ---
     `.shortcut-modal{width:480px}`,

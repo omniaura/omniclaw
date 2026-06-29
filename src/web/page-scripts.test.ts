@@ -101,6 +101,23 @@ describe('tasks page script', () => {
     );
     expect(script).toContain('if(isFinite(nr)&&nr<now)overdue++;');
   });
+
+  it('sends the optional preprocess script on create and edit', () => {
+    const script = allPageScripts().tasks;
+
+    // Create payload includes the trimmed preprocess field
+    expect(script).toContain(
+      'preprocess_script:document.getElementById("tmc-preprocess").value.trim()',
+    );
+    // Edit payload includes the trimmed preprocess field
+    expect(script).toContain(
+      'preprocess_script:document.getElementById("tme-preprocess").value.trim()',
+    );
+    // Edit modal hydrates the field from the loaded task (blank when unset)
+    expect(script).toContain(
+      'document.getElementById("tme-preprocess").value=t.preprocess_script||"";',
+    );
+  });
 });
 
 describe('context page script', () => {
