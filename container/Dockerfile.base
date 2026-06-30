@@ -50,7 +50,7 @@ ENV PATH="${GOPATH}/bin:${PATH}"
 ENV CGO_ENABLED=1
 
 # Install just command runner (required for ditto backend development)
-ARG JUST_VERSION=1.54.0
+ARG JUST_VERSION=1.55.1
 RUN ARCH="$(dpkg --print-architecture)" \
     && JUST_ARCH=$([ "$ARCH" = "amd64" ] && echo "x86_64" || echo "aarch64") \
     && wget -q "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${JUST_ARCH}-unknown-linux-musl.tar.gz" \
