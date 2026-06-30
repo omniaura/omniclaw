@@ -209,10 +209,7 @@ function clampReadThreadLimit(limit: unknown): number {
   return Math.max(1, Math.min(100, Math.floor(limit)));
 }
 
-function normalizeConfirmationEmoji(
-  value: unknown,
-  fallback: string,
-): string {
+function normalizeConfirmationEmoji(value: unknown, fallback: string): string {
   const raw = typeof value === 'string' ? value.trim() : '';
   const stripped = raw.replace(/^:+|:+$/g, '');
   if (!stripped || !/^[a-zA-Z0-9_+-]+$/.test(stripped)) return fallback;
