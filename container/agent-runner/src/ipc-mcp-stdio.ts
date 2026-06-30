@@ -66,7 +66,7 @@ function readCurrentChatJid(): string {
 interface UserInfo {
   id: string;
   name: string;
-  platform: 'discord' | 'whatsapp' | 'telegram';
+  platform: 'discord' | 'whatsapp' | 'telegram' | 'slack';
   lastSeen: string;
 }
 
@@ -255,6 +255,236 @@ Recommended: omit target_jid to reply in the channel that started this turn. Onl
         {
           type: 'text' as const,
           text: `Message sent${targetDesc ? ` to ${targetDesc}` : ''}. If this was your final response, stay silent — wrap any remaining text in <internal> tags to avoid a duplicate.`,
+        },
+      ],
+    };
+  },
+);
+
+server.tool(
+  'read_thread',
+  `Read locally stored messages for the current conversation scope. Use this before summarizing, filing, extracting decisions/action items, or acting on "this thread", "above", or prior conversation context. In Slack, the current scope may be one Slack thread rather than the whole channel. Do not call this for simple replies where the current message is enough.`,
+  {
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe(
+        'Maximum number of messages to return, newest window in chronological order. Defaults to 50.',
+      ),
+  },
+  async (args) => {
+    const requestId = `read-thread-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const chatJid = readCurrentChatJid();
+    writeIpcFile(MESSAGES_DIR, {
+      type: 'read_thread',
+      chatJid,
+      limit: args.limit,
+      requestId,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    const response = await waitForResponse(requestId, 8000);
+    if (!response) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Timed out waiting for thread messages.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    if (response.ok === false) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              typeof response.error === 'string'
+                ? response.error
+                : 'Unable to read thread messages.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(response.result ?? response, null, 2),
+        },
+      ],
+    };
+  },
+);
+
+server.tool(
+  'update_thread_summary',
+  `Save a compact durable summary for the current conversation scope. Use this after meaningful state changes in a thread: decisions, open questions, owners, artifacts, next steps, or resolution status. Read the thread first unless the current turn already contains all relevant context. Do not include secrets, raw logs, or transient chatter.`,
+  {
+    summary: z
+      .string()
+      .min(1)
+      .max(4000)
+      .describe(
+        'Replacement summary for the current thread/channel: topic, decisions, open items, owners, links/artifacts, and current status.',
+      ),
+    status: z
+      .enum(['active', 'resolved', 'blocked'])
+      .optional()
+      .describe('Optional coarse status for the thread.'),
+    through_message_id: z
+      .string()
+      .optional()
+      .describe('Optional latest message id covered by this summary.'),
+    through_timestamp: z
+      .string()
+      .optional()
+      .describe('Optional latest message timestamp covered by this summary.'),
+  },
+  async (args) => {
+    const requestId = `update-thread-summary-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const chatJid = readCurrentChatJid();
+    writeIpcFile(MESSAGES_DIR, {
+      type: 'update_thread_summary',
+      chatJid,
+      summary: args.summary,
+      status: args.status,
+      throughMessageId: args.through_message_id,
+      throughTimestamp: args.through_timestamp,
+      requestId,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    const response = await waitForResponse(requestId, 8000);
+    if (!response) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Timed out waiting for thread summary update.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    if (response.ok === false) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              typeof response.error === 'string'
+                ? response.error
+                : 'Unable to update thread summary.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: 'Thread summary updated.',
+        },
+      ],
+    };
+  },
+);
+
+server.tool(
+  'request_confirmation',
+  `Ask the current conversation for explicit approval before a write, external side effect, irreversible action, or risky change. This posts a confirmation request in the current thread/channel and, where supported, adds approve/deny reactions. After calling this tool, stop and wait for the user to approve, deny, or request changes; do not perform the action until a later turn contains approval.`,
+  {
+    action: z
+      .string()
+      .min(1)
+      .max(240)
+      .describe(
+        'Brief title for the proposed action, such as "Create the Linear issue" or "Push the release branch".',
+      ),
+    details: z
+      .string()
+      .max(4000)
+      .optional()
+      .describe(
+        'Specific details the human should approve: target, scope, consequences, commands, or data that will be written.',
+      ),
+    approve_emoji: z
+      .string()
+      .max(64)
+      .optional()
+      .describe(
+        'Emoji name for approval, without surrounding colons. Defaults to white_check_mark.',
+      ),
+    deny_emoji: z
+      .string()
+      .max(64)
+      .optional()
+      .describe(
+        'Emoji name for denial, without surrounding colons. Defaults to x.',
+      ),
+  },
+  async (args) => {
+    const requestId = `request-confirmation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const chatJid = readCurrentChatJid();
+    writeIpcFile(MESSAGES_DIR, {
+      type: 'request_confirmation',
+      chatJid,
+      action: args.action,
+      details: args.details,
+      approveEmoji: args.approve_emoji,
+      denyEmoji: args.deny_emoji,
+      requestId,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    const response = await waitForResponse(requestId, 8000);
+    if (!response) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Timed out waiting for confirmation request result.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    if (response.ok === false) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              typeof response.error === 'string'
+                ? response.error
+                : 'Unable to request confirmation.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `${JSON.stringify(response.result ?? response, null, 2)}\n\nConfirmation request posted. Stop now and wait for a later user reply or approval reaction before taking the action.`,
         },
       ],
     };
@@ -956,7 +1186,7 @@ if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
   if (!isTelegram)
     server.tool(
       'format_mention',
-      'Format a user mention for Discord using their display name. Returns the proper <@USER_ID> format for Discord mentions.',
+      'Format a user mention for platforms that support native mentions using their display name. Returns <@USER_ID> for Discord and Slack when the user is known.',
       {
         user_name: z
           .string()
@@ -971,8 +1201,11 @@ if (chatJid.startsWith('dc:') || chatJid.startsWith('tg:')) {
         const key = args.user_name.toLowerCase().trim();
         const user = userRegistry[key];
 
-        if (user && user.platform === 'discord') {
-          // Return properly formatted Discord mention
+        if (
+          user &&
+          (user.platform === 'discord' || user.platform === 'slack')
+        ) {
+          // Discord and Slack both use <@USER_ID> for user mentions.
           return {
             content: [
               {

@@ -94,6 +94,7 @@ import {
   getRecentTaskOutcomeStats,
   getTaskRunLogs,
   getTaskRunPhaseEvents,
+  getThreadSummary,
   initDatabase,
   setAgent,
   setAgentHealth,
@@ -103,6 +104,7 @@ import {
   setRegisteredGroup,
   setRouterState,
   setSession,
+  setThreadSummary,
   storeChatMetadata,
   storeGuildRoster,
   storeMessage,
@@ -136,13 +138,15 @@ import { createResumePositionStore } from './resume-position-store.js';
 import { getDiscordChannelSeed, getServerSeed } from './seed-templates.js';
 import {
   findChannel,
+  type FormatMessagesOptions,
   formatMessages,
   formatOutbound,
+  formatThreadSummary,
   getAgentName,
 } from './router.js';
 import { calculateNextRun } from './schedule-utils.js';
 import { redactSensitiveData } from './security/redaction.js';
-import { parseScopedSlackJid } from './slack-jid.js';
+import { parseSlackJid } from './slack-jid.js';
 import {
   buildStartupConfirmationTargets,
   hasPriorRuntimeState,
@@ -565,8 +569,9 @@ function getRuntimeGroupFolder(
   baseFolder: string,
   processKeyJid: string,
 ): string {
-  const { agentId } = parseDispatchKey(processKeyJid);
-  if (!agentId) return baseFolder;
+  const { channelJid, agentId } = parseDispatchKey(processKeyJid);
+  const slack = parseSlackJid(channelJid);
+  if (!agentId && !slack?.threadTs) return baseFolder;
   const digest = createHash('sha1')
     .update(processKeyJid)
     .digest('hex')
@@ -879,6 +884,13 @@ function getSubscriptionsForChannelInMemory(
 ): ChannelSubscription[] {
   const exact = channelSubscriptions[channelJid];
   if (exact && exact.length > 0) return exact;
+  const slack = parseSlackJid(channelJid);
+  if (slack) {
+    const parent = channelSubscriptions[slack.parentJid];
+    if (parent && parent.length > 0) return parent;
+    const legacyParent = channelSubscriptions[slack.legacyParentJid];
+    if (legacyParent && legacyParent.length > 0) return legacyParent;
+  }
   const legacyJid = toLegacyTelegramJid(channelJid);
   if (legacyJid) return channelSubscriptions[legacyJid] || [];
   return [];
@@ -899,6 +911,13 @@ function buildMessagePollJids(): string[] {
     if (legacyJid && jids.has(legacyJid)) {
       jids.add(chat.jid);
     }
+    const slack = parseSlackJid(chat.jid);
+    if (
+      slack?.threadTs &&
+      (jids.has(slack.parentJid) || jids.has(slack.legacyParentJid))
+    ) {
+      jids.add(chat.jid);
+    }
   }
 
   return Array.from(jids);
@@ -909,7 +928,7 @@ function buildRegisteredGroupFromSubscription(
   sub: ChannelSubscription,
 ): RegisteredGroup | undefined {
   const agent = agents[sub.agentId];
-  const fallback = registeredGroups[channelJid];
+  const fallback = getRegisteredGroupForJid(channelJid);
   if (!agent && !fallback) return undefined;
 
   const resolvedBotId = sub.discordBotId || fallback?.discordBotId;
@@ -981,8 +1000,8 @@ function toLegacyTelegramJid(jid: string): string | undefined {
 }
 
 function toLegacySlackJid(jid: string): string | undefined {
-  const parsed = parseScopedSlackJid(jid);
-  return parsed ? `slack:${parsed.channelId}` : undefined;
+  const parsed = parseSlackJid(jid);
+  return parsed?.botId ? parsed.legacyParentJid : undefined;
 }
 
 function getRegisteredGroupForJid(jid: string): RegisteredGroup | undefined {
@@ -990,8 +1009,12 @@ function getRegisteredGroupForJid(jid: string): RegisteredGroup | undefined {
   if (exact) return exact;
   const legacyTelegramJid = toLegacyTelegramJid(jid);
   if (legacyTelegramJid) return registeredGroups[legacyTelegramJid];
-  const legacySlackJid = toLegacySlackJid(jid);
-  if (legacySlackJid) return registeredGroups[legacySlackJid];
+  const slack = parseSlackJid(jid);
+  if (slack) {
+    const parent = registeredGroups[slack.parentJid];
+    if (parent) return parent;
+    return registeredGroups[slack.legacyParentJid];
+  }
   return undefined;
 }
 
@@ -1001,8 +1024,8 @@ function getPreferredChannelBotId(
 ): string | undefined {
   if (jid.startsWith('dc:')) return discordBotId || getDiscordBotIdForJid(jid);
   if (jid.startsWith('slack:')) {
-    const scopedSlack = parseScopedSlackJid(jid);
-    return scopedSlack?.botId || SLACK_DEFAULT_BOT_ID;
+    const slack = parseSlackJid(jid);
+    return slack?.botId || SLACK_DEFAULT_BOT_ID;
   }
   const scopedTelegram = parseScopedTelegramJid(jid);
   if (scopedTelegram) return scopedTelegram.botId;
@@ -1989,6 +2012,14 @@ export function _handleSessionCommandForTest(
   return handleSessionCommand(command, chatJid, group, options);
 }
 
+/** @internal - exported for testing */
+export function _getRuntimeGroupFolderForTest(
+  baseFolder: string,
+  processKeyJid: string,
+): string {
+  return getRuntimeGroupFolder(baseFolder, processKeyJid);
+}
+
 /**
  * Whether a batch of pending messages contains a real trigger that should wake
  * a trigger-gated agent. Synthetic reaction notifications (id `react-*`) are
@@ -2053,7 +2084,7 @@ async function processGroupMessages(dispatchJid: string): Promise<boolean> {
     messageCount: missedMessages.length,
   });
 
-  let prompt = formatMessages(missedMessages, {
+  let prompt = formatMessagesForPrompt(chatJid, missedMessages, {
     channelRosterNames: await getChannelRosterNames(
       chatJid,
       group.discordGuildId,
@@ -2468,6 +2499,90 @@ function buildAgentDiscoveryCapabilities(agent: Agent): string[] {
   ];
 }
 
+function formatMessagesForPrompt(
+  chatJid: string,
+  messages: NewMessage[],
+  options: FormatMessagesOptions = {},
+): string {
+  const formatted = formatMessages(messages, options);
+  const threadSummary = getThreadSummary(chatJid);
+  if (!threadSummary) return formatted;
+  return `${formatThreadSummary(threadSummary)}\n\n${formatted}`;
+}
+
+function getSlackParentProcessKeys(
+  chatJid: string,
+  processKeyJid: string,
+): string[] {
+  const slack = parseSlackJid(chatJid);
+  if (!slack?.threadTs) return [];
+
+  const { agentId } = parseDispatchKey(processKeyJid);
+  const parentJids = Array.from(
+    new Set([slack.parentJid, slack.legacyParentJid]),
+  );
+  return agentId
+    ? parentJids.map((parentJid) => makeDispatchKey(parentJid, agentId))
+    : parentJids;
+}
+
+function prepareSlackThreadSessionFork(
+  baseFolder: string,
+  chatJid: string,
+  processKeyJid: string,
+  runtimeGroupFolder: string,
+): string | undefined {
+  if (sessions[runtimeGroupFolder]) return undefined;
+  if (getPendingSessionIntent(runtimeGroupFolder)?.forkFrom) {
+    return undefined;
+  }
+
+  for (const parentProcessKey of getSlackParentProcessKeys(
+    chatJid,
+    processKeyJid,
+  )) {
+    const parentRuntimeFolder = getRuntimeGroupFolder(
+      baseFolder,
+      parentProcessKey,
+    );
+    if (parentRuntimeFolder === runtimeGroupFolder) continue;
+
+    const parentSessionId = sessions[parentRuntimeFolder];
+    if (!parentSessionId) continue;
+
+    sessions[runtimeGroupFolder] = parentSessionId;
+    setSession(runtimeGroupFolder, parentSessionId);
+    resumePositionStore.set(runtimeGroupFolder, '');
+    setPendingSessionIntent(runtimeGroupFolder, { forkFrom: parentSessionId });
+    logger.info(
+      {
+        chatJid,
+        runtimeGroupFolder,
+        parentRuntimeFolder,
+        parentSessionId,
+      },
+      'Prepared Slack thread runtime to fork from parent channel session',
+    );
+    return parentSessionId;
+  }
+
+  return undefined;
+}
+
+/** @internal - exported for testing */
+export function _prepareSlackThreadSessionForkForTest(
+  baseFolder: string,
+  chatJid: string,
+  processKeyJid: string,
+): string | undefined {
+  return prepareSlackThreadSessionFork(
+    baseFolder,
+    chatJid,
+    processKeyJid,
+    getRuntimeGroupFolder(baseFolder, processKeyJid),
+  );
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
@@ -2491,6 +2606,13 @@ async function runAgent(
       'Expired stale sessions before agent run',
     );
   }
+
+  prepareSlackThreadSessionFork(
+    group.folder,
+    chatJid,
+    processKeyJid,
+    runtimeGroupFolder,
+  );
 
   const sessionId = sessions[runtimeGroupFolder];
   const pendingSessionIntent = getPendingSessionIntent(runtimeGroupFolder);
@@ -2969,7 +3091,7 @@ async function startMessageLoop(): Promise<void> {
             );
             if (allPending.length === 0) continue;
             const messagesToSend = allPending;
-            const formatted = formatMessages(messagesToSend, {
+            const formatted = formatMessagesForPrompt(chatJid, messagesToSend, {
               channelRosterNames: await getChannelRosterNames(
                 chatJid,
                 group.discordGuildId,
@@ -3029,7 +3151,7 @@ async function startMessageLoop(): Promise<void> {
             );
             if (filteredPending.length === 0) continue;
             const messagesToSend = filteredPending;
-            const formatted = formatMessages(messagesToSend, {
+            const formatted = formatMessagesForPrompt(chatJid, messagesToSend, {
               channelRosterNames: await getChannelRosterNames(
                 chatJid,
                 sub.discordGuildId,
@@ -4309,11 +4431,17 @@ async function main(): Promise<void> {
     agentFolders: () => new Set(Object.values(agents).map((a) => a.folder)),
     getSubscriptions: (jid) => {
       refreshChannelSubscriptions();
-      return (channelSubscriptions[jid] ?? []).map((s) => ({
+      return getSubscriptionsForChannelInMemory(jid).map((s) => ({
         agentId: s.agentId,
         agentFolder: agents[s.agentId]?.folder ?? s.agentId,
       }));
     },
+    getMessages: (jid, since, limit) => {
+      const msgs = getMessagesSince(jid, since);
+      return limit ? msgs.slice(-limit) : msgs;
+    },
+    getThreadSummary,
+    setThreadSummary,
     onIpcEvent: (kind: IpcEventKind, sourceGroup, summary, details) => {
       const event = ipcEvents.push(kind, sourceGroup, summary, details);
       webServer?.broadcast({

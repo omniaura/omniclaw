@@ -1,5 +1,10 @@
 import { logger } from './logger.js';
-import type { Channel, NewMessage, RegisteredGroup } from './types.js';
+import type {
+  Channel,
+  NewMessage,
+  RegisteredGroup,
+  ThreadSummary,
+} from './types.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -91,6 +96,27 @@ export function formatMessages(
     attrs.length > 0 ? `<messages ${attrs.join(' ')}>` : '<messages>';
 
   return `${header}\n${lines.join('\n')}\n</messages>`;
+}
+
+export function formatThreadSummary(summary: ThreadSummary): string {
+  const attrs = [
+    `chat_jid="${escapeXml(summary.chat_jid)}"`,
+    `updated_at="${escapeXml(summary.updated_at)}"`,
+  ];
+  if (summary.status) {
+    attrs.push(`status="${escapeXml(summary.status)}"`);
+  }
+  if (summary.updated_by) {
+    attrs.push(`updated_by="${escapeXml(summary.updated_by)}"`);
+  }
+  if (summary.through_message_id) {
+    attrs.push(`through_message_id="${escapeXml(summary.through_message_id)}"`);
+  }
+  if (summary.through_timestamp) {
+    attrs.push(`through_timestamp="${escapeXml(summary.through_timestamp)}"`);
+  }
+
+  return `<conversation_summary ${attrs.join(' ')}>\n${escapeXml(summary.summary)}\n</conversation_summary>`;
 }
 
 export function stripInternalTags(text: string): string {

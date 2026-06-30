@@ -162,6 +162,16 @@ export interface NewMessage {
   reply_to_bot_id?: string;
 }
 
+export interface ThreadSummary {
+  chat_jid: string;
+  summary: string;
+  status?: 'active' | 'resolved' | 'blocked';
+  updated_at: string;
+  updated_by?: string;
+  through_message_id?: string;
+  through_timestamp?: string;
+}
+
 /** Attachment type tag for the unified media pipeline. */
 export type MediaAttachmentType = 'image' | 'file' | 'video' | 'audio';
 
@@ -538,9 +548,18 @@ export interface IpcMessagePayload {
   currentChatJid?: string;
   targetWasExplicit?: boolean;
   text?: string;
+  action?: string;
+  details?: string;
+  approveEmoji?: string;
+  denyEmoji?: string;
+  summary?: string;
+  status?: string;
   messageId?: string;
+  throughMessageId?: string;
+  throughTimestamp?: string;
   emoji?: string;
   remove?: boolean;
+  limit?: number;
   userName?: string;
   platform?: string;
   requestId?: string;

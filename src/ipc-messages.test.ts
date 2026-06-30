@@ -361,6 +361,125 @@ describe('processMessageIpc: react_to_message', () => {
 });
 
 // =============================================================================
+// request_confirmation
+// =============================================================================
+
+describe('processMessageIpc: request_confirmation', () => {
+  function readResponse(sourceGroup: string, requestId: string) {
+    const responsePath = path.join(
+      tmpDir,
+      sourceGroup,
+      'responses',
+      `${requestId}.json`,
+    );
+    return JSON.parse(fs.readFileSync(responsePath, 'utf8'));
+  }
+
+  it('posts a confirmation request and seeds approve/deny reactions', async () => {
+    const result = await processMsg({
+      type: 'request_confirmation',
+      chatJid: 'other@g.us',
+      action: 'Push the release branch',
+      details: 'Branch: codex/slack-thread-context\nRemote: origin',
+      requestId: 'confirm-1',
+    });
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]?.jid).toBe('other@g.us');
+    expect(sentMessages[0]?.text).toContain(
+      '*Confirmation needed:* Push the release branch',
+    );
+    expect(sentMessages[0]?.text).toContain(
+      'Branch: codex/slack-thread-context',
+    );
+    expect(sentMessages[0]?.text).toContain(
+      'React with :white_check_mark: to approve or :x: to deny.',
+    );
+    expect(reactions).toEqual([
+      {
+        action: 'add',
+        jid: 'other@g.us',
+        messageId: 'sent-1',
+        emoji: ':white_check_mark:',
+      },
+      {
+        action: 'add',
+        jid: 'other@g.us',
+        messageId: 'sent-1',
+        emoji: ':x:',
+      },
+    ]);
+    expect(readResponse('main', 'confirm-1')).toEqual({
+      type: 'request_confirmation_response',
+      requestId: 'confirm-1',
+      ok: true,
+      result: {
+        chatJid: 'other@g.us',
+        messageId: 'sent-1',
+        approveEmoji: ':white_check_mark:',
+        denyEmoji: ':x:',
+        reactionsAdded: [':white_check_mark:', ':x:'],
+        reactionErrors: [],
+      },
+    });
+  });
+
+  it('inherits Slack thread authorization from the parent channel registration', async () => {
+    const threadJid = 'slack:TEST:C123:thread:1700000000.000100';
+    groups = {
+      ...groups,
+      'slack:C123': OTHER_GROUP,
+    };
+
+    const result = await processMsg(
+      {
+        type: 'request_confirmation',
+        chatJid: threadJid,
+        action: 'Create the ticket',
+        details: 'Project: Support',
+        approveEmoji: ':thumbsup:',
+        denyEmoji: ':no_entry:',
+        requestId: 'confirm-slack',
+      },
+      'other-group',
+      false,
+    );
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(sentMessages[0]?.jid).toBe(threadJid);
+    expect(sentMessages[0]?.text).toContain(
+      'React with :thumbsup: to approve or :no_entry: to deny.',
+    );
+    expect(reactions).toEqual([
+      {
+        action: 'add',
+        jid: threadJid,
+        messageId: 'sent-1',
+        emoji: ':thumbsup:',
+      },
+      {
+        action: 'add',
+        jid: threadJid,
+        messageId: 'sent-1',
+        emoji: ':no_entry:',
+      },
+    ]);
+    expect(readResponse('other-group', 'confirm-slack')).toMatchObject({
+      type: 'request_confirmation_response',
+      requestId: 'confirm-slack',
+      ok: true,
+      result: {
+        chatJid: threadJid,
+        messageId: 'sent-1',
+        approveEmoji: ':thumbsup:',
+        denyEmoji: ':no_entry:',
+      },
+    });
+  });
+});
+
+// =============================================================================
 // format_mention
 // =============================================================================
 

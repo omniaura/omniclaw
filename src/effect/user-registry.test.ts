@@ -72,6 +72,13 @@ const charlie: UserInfo = {
   lastSeen: '2024-01-01T00:00:00.000Z',
 };
 
+const dana: UserInfo = {
+  id: 'U123SLACK',
+  name: 'Dana',
+  platform: 'slack',
+  lastSeen: '2024-01-01T00:00:00.000Z',
+};
+
 describe('UserRegistryService', () => {
   describe('getUser', () => {
     it('returns null for unknown user', async () => {
@@ -348,6 +355,17 @@ describe('formatMention', () => {
       }),
     );
     expect(result).toBe('<@123456>');
+  });
+
+  it('formats Slack mention as <@id>', async () => {
+    const result = await runWithRegistry(
+      Effect.gen(function* (_) {
+        const svc = yield* _(UserRegistryService);
+        yield* _(svc.upsertUser(dana));
+        return yield* _(formatMention('Dana'));
+      }),
+    );
+    expect(result).toBe('<@U123SLACK>');
   });
 
   it('formats WhatsApp mention as @id', async () => {

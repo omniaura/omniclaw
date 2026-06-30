@@ -33,6 +33,7 @@ import type {
   IpcDrainResult,
   IpcMessage,
 } from '@omniclaw/protocol';
+import { CONVERSATION_THREAD_TOOLS_GUIDANCE } from './thread-tools-guidance.js';
 
 type ExternalMcpServerConfig =
   | {
@@ -1163,6 +1164,11 @@ async function runQuery(
       ? globalClaudeMd + channelBlock
       : channelBlock.trim();
   }
+
+  const threadToolsBlock = `\n\n${CONVERSATION_THREAD_TOOLS_GUIDANCE}`;
+  globalClaudeMd = globalClaudeMd
+    ? globalClaudeMd + threadToolsBlock
+    : CONVERSATION_THREAD_TOOLS_GUIDANCE;
 
   // Append GitHub context (pre-fetched open PRs, issues, review comments)
   if (containerInput.githubContext) {

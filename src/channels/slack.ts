@@ -26,7 +26,12 @@ import {
   type DiscordFlowDefinition,
   type DiscordSessionCommand,
 } from '../discord-command-flows.js';
-import { parseScopedSlackJid } from '../slack-jid.js';
+import {
+  channelIdToSlackJid,
+  parseSlackJid,
+  parseScopedSlackJid,
+  slackThreadIdToJid,
+} from '../slack-jid.js';
 import { parseSlackCommandText } from '../slack-command-flows.js';
 import type {
   Channel,
@@ -45,15 +50,14 @@ export { parseScopedSlackJid };
 // Multi-bot format: "slack:{botId}:{channelId}"
 
 export function jidToChannelId(jid: string): string | null {
-  const scoped = parseScopedSlackJid(jid);
-  if (scoped) return scoped.channelId;
+  const parsed = parseSlackJid(jid);
+  if (parsed) return parsed.channelId;
   if (!jid.startsWith('slack:')) return null;
   return jid.slice('slack:'.length);
 }
 
 export function channelIdToJid(channelId: string, botId?: string): string {
-  if (botId) return `slack:${botId}:${channelId}`;
-  return `slack:${channelId}`;
+  return channelIdToSlackJid(channelId, botId);
 }
 
 // Slack limits: plain `text` messages cap at 4,000 chars; `markdown` blocks
@@ -63,6 +67,8 @@ const MARKDOWN_BLOCK_LIMIT = 11500;
 const THREAD_ROOT_CACHE_MAX = 1000;
 const SEEN_MESSAGE_CACHE_MAX = 500;
 const THREAD_EXCERPT_MAX_CHARS = 140;
+const THREAD_CONTEXT_FETCH_LIMIT = 15;
+const THREAD_CONTEXT_MAX_CHARS = 6000;
 const TASK_TITLE_MAX_CHARS = 80;
 // Slack caps each task_update chunk at 256 chars; keep title + details under it
 // so progress updates always render instead of being silently rejected.
@@ -102,6 +108,18 @@ function assertSlackFileUrl(url: string): void {
   if (parsed.protocol !== 'https:' || !SLACK_FILE_HOSTS.has(parsed.hostname)) {
     throw new Error(`Rejected non-Slack file URL: ${parsed.hostname || url}`);
   }
+}
+
+function slackTriggerMatches(content: string, trigger?: string): boolean {
+  if (!trigger) return false;
+  const name = trigger.replace(/^@/, '').trim();
+  if (!name) return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^@${escaped}\\b`, 'i').test(content.trim());
+}
+
+function slackTsToIso(ts: string): string {
+  return new Date(parseFloat(ts) * 1000).toISOString();
 }
 
 /** A `markdown` block renders standard markdown (GFM) instead of legacy mrkdwn. */
@@ -270,6 +288,8 @@ export class SlackChannel implements Channel {
    * recipient_user_id when streaming outside a DM.
    */
   private lastHumanSenderByChannel = new Map<string, string>();
+  /** Last human sender per Slack thread (`channelId:thread_ts`). */
+  private lastHumanSenderByThread = new Map<string, string>();
 
   constructor(opts: SlackChannelOpts) {
     this.opts = opts;
@@ -373,7 +393,8 @@ export class SlackChannel implements Channel {
     text: string,
     replyToMessageId?: string,
   ): Promise<string | void> {
-    const channelId = this.extractChannelId(jid);
+    const parsedJid = parseSlackJid(jid);
+    const channelId = parsedJid?.channelId ?? this.extractChannelId(jid);
     if (!channelId) {
       logger.warn({ jid }, 'Invalid Slack JID — cannot send message');
       return;
@@ -382,9 +403,11 @@ export class SlackChannel implements Channel {
     // Slack requires threading on the root ts — map reply targets through the
     // thread-root cache. Bare sends to a DM with an active assistant thread go
     // into that thread so they show up in the agent pane.
-    const threadTs = replyToMessageId
-      ? (this.threadRootByTs.get(replyToMessageId) ?? replyToMessageId)
-      : this.assistantThreads.get(channelId);
+    const threadTs =
+      parsedJid?.threadTs ??
+      (replyToMessageId
+        ? (this.threadRootByTs.get(replyToMessageId) ?? replyToMessageId)
+        : this.assistantThreads.get(channelId));
 
     try {
       // Threaded sends get the native AI streaming treatment when possible
@@ -425,7 +448,8 @@ export class SlackChannel implements Channel {
     messageId: string,
     text: string,
   ): Promise<void> {
-    const channelId = this.extractChannelId(jid);
+    const parsedJid = parseSlackJid(jid);
+    const channelId = parsedJid?.channelId ?? this.extractChannelId(jid);
     if (!channelId) return;
     const chunk = text.slice(0, MARKDOWN_BLOCK_LIMIT);
     try {
@@ -460,9 +484,11 @@ export class SlackChannel implements Channel {
    * status automatically when the reply lands in the thread.
    */
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
-    const channelId = this.extractChannelId(jid);
+    const parsedJid = parseSlackJid(jid);
+    const channelId = parsedJid?.channelId ?? this.extractChannelId(jid);
     if (!channelId) return;
-    const threadTs = this.assistantThreads.get(channelId);
+    const threadTs =
+      parsedJid?.threadTs ?? this.assistantThreads.get(channelId);
     if (!threadTs) return;
     try {
       await this.client.assistant.threads.setStatus({
@@ -494,8 +520,9 @@ export class SlackChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    const scoped = parseScopedSlackJid(jid);
-    if (scoped) return scoped.botId === this.botId;
+    const parsed = parseSlackJid(jid);
+    if (parsed?.botId) return parsed.botId === this.botId;
+    if (parsed && !parsed.botId) return this.allowLegacyJidRouting;
     return this.allowLegacyJidRouting && /^slack:[^:]+$/.test(jid);
   }
 
@@ -510,7 +537,8 @@ export class SlackChannel implements Channel {
     messageId: string,
     emoji: string,
   ): Promise<void> {
-    const channelId = this.extractChannelId(jid);
+    const parsedJid = parseSlackJid(jid);
+    const channelId = parsedJid?.channelId ?? this.extractChannelId(jid);
     if (!channelId) return;
     // Strip surrounding colons if passed as :emoji:
     const name = emoji.replace(/^:|:$/g, '');
@@ -533,7 +561,8 @@ export class SlackChannel implements Channel {
     messageId: string,
     emoji: string,
   ): Promise<void> {
-    const channelId = this.extractChannelId(jid);
+    const parsedJid = parseSlackJid(jid);
+    const channelId = parsedJid?.channelId ?? this.extractChannelId(jid);
     if (!channelId) return;
     const name = emoji.replace(/^:|:$/g, '');
     try {
@@ -559,10 +588,15 @@ export class SlackChannel implements Channel {
     messageId: string,
     _name: string,
   ): Promise<{ channelId: string; ts: string } | null> {
-    const channelId = this.extractChannelId(jid);
+    const parsedJid = parseSlackJid(jid);
+    const channelId = parsedJid?.channelId ?? this.extractChannelId(jid);
     if (!channelId) return null;
     // In Slack, a thread is created implicitly on first reply — just return the anchor info
-    return { channelId, ts: this.threadRootByTs.get(messageId) ?? messageId };
+    return {
+      channelId,
+      ts:
+        parsedJid?.threadTs ?? this.threadRootByTs.get(messageId) ?? messageId,
+    };
   }
 
   async sendToThread(
@@ -1074,11 +1108,14 @@ export class SlackChannel implements Channel {
     jid: string,
     replyToMessageId?: string,
   ): Promise<OutboundMessageStream | null> {
-    const channelId = this.extractChannelId(jid);
+    const parsedJid = parseSlackJid(jid);
+    const channelId = parsedJid?.channelId ?? this.extractChannelId(jid);
     if (!channelId) return null;
-    const threadTs = replyToMessageId
-      ? (this.threadRootByTs.get(replyToMessageId) ?? replyToMessageId)
-      : this.assistantThreads.get(channelId);
+    const threadTs =
+      parsedJid?.threadTs ??
+      (replyToMessageId
+        ? (this.threadRootByTs.get(replyToMessageId) ?? replyToMessageId)
+        : this.assistantThreads.get(channelId));
     if (!threadTs) return null;
     const target = this.resolveStreamTarget(channelId, threadTs);
     if (!target) return null;
@@ -1091,7 +1128,10 @@ export class SlackChannel implements Channel {
   ): SlackStreamTarget | null {
     // DM channels (assistant threads included) stream without recipient info.
     if (channelId.startsWith('D')) return { channelId, threadTs };
-    const userId = this.lastHumanSenderByChannel.get(channelId);
+    const threadKey = `${channelId}:${threadTs}`;
+    const userId =
+      this.lastHumanSenderByThread.get(threadKey) ||
+      this.lastHumanSenderByChannel.get(channelId);
     if (!userId || !this.teamId) return null;
     return {
       channelId,
@@ -1334,6 +1374,73 @@ export class SlackChannel implements Channel {
     }
   }
 
+  private async getThreadContextBlock(
+    channelId: string,
+    threadTs: string,
+    currentTs: string,
+  ): Promise<string | null> {
+    try {
+      const result = await this.client.conversations.replies({
+        channel: channelId,
+        ts: threadTs,
+        limit: THREAD_CONTEXT_FETCH_LIMIT,
+      });
+      const messages = Array.isArray(result.messages) ? result.messages : [];
+      const lines: string[] = [];
+
+      for (const raw of messages) {
+        const message = raw as {
+          ts?: string;
+          text?: string;
+          user?: string;
+          username?: string;
+          bot_profile?: { name?: string };
+          subtype?: string;
+        };
+        if (!message.ts || message.ts === currentTs) continue;
+        if (message.subtype === 'message_deleted') continue;
+        const rawText = typeof message.text === 'string' ? message.text : '';
+        if (!rawText.trim()) continue;
+
+        const { text } = await resolveMentions(rawText, this.client);
+        const senderName = message.user
+          ? await resolveSlackUserName(this.client, message.user, message.user)
+          : message.username || message.bot_profile?.name || 'Slack';
+        lines.push(`- ${slackTsToIso(message.ts)} ${senderName}: ${text}`);
+      }
+
+      const rootText =
+        typeof (messages[0] as { text?: string } | undefined)?.text === 'string'
+          ? (messages[0] as { text?: string }).text || ''
+          : '';
+      const excerpt = rootText
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, THREAD_EXCERPT_MAX_CHARS);
+      this.threadRootExcerpts.set(`${channelId}:${threadTs}`, excerpt);
+
+      if (lines.length === 0) return null;
+      const suffix = result.has_more
+        ? '\n- [More Slack thread messages omitted by fetch limit]'
+        : '';
+      const block = [
+        `Slack thread context before this message (thread_ts ${threadTs}):`,
+        ...lines,
+      ].join('\n');
+      const truncated =
+        block.length > THREAD_CONTEXT_MAX_CHARS
+          ? `${block.slice(0, THREAD_CONTEXT_MAX_CHARS)}\n[Slack thread context truncated]`
+          : block;
+      return `${truncated}${suffix}`;
+    } catch (err) {
+      logger.debug(
+        { err, channelId, threadTs },
+        'Slack thread context hydration failed',
+      );
+      return null;
+    }
+  }
+
   /**
    * Process a `reaction_added` event. Exposed (via the public-shaped method)
    * for tests; the bolt event handler in `connect()` delegates straight here.
@@ -1357,12 +1464,13 @@ export class SlackChannel implements Channel {
     if (event.user === this.botUserId) return;
     if (event.item_user !== this.botUserId) return;
 
-    const chatJid = channelIdToJid(
-      channelId,
-      this.multiBotMode ? this.botId : undefined,
-    );
     const messageId = event.item.type === 'message' ? event.item.ts : null;
     if (!messageId) return;
+
+    const rootTs = this.threadRootByTs.get(messageId);
+    const chatJid = rootTs
+      ? slackThreadIdToJid(channelId, rootTs, this.botId)
+      : channelIdToJid(channelId, this.multiBotMode ? this.botId : undefined);
 
     const emoji = `:${event.reaction}:`;
 
@@ -1401,21 +1509,26 @@ export class SlackChannel implements Channel {
     // routing) — process it once.
     if (!this.markSeen(`${channelId}:${event.ts}`)) return;
 
-    const chatJid = channelIdToJid(
+    const parentChatJid = channelIdToJid(
       channelId,
       this.multiBotMode ? this.botId : undefined,
     );
     const legacyChatJid = channelIdToJid(channelId);
     // Slack ts is the unique message timestamp, doubles as message ID
     const msgId = event.ts;
-    const timestamp = new Date(parseFloat(event.ts) * 1000).toISOString();
+    const threadRootTs = event.thread_ts || event.ts;
+    const timestamp = slackTsToIso(event.ts);
 
     // Replies to this message must thread under the root ts.
-    this.rememberThreadRoot(event.ts, event.thread_ts || event.ts);
+    this.rememberThreadRoot(event.ts, threadRootTs);
 
     const senderUserId = 'user' in event ? event.user : 'unknown';
     if (senderUserId && senderUserId !== 'unknown') {
       this.lastHumanSenderByChannel.set(channelId, senderUserId);
+      this.lastHumanSenderByThread.set(
+        `${channelId}:${threadRootTs}`,
+        senderUserId,
+      );
     }
     const sender = `slack:${senderUserId}`;
     const senderName = await resolveSlackUserName(
@@ -1442,6 +1555,7 @@ export class SlackChannel implements Channel {
       this.client,
     );
     let content = resolvedText;
+    const resolvedMessageContent = content;
 
     if (
       this.multiBotMode &&
@@ -1461,24 +1575,11 @@ export class SlackChannel implements Channel {
       return;
     }
 
-    // Annotate threaded replies with the root message so the agent has
-    // context. Assistant threads skip this — the whole conversation IS the
-    // thread, and history comes from the message store.
-    if (
-      !opts.assistantThread &&
-      'thread_ts' in event &&
-      event.thread_ts &&
-      event.thread_ts !== event.ts
-    ) {
-      const excerpt = await this.getThreadRootExcerpt(
-        channelId,
-        event.thread_ts,
-      );
-      content = excerpt
-        ? `[Thread reply to: "${excerpt}"] ${content}`
-        : `[Thread reply] ${content}`;
-    }
-
+    const mentionsThisBot = Boolean(
+      this.botUserId && mentions.some((m) => m.id === this.botUserId),
+    );
+    const isThreadReply =
+      'thread_ts' in event && event.thread_ts && event.thread_ts !== event.ts;
     // Store channel metadata for group discovery
     let channelName = channelId;
     try {
@@ -1491,7 +1592,7 @@ export class SlackChannel implements Channel {
     } catch {
       // Fall back to channel ID
     }
-    this.opts.onChatMetadata(chatJid, timestamp, channelName);
+    this.opts.onChatMetadata(parentChatJid, timestamp, channelName);
     if (this.allowLegacyJidRouting) {
       this.opts.onChatMetadata(legacyChatJid, timestamp, channelName);
     }
@@ -1499,22 +1600,66 @@ export class SlackChannel implements Channel {
     // Only process registered groups (auto-register if callback provided)
     const groups = this.opts.registeredGroups();
     let group =
-      groups[chatJid] ||
+      groups[parentChatJid] ||
       (this.allowLegacyJidRouting ? groups[legacyChatJid] : undefined);
     if (!group && this.opts.autoRegister) {
-      const registered = await this.opts.autoRegister(chatJid, channelName);
+      const registered = await this.opts.autoRegister(
+        parentChatJid,
+        channelName,
+      );
       if (registered) {
         group =
-          groups[chatJid] ||
+          groups[parentChatJid] ||
           (this.allowLegacyJidRouting ? groups[legacyChatJid] : undefined);
       }
     }
     if (!group) {
       logger.debug(
-        { chatJid, legacyChatJid, channelName },
+        { chatJid: parentChatJid, legacyChatJid, channelName },
         'Message from unregistered Slack channel — ignoring',
       );
       return;
+    }
+
+    const explicitlyTriggeredThread = Boolean(
+      mentionsThisBot ||
+      slackTriggerMatches(resolvedMessageContent, group.trigger),
+    );
+    const shouldUseThreadContext = Boolean(
+      opts.assistantThread ||
+      isThreadReply ||
+      (!channelId.startsWith('D') && explicitlyTriggeredThread),
+    );
+    const chatJid = shouldUseThreadContext
+      ? slackThreadIdToJid(channelId, threadRootTs, this.botId)
+      : parentChatJid;
+
+    if (chatJid !== parentChatJid) {
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        `${channelName} thread ${threadRootTs}`,
+      );
+    }
+
+    // OpenTag-style grounding: when the bot is explicitly summoned inside an
+    // existing Slack thread, fetch the current Slack transcript as prompt
+    // context instead of storing old replies as new inbound messages.
+    if (!opts.assistantThread && isThreadReply) {
+      const threadContext = explicitlyTriggeredThread
+        ? await this.getThreadContextBlock(channelId, threadRootTs, event.ts)
+        : null;
+      if (threadContext) {
+        content = `${threadContext}\n\nCurrent Slack message: ${content}`;
+      } else {
+        const excerpt = await this.getThreadRootExcerpt(
+          channelId,
+          threadRootTs,
+        );
+        content = excerpt
+          ? `[Thread reply to: "${excerpt}"] ${content}`
+          : `[Thread reply] ${content}`;
+      }
     }
 
     // Process file attachments (images, documents, etc.)
@@ -1637,10 +1782,11 @@ export class SlackChannel implements Channel {
   }
 
   private extractChannelId(jid: string): string | null {
-    const scoped = parseScopedSlackJid(jid);
-    if (scoped) {
-      if (scoped.botId !== this.botId) return null;
-      return scoped.channelId;
+    const parsed = parseSlackJid(jid);
+    if (parsed) {
+      if (parsed.botId && parsed.botId !== this.botId) return null;
+      if (!parsed.botId && !this.allowLegacyJidRouting) return null;
+      return parsed.channelId;
     }
     if (this.allowLegacyJidRouting && /^slack:[^:]+$/.test(jid)) {
       return jidToChannelId(jid);

@@ -6,6 +6,7 @@ import {
   escapeXml,
   formatMessages,
   formatOutbound,
+  formatThreadSummary,
   stripInternalTags,
 } from './router.js';
 import type { Channel, NewMessage } from './types.js';
@@ -57,6 +58,26 @@ describe('escapeXml', () => {
 });
 
 // --- formatMessages ---
+
+describe('formatThreadSummary', () => {
+  it('formats a thread summary outside the messages block with escaped content', () => {
+    const result = formatThreadSummary({
+      chat_jid: 'slack:TEST:C123:thread:1700000000.000100',
+      summary: 'Decision: use A & B <carefully>.',
+      status: 'active',
+      updated_at: '2024-01-01T00:00:03.000Z',
+      updated_by: 'team-agent',
+      through_message_id: '1700000000.000200',
+      through_timestamp: '2024-01-01T00:00:02.000Z',
+    });
+
+    expect(result).toBe(
+      '<conversation_summary chat_jid="slack:TEST:C123:thread:1700000000.000100" updated_at="2024-01-01T00:00:03.000Z" status="active" updated_by="team-agent" through_message_id="1700000000.000200" through_timestamp="2024-01-01T00:00:02.000Z">\n' +
+        'Decision: use A &amp; B &lt;carefully&gt;.\n' +
+        '</conversation_summary>',
+    );
+  });
+});
 
 describe('formatMessages', () => {
   it('formats a single message as XML with participant attributes', () => {

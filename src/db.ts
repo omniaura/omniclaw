@@ -20,6 +20,7 @@ import {
   ScheduledTask,
   TaskRunPhaseEvent,
   TaskRunLog,
+  ThreadSummary,
   registeredGroupToAgent,
   registeredGroupToRoute,
 } from './types.js';
@@ -690,6 +691,34 @@ type MessageRow = NewMessage & {
   sender_platform: string | null;
 };
 
+interface ThreadSummaryRow {
+  chat_jid: string;
+  summary: string;
+  status: string | null;
+  updated_at: string;
+  updated_by: string | null;
+  through_message_id: string | null;
+  through_timestamp: string | null;
+}
+
+function mapThreadSummaryRow(row: ThreadSummaryRow): ThreadSummary {
+  const status =
+    row.status === 'active' ||
+    row.status === 'resolved' ||
+    row.status === 'blocked'
+      ? row.status
+      : undefined;
+  return {
+    chat_jid: row.chat_jid,
+    summary: row.summary,
+    status,
+    updated_at: row.updated_at,
+    updated_by: row.updated_by || undefined,
+    through_message_id: row.through_message_id || undefined,
+    through_timestamp: row.through_timestamp || undefined,
+  };
+}
+
 const VALID_SENDER_PLATFORMS = new Set<
   NonNullable<NewMessage['sender_platform']>
 >(['discord', 'whatsapp', 'telegram', 'slack', 'ipc', 'system']);
@@ -786,6 +815,59 @@ export function getMessagesSince(
   `;
   const rows = db.prepare(sql).all(chatJid, sinceTimestamp) as MessageRow[];
   return rows.map(mapMessageRow);
+}
+
+export function getThreadSummary(chatJid: string): ThreadSummary | undefined {
+  const row = db
+    .prepare('SELECT * FROM thread_summaries WHERE chat_jid = ?')
+    .get(chatJid) as ThreadSummaryRow | undefined;
+  return row ? mapThreadSummaryRow(row) : undefined;
+}
+
+export function setThreadSummary(
+  summary: Omit<ThreadSummary, 'updated_at'> & { updated_at?: string },
+): boolean {
+  const trimmed = summary.summary.trim();
+  if (!trimmed) {
+    clearThreadSummary(summary.chat_jid);
+    return true;
+  }
+
+  const existing = getThreadSummary(summary.chat_jid);
+  if (
+    existing?.through_timestamp &&
+    summary.through_timestamp &&
+    summary.through_timestamp < existing.through_timestamp
+  ) {
+    return false;
+  }
+
+  const updatedAt = summary.updated_at ?? new Date().toISOString();
+  const status =
+    summary.status === 'active' ||
+    summary.status === 'resolved' ||
+    summary.status === 'blocked'
+      ? summary.status
+      : undefined;
+
+  db.query(
+    `INSERT OR REPLACE INTO thread_summaries
+      (chat_jid, summary, status, updated_at, updated_by, through_message_id, through_timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    summary.chat_jid,
+    trimmed,
+    status ?? null,
+    updatedAt,
+    summary.updated_by ?? null,
+    summary.through_message_id ?? null,
+    summary.through_timestamp ?? null,
+  );
+  return true;
+}
+
+export function clearThreadSummary(chatJid: string): void {
+  db.query('DELETE FROM thread_summaries WHERE chat_jid = ?').run(chatJid);
 }
 
 /**

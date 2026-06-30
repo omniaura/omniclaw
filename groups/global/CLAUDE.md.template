@@ -22,6 +22,14 @@ Use `mcp__omniclaw__send_message` to send a message **mid-task**, before you're 
 
 When working as a sub-agent or teammate, only use `send_message` if instructed to by the main agent.
 
+## Conversation Thread Context
+
+Use `mcp__omniclaw__read_thread` before summarizing, filing, extracting decisions or action items, updating durable thread state, or taking action that depends on prior messages in "this thread" or "above".
+
+When stable thread state changes, use `mcp__omniclaw__update_thread_summary` to save a compact neutral summary for the current conversation scope. Include the topic, decisions, open questions, owners, artifacts, and next steps. Do not include secrets, raw transcripts, or transient chatter.
+
+Before risky writes, external side effects, or irreversible actions that need human approval, use `mcp__omniclaw__request_confirmation`. After requesting confirmation, stop and wait for a later user reply or approval reaction before taking the action.
+
 ## Requesting Context
 
 If you need information from outside your workspace (files from another project, context from another group, credentials, etc.), ask directly in the current chat with exactly what you need and why.
@@ -35,6 +43,7 @@ Files you create are saved in `/workspace/group/`. Use this for notes, research,
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
 
 When you learn something important:
+
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
@@ -50,10 +59,11 @@ When you learn something important:
 ## Message Formatting
 
 NEVER use markdown. Only use WhatsApp/Telegram formatting:
-- *single asterisks* for bold (NEVER **double asterisks**)
+
+- _single asterisks_ for bold (NEVER **double asterisks**)
 - _underscores_ for italic
 - • bullet points
-- ```triple backticks``` for code
+- `triple backticks` for code
 
 No ## headings. No [links](url). No **double stars**.
 
@@ -68,6 +78,7 @@ When running as a heartbeat (scheduled background task):
 5. If nothing is actionable, complete silently — do not send "nothing to report"
 
 You have permission to proactively:
+
 - Create PRs for issues in `ditto/` and `omniaura/` repos
 - Triage existing issues (check if still valid, add context)
 - Work on issues and open PRs without explicit instruction

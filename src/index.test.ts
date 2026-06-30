@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'bun:test';
 
 import {
   _initTestDatabase,
+  getSession,
   getPendingSessionIntent,
   setChannelSubscription,
   setSession,
@@ -9,10 +10,12 @@ import {
 } from './db.js';
 import {
   _createIntermediateStatusStreamer,
+  _getRuntimeGroupFolderForTest,
   _handleSessionCommandForTest,
   _getSlashCommandGroupsFromSubscriptions,
   _getEnabledStartupConfirmationTargets,
   _isAgentEnabled,
+  _prepareSlackThreadSessionForkForTest,
   _markChannelSubscriptionsDirty,
   _selectEnabledSubscriptionsForMessage,
   _selectSubscriptionsForMessage,
@@ -503,6 +506,96 @@ describe('Discord session command state', () => {
   });
 });
 
+describe('runtime group folder selection', () => {
+  beforeEach(() => {
+    _initTestDatabase();
+    _setSessions({});
+  });
+
+  it('keeps legacy channel runs on the base group folder', () => {
+    expect(_getRuntimeGroupFolderForTest('support', 'slack:C123')).toBe(
+      'support',
+    );
+  });
+
+  it('isolates legacy Slack thread runs from the parent group session', () => {
+    const parent = _getRuntimeGroupFolderForTest('support', 'slack:TEST:C123');
+    const thread = _getRuntimeGroupFolderForTest(
+      'support',
+      'slack:TEST:C123:thread:1700000000.000100',
+    );
+    const siblingThread = _getRuntimeGroupFolderForTest(
+      'support',
+      'slack:TEST:C123:thread:1700000000.000200',
+    );
+
+    expect(parent).toBe('support');
+    expect(thread).toMatch(/^support__dispatch__[a-f0-9]{16}$/);
+    expect(siblingThread).toMatch(/^support__dispatch__[a-f0-9]{16}$/);
+    expect(thread).not.toBe(parent);
+    expect(siblingThread).not.toBe(thread);
+  });
+
+  it('prepares a new Slack thread session as a fork of the parent channel session', () => {
+    const parentSession = '11111111-1111-4111-8111-111111111111';
+    const threadJid = 'slack:TEST:C123:thread:1700000000.000100';
+    const threadRuntime = _getRuntimeGroupFolderForTest('support', threadJid);
+
+    setSession('support', parentSession);
+    _setSessions({ support: parentSession });
+
+    expect(
+      _prepareSlackThreadSessionForkForTest('support', threadJid, threadJid),
+    ).toBe(parentSession);
+    expect(getSession(threadRuntime)).toBe(parentSession);
+    expect(getPendingSessionIntent(threadRuntime)).toEqual({
+      forkFrom: parentSession,
+      name: undefined,
+    });
+  });
+
+  it('uses the matching subscribed-agent parent session for Slack thread forks', () => {
+    const parentSession = '22222222-2222-4222-8222-222222222222';
+    const parentKey = 'slack:TEST:C123::agent::team-agent';
+    const threadKey =
+      'slack:TEST:C123:thread:1700000000.000100::agent::team-agent';
+    const parentRuntime = _getRuntimeGroupFolderForTest('support', parentKey);
+    const threadRuntime = _getRuntimeGroupFolderForTest('support', threadKey);
+
+    setSession(parentRuntime, parentSession);
+    _setSessions({ [parentRuntime]: parentSession });
+
+    expect(
+      _prepareSlackThreadSessionForkForTest(
+        'support',
+        'slack:TEST:C123:thread:1700000000.000100',
+        threadKey,
+      ),
+    ).toBe(parentSession);
+    expect(getSession(threadRuntime)).toBe(parentSession);
+    expect(getPendingSessionIntent(threadRuntime)?.forkFrom).toBe(
+      parentSession,
+    );
+  });
+
+  it('does not overwrite an existing Slack thread session fork state', () => {
+    const parentSession = '33333333-3333-4333-8333-333333333333';
+    const threadSession = '44444444-4444-4444-8444-444444444444';
+    const threadJid = 'slack:TEST:C123:thread:1700000000.000100';
+    const threadRuntime = _getRuntimeGroupFolderForTest('support', threadJid);
+
+    setSession('support', parentSession);
+    setSession(threadRuntime, threadSession);
+    _setSessions({ support: parentSession, [threadRuntime]: threadSession });
+
+    expect(
+      _prepareSlackThreadSessionForkForTest('support', threadJid, threadJid),
+    ).toBeUndefined();
+    expect(getSession(threadRuntime)).toBe(threadSession);
+    expect(getPendingSessionIntent(threadRuntime)).toBeUndefined();
+  });
+});
+
 describe('slash command subscription groups', () => {
   beforeEach(() => {
     _initTestDatabase();
@@ -684,6 +777,65 @@ describe('subscription selection', () => {
     ]);
 
     expect(result.selectedByTrigger).toBe(true);
+    expect(result.selected.map((s) => s.agentId)).toEqual(['agent-a']);
+  });
+
+  it('inherits parent Slack subscriptions for thread-scoped conversations', () => {
+    _setChannelSubscriptions({
+      'slack:TEST:C123': [
+        {
+          ...BASE_SUBSCRIPTION,
+          channelJid: 'slack:TEST:C123',
+          agentId: 'agent-a',
+          trigger: '@Clayton',
+          priority: 0,
+        },
+      ],
+    });
+
+    const result = _selectSubscriptionsForMessage(
+      'slack:TEST:C123:thread:1700000000.000100',
+      [
+        makeMessage({
+          chat_jid: 'slack:TEST:C123:thread:1700000000.000100',
+          sender_platform: 'slack',
+          sender: 'slack:UPEYTON',
+          sender_user_id: 'UPEYTON',
+          content: '@Clayton please handle this thread',
+        }),
+      ],
+    );
+
+    expect(result.selectedByTrigger).toBe(true);
+    expect(result.selected.map((s) => s.agentId)).toEqual(['agent-a']);
+  });
+
+  it('falls back to legacy Slack parent subscriptions for thread conversations', () => {
+    _setChannelSubscriptions({
+      'slack:C123': [
+        {
+          ...BASE_SUBSCRIPTION,
+          channelJid: 'slack:C123',
+          agentId: 'agent-a',
+          trigger: '@Clayton',
+          priority: 0,
+        },
+      ],
+    });
+
+    const result = _selectSubscriptionsForMessage(
+      'slack:TEST:C123:thread:1700000000.000100',
+      [
+        makeMessage({
+          chat_jid: 'slack:TEST:C123:thread:1700000000.000100',
+          sender_platform: 'slack',
+          sender: 'slack:UPEYTON',
+          sender_user_id: 'UPEYTON',
+          content: '@Clayton please handle this thread',
+        }),
+      ],
+    );
+
     expect(result.selected.map((s) => s.agentId)).toEqual(['agent-a']);
   });
 

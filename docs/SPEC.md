@@ -701,7 +701,7 @@ The heartbeat reads `## Goals` and `## Heartbeat` sections from the agent's CLAU
 
 ## MCP Tools
 
-The `omniclaw` MCP server runs inside each container via stdio, providing 16 tools:
+The `omniclaw` MCP server runs inside each container via stdio, providing task, messaging, routing, context, and coordination tools:
 
 ### Task Management
 
@@ -721,6 +721,14 @@ The `omniclaw` MCP server runs inside each container via stdio, providing 16 too
 | `send_message`     | Send a message to the current channel       |
 | `react_to_message` | Add/remove emoji reaction on a message      |
 | `format_mention`   | Format an @mention for the current platform |
+
+### Conversation Context
+
+| Tool                    | Purpose                                                      |
+| ----------------------- | ------------------------------------------------------------ |
+| `read_thread`           | Read locally stored messages for the current conversation    |
+| `update_thread_summary` | Save compact durable state for the current thread or channel |
+| `request_confirmation`  | Ask for human approval before risky writes or side effects   |
 
 ### Heartbeat & Groups
 

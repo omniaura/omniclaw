@@ -25,6 +25,7 @@ import type {
   IpcDrainResult,
   IpcMessage,
 } from '@omniclaw/protocol';
+import { CONVERSATION_THREAD_TOOLS_GUIDANCE } from './thread-tools-guidance.js';
 
 const OUTPUT_START_MARKER = '---OMNICLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---OMNICLAW_OUTPUT_END---';
@@ -439,7 +440,7 @@ export async function runCursorSdkRuntime(
       sdkAgent = await Agent.create(baseOptions);
     }
 
-    let prompt = containerInput.prompt;
+    let prompt = `${CONVERSATION_THREAD_TOOLS_GUIDANCE}\n\n${containerInput.prompt}`;
     if (containerInput.isScheduledTask) {
       prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
     }

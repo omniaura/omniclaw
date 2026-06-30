@@ -1,4 +1,4 @@
-import { parseScopedSlackJid } from './slack-jid.js';
+import { parseSlackJid } from './slack-jid.js';
 
 export interface ContextLayerInput {
   channelJid: string;
@@ -45,8 +45,8 @@ export function resolveContextLayers(
     return { serverFolder, categoryFolder, channelFolder };
   }
 
-  const slack = parseScopedSlackJid(input.channelJid);
-  if (slack) {
+  const slack = parseSlackJid(input.channelJid);
+  if (slack?.botId) {
     const serverFolder = input.serverFolder || `servers/slack-${slack.botId}`;
     const categoryFolder = input.categoryFolder || `${serverFolder}/channels`;
     const channelSegment = slack.channelId.replace(/[^a-zA-Z0-9_-]/g, '-');

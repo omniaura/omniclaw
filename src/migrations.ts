@@ -16,7 +16,7 @@ export interface Migration {
  * The version that represents the latest schema. Existing databases that
  * predate the migration framework are advanced through every migration to this.
  */
-export const BASELINE_VERSION = 8;
+export const BASELINE_VERSION = 9;
 
 // ---------------------------------------------------------------------------
 // Schema helpers (available for use in migrations)
@@ -279,6 +279,16 @@ const migration1: Migration = {
         fork_from TEXT,
         name TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS thread_summaries (
+        chat_jid TEXT PRIMARY KEY,
+        summary TEXT NOT NULL,
+        status TEXT,
+        updated_at TEXT NOT NULL,
+        updated_by TEXT,
+        through_message_id TEXT,
+        through_timestamp TEXT
       );
 
       CREATE TABLE IF NOT EXISTS registered_groups (
@@ -613,6 +623,24 @@ const migration8: Migration = {
   },
 };
 
+const migration9: Migration = {
+  version: 9,
+  description: 'Persist per-thread rolling conversation summaries',
+  up: (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS thread_summaries (
+        chat_jid TEXT PRIMARY KEY,
+        summary TEXT NOT NULL,
+        status TEXT,
+        updated_at TEXT NOT NULL,
+        updated_by TEXT,
+        through_message_id TEXT,
+        through_timestamp TEXT
+      );
+    `);
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Migration registry
 // ---------------------------------------------------------------------------
@@ -632,4 +660,5 @@ export const allMigrations: Migration[] = [
   migration6,
   migration7,
   migration8,
+  migration9,
 ];

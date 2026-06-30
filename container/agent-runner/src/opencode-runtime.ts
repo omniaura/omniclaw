@@ -30,6 +30,7 @@ import {
   redactActivityOutput,
   TOOL_OUTPUT_SNIPPET_CHARS,
 } from './activity-format.js';
+import { CONVERSATION_THREAD_TOOLS_GUIDANCE } from './thread-tools-guidance.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -621,6 +622,8 @@ function buildSystemContext(containerInput: ContainerInput): string | null {
     }
     parts.push(`## Your Identity\n${identityParts.join(' ')}`);
   }
+
+  parts.push(CONVERSATION_THREAD_TOOLS_GUIDANCE);
 
   if (parts.length === 0) return null;
   return parts.join('\n\n---\n\n');

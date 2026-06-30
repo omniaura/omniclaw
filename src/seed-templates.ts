@@ -31,7 +31,7 @@ export interface SeedTemplate {
 
 const DISCORD_CHANNEL_TEMPLATE: SeedTemplate = {
   key: 'discord-channel',
-  version: 3,
+  version: 4,
   body: `## Channel: Discord (Secondary)
 This group communicates via Discord, a secondary channel.
 You can freely answer questions and have conversations here.
@@ -47,6 +47,13 @@ To end a turn silently, emit only \`<internal>…</internal>\` content. Anything
 those tags is stripped before send (see \`stripInternalTags\` in \`src/router.ts\`), and
 a turn that produces only internal-tagged text is suppressed entirely. Use this for
 private notes-to-self when the right action is no action.
+
+## Conversation Thread Context
+Use \`mcp__omniclaw__read_thread\` before summarizing, filing, extracting decisions or action items, updating durable thread state, or taking action that depends on prior messages in "this thread" or "above".
+
+When stable thread state changes, use \`mcp__omniclaw__update_thread_summary\` to save a compact neutral summary for the current conversation scope. Include the topic, decisions, open questions, owners, artifacts, and next steps. Do not include secrets, raw transcripts, or transient chatter.
+
+Before risky writes, external side effects, or irreversible actions that need human approval, use \`mcp__omniclaw__request_confirmation\`. After requesting confirmation, stop and wait for a later user reply or approval reaction before taking the action.
 
 ## Getting Context You Don't Have
 When you need project context, repo access, credentials, or information that hasn't been shared with you:

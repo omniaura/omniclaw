@@ -18,6 +18,7 @@ import {
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  getThreadSummary,
   loadAllDeltaCursors,
   recordGitHubWebhookDelivery,
   setAgent,
@@ -25,6 +26,7 @@ import {
   setDeltaCursorInDb,
   setAgentHealth,
   setRegisteredGroup,
+  setThreadSummary,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -617,6 +619,66 @@ describe('getMessagesSince', () => {
     const msgs = getMessagesSince('group@g.us', '');
     // 3 user messages (bot message excluded)
     expect(msgs).toHaveLength(3);
+  });
+});
+
+// --- thread summaries ---
+
+describe('thread summaries', () => {
+  it('persists and reads a rolling thread summary', () => {
+    const updated = setThreadSummary({
+      chat_jid: 'slack:TEST:C123:thread:1700000000.000100',
+      summary: 'Thread is about launch readiness. Peyton owns the checklist.',
+      status: 'active',
+      updated_by: 'team-agent',
+      through_message_id: '1700000000.000200',
+      through_timestamp: '2024-01-01T00:00:02.000Z',
+      updated_at: '2024-01-01T00:00:03.000Z',
+    });
+
+    expect(updated).toBe(true);
+    expect(
+      getThreadSummary('slack:TEST:C123:thread:1700000000.000100'),
+    ).toEqual({
+      chat_jid: 'slack:TEST:C123:thread:1700000000.000100',
+      summary: 'Thread is about launch readiness. Peyton owns the checklist.',
+      status: 'active',
+      updated_by: 'team-agent',
+      through_message_id: '1700000000.000200',
+      through_timestamp: '2024-01-01T00:00:02.000Z',
+      updated_at: '2024-01-01T00:00:03.000Z',
+    });
+  });
+
+  it('keys Slack thread summaries by exact thread JID', () => {
+    setThreadSummary({
+      chat_jid: 'slack:TEST:C123:thread:1700000000.000100',
+      summary: 'Thread-level summary.',
+    });
+
+    expect(getThreadSummary('slack:C123')).toBeUndefined();
+    expect(
+      getThreadSummary('slack:TEST:C123:thread:1700000000.000100')?.summary,
+    ).toBe('Thread-level summary.');
+  });
+
+  it('does not overwrite newer summaries with older covered timestamps', () => {
+    setThreadSummary({
+      chat_jid: 'slack:TEST:C123:thread:1700000000.000100',
+      summary: 'Newer summary.',
+      through_timestamp: '2024-01-01T00:00:10.000Z',
+    });
+
+    const updated = setThreadSummary({
+      chat_jid: 'slack:TEST:C123:thread:1700000000.000100',
+      summary: 'Older summary.',
+      through_timestamp: '2024-01-01T00:00:05.000Z',
+    });
+
+    expect(updated).toBe(false);
+    expect(
+      getThreadSummary('slack:TEST:C123:thread:1700000000.000100')?.summary,
+    ).toBe('Newer summary.');
   });
 });
 
