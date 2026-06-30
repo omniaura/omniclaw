@@ -12,8 +12,8 @@ export interface UserInfo {
   id: string;
   /** Display name or username */
   name: string;
-  /** Platform identifier (discord, whatsapp, telegram) */
-  platform: 'discord' | 'whatsapp' | 'telegram';
+  /** Platform identifier. */
+  platform: 'discord' | 'whatsapp' | 'telegram' | 'slack';
   /** Last seen timestamp */
   lastSeen: string;
 }
@@ -199,6 +199,7 @@ export const formatMention = (
     // Format based on platform
     switch (user.platform) {
       case 'discord':
+      case 'slack':
         return `<@${user.id}>`;
       case 'whatsapp':
         // WhatsApp uses @<phone_number> format

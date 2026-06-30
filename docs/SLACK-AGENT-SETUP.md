@@ -20,6 +20,20 @@ The new agent capabilities require three coupled things on the Slack side:
 
 Without all three, the code paths in `src/channels/slack.ts` (`registerAssistant`, `setStatus`, suggested prompts, streaming) compile and run but Slack never invokes them. Same binary, no visible agent UI.
 
+## Thread context model
+
+Slack channel threads are treated as first-class OmniClaw conversations. When a user mentions a bot or uses the bot's configured trigger in a top-level channel message, OmniClaw stores that message under a durable thread JID:
+
+```text
+slack:<bot-id>:<channel-id>:thread:<root-ts>
+```
+
+That gives each Slack thread its own runtime folder, active session, reply anchor, and local message history while still inheriting the parent channel registration and shared context layers. If the parent channel already has an active agent session, the first agent turn in the new Slack thread starts as a fork of that parent session and then diverges under the thread runtime. Ordinary unmentioned channel chatter stays on the parent channel JID so it can be remembered without waking every subscribed agent.
+
+When the bot is explicitly summoned inside an existing Slack thread, OmniClaw fetches a small Slack transcript with `conversations.replies` and injects it into the current prompt as context only. It does not backfill those Slack messages into the local queue, which avoids duplicate wakeups and cursor drift. The fetch limit is intentionally 15 messages to match Slack's current non-Marketplace `conversations.replies` cap; if the API is unavailable or rate limited, OmniClaw falls back to the thread-root excerpt.
+
+Agents also get thread-scoped MCP tools in the container. `read_thread` reads locally stored messages for the current Slack thread or channel, which is useful before summarizing, filing tickets, or acting on "this thread." `update_thread_summary` saves a compact durable summary for the same scope so future turns can start from the thread's decisions, open questions, owners, artifacts, and next steps. `request_confirmation` posts an OpenTag-style approval request in the same Slack thread before risky writes or external side effects; OmniClaw adds approve/deny reactions when Slack returns a message id, and a human reaction wakes the same thread context. Summaries are state, not transcripts; they should never include secrets or raw logs.
+
 ## Manifest walkthrough
 
 The file at `config-examples/slack-app-manifest.json` is the reference. Highlights:

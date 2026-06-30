@@ -58,6 +58,16 @@ describe('resolveContextLayers', () => {
     expect(layers.channelFolder).toBe('servers/slack-OPS/channels/C123ABC');
   });
 
+  it('keeps Slack thread contexts on the parent channel layer', () => {
+    const layers = resolveContextLayers({
+      channelJid: 'slack:OPS:C123ABC:thread:1700000000.000100',
+    });
+
+    expect(layers.serverFolder).toBe('servers/slack-OPS');
+    expect(layers.categoryFolder).toBe('servers/slack-OPS/channels');
+    expect(layers.channelFolder).toBe('servers/slack-OPS/channels/C123ABC');
+  });
+
   it('does not auto-derive layers for legacy Slack JID', () => {
     const layers = resolveContextLayers({
       channelJid: 'slack:C123ABC',

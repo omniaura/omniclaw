@@ -31,6 +31,7 @@ import {
   redactActivityOutput,
   TOOL_OUTPUT_SNIPPET_CHARS,
 } from './activity-format.js';
+import { CONVERSATION_THREAD_TOOLS_GUIDANCE } from './thread-tools-guidance.js';
 
 interface JsonRpcRequest {
   id: string | number;
@@ -999,6 +1000,8 @@ function buildSystemContext(containerInput: ContainerInput): string | null {
     }
     parts.push(`## Your Identity\n${identityParts.join(' ')}`);
   }
+
+  parts.push(CONVERSATION_THREAD_TOOLS_GUIDANCE);
 
   return parts.length > 0 ? parts.join('\n\n---\n\n') : null;
 }

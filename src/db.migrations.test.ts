@@ -159,6 +159,12 @@ describe('db migrations (bun:sqlite)', () => {
       'fork_from',
     );
     expect(getTableColumns(db, 'pending_session_intents')).toContain('name');
+    expect(getTableColumns(db, 'thread_summaries')).toContain('chat_jid');
+    expect(getTableColumns(db, 'thread_summaries')).toContain('summary');
+    expect(getTableColumns(db, 'thread_summaries')).toContain('status');
+    expect(getTableColumns(db, 'thread_summaries')).toContain(
+      'through_timestamp',
+    );
 
     // Verify default values applied to existing rows
     const agents = db
@@ -199,6 +205,12 @@ describe('db migrations (bun:sqlite)', () => {
       'fork_from',
     );
     expect(getTableColumns(db, 'pending_session_intents')).toContain('name');
+    expect(getTableColumns(db, 'thread_summaries')).toContain('chat_jid');
+    expect(getTableColumns(db, 'thread_summaries')).toContain('summary');
+    expect(getTableColumns(db, 'thread_summaries')).toContain('status');
+    expect(getTableColumns(db, 'thread_summaries')).toContain(
+      'through_timestamp',
+    );
 
     // Write an agent with opencode runtime
     db.query(

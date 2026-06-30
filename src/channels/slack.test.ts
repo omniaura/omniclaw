@@ -152,6 +152,18 @@ describe('SlackChannel.ownsJid', () => {
     expect(ownsJid('slack:C123', 'OPS', false)).toBe(false);
   });
 
+  it('matches thread JIDs for the same bot', () => {
+    expect(ownsJid('slack:OPS:C123:thread:1700000000.000100', 'OPS')).toBe(
+      true,
+    );
+  });
+
+  it('does not match thread JIDs for a different bot', () => {
+    expect(ownsJid('slack:SUPPORT:C123:thread:1700000000.000100', 'OPS')).toBe(
+      false,
+    );
+  });
+
   it('does not match non-Slack JIDs', () => {
     expect(ownsJid('dc:123')).toBe(false);
     expect(ownsJid('tg:456')).toBe(false);
@@ -357,7 +369,7 @@ describe('SlackChannel.handleMessage multi-bot mention routing', () => {
 
     expect(onMessage).toHaveBeenCalledTimes(1);
     const calls = onMessage.mock.calls as unknown as Array<[string]>;
-    expect(calls[0][0]).toBe('slack:CLAYTON:C123');
+    expect(calls[0][0]).toBe('slack:CLAYTON:C123:thread:1700000000.000100');
   });
 });
 
@@ -421,6 +433,21 @@ describe('SlackChannel.sendMessage', () => {
     await channel.sendMessage('slack:C123', 'reply', '200.2');
 
     const args = (postMessage.mock.calls[0] as unknown as [any])[0];
+    expect(args.thread_ts).toBe('100.1');
+  });
+
+  it('threads replies from durable thread JIDs without an in-memory root cache', async () => {
+    const channel = makeSendChannel();
+    const postMessage = mock(() => Promise.resolve({ ts: '3.301' }));
+    (channel as any).client = { chat: { postMessage } };
+
+    await channel.sendMessage(
+      'slack:TEST:C123:thread:100.1',
+      'reply from thread jid',
+    );
+
+    const args = (postMessage.mock.calls[0] as unknown as [any])[0];
+    expect(args.channel).toBe('C123');
     expect(args.thread_ts).toBe('100.1');
   });
 
@@ -628,6 +655,27 @@ describe('SlackChannel.startMessageStream', () => {
     expect(await channel.startMessageStream('slack:C123')).toBeNull();
   });
 
+  it('starts streams from durable thread JIDs', async () => {
+    const channel = makeSendChannel();
+    const startStream = mock(() => Promise.resolve({ ts: '8.801' }));
+    const stopStream = mock(() => Promise.resolve({}));
+    (channel as any).client = { chat: { startStream, stopStream } };
+    (channel as any).teamId = 'T999';
+    (channel as any).lastHumanSenderByThread.set('C123:100.1', 'UPEYTON');
+
+    const stream = await channel.startMessageStream(
+      'slack:TEST:C123:thread:100.1',
+    );
+    expect(stream).not.toBeNull();
+    await stream!.appendText('hi');
+    await stream!.stop();
+
+    const startArgs = (startStream.mock.calls[0] as unknown as [any])[0];
+    expect(startArgs.channel).toBe('C123');
+    expect(startArgs.thread_ts).toBe('100.1');
+    expect(startArgs.recipient_user_id).toBe('UPEYTON');
+  });
+
   it('returns null in channels without recipient info', async () => {
     const channel = makeSendChannel();
     expect(await channel.startMessageStream('slack:C123', '100.1')).toBeNull();
@@ -798,9 +846,198 @@ describe('SlackChannel.handleMessage extras', () => {
 
     expect(onMessage).toHaveBeenCalledTimes(1);
     const msg = (onMessage.mock.calls[0] as unknown as [string, any])[1];
+    expect((onMessage.mock.calls[0] as unknown as [string, any])[0]).toBe(
+      'slack:TEST:C123:thread:1700000000.000100',
+    );
+    expect(msg.chat_jid).toBe('slack:TEST:C123:thread:1700000000.000100');
     expect(msg.content).toBe(
       '[Thread reply to: "What is the deploy status?"] any update?',
     );
+  });
+
+  it('hydrates existing Slack thread context into explicit threaded bot mentions', async () => {
+    const onMessage = mock(() => {});
+    const replies = mock(() =>
+      Promise.resolve({
+        messages: [
+          {
+            ts: '1700000000.000100',
+            text: 'root request',
+            user: 'UOMAR',
+          },
+          {
+            ts: '1700000000.000150',
+            text: 'prior reply with <@UPEYTON>',
+            user: 'UOMAR',
+          },
+          {
+            ts: '1700000000.000200',
+            text: '<@UBOT> summarize this',
+            user: 'UPEYTON',
+          },
+        ],
+      }),
+    );
+    const channel = makeInboundChannel(onMessage);
+    (channel as any).client = {
+      users: {
+        info: mock(({ user }: { user: string }) =>
+          Promise.resolve({
+            user: {
+              name: user.toLowerCase(),
+              profile: {
+                display_name:
+                  user === 'UOMAR'
+                    ? 'Omar'
+                    : user === 'UBOT'
+                      ? 'Bot'
+                      : 'Peyton',
+              },
+            },
+          }),
+        ),
+      },
+      conversations: {
+        info: mock(() => Promise.resolve({ channel: { name: 'general' } })),
+        replies,
+      },
+    };
+
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000200',
+      thread_ts: '1700000000.000100',
+      text: '<@UBOT> summarize this',
+      user: 'UPEYTON',
+    });
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(replies).toHaveBeenCalledTimes(1);
+    const [chatJid, msg] = onMessage.mock.calls[0] as unknown as [string, any];
+    expect(chatJid).toBe('slack:TEST:C123:thread:1700000000.000100');
+    expect(msg.content).toContain(
+      'Slack thread context before this message (thread_ts 1700000000.000100):',
+    );
+    expect(msg.content).toContain('Omar: root request');
+    expect(msg.content).toContain('Omar: prior reply with @Peyton');
+    expect(msg.content).toContain('Current Slack message: @Bot summarize this');
+  });
+
+  it('falls back to the root excerpt when thread context hydration fails', async () => {
+    const onMessage = mock(() => {});
+    let replyCalls = 0;
+    const replies = mock(() => {
+      replyCalls++;
+      if (replyCalls === 1) {
+        return Promise.reject(new Error('rate limited'));
+      }
+      return Promise.resolve({
+        messages: [{ text: 'fallback root message' }],
+      });
+    });
+    const channel = makeInboundChannel(onMessage);
+    (channel as any).client = {
+      users: {
+        info: mock(({ user }: { user: string }) =>
+          Promise.resolve({
+            user: {
+              name: user.toLowerCase(),
+              profile: { display_name: user === 'UBOT' ? 'Bot' : 'Peyton' },
+            },
+          }),
+        ),
+      },
+      conversations: {
+        info: mock(() => Promise.resolve({ channel: { name: 'general' } })),
+        replies,
+      },
+    };
+
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000250',
+      thread_ts: '1700000000.000100',
+      text: '<@UBOT> summarize this',
+      user: 'UPEYTON',
+    });
+
+    expect(replies).toHaveBeenCalledTimes(2);
+    const msg = (onMessage.mock.calls[0] as unknown as [string, any])[1];
+    expect(msg.content).toBe(
+      '[Thread reply to: "fallback root message"] @Bot summarize this',
+    );
+  });
+
+  it('stores top-level bot mentions under a Slack thread conversation JID', async () => {
+    const onMessage = mock(() => {});
+    const metadata: Array<{ jid: string; name?: string }> = [];
+    const channel = new SlackChannel({
+      botId: 'TEST',
+      token: 'xoxb-test',
+      appToken: 'xapp-test',
+      onMessage,
+      onChatMetadata: (jid, _timestamp, name) => metadata.push({ jid, name }),
+      registeredGroups: () => ({
+        'slack:C123': {
+          name: 'general',
+          folder: 'general',
+          trigger: '@bot',
+          added_at: new Date().toISOString(),
+        },
+      }),
+    });
+    (channel as any).botUserId = 'UBOT';
+    (channel as any).client = makeInboundClient();
+
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000500',
+      text: '<@UBOT> please handle this',
+      user: 'UPEYTON',
+    });
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    const [chatJid, msg] = onMessage.mock.calls[0] as unknown as [string, any];
+    expect(chatJid).toBe('slack:TEST:C123:thread:1700000000.000500');
+    expect(msg.chat_jid).toBe('slack:TEST:C123:thread:1700000000.000500');
+    expect(metadata.map((m) => m.jid)).toContain('slack:C123');
+    expect(metadata.map((m) => m.jid)).toContain(
+      'slack:TEST:C123:thread:1700000000.000500',
+    );
+  });
+
+  it('keeps unmentioned top-level channel messages on the parent channel JID', async () => {
+    const onMessage = mock(() => {});
+    const channel = makeInboundChannel(onMessage);
+    (channel as any).client = makeInboundClient();
+
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000600',
+      text: 'ordinary channel chatter',
+      user: 'UPEYTON',
+    });
+
+    const [chatJid, msg] = onMessage.mock.calls[0] as unknown as [string, any];
+    expect(chatJid).toBe('slack:C123');
+    expect(msg.chat_jid).toBe('slack:C123');
+  });
+
+  it('stores top-level configured trigger messages under a Slack thread conversation JID', async () => {
+    const onMessage = mock(() => {});
+    const channel = makeInboundChannel(onMessage);
+    (channel as any).client = makeInboundClient();
+
+    await (channel as any).handleMessage({
+      channel: 'C123',
+      ts: '1700000000.000700',
+      text: '@bot please handle this',
+      user: 'UPEYTON',
+    });
+
+    const [chatJid, msg] = onMessage.mock.calls[0] as unknown as [string, any];
+    expect(chatJid).toBe('slack:TEST:C123:thread:1700000000.000700');
+    expect(msg.chat_jid).toBe('slack:TEST:C123:thread:1700000000.000700');
   });
 
   it('skips the thread annotation in assistant threads', async () => {
@@ -820,6 +1057,9 @@ describe('SlackChannel.handleMessage extras', () => {
     );
 
     const msg = (onMessage.mock.calls[0] as unknown as [string, any])[1];
+    expect((onMessage.mock.calls[0] as unknown as [string, any])[0]).toBe(
+      'slack:TEST:C123:thread:1700000000.000100',
+    );
     expect(msg.content).toBe('assistant question');
   });
 

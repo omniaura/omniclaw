@@ -22,11 +22,20 @@ Use `mcp__omniclaw__send_message` to send a message **mid-task**, before you're 
 
 When working as a sub-agent or teammate, only use `send_message` if instructed to by the main agent.
 
+## Conversation Thread Context
+
+Use `mcp__omniclaw__read_thread` before summarizing, filing, extracting decisions or action items, updating durable thread state, or taking action that depends on prior messages in "this thread" or "above".
+
+When stable thread state changes, use `mcp__omniclaw__update_thread_summary` to save a compact neutral summary for the current conversation scope. Include the topic, decisions, open questions, owners, artifacts, and next steps. Do not include secrets, raw transcripts, or transient chatter.
+
+Before risky writes, external side effects, or irreversible actions that need human approval, use `mcp__omniclaw__request_confirmation`. After requesting confirmation, stop and wait for a later user reply or approval reaction before taking the action.
+
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
 
 When you learn something important:
+
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
@@ -34,10 +43,11 @@ When you learn something important:
 ## WhatsApp Formatting (and other messaging apps)
 
 Do NOT use markdown headings (##) in WhatsApp messages. Only use:
-- *Bold* (single asterisks) (NEVER **double asterisks**)
+
+- _Bold_ (single asterisks) (NEVER **double asterisks**)
 - _Italic_ (underscores)
 - • Bullets (bullet points)
-- ```Code blocks``` (triple backticks)
+- `Code blocks` (triple backticks)
 
 Keep messages clean and readable for WhatsApp.
 
@@ -51,12 +61,13 @@ This is the **main channel**, which has elevated privileges.
 
 Main has access to the entire project:
 
-| Container Path | Host Path | Access |
-|----------------|-----------|--------|
-| `/workspace/project` | Project root | read-write |
-| `/workspace/group` | `groups/main/` | read-write |
+| Container Path       | Host Path      | Access     |
+| -------------------- | -------------- | ---------- |
+| `/workspace/project` | Project root   | read-write |
+| `/workspace/group`   | `groups/main/` | read-write |
 
 Key paths inside the container:
+
 - `/workspace/project/store/messages.db` - SQLite database
 - `/workspace/project/store/messages.db` (registered_groups table) - Group config
 - `/workspace/project/groups/` - All group folders
@@ -141,6 +152,7 @@ Example:
 ```
 
 Example folder name conventions:
+
 - "Family Chat" → `family-chat`
 - "Work Team" → `work-team`
 - Use lowercase, hyphens instead of spaces
@@ -196,6 +208,7 @@ You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts
 ## Scheduling for Other Groups
 
 When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `available_groups.json` (or `registered_groups` in SQLite):
+
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.

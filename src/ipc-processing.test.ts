@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 import { describe, it, expect, beforeEach } from 'bun:test';
 
 import {
@@ -31,6 +34,7 @@ import {
   Agent,
   ChannelRoute,
   ChannelSubscription,
+  NewMessage,
 } from './types.js';
 
 // --- Shared test fixtures ---
@@ -206,6 +210,312 @@ describe('processMessageIpc: send_message routing audit', () => {
       currentChatJid: 'dc:sibling',
       targetWasExplicit: true,
     });
+  });
+
+  it('sends messages to Slack thread JIDs through parent registration', async () => {
+    const threadJid = 'slack:TEST:C123:thread:1700000000.000100';
+    const slackGroups = {
+      ...groups,
+      'slack:C123': OTHER_GROUP,
+    };
+
+    const result = await processMessageIpc(
+      {
+        type: 'message',
+        chatJid: threadJid,
+        originChatJid: threadJid,
+        currentChatJid: threadJid,
+        targetWasExplicit: false,
+        text: 'progress in the thread',
+      },
+      'other-group',
+      false,
+      '/tmp/omniclaw-ipc-test',
+      slackGroups,
+      deps,
+    );
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(sentMessages).toEqual([
+      { jid: threadJid, text: 'progress in the thread' },
+    ]);
+    expect(ipcEvents[0]?.details).toMatchObject({
+      chatJid: threadJid,
+      originChatJid: threadJid,
+      currentChatJid: threadJid,
+      targetWasExplicit: false,
+    });
+  });
+
+  it('returns locally stored messages for read_thread on Slack thread JIDs', async () => {
+    const threadJid = 'slack:TEST:C123:thread:1700000000.000100';
+    const ipcDir = path.join(
+      '/tmp',
+      `omniclaw-read-thread-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    );
+    const message: NewMessage = {
+      id: '1700000000.000100',
+      chat_jid: threadJid,
+      sender: 'slack:UPEYTON',
+      sender_name: 'Peyton',
+      content: 'please summarize this',
+      timestamp: '2023-11-14T22:13:20.000Z',
+      sender_platform: 'slack',
+      sender_user_id: 'UPEYTON',
+    };
+    deps.getMessages = (jid, since, limit) => {
+      expect(jid).toBe(threadJid);
+      expect(since).toBe('');
+      expect(limit).toBe(25);
+      return [message];
+    };
+    deps.getThreadSummary = (jid) => {
+      expect(jid).toBe(threadJid);
+      return {
+        chat_jid: threadJid,
+        summary: 'Thread is about launch readiness.',
+        status: 'active',
+        updated_at: '2024-01-01T00:00:03.000Z',
+      };
+    };
+
+    try {
+      const result = await processMessageIpc(
+        {
+          type: 'read_thread',
+          chatJid: threadJid,
+          limit: 25,
+          requestId: 'read-thread-test',
+        },
+        'other-group',
+        false,
+        ipcDir,
+        {
+          ...groups,
+          'slack:C123': OTHER_GROUP,
+        },
+        deps,
+      );
+
+      expect(result).toEqual({ action: 'handled' });
+      const response = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            ipcDir,
+            'other-group',
+            'responses',
+            'read-thread-test.json',
+          ),
+          'utf-8',
+        ),
+      );
+      expect(response).toMatchObject({
+        requestId: 'read-thread-test',
+        type: 'read_thread_response',
+        ok: true,
+        result: {
+          chatJid: threadJid,
+          count: 1,
+          summary: {
+            chat_jid: threadJid,
+            summary: 'Thread is about launch readiness.',
+            status: 'active',
+            updated_at: '2024-01-01T00:00:03.000Z',
+          },
+          messages: [
+            {
+              id: '1700000000.000100',
+              sender: 'Peyton',
+              sender_id: 'slack:UPEYTON',
+              timestamp: '2023-11-14T22:13:20.000Z',
+              content: 'please summarize this',
+            },
+          ],
+        },
+      });
+    } finally {
+      fs.rmSync(ipcDir, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks read_thread for Slack threads owned by another group', async () => {
+    const threadJid = 'slack:TEST:C123:thread:1700000000.000100';
+    const ipcDir = path.join(
+      '/tmp',
+      `omniclaw-read-thread-blocked-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    );
+    deps.getMessages = () => {
+      throw new Error('read_thread should not reach getMessages');
+    };
+
+    try {
+      const result = await processMessageIpc(
+        {
+          type: 'read_thread',
+          chatJid: threadJid,
+          requestId: 'read-thread-blocked-test',
+        },
+        'third-group',
+        false,
+        ipcDir,
+        {
+          ...groups,
+          'slack:C123': OTHER_GROUP,
+        },
+        deps,
+      );
+
+      expect(result).toEqual({
+        action: 'blocked',
+        reason: 'not authorized',
+      });
+      const response = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            ipcDir,
+            'third-group',
+            'responses',
+            'read-thread-blocked-test.json',
+          ),
+          'utf-8',
+        ),
+      );
+      expect(response).toMatchObject({
+        requestId: 'read-thread-blocked-test',
+        type: 'read_thread_response',
+        ok: false,
+        error: `Not authorized to read ${threadJid}.`,
+      });
+    } finally {
+      fs.rmSync(ipcDir, { recursive: true, force: true });
+    }
+  });
+
+  it('updates thread summaries for the current Slack thread', async () => {
+    const threadJid = 'slack:TEST:C123:thread:1700000000.000100';
+    const ipcDir = path.join(
+      '/tmp',
+      `omniclaw-update-thread-summary-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    );
+    let saved:
+      | {
+          chat_jid: string;
+          summary: string;
+          status?: 'active' | 'resolved' | 'blocked';
+          updated_by?: string;
+          through_message_id?: string;
+          through_timestamp?: string;
+        }
+      | undefined;
+    deps.setThreadSummary = (summary) => {
+      saved = summary;
+      return true;
+    };
+
+    try {
+      const result = await processMessageIpc(
+        {
+          type: 'update_thread_summary',
+          chatJid: threadJid,
+          summary: 'Decision: ship the thread routing fix. Owner: Peyton.',
+          status: 'active',
+          throughMessageId: '1700000000.000200',
+          throughTimestamp: '2024-01-01T00:00:02.000Z',
+          requestId: 'update-thread-summary-test',
+        },
+        'other-group',
+        false,
+        ipcDir,
+        {
+          ...groups,
+          'slack:C123': OTHER_GROUP,
+        },
+        deps,
+      );
+
+      expect(result).toEqual({ action: 'handled' });
+      expect(saved).toEqual({
+        chat_jid: threadJid,
+        summary: 'Decision: ship the thread routing fix. Owner: Peyton.',
+        status: 'active',
+        updated_by: 'other-group',
+        through_message_id: '1700000000.000200',
+        through_timestamp: '2024-01-01T00:00:02.000Z',
+      });
+      const response = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            ipcDir,
+            'other-group',
+            'responses',
+            'update-thread-summary-test.json',
+          ),
+          'utf-8',
+        ),
+      );
+      expect(response).toMatchObject({
+        requestId: 'update-thread-summary-test',
+        type: 'update_thread_summary_response',
+        ok: true,
+        result: {
+          chatJid: threadJid,
+          updated: true,
+        },
+      });
+    } finally {
+      fs.rmSync(ipcDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports stale thread summary updates without overwriting', async () => {
+    const threadJid = 'slack:TEST:C123:thread:1700000000.000100';
+    const ipcDir = path.join(
+      '/tmp',
+      `omniclaw-update-thread-summary-stale-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    );
+    deps.setThreadSummary = () => false;
+
+    try {
+      const result = await processMessageIpc(
+        {
+          type: 'update_thread_summary',
+          chatJid: threadJid,
+          summary: 'Older summary.',
+          requestId: 'update-thread-summary-stale-test',
+        },
+        'other-group',
+        false,
+        ipcDir,
+        {
+          ...groups,
+          'slack:C123': OTHER_GROUP,
+        },
+        deps,
+      );
+
+      expect(result).toEqual({
+        action: 'blocked',
+        reason: 'stale summary',
+      });
+      const response = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            ipcDir,
+            'other-group',
+            'responses',
+            'update-thread-summary-stale-test.json',
+          ),
+          'utf-8',
+        ),
+      );
+      expect(response).toMatchObject({
+        requestId: 'update-thread-summary-stale-test',
+        type: 'update_thread_summary_response',
+        ok: false,
+      });
+    } finally {
+      fs.rmSync(ipcDir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -32,9 +32,12 @@ import {
   Channel,
   IpcMessagePayload,
   IpcTaskPayload,
+  NewMessage,
   RegisteredGroup,
+  ThreadSummary,
 } from './types.js';
 import { normalizePreprocessScriptPath } from './task-preprocessor.js';
+import { parseSlackJid } from './slack-jid.js';
 import type { IpcEventKind } from './web/ipc-events.js';
 
 export const MAX_IPC_FILES_PER_SOURCE_PER_POLL = 50;
@@ -73,6 +76,14 @@ export interface IpcDeps {
   getSubscriptions?: (
     jid: string,
   ) => Array<{ agentId: string; agentFolder: string }>;
+  /** Read locally stored chat/thread messages for tools like read_thread. */
+  getMessages?: (jid: string, since: string, limit?: number) => NewMessage[];
+  /** Read the durable rolling summary for a chat/thread. */
+  getThreadSummary?: (jid: string) => ThreadSummary | undefined;
+  /** Update the durable rolling summary for a chat/thread. */
+  setThreadSummary?: (
+    summary: Omit<ThreadSummary, 'updated_at'> & { updated_at?: string },
+  ) => boolean;
   /** Called when an IPC event occurs (for the web UI inspector). */
   onIpcEvent?: (
     kind: IpcEventKind,
@@ -130,6 +141,114 @@ function safeEmitIpcEvent(
       );
     }
   });
+}
+
+function getRegisteredGroupForIpcJid(
+  jid: string,
+  registeredGroups: Record<string, RegisteredGroup>,
+): RegisteredGroup | undefined {
+  const exact = registeredGroups[jid];
+  if (exact) return exact;
+  const slack = parseSlackJid(jid);
+  if (!slack) return undefined;
+  return (
+    registeredGroups[slack.parentJid] || registeredGroups[slack.legacyParentJid]
+  );
+}
+
+function sourceCanAccessJid(
+  jid: string,
+  sourceGroup: string,
+  isMain: boolean,
+  registeredGroups: Record<string, RegisteredGroup>,
+  deps: IpcDeps,
+): {
+  allowed: boolean;
+  targetGroup: RegisteredGroup | undefined;
+  isSelf: boolean;
+} {
+  const targetGroup = getRegisteredGroupForIpcJid(jid, registeredGroups);
+  const channelSubs = deps.getSubscriptions?.(jid) ?? [];
+  const isSelf = Boolean(
+    (targetGroup && targetGroup.folder === sourceGroup) ||
+    channelSubs.some((s) => s.agentFolder === sourceGroup),
+  );
+  return {
+    allowed: isMain || isSelf || !!targetGroup,
+    targetGroup,
+    isSelf,
+  };
+}
+
+function sourceCanReadJid(
+  jid: string,
+  sourceGroup: string,
+  isMain: boolean,
+  registeredGroups: Record<string, RegisteredGroup>,
+  deps: IpcDeps,
+): {
+  allowed: boolean;
+  targetGroup: RegisteredGroup | undefined;
+  isSelf: boolean;
+} {
+  const access = sourceCanAccessJid(
+    jid,
+    sourceGroup,
+    isMain,
+    registeredGroups,
+    deps,
+  );
+  return {
+    ...access,
+    allowed: isMain || access.isSelf,
+  };
+}
+
+function clampReadThreadLimit(limit: unknown): number {
+  if (typeof limit !== 'number' || !Number.isFinite(limit)) return 50;
+  return Math.max(1, Math.min(100, Math.floor(limit)));
+}
+
+function normalizeConfirmationEmoji(value: unknown, fallback: string): string {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  const stripped = raw.replace(/^:+|:+$/g, '');
+  if (!stripped || !/^[a-zA-Z0-9_+-]+$/.test(stripped)) return fallback;
+  return stripped.slice(0, 64);
+}
+
+function renderConfirmationRequest(data: IpcMessagePayload): {
+  text: string;
+  approveEmoji: string;
+  denyEmoji: string;
+} {
+  const action =
+    typeof data.action === 'string' && data.action.trim()
+      ? data.action.trim().slice(0, 240)
+      : 'Approve this action?';
+  const details =
+    typeof data.details === 'string' ? data.details.trim().slice(0, 4000) : '';
+  const approveName = normalizeConfirmationEmoji(
+    data.approveEmoji,
+    'white_check_mark',
+  );
+  const denyName = normalizeConfirmationEmoji(data.denyEmoji, 'x');
+  const approveEmoji = `:${approveName}:`;
+  const denyEmoji = `:${denyName}:`;
+  const lines = [`*Confirmation needed:* ${action}`, ''];
+
+  if (details) {
+    lines.push(details, '');
+  }
+
+  lines.push(
+    `React with ${approveEmoji} to approve or ${denyEmoji} to deny. You can also reply with changes or questions.`,
+  );
+
+  return {
+    text: lines.join('\n'),
+    approveEmoji,
+    denyEmoji,
+  };
 }
 
 type IpcSourceKind = 'messages' | 'tasks';
@@ -398,6 +517,286 @@ export async function processMessageIpc(
     return { action: 'handled' };
   }
 
+  // --- request_confirmation ---
+  if (data.type === 'request_confirmation' && data.chatJid) {
+    const chatJid = data.chatJid;
+    const access = sourceCanAccessJid(
+      chatJid,
+      sourceGroup,
+      isMain,
+      registeredGroups,
+      deps,
+    );
+    if (!access.allowed) {
+      const responseWrite = writeIpcMessageResponse(
+        ipcBaseDir,
+        sourceGroup,
+        data.requestId,
+        {
+          type: 'request_confirmation_response',
+          ok: false,
+          error: `Not authorized to request confirmation in ${chatJid}.`,
+        },
+      );
+      if (!responseWrite.ok) return responseWrite.result;
+      logger.warn(
+        { chatJid, sourceGroup },
+        'Unauthorized IPC request_confirmation attempt blocked',
+      );
+      return { action: 'blocked', reason: 'not authorized' };
+    }
+
+    const { text, approveEmoji, denyEmoji } = renderConfirmationRequest(data);
+    const msgText = stripInternalTags(text);
+    if (!msgText) {
+      const responseWrite = writeIpcMessageResponse(
+        ipcBaseDir,
+        sourceGroup,
+        data.requestId,
+        {
+          type: 'request_confirmation_response',
+          ok: false,
+          error: 'Confirmation request was empty after sanitization.',
+        },
+      );
+      if (!responseWrite.ok) return responseWrite.result;
+      return { action: 'blocked', reason: 'empty confirmation request' };
+    }
+
+    const sentMessageId = await deps.sendMessage(chatJid, msgText);
+    const messageId =
+      typeof sentMessageId === 'string' && sentMessageId.trim()
+        ? sentMessageId.trim()
+        : undefined;
+    const ch = deps.findChannel?.(chatJid);
+    const reactionsAdded: string[] = [];
+    const reactionErrors: string[] = [];
+
+    if (messageId && ch?.addReaction) {
+      for (const emoji of [approveEmoji, denyEmoji]) {
+        try {
+          await ch.addReaction(chatJid, messageId, emoji);
+          reactionsAdded.push(emoji);
+        } catch (err) {
+          reactionErrors.push(err instanceof Error ? err.message : String(err));
+        }
+      }
+    }
+
+    const responseWrite = writeIpcMessageResponse(
+      ipcBaseDir,
+      sourceGroup,
+      data.requestId,
+      {
+        type: 'request_confirmation_response',
+        ok: true,
+        result: {
+          chatJid,
+          messageId: messageId ?? null,
+          approveEmoji,
+          denyEmoji,
+          reactionsAdded,
+          reactionErrors,
+        },
+      },
+    );
+    if (!responseWrite.ok) return responseWrite.result;
+
+    logger.info(
+      {
+        chatJid,
+        sourceGroup,
+        messageId,
+        approveEmoji,
+        denyEmoji,
+        reactionErrorCount: reactionErrors.length,
+      },
+      'IPC request_confirmation processed',
+    );
+    return { action: 'handled' };
+  }
+
+  // --- read_thread ---
+  if (data.type === 'read_thread' && data.chatJid) {
+    const chatJid = data.chatJid;
+    const access = sourceCanReadJid(
+      chatJid,
+      sourceGroup,
+      isMain,
+      registeredGroups,
+      deps,
+    );
+    if (!access.allowed) {
+      const responseWrite = writeIpcMessageResponse(
+        ipcBaseDir,
+        sourceGroup,
+        data.requestId,
+        {
+          type: 'read_thread_response',
+          ok: false,
+          error: `Not authorized to read ${chatJid}.`,
+        },
+      );
+      if (!responseWrite.ok) return responseWrite.result;
+      logger.warn(
+        { chatJid, sourceGroup },
+        'Unauthorized IPC read_thread attempt blocked',
+      );
+      return { action: 'blocked', reason: 'not authorized' };
+    }
+
+    if (!deps.getMessages) {
+      const responseWrite = writeIpcMessageResponse(
+        ipcBaseDir,
+        sourceGroup,
+        data.requestId,
+        {
+          type: 'read_thread_response',
+          ok: false,
+          error: 'Host message reader is unavailable.',
+        },
+      );
+      if (!responseWrite.ok) return responseWrite.result;
+      return { action: 'blocked', reason: 'message reader unavailable' };
+    }
+
+    const limit = clampReadThreadLimit(data.limit);
+    const messages = deps.getMessages(chatJid, '', limit).map((m) => ({
+      id: m.id,
+      sender: m.sender_name || m.sender,
+      sender_id: m.sender,
+      timestamp: m.timestamp,
+      content: m.content,
+    }));
+    const threadSummary = deps.getThreadSummary?.(chatJid);
+    const responseWrite = writeIpcMessageResponse(
+      ipcBaseDir,
+      sourceGroup,
+      data.requestId,
+      {
+        type: 'read_thread_response',
+        ok: true,
+        result: {
+          chatJid,
+          count: messages.length,
+          summary: threadSummary ?? null,
+          messages,
+        },
+      },
+    );
+    if (!responseWrite.ok) return responseWrite.result;
+    logger.info(
+      { chatJid, sourceGroup, count: messages.length },
+      'IPC read_thread processed',
+    );
+    return { action: 'handled' };
+  }
+
+  // --- update_thread_summary ---
+  if (data.type === 'update_thread_summary' && data.chatJid) {
+    const chatJid = data.chatJid;
+    const access = sourceCanReadJid(
+      chatJid,
+      sourceGroup,
+      isMain,
+      registeredGroups,
+      deps,
+    );
+    if (!access.allowed) {
+      const responseWrite = writeIpcMessageResponse(
+        ipcBaseDir,
+        sourceGroup,
+        data.requestId,
+        {
+          type: 'update_thread_summary_response',
+          ok: false,
+          error: `Not authorized to update summary for ${chatJid}.`,
+        },
+      );
+      if (!responseWrite.ok) return responseWrite.result;
+      logger.warn(
+        { chatJid, sourceGroup },
+        'Unauthorized IPC update_thread_summary attempt blocked',
+      );
+      return { action: 'blocked', reason: 'not authorized' };
+    }
+
+    if (!deps.setThreadSummary) {
+      const responseWrite = writeIpcMessageResponse(
+        ipcBaseDir,
+        sourceGroup,
+        data.requestId,
+        {
+          type: 'update_thread_summary_response',
+          ok: false,
+          error: 'Host thread summary writer is unavailable.',
+        },
+      );
+      if (!responseWrite.ok) return responseWrite.result;
+      return { action: 'blocked', reason: 'thread summary writer unavailable' };
+    }
+
+    const summary = typeof data.summary === 'string' ? data.summary.trim() : '';
+    if (!summary) {
+      const responseWrite = writeIpcMessageResponse(
+        ipcBaseDir,
+        sourceGroup,
+        data.requestId,
+        {
+          type: 'update_thread_summary_response',
+          ok: false,
+          error: 'Summary must be non-empty.',
+        },
+      );
+      if (!responseWrite.ok) return responseWrite.result;
+      return { action: 'blocked', reason: 'empty summary' };
+    }
+
+    const status =
+      data.status === 'active' ||
+      data.status === 'resolved' ||
+      data.status === 'blocked'
+        ? data.status
+        : undefined;
+    const updated = deps.setThreadSummary({
+      chat_jid: chatJid,
+      summary,
+      status,
+      updated_by: sourceGroup,
+      through_message_id: data.throughMessageId,
+      through_timestamp: data.throughTimestamp,
+    });
+
+    const responseWrite = writeIpcMessageResponse(
+      ipcBaseDir,
+      sourceGroup,
+      data.requestId,
+      {
+        type: 'update_thread_summary_response',
+        ok: updated,
+        ...(updated
+          ? {
+              result: {
+                chatJid,
+                updated: true,
+              },
+            }
+          : {
+              error:
+                'Thread summary was not updated because it appears older than the saved summary.',
+            }),
+      },
+    );
+    if (!responseWrite.ok) return responseWrite.result;
+    logger.info(
+      { chatJid, sourceGroup, updated },
+      'IPC update_thread_summary processed',
+    );
+    return updated
+      ? { action: 'handled' }
+      : { action: 'blocked', reason: 'stale summary' };
+  }
+
   // --- ssh_pubkey ---
   if (data.type === 'ssh_pubkey' && data.pubkey) {
     logger.info(
@@ -425,17 +824,14 @@ export async function processMessageIpc(
       );
       return { action: 'suppressed', reason: 'internal-only' };
     }
-    // Authorization: any registered agent can message any other registered agent
-    const targetGroup = registeredGroups[msgChatJid];
-    // isSelf: sourceGroup is the primary agent OR any subscriber of this channel.
-    // Prevents secondary agents (e.g. OCPeyton) posting to a shared channel from
-    // triggering notifyGroup, which would wake up the primary agent (Clayton) to respond.
-    const channelSubs = deps.getSubscriptions?.(msgChatJid) ?? [];
-    const isSelf =
-      (targetGroup && targetGroup.folder === sourceGroup) ||
-      channelSubs.some((s) => s.agentFolder === sourceGroup);
-    const isRegisteredTarget = !!targetGroup;
-    if (isMain || isSelf || isRegisteredTarget) {
+    const { allowed, targetGroup, isSelf } = sourceCanAccessJid(
+      msgChatJid,
+      sourceGroup,
+      isMain,
+      registeredGroups,
+      deps,
+    );
+    if (allowed) {
       await deps.sendMessage(msgChatJid, msgText, data.discord_bot_id);
       // Cross-group message: also wake up the target agent.
       // Pass sourceGroup so the notify message is tagged — the source
