@@ -51,8 +51,8 @@ describe('normalizeAgentModelOverride', () => {
   });
 
   it('allows non-control punctuation used by provider model names', () => {
-    expect(normalizeAgentModelOverride('openai/gpt-5.5:preview_2026-07-01')).toBe(
-      'openai/gpt-5.5:preview_2026-07-01',
-    );
+    expect(
+      normalizeAgentModelOverride('openai/gpt-5.5:preview_2026-07-01'),
+    ).toBe('openai/gpt-5.5:preview_2026-07-01');
   });
 });
