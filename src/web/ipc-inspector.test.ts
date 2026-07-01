@@ -7,6 +7,7 @@ import { startWebServer, type WebServerHandle } from './server.js';
 import {
   classifyIpcEventSeverity,
   countIpcEventSeverities,
+  formatPendingWithBreadth,
   formatRecentEventsValue,
   renderIpcInspector,
 } from './ipc-inspector.js';
@@ -212,16 +213,39 @@ describe('renderIpcInspector', () => {
     expect(html).toContain('id="stat-groups">2 (1 active)<');
   });
 
-  it('shows aggregate pending messages stat card', () => {
-    // alpha has 2 pending msgs, beta has 0 → total 2
+  it('shows aggregate pending messages stat card with group breadth', () => {
+    // alpha has 2 pending msgs, beta has 0 → total 2 across 1 group
     const html = renderIpcInspector(makeState());
-    expect(html).toContain('id="stat-pending-messages">2<');
+    expect(html).toContain('id="stat-pending-messages">2 (1 group)<');
   });
 
-  it('shows aggregate pending tasks stat card', () => {
-    // alpha has 1 pending task, beta has 0 → total 1
+  it('shows aggregate pending tasks stat card with group breadth', () => {
+    // alpha has 1 pending task, beta has 0 → total 1 across 1 group
     const html = renderIpcInspector(makeState());
-    expect(html).toContain('id="stat-pending-tasks">1<');
+    expect(html).toContain('id="stat-pending-tasks">1 (1 group)<');
+  });
+
+  it('pluralizes group breadth when backlog spans multiple groups', () => {
+    // both groups carry pending messages → total 5 across 2 groups
+    const spread: GroupQueueDetail[] = sampleQueueDetails.map((g, i) => ({
+      ...g,
+      messageLane: { ...g.messageLane, pendingCount: i === 0 ? 2 : 3 },
+    }));
+    const html = renderIpcInspector(
+      makeState({ getQueueDetails: () => spread }),
+    );
+    expect(html).toContain('id="stat-pending-messages">5 (2 groups)<');
+  });
+
+  it('omits breadth annotation when nothing is pending', () => {
+    const idle: GroupQueueDetail[] = sampleQueueDetails.map((g) => ({
+      ...g,
+      messageLane: { ...g.messageLane, pendingCount: 0 },
+      taskLane: { ...g.taskLane, pendingCount: 0 },
+    }));
+    const html = renderIpcInspector(makeState({ getQueueDetails: () => idle }));
+    expect(html).toContain('id="stat-pending-messages">0<');
+    expect(html).toContain('id="stat-pending-tasks">0<');
   });
 
   it('shows aggregate retrying stat card with retry depth', () => {
@@ -767,6 +791,25 @@ describe('formatRecentEventsValue', () => {
     expect(formatRecentEventsValue(10, { error: 3, warn: 2, ok: 5 })).toBe(
       '10 (3 err, 2 warn)',
     );
+  });
+});
+
+describe('formatPendingWithBreadth', () => {
+  it('returns the bare total when nothing is pending', () => {
+    expect(formatPendingWithBreadth(0, 0)).toBe('0');
+  });
+
+  it('falls back to the bare total when breadth is unknown', () => {
+    // Defensive: a positive total with zero groups should never annotate.
+    expect(formatPendingWithBreadth(4, 0)).toBe('4');
+  });
+
+  it('uses the singular unit for a single group', () => {
+    expect(formatPendingWithBreadth(3, 1)).toBe('3 (1 group)');
+  });
+
+  it('pluralizes the unit for multiple groups', () => {
+    expect(formatPendingWithBreadth(7, 3)).toBe('7 (3 groups)');
   });
 });
 

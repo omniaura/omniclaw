@@ -77,6 +77,25 @@ export function formatRecentEventsValue(
   return `${total} (${parts.join(', ')})`;
 }
 
+/**
+ * Format a pending-backlog stat card value as intensity plus group breadth.
+ * Mirrors the `retrying` card's `N (M)` shape: the total pending count is the
+ * headline (intensity), qualified in parentheses by how many groups actually
+ * carry the backlog (breadth). The two together answer a question the bare
+ * total can't: a backlog concentrated in a single group points at one stuck
+ * agent, while the same total spread across many groups points at systemic
+ * back-pressure. Falls back to the bare total when nothing is pending so an
+ * empty queue still reads as a clean `0`.
+ */
+export function formatPendingWithBreadth(
+  total: number,
+  groups: number,
+): string {
+  if (total <= 0 || groups <= 0) return String(total);
+  const unit = groups === 1 ? 'group' : 'groups';
+  return `${total} (${groups} ${unit})`;
+}
+
 /** Render IPC inspector content (no shell). */
 export function renderIpcInspectorContent(state: WebStateProvider): string {
   const stats = state.getQueueStats();
@@ -85,6 +104,8 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
 
   let pendingMessages = 0;
   let pendingTasks = 0;
+  let groupsWithPendingMessages = 0;
+  let groupsWithPendingTasks = 0;
   let retryingGroups = 0;
   let totalRetries = 0;
   // Count groups with either lane currently in flight. Matches the
@@ -98,6 +119,8 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
   for (const g of queueDetails) {
     pendingMessages += g.messageLane.pendingCount;
     pendingTasks += g.taskLane.pendingCount;
+    if (g.messageLane.pendingCount > 0) groupsWithPendingMessages++;
+    if (g.taskLane.pendingCount > 0) groupsWithPendingTasks++;
     if (g.retryCount > 0) retryingGroups++;
     totalRetries += g.retryCount;
     if ((g.messageLane.active && !g.messageLane.idle) || g.taskLane.active) {
@@ -185,8 +208,8 @@ export function renderIpcInspectorContent(state: WebStateProvider): string {
     `<div class="stat-card"><div class="label">processing</div><div class="value" id="stat-processing">${Math.max(0, stats.activeContainers - stats.idleContainers)}/${stats.maxActive}</div></div>` +
     `<div class="stat-card"><div class="label">idle</div><div class="value" id="stat-ipc-idle">${stats.idleContainers}/${stats.maxIdle}</div></div>` +
     `<div class="stat-card"><div class="label">groups tracked</div><div class="value" id="stat-groups">${groupsTrackedValue}</div></div>` +
-    `<div class="stat-card"><div class="label">pending msgs</div><div class="value" id="stat-pending-messages">${pendingMessages}</div></div>` +
-    `<div class="stat-card"><div class="label">pending tasks</div><div class="value" id="stat-pending-tasks">${pendingTasks}</div></div>` +
+    `<div class="stat-card"><div class="label">pending msgs</div><div class="value" id="stat-pending-messages">${formatPendingWithBreadth(pendingMessages, groupsWithPendingMessages)}</div></div>` +
+    `<div class="stat-card"><div class="label">pending tasks</div><div class="value" id="stat-pending-tasks">${formatPendingWithBreadth(pendingTasks, groupsWithPendingTasks)}</div></div>` +
     `<div class="stat-card"><div class="label">retrying</div><div class="value" id="stat-retrying">${retryingGroups > 0 ? `${retryingGroups} (${totalRetries})` : '0'}</div></div>` +
     `<div class="stat-card"><div class="label">recent events</div><div class="value" id="stat-events">${formatRecentEventsValue(events.length, eventCounts)}</div></div>` +
     `</div>` +

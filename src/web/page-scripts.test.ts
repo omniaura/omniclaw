@@ -103,6 +103,25 @@ describe('tasks page script', () => {
   });
 });
 
+describe('ipc page script', () => {
+  it('updates pending stat cards with group breadth on poll', () => {
+    const script = allPageScripts().ipc;
+
+    expect(script).toContain('fetch("/api/ipc/queue")');
+    // Breadth counters accumulate total and group count per lane.
+    expect(script).toContain('var pm=0,pmg=0,pt=0,ptg=0;');
+    expect(script).toContain(
+      'function fmtPend(total,groups){return total>0&&groups>0?total+" ("+groups+" "+(groups===1?"group":"groups")+")":String(total);}',
+    );
+    expect(script).toContain(
+      'var spm=document.getElementById("stat-pending-messages");if(spm)spm.textContent=fmtPend(pm,pmg);',
+    );
+    expect(script).toContain(
+      'var spt=document.getElementById("stat-pending-tasks");if(spt)spt.textContent=fmtPend(pt,ptg);',
+    );
+  });
+});
+
 describe('context page script', () => {
   it('sanitizes rendered markdown before injecting preview HTML', () => {
     const script = allPageScripts().context;
