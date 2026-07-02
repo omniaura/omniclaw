@@ -261,10 +261,14 @@ export function buildSafeMediaPath(
   rawFilename: string,
   prefix?: string,
 ): string {
-  const safeName = path.basename(rawFilename);
-  const filename = prefix
-    ? `${messageId}-${prefix}-${safeName}`
-    : `${messageId}-${safeName}`;
+  const safeName = sanitizeAttachmentMarkerAttribute(rawFilename, 'attachment');
+  const safeMessageId = sanitizeAttachmentMarkerAttribute(messageId, 'message');
+  const safePrefix = prefix
+    ? sanitizeAttachmentMarkerAttribute(prefix, 'attachment')
+    : undefined;
+  const filename = safePrefix
+    ? `${safeMessageId}-${safePrefix}-${safeName}`
+    : `${safeMessageId}-${safeName}`;
   const filePath = path.join(mediaDir, filename);
   assertPathWithin(filePath, mediaDir, 'media attachment');
   return filePath;
@@ -309,9 +313,27 @@ export async function storeMediaAttachment(opts: {
 // Attachment markers (text format consumed by agent-runner)
 // ---------------------------------------------------------------------------
 
+const ATTACHMENT_MARKER_UNSAFE_RE = /[^A-Za-z0-9._-]/g;
+
+function sanitizeAttachmentMarkerAttribute(
+  value: string,
+  fallback: string,
+): string {
+  const sanitized = path
+    .basename(value)
+    .replace(ATTACHMENT_MARKER_UNSAFE_RE, '_')
+    .replace(/_+/g, '_')
+    .replace(/^\.+$/, '');
+  return sanitized || fallback;
+}
+
+function escapeInlineAttachmentMarkers(content: string): string {
+  return content.replace(/\[(\/?attachment:)/g, '[\\$1');
+}
+
 /** Format an image attachment marker for the agent runtime. */
 export function formatImageMarker(filename: string): string {
-  return `[attachment:image file=${filename}]`;
+  return `[attachment:image file=${sanitizeAttachmentMarkerAttribute(filename, 'image')}]`;
 }
 
 /** Format an inline text file attachment for the agent runtime. */
@@ -319,7 +341,7 @@ export function formatTextFileMarker(
   filename: string,
   content: string,
 ): string {
-  return `[attachment:file name=${filename}]\n${content}\n[/attachment:file]`;
+  return `[attachment:file name=${sanitizeAttachmentMarkerAttribute(filename, 'file')}]\n${escapeInlineAttachmentMarkers(content)}\n[/attachment:file]`;
 }
 
 /**
@@ -336,8 +358,10 @@ export function formatBinaryFileMarker(
   filename: string,
   originalName?: string,
 ): string {
-  const safe = path.basename(filename);
-  const display = originalName ? path.basename(originalName) : safe;
+  const safe = sanitizeAttachmentMarkerAttribute(filename, 'file');
+  const display = originalName
+    ? sanitizeAttachmentMarkerAttribute(originalName, safe)
+    : safe;
   return `[attachment:file path=media/${safe} name=${display}]`;
 }
 
