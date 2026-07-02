@@ -40,16 +40,14 @@ describe('SharedVmManager', () => {
   let extraDir = '';
 
   function mockContainerList(containers: unknown) {
-    return spyOn(Bun, '$').mockImplementation(
-      (() => ({
-        quiet: mock(async () => ({
-          text: () =>
-            typeof containers === 'string'
-              ? containers
-              : JSON.stringify(containers),
-        })),
-      })) as unknown as typeof Bun.$,
-    );
+    return spyOn(Bun, '$').mockImplementation((() => ({
+      quiet: mock(async () => ({
+        text: () =>
+          typeof containers === 'string'
+            ? containers
+            : JSON.stringify(containers),
+      })),
+    })) as unknown as typeof Bun.$);
   }
 
   beforeEach(() => {
