@@ -39,6 +39,19 @@ describe('SharedVmManager', () => {
   const originalExtraDir = process.env.OMNICLAW_EXTRA_DIR;
   let extraDir = '';
 
+  function mockContainerList(containers: unknown) {
+    return spyOn(Bun, '$').mockImplementation(
+      (() => ({
+        quiet: mock(async () => ({
+          text: () =>
+            typeof containers === 'string'
+              ? containers
+              : JSON.stringify(containers),
+        })),
+      })) as unknown as typeof Bun.$,
+    );
+  }
+
   beforeEach(() => {
     extraDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-extra-'));
     process.env.OMNICLAW_EXTRA_DIR = extraDir;
@@ -146,5 +159,92 @@ describe('SharedVmManager', () => {
       'stop',
       'omniclaw-shared-claude-stop-me',
     ]);
+  });
+
+  it('reuses a live container discovered from runtime list output', async () => {
+    const manager = new SharedVmManager();
+    (manager as any).containerName = 'omniclaw-shared-claude-live';
+    const dollarSpy = mockContainerList([
+      {
+        status: 'running',
+        configuration: { id: 'omniclaw-shared-claude-live' },
+      },
+      {
+        status: 'stopped',
+        configuration: { id: 'omniclaw-shared-claude-live' },
+      },
+    ]);
+    const spawnSpy = spyOn(Bun, 'spawn');
+
+    await expect(manager.ensureRunning()).resolves.toBe(
+      'omniclaw-shared-claude-live',
+    );
+
+    expect(dollarSpy).toHaveBeenCalledTimes(1);
+    expect(spawnSpy).not.toHaveBeenCalled();
+  });
+
+  it('starts a replacement when runtime list parsing fails for a cached name', async () => {
+    const manager = new SharedVmManager();
+    (manager as any).containerName = 'omniclaw-shared-claude-stale';
+    const nowSpy = spyOn(Date, 'now').mockReturnValue(333);
+    mockContainerList('not json');
+    const spawnSpy = spyOn(Bun, 'spawn').mockImplementation((() =>
+      makeProcess(0)) as unknown as typeof Bun.spawn);
+
+    try {
+      await expect(manager.ensureRunning()).resolves.toBe(
+        'omniclaw-shared-claude-333',
+      );
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('stops only running orphaned shared VMs during cleanup', async () => {
+    const manager = new SharedVmManager();
+    (manager as any).containerName = 'omniclaw-shared-claude-current';
+    mockContainerList([
+      {
+        status: 'running',
+        configuration: { id: 'omniclaw-shared-claude-current' },
+      },
+      {
+        status: 'running',
+        configuration: { id: 'omniclaw-shared-claude-orphan-a' },
+      },
+      {
+        status: 'stopped',
+        configuration: { id: 'omniclaw-shared-claude-stopped' },
+      },
+      {
+        status: 'running',
+        configuration: { id: 'unrelated-container' },
+      },
+      {
+        status: 'running',
+        configuration: { id: 'omniclaw-shared-claude-orphan-b' },
+      },
+    ]);
+    const spawnSpy = spyOn(Bun, 'spawn').mockImplementation((() =>
+      makeProcess(0)) as unknown as typeof Bun.spawn);
+
+    await expect(manager.cleanupOrphans()).resolves.toBeUndefined();
+
+    expect(spawnSpy.mock.calls.map((call) => call[0])).toEqual([
+      [LOCAL_RUNTIME, 'stop', 'omniclaw-shared-claude-orphan-a'],
+      [LOCAL_RUNTIME, 'stop', 'omniclaw-shared-claude-orphan-b'],
+    ]);
+  });
+
+  it('treats malformed runtime list output as non-fatal during cleanup', async () => {
+    const manager = new SharedVmManager();
+    mockContainerList('not json');
+    const spawnSpy = spyOn(Bun, 'spawn');
+
+    await expect(manager.cleanupOrphans()).resolves.toBeUndefined();
+
+    expect(spawnSpy).not.toHaveBeenCalled();
   });
 });
