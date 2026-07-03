@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomUUID } from 'crypto';
 
-import { describe, it, expect, afterEach } from 'bun:test';
+import { describe, it, expect, afterEach, mock } from 'bun:test';
 
 import {
   isTrustedLanDiscoveryAdminRequest,
@@ -206,6 +206,8 @@ function extractInlineShellScript(html: string): string {
 const testAuth = { username: 'admin', password: 'secret' };
 const authHeader = `Basic ${btoa(`${testAuth.username}:${testAuth.password}`)}`;
 const peerSecret = 'peer-shared-secret-32-bytes-long!';
+const originalFetch = globalThis.fetch;
+const originalWebUiSolid = process.env.WEB_UI_SOLID;
 
 let handle: WebServerHandle | null = null;
 
@@ -218,6 +220,12 @@ afterEach(async () => {
   if (handle) {
     await handle.stop();
     handle = null;
+  }
+  globalThis.fetch = originalFetch;
+  if (originalWebUiSolid === undefined) {
+    delete process.env.WEB_UI_SOLID;
+  } else {
+    process.env.WEB_UI_SOLID = originalWebUiSolid;
   }
   resetDiscoveryContextForTests();
 });
@@ -472,6 +480,29 @@ describe('basic auth', () => {
       error: 'Cross-site request blocked',
     });
     expect(runCalls).toBe(0);
+  });
+
+  it('rejects cross-site SolidStart page POSTs before proxying', async () => {
+    process.env.WEB_UI_SOLID = 'true';
+    const proxyFetch = mock(
+      async () => new Response('proxied unsafe page mutation', { status: 299 }),
+    );
+    globalThis.fetch = proxyFetch as unknown as typeof fetch;
+
+    handle = startWebServer(testConfig(), makeState());
+
+    const res = await originalFetch(url('/solid-action'), {
+      method: 'POST',
+      headers: {
+        Authorization: authHeader,
+        Origin: 'https://attacker.example',
+        'Sec-Fetch-Site': 'cross-site',
+      },
+    });
+
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('Cross-site request blocked');
+    expect(proxyFetch).not.toHaveBeenCalled();
   });
 
   it('allows same-origin browser POSTs with valid Basic credentials', async () => {

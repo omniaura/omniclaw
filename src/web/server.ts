@@ -446,6 +446,13 @@ export function startWebServer(
       );
     }
 
+    if (
+      !isAuthenticatedPeerRequest &&
+      isCrossSiteBrowserMutation(req, url, corsOrigin)
+    ) {
+      return makeCsrfRejection(url.pathname);
+    }
+
     // --- SolidStart mode: JSON SSE + delegate to SolidStart handler ---
     if (solidMode && url.pathname === '/api/events') {
       if (req.method !== 'GET') {
@@ -839,13 +846,6 @@ export function startWebServer(
         status: 204,
         headers: makeCorsHeaders(corsOrigin),
       });
-    }
-
-    if (
-      !isAuthenticatedPeerRequest &&
-      isCrossSiteBrowserMutation(req, url, corsOrigin)
-    ) {
-      return makeCsrfRejection(url.pathname);
     }
 
     const result = handleRequest(req, state, sseClients.size);
