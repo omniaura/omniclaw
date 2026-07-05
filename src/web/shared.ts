@@ -23,7 +23,8 @@ export function escapeHtml(str: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 export function escapeJsonForHtml(json: string): string {
@@ -1691,7 +1692,7 @@ function shellScript(pageScripts: Record<string, string>): string {
 
   // ---- Escape helper (used by page inits) ----
   parts.push(
-    'window.__esc=function(s){if(!s)return"";var d=document.createElement("div");d.textContent=String(s);return d.innerHTML;};',
+    `window.__esc=function(s){if(!s)return"";return String(s).replace(/[&<>"']/g,function(c){return c==="&"?"&amp;":c==="<"?"&lt;":c===">"?"&gt;":c==='"'?"&quot;":"&#39;";});};`,
   );
   parts.push(
     'window.__sanitizeUrl=function(url){if(!url)return"";var v=String(url).trim();if(!v)return"";if(v[0]==="#"||v[0]==="/")return v;try{var p=new URL(v,window.location.origin).protocol.toLowerCase();if(p==="http:"||p==="https:"||p==="mailto:"||p==="tel:")return v;}catch{}return"";};',
