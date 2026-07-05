@@ -35,6 +35,16 @@ describe('normalizeAgentModelOverride', () => {
     ).toThrow(InvalidAgentModelOverrideError);
   });
 
+  test('reports a specific validation error for oversized overrides', () => {
+    expect(() =>
+      normalizeAgentModelOverride(
+        'a'.repeat(MAX_AGENT_MODEL_OVERRIDE_LENGTH + 1),
+      ),
+    ).toThrow(
+      `"model" must be ${MAX_AGENT_MODEL_OVERRIDE_LENGTH} characters or fewer`,
+    );
+  });
+
   test('rejects control characters after trimming', () => {
     const unsafeModels = [
       'claude\nopencode',
@@ -49,5 +59,11 @@ describe('normalizeAgentModelOverride', () => {
         InvalidAgentModelOverrideError,
       );
     }
+  });
+
+  test('reports a specific validation error for control characters', () => {
+    expect(() => normalizeAgentModelOverride('claude\nopencode')).toThrow(
+      '"model" must not contain control characters',
+    );
   });
 });
