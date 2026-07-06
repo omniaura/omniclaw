@@ -643,6 +643,14 @@ function shellCSS(): string {
     `.ad-table-wrap table{background:var(--surface)}`,
     `.td-dim{color:var(--text-dim)}`,
     `.td-prompt{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}`,
+    // Agent-detail message composer
+    `.ad-send-form{display:flex;flex-direction:column;gap:8px}`,
+    `.ad-send-row{display:flex;gap:8px;flex-wrap:wrap}`,
+    `.ad-send-channel{flex:1 1 200px;min-width:0}`,
+    `.ad-send-sender{flex:1 1 160px;min-width:0}`,
+    `.ad-send-content{width:100%;min-height:72px;resize:vertical;font-family:inherit;font-size:12px}`,
+    `.ad-send-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}`,
+    `.ad-send-help{font-size:10px}`,
 
     // --- Page: Task Manager ---
     `.tasks-page{padding:12px 16px;flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column}`,
