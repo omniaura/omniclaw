@@ -11,9 +11,19 @@ import {
 
 describe('escapeHtml', () => {
   it('escapes the HTML-sensitive characters used by the web UI', () => {
-    expect(escapeHtml('&<>"')).toBe('&amp;&lt;&gt;&quot;');
-    expect(escapeHtml("it's fine")).toBe("it's fine");
+    expect(escapeHtml('&<>"\'')).toBe('&amp;&lt;&gt;&quot;&#39;');
     expect(escapeHtml('')).toBe('');
+  });
+});
+
+describe('client escape helper', () => {
+  it('encodes quotes for generated HTML attribute contexts', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('window.__esc=function(s){');
+    expect(html).toContain('c===\'"\'?"&quot;":"&#39;"');
+    expect(html).toContain('/[&<>"\']/g');
+    expect(html).not.toContain('document.createElement("div");d.textContent');
   });
 });
 
