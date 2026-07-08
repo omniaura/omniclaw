@@ -526,9 +526,19 @@ describe('createSimDiscoveryEnvironment', () => {
 
   it('returns null when direct peer-client lookup targets an unknown peer', () => {
     const env = createSimDiscoveryEnvironment(new FakeState());
+    const createPeerClient = env.context.createPeerClient;
 
-    expect(env.context.createPeerClient({ instanceId: 'missing' } as any)).toBe(
-      null,
-    );
+    expect(createPeerClient).toBeDefined();
+    expect(
+      createPeerClient!(
+        {
+          instanceId: 'missing',
+          host: 'missing.local',
+          port: 3100,
+          sharedSecret: 'sim-secret-missing',
+        },
+        env.context,
+      ),
+    ).toBe(null);
   });
 });
