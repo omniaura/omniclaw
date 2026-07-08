@@ -458,4 +458,77 @@ describe('createSimDiscoveryEnvironment', () => {
       'Remote peer not found: missing-peer',
     );
   });
+
+  it('builds a deterministic default network page state for the seeded peer', () => {
+    const env = createSimDiscoveryEnvironment(new FakeState());
+
+    const pageState = env.getNetworkPageState();
+
+    expect(pageState).toMatchObject({
+      instanceId: 'sim-local-instance',
+      instanceName: 'Sim Local OmniClaw',
+      discoveryAvailable: true,
+      discoveryEnabled: true,
+      runtime: {
+        enabled: true,
+        active: true,
+        currentNetwork: {
+          id: 'sim-lan',
+          label: 'Simulated LAN',
+        },
+        trustedNetworks: [],
+      },
+      pendingRequests: [],
+    });
+    expect(pageState.peers).toHaveLength(1);
+    expect(pageState.peers[0]).toMatchObject({
+      instanceId: 'peer-remote-1',
+      name: 'Remote OmniClaw',
+      host: 'remote-sim.local',
+      port: 3100,
+      addresses: ['192.168.1.80'],
+      status: 'trusted',
+      online: true,
+    });
+  });
+
+  it('adds an initially offline trusted peer without advertising addresses', () => {
+    const env = createSimDiscoveryEnvironment(new FakeState());
+
+    env.addRemotePeer({
+      instanceId: 'peer-offline',
+      name: 'Offline Builder',
+      host: 'offline-sim.local',
+      address: '192.168.1.99',
+      channelFolder: 'offline',
+      online: false,
+    });
+
+    expect(env.listRemotePeers()).toContainEqual(
+      expect.objectContaining({
+        instanceId: 'peer-offline',
+        name: 'Offline Builder',
+        online: false,
+        status: 'trusted',
+      }),
+    );
+    expect(env.getNetworkPageState().peers).toContainEqual(
+      expect.objectContaining({
+        instanceId: 'peer-offline',
+        host: 'offline-sim.local',
+        port: 3100,
+        addresses: [],
+        online: false,
+        status: 'trusted',
+      }),
+    );
+  });
+
+  it('returns null when direct peer-client lookup targets an unknown peer', () => {
+    const env = createSimDiscoveryEnvironment(new FakeState());
+
+    expect(env.context.createPeerClient({ instanceId: 'missing' } as any)).toBe(
+      null,
+    );
+  });
 });
