@@ -256,8 +256,7 @@ describe('renderPeerRows', () => {
   });
 
   it('renders an offline peer with a last-seen relative chip and absolute title', () => {
-    const now = Date.parse('2026-06-07T12:00:00.000Z');
-    const lastSeen = new Date(now - 5 * 60_000).toISOString();
+    const lastSeen = new Date(Date.now() - 5 * 60_000).toISOString();
     const html = renderPeerRows([
       makePeer({
         instanceId: 'offline-1',
