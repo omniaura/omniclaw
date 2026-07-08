@@ -256,8 +256,12 @@ describe('renderPeerRows', () => {
   });
 
   it('renders an offline peer with a last-seen relative chip and absolute title', () => {
-    const now = Date.parse('2026-06-07T12:00:00.000Z');
-    const lastSeen = new Date(now - 5 * 60_000).toISOString();
+    // `renderPeerRows` humanizes lastSeen against the real `Date.now()`, so the
+    // fixture must be anchored to the wall clock too. A fixed fake `now` drifts
+    // past the 30-day locale-date fallback in `formatPeerLastSeen` and renders
+    // an absolute date instead of "Nm ago" — a permanent CI failure (not a
+    // flake) once real time passes the fixture by a month.
+    const lastSeen = new Date(Date.now() - 5 * 60_000).toISOString();
     const html = renderPeerRows([
       makePeer({
         instanceId: 'offline-1',
@@ -269,12 +273,8 @@ describe('renderPeerRows', () => {
 
     expect(html).toContain('peer-last-seen');
     expect(html).toContain(`title="${lastSeen}"`);
-    // Either "5m ago" (now-relative at test time) or any *m/h/d ago value —
-    // assert structural attributes rather than the exact minute count so the
-    // suite stays stable as wall-clock drifts past the captured `lastSeen`.
-    expect(html).toMatch(
-      /peer-last-seen[^>]*>(now|\d+m ago|\d+h ago|\d+d ago)</,
-    );
+    // Anchored to Date.now(), the 5-minute delta renders deterministically.
+    expect(html).toContain('>5m ago<');
   });
 
   it('omits the last-seen chip when the peer is online', () => {
@@ -393,10 +393,14 @@ describe('renderPeerOnlineCell', () => {
   });
 
   it('emits both the relative chip and the absolute title for an offline peer', () => {
-    const lastSeen = '2026-06-07T11:00:00.000Z';
+    // Anchor to Date.now(): renderPeerOnlineCell humanizes against the real
+    // clock, so a fixed past date drifts into the locale-date fallback and
+    // stops exercising the relative-chip path this test is named for.
+    const lastSeen = new Date(Date.now() - 2 * 3_600_000).toISOString();
     const html = renderPeerOnlineCell(peerFor({ online: false, lastSeen }));
     expect(html).toContain('class="peer-last-seen"');
     expect(html).toContain(`title="${lastSeen}"`);
+    expect(html).toContain('>2h ago<');
     expect(html).toContain('<span style="color:var(--text-muted)">○</span>');
   });
 });
