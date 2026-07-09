@@ -27,6 +27,17 @@ describe('client escape helper', () => {
   });
 });
 
+describe('client lane-reason tooltip map', () => {
+  it('injects the canonical reason descriptions for client chip renderers', () => {
+    const html = renderShell('/', 'Dashboard', '<div>content</div>', {});
+
+    expect(html).toContain('window.__laneReasonDesc=');
+    // A representative description from the canonical registry is present so
+    // live-updating chips can surface the same tooltip as server-rendered ones.
+    expect(html).toContain('No pending messages and no active container.');
+  });
+});
+
 describe('renderNavLinks', () => {
   it('marks only the active path as active and includes datastar navigation hooks', () => {
     const html = renderNavLinks('/tasks');
