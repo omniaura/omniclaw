@@ -80,7 +80,7 @@ RUN chmod +x /tmp/gitcrawl.sh /tmp/discrawl.sh \
     && rm -f /tmp/gitcrawl.sh /tmp/discrawl.sh
 
 # Install Graphite CLI for stacked PRs workflow (pinned to stable version)
-ARG GRAPHITE_VERSION=1.8.6
+ARG GRAPHITE_VERSION=
 RUN npm install -g @withgraphite/graphite-cli@${GRAPHITE_VERSION}
 
 # Install claude-code globally (default agent runtime)
