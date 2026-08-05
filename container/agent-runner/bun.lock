@@ -8,7 +8,7 @@
         "@anthropic-ai/claude-agent-sdk": "^0.3.221",
         "@cursor/sdk": "^1.0.12",
         "@modelcontextprotocol/sdk": "^1.27.1",
-        "@opencode-ai/sdk": "^1.18.12",
+        "@opencode-ai/sdk": "^1.18.13",
         "cron-parser": "^5.0.0",
         "zod": "^4.0.0",
       },
@@ -71,7 +71,7 @@
 
     "@npmcli/move-file": ["@npmcli/move-file@1.1.2", "", { "dependencies": { "mkdirp": "^1.0.4", "rimraf": "^3.0.2" } }, "sha512-1SUf/Cg2GzGDyaf15aR9St9TWlb+XvbZXWpDx8YKs7MLzMH/BCeopv+y9vzrzgkfykCGuWOlSu3mZhj2+FQcrg=="],
 
-    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.18.12", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-Skjm0uRWqIiL9BQliZSrvnBflT99q1aGhT2pATNwli2WU8XSKm4lhZJFay7dIzjrA5C9SfgK+YSeoES2PbFugA=="],
+    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.18.13", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-JY9etiVcu1G/pZjaH2vjK/b8z54ujxaWCD1GziO4ADUhRM6m6zm2332bPGcxEfA6TwweiJfNlK6wVZQ0f/X4KQ=="],
 
     "@stablelib/base64": ["@stablelib/base64@1.0.1", "", {}, "sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ=="],
 
