@@ -63,6 +63,33 @@ describe('tasks page script', () => {
     );
   });
 
+  it('filters rows by status and free-text search together', () => {
+    const script = allPageScripts().tasks;
+
+    expect(script).toContain('var currentSearch="";');
+    expect(script).toContain(
+      'currentSearch=searchInput.value.trim().toLowerCase();',
+    );
+    expect(script).toContain(
+      'var statusMatch=currentFilter==="all"||row.getAttribute("data-status")===currentFilter;',
+    );
+    expect(script).toContain(
+      'var searchMatch=!currentSearch||(row.getAttribute("data-search")||"").indexOf(currentSearch)!==-1;',
+    );
+    expect(script).toContain(
+      'row.classList.toggle("hidden",!(statusMatch&&searchMatch));',
+    );
+  });
+
+  it('annotates refreshed rows with searchable text', () => {
+    const script = allPageScripts().tasks;
+
+    expect(script).toContain(
+      'var searchText=((task.group_folder||"")+" "+(task.prompt||"")).toLowerCase();',
+    );
+    expect(script).toContain('data-search="\'+window.__esc(searchText)+\'"');
+  });
+
   it('preserves one-shot datetime-local wall-clock values', () => {
     const script = allPageScripts().tasks;
 
