@@ -3,6 +3,8 @@ import path from 'path';
 
 import { describe, it, expect, beforeEach } from 'bun:test';
 
+import { GROUPS_DIR, TASK_WORKFLOWS_DIR } from './config.js';
+
 import {
   _initTestDatabase,
   _backdateSessionForTest,
@@ -1043,26 +1045,43 @@ describe('processTaskIpc: task mutation behavior', () => {
   });
 
   it('stores deterministic preprocessor script when scheduling a task', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: 'Sync connectors if MCP package changed',
-        preprocess_script: 'sync-connectors-if-mcp-changed.ts',
-        schedule_type: 'interval',
-        schedule_value: '60000',
-        targetJid: 'other@g.us',
-      },
-      'other-group',
-      false,
-      deps,
+    // The workflow file must exist at the resolved path (issue #973), so
+    // create it under the target group's task-workflows directory first.
+    const scriptName = 'sync-connectors-if-mcp-changed.ts';
+    const groupWorkflowsDir = path.isAbsolute(TASK_WORKFLOWS_DIR)
+      ? TASK_WORKFLOWS_DIR
+      : path.join(GROUPS_DIR, 'other-group', TASK_WORKFLOWS_DIR);
+    const scriptPath = path.join(groupWorkflowsDir, scriptName);
+    fs.mkdirSync(groupWorkflowsDir, { recursive: true });
+    fs.writeFileSync(
+      scriptPath,
+      'console.log(JSON.stringify({ action: "skip" }));',
     );
 
-    const tasks = getAllTasks();
-    expect(tasks).toHaveLength(1);
-    expect(tasks[0]).toMatchObject({
-      prompt: 'Sync connectors if MCP package changed',
-      preprocess_script: 'sync-connectors-if-mcp-changed.ts',
-    });
+    try {
+      await processTaskIpc(
+        {
+          type: 'schedule_task',
+          prompt: 'Sync connectors if MCP package changed',
+          preprocess_script: scriptName,
+          schedule_type: 'interval',
+          schedule_value: '60000',
+          targetJid: 'other@g.us',
+        },
+        'other-group',
+        false,
+        deps,
+      );
+
+      const tasks = getAllTasks();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]).toMatchObject({
+        prompt: 'Sync connectors if MCP package changed',
+        preprocess_script: scriptName,
+      });
+    } finally {
+      fs.rmSync(scriptPath, { force: true });
+    }
   });
 
   it('blocks a non-main group from scheduling tasks for another group', async () => {
