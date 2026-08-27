@@ -41,6 +41,7 @@ import {
 import { checkPeerAuth } from '../discovery/routes.js';
 import type { TrustStore } from '../discovery/trust-store.js';
 import { serializeLogRecord } from './log-stream.js';
+import { LogRingBuffer } from './log-buffer.js';
 import { renderSystemContent } from './system.js';
 import { renderSettingsContent } from './settings.js';
 import { renderTasksContent } from './tasks.js';
@@ -59,6 +60,16 @@ import {
 
 const MAX_SSE_CLIENTS = 100;
 const MAX_LOG_LINES = 500;
+/**
+ * Capacity of the structured recent-log buffer served by `/api/logs/recent`.
+ * Larger than MAX_LOG_LINES (the rendered-HTML replay cap) since structured
+ * JSON records are cheap and JSON consumers benefit from deeper history.
+ */
+const MAX_RECENT_LOG_RECORDS = 1000;
+/** Hard cap on records returned in a single /api/logs/recent response. */
+const MAX_RECENT_LOG_LIMIT = MAX_RECENT_LOG_RECORDS;
+/** Valid log levels accepted by the ?level= filter on /api/logs/recent. */
+const LOG_LEVELS = new Set(['debug', 'info', 'warn', 'error', 'fatal']);
 const SNAPSHOT_INTERVAL_MS = 5000;
 const PORT_ZERO_RETRY_ATTEMPTS = 10;
 const PORT_ZERO_FALLBACK_START = 40000;
@@ -256,6 +267,16 @@ export function startWebServer(
     typeof logger.subscribe === 'function'
       ? logger.subscribe.bind(logger)
       : null;
+
+  // Structured recent-log buffer for /api/logs/recent. Populated by a single
+  // always-on subscription so JSON consumers can fetch history without an
+  // open SSE connection. Torn down in stop().
+  const logRingBuffer = new LogRingBuffer(MAX_RECENT_LOG_RECORDS);
+  const unsubscribeLogBuffer =
+    subscribeToRawLogs?.((record) => {
+      if (record.level === 'trace') return;
+      logRingBuffer.push(serializeLogRecord(record));
+    }) ?? null;
 
   // Initialize SolidStart handler if enabled.
   // Store the promise so the first proxied request can await it.
@@ -551,6 +572,35 @@ export function startWebServer(
         return response;
       }
       // Fall through to Datastar UI if SolidStart handler not ready
+    }
+
+    if (url.pathname === '/api/logs/recent') {
+      const jsonHeaders = {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-transform',
+        ...(corsOrigin ? makeCorsHeaders(corsOrigin) : {}),
+      };
+      if (req.method !== 'GET') {
+        return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+          status: 405,
+          headers: jsonHeaders,
+        });
+      }
+      const levelParam = url.searchParams.get('level')?.trim();
+      const level =
+        levelParam && LOG_LEVELS.has(levelParam) ? levelParam : undefined;
+      const limitRaw = url.searchParams.get('limit');
+      let limit: number | undefined;
+      if (limitRaw != null) {
+        const parsed = Number.parseInt(limitRaw, 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          limit = Math.min(parsed, MAX_RECENT_LOG_LIMIT);
+        }
+      }
+      const logs = logRingBuffer.recent({ level, limit });
+      return new Response(JSON.stringify({ logs, total: logRingBuffer.size }), {
+        headers: jsonHeaders,
+      });
     }
 
     if (url.pathname === '/api/logs/stream') {
@@ -988,6 +1038,7 @@ export function startWebServer(
     },
     async stop() {
       clearInterval(snapshotTicker);
+      unsubscribeLogBuffer?.();
       loginRateLimiter?.dispose();
       for (const client of sseClients) {
         client.close();
@@ -1087,6 +1138,7 @@ function isPeerRoute(pathname: string): boolean {
   return (
     pathname === '/api/agents' ||
     pathname === '/api/logs/stream' ||
+    pathname === '/api/logs/recent' ||
     pathname === '/api/stats' ||
     pathname === '/api/context/files' ||
     pathname === '/api/context/layers' ||
