@@ -4,6 +4,23 @@
  * via SSE without losing the log stream or sidebar state.
  */
 
+import { MESSAGE_LANE_REASON_META } from '../group-queue.js';
+
+/**
+ * Client-side lookup of lane reason descriptions, injected once into the shell
+ * so live-updating chip renderers (IPC queue table, agent-detail badge) can add
+ * the same operator tooltip that the server-rendered chips carry. Values come
+ * from the canonical registry in group-queue.ts — the single source of truth.
+ */
+const LANE_REASON_DESC_JS = JSON.stringify(
+  Object.fromEntries(
+    Object.entries(MESSAGE_LANE_REASON_META).map(([code, meta]) => [
+      code,
+      meta.description,
+    ]),
+  ),
+);
+
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', page: 'dashboard' },
   { href: '/agents-list', label: 'Agents', page: 'agents' },
@@ -1694,6 +1711,8 @@ function shellScript(pageScripts: Record<string, string>): string {
   parts.push(
     `window.__esc=function(s){if(!s)return"";return String(s).replace(/[&<>"']/g,function(c){return c==="&"?"&amp;":c==="<"?"&lt;":c===">"?"&gt;":c==='"'?"&quot;":"&#39;";});};`,
   );
+  // Canonical lane-reason descriptions for client-rendered chip tooltips.
+  parts.push(`window.__laneReasonDesc=${LANE_REASON_DESC_JS};`);
   parts.push(
     'window.__sanitizeUrl=function(url){if(!url)return"";var v=String(url).trim();if(!v)return"";if(v[0]==="#"||v[0]==="/")return v;try{var p=new URL(v,window.location.origin).protocol.toLowerCase();if(p==="http:"||p==="https:"||p==="mailto:"||p==="tel:")return v;}catch{}return"";};',
   );

@@ -6,10 +6,99 @@ import {
   GroupQueue,
   deriveMessageLaneReason,
   deriveTaskLaneReason,
+  describeLaneReason,
   summarizeError,
+  MESSAGE_LANE_REASONS,
+  TASK_LANE_REASONS,
+  MESSAGE_LANE_REASON_META,
+  TASK_LANE_REASON_META,
+  type MessageLaneReason,
+  type TaskLaneReason,
 } from './group-queue.js';
 
 mock.restore();
+
+describe('lane reason registry', () => {
+  it('lists every message-lane reason that derivation can produce', () => {
+    // Exercise all derivation branches and confirm each result is in the
+    // canonical list — guards against the list drifting from the union type.
+    const produced = new Set<MessageLaneReason>([
+      deriveMessageLaneReason({
+        laneState: 'running',
+        pendingCount: 0,
+        retryCount: 0,
+      }),
+      deriveMessageLaneReason({
+        laneState: 'cooldown',
+        pendingCount: 0,
+        retryCount: 0,
+      }),
+      deriveMessageLaneReason({
+        laneState: 'idle',
+        pendingCount: 0,
+        retryCount: 1,
+      }),
+      deriveMessageLaneReason({
+        laneState: 'idle',
+        pendingCount: 1,
+        retryCount: 0,
+      }),
+      deriveMessageLaneReason({
+        laneState: 'idle',
+        pendingCount: 0,
+        retryCount: 0,
+      }),
+    ]);
+    for (const reason of produced) {
+      expect(MESSAGE_LANE_REASONS).toContain(reason);
+    }
+    // Every canonical reason should be reachable by some derivation input.
+    expect([...produced].sort()).toEqual([...MESSAGE_LANE_REASONS].sort());
+  });
+
+  it('lists every task-lane reason that derivation can produce', () => {
+    const produced = new Set<TaskLaneReason>([
+      deriveTaskLaneReason({ active: true, pendingCount: 0 }),
+      deriveTaskLaneReason({ active: false, pendingCount: 1 }),
+      deriveTaskLaneReason({ active: false, pendingCount: 0 }),
+    ]);
+    expect([...produced].sort()).toEqual([...TASK_LANE_REASONS].sort());
+  });
+
+  it('has no duplicate entries in the canonical lists', () => {
+    expect(new Set(MESSAGE_LANE_REASONS).size).toBe(
+      MESSAGE_LANE_REASONS.length,
+    );
+    expect(new Set(TASK_LANE_REASONS).size).toBe(TASK_LANE_REASONS.length);
+  });
+
+  it('provides non-empty label and description metadata for every reason', () => {
+    for (const reason of MESSAGE_LANE_REASONS) {
+      const meta = MESSAGE_LANE_REASON_META[reason];
+      expect(meta).toBeDefined();
+      expect(meta.label.length).toBeGreaterThan(0);
+      expect(meta.description.length).toBeGreaterThan(0);
+    }
+    for (const reason of TASK_LANE_REASONS) {
+      const meta = TASK_LANE_REASON_META[reason];
+      expect(meta).toBeDefined();
+      expect(meta.label.length).toBeGreaterThan(0);
+      expect(meta.description.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('describeLaneReason resolves known codes and falls back safely', () => {
+    expect(describeLaneReason('no-work')).toEqual(
+      MESSAGE_LANE_REASON_META['no-work'],
+    );
+    // Task-only codes resolve via the message-lane superset map.
+    expect(describeLaneReason('back-pressure').label).toBe('Back-pressure');
+    // Unknown code returns a neutral, non-throwing fallback.
+    const unknown = describeLaneReason('mystery' as MessageLaneReason);
+    expect(unknown.label).toBe('mystery');
+    expect(unknown.description).toBe('');
+  });
+});
 
 describe('GroupQueue', () => {
   let queue: GroupQueue;
