@@ -1011,11 +1011,12 @@ describe('renderSystemContent', () => {
     ];
     const health = buildHealthData(makeState([makeAgent()], details), 0);
     expect(health.queue.longest_running_message_ms).toBe(90_000);
+    expect(health.queue.longest_running_message_group).toBe('g2');
     expect(health.queue.processing_groups).toBe(2);
     const html = renderSystemContent(makeState([makeAgent()], details), 0);
-    // 90000ms => 1.5m via the shared formatter
+    // 90000ms => 1.5m via the shared formatter, attributed to its owning group
     expect(html).toContain(
-      '<span class="metric-value" id="sys-queue-longest-running-message">1.5m</span>',
+      '<span class="metric-value" id="sys-queue-longest-running-message">1.5m · g2</span>',
     );
   });
 
@@ -1041,6 +1042,7 @@ describe('renderSystemContent', () => {
     const health = buildHealthData(makeState([makeAgent()], details), 0);
     expect(health.queue.processing_groups).toBe(0);
     expect(health.queue.longest_running_message_ms).toBe(0);
+    expect(health.queue.longest_running_message_group).toBeNull();
     const html = renderSystemContent(makeState([makeAgent()], details), 0);
     expect(html).toContain(
       '<span class="metric-value" id="sys-queue-longest-running-message">—</span>',
@@ -1094,10 +1096,11 @@ describe('renderSystemContent', () => {
     ];
     const health = buildHealthData(makeState([makeAgent()], details), 0);
     expect(health.queue.longest_running_task_ms).toBe(125_000);
+    expect(health.queue.longest_running_task_group).toBe('g2');
     const html = renderSystemContent(makeState([makeAgent()], details), 0);
-    // 125000ms => 2.1m via the IPC inspector's formatter
+    // 125000ms => 2.1m via the IPC inspector's formatter, attributed to owner
     expect(html).toContain(
-      '<span class="metric-value" id="sys-queue-longest-running">2.1m</span>',
+      '<span class="metric-value" id="sys-queue-longest-running">2.1m · g2</span>',
     );
   });
 
@@ -1123,10 +1126,47 @@ describe('renderSystemContent', () => {
     const health = buildHealthData(makeState([makeAgent()], details), 0);
     expect(health.queue.running_tasks).toBe(0);
     expect(health.queue.longest_running_task_ms).toBe(0);
+    expect(health.queue.longest_running_task_group).toBeNull();
     const html = renderSystemContent(makeState([makeAgent()], details), 0);
     // em-dash placeholder when no task is running
     expect(html).toContain(
       '<span class="metric-value" id="sys-queue-longest-running">\u2014</span>',
+    );
+  });
+
+  it('attributes a freshly-started task (0ms) to its owning group', () => {
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'just-started',
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 0,
+          containerName: null,
+        },
+        taskLane: {
+          active: true,
+          pendingCount: 0,
+          containerName: 'js-task',
+          activeTask: {
+            taskId: 't-new',
+            promptPreview: 'p',
+            startedAt: Date.now(),
+            runningMs: 0,
+          },
+        },
+        retryCount: 0,
+      },
+    ];
+    const health = buildHealthData(makeState([makeAgent()], details), 0);
+    // running_tasks gates the row on, so the group must not be null even at
+    // 0ms \u2014 otherwise the age renders with no owner to jump to.
+    expect(health.queue.running_tasks).toBe(1);
+    expect(health.queue.longest_running_task_ms).toBe(0);
+    expect(health.queue.longest_running_task_group).toBe('just-started');
+    const html = renderSystemContent(makeState([makeAgent()], details), 0);
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-queue-longest-running">0ms \u00b7 just-started</span>',
     );
   });
 
