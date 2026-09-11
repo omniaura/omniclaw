@@ -36,7 +36,10 @@ import {
   RegisteredGroup,
   ThreadSummary,
 } from './types.js';
-import { normalizePreprocessScriptPath } from './task-preprocessor.js';
+import {
+  checkPreprocessScriptExists,
+  normalizePreprocessScriptPath,
+} from './task-preprocessor.js';
 import { parseSlackJid } from './slack-jid.js';
 import type { IpcEventKind } from './web/ipc-events.js';
 
@@ -1192,6 +1195,31 @@ export async function processTaskIpc(
             { sourceGroup, targetFolder, error: preprocessScript.error },
             'Invalid task preprocess_script rejected',
           );
+          safeEmitIpcEvent(
+            deps,
+            'task_error',
+            sourceGroup,
+            `Task not created: ${preprocessScript.error}`,
+            { targetFolder },
+          );
+          break;
+        }
+        const preprocessExists = checkPreprocessScriptExists(
+          targetFolder,
+          preprocessScript.path,
+        );
+        if (!preprocessExists.ok) {
+          logger.warn(
+            { sourceGroup, targetFolder, error: preprocessExists.error },
+            'Task preprocess_script missing at resolved path',
+          );
+          safeEmitIpcEvent(
+            deps,
+            'task_error',
+            sourceGroup,
+            `Task not created: ${preprocessExists.error}`,
+            { targetFolder },
+          );
           break;
         }
         createTask({
@@ -1272,6 +1300,35 @@ export async function processTaskIpc(
               error: preprocessScript.error,
             },
             'Invalid task preprocess_script rejected',
+          );
+          safeEmitIpcEvent(
+            deps,
+            'task_error',
+            sourceGroup,
+            `Task ${data.taskId} not edited: ${preprocessScript.error}`,
+            { taskId: data.taskId },
+          );
+          break;
+        }
+        const preprocessExists = checkPreprocessScriptExists(
+          task.group_folder,
+          preprocessScript.path,
+        );
+        if (!preprocessExists.ok) {
+          logger.warn(
+            {
+              taskId: data.taskId,
+              sourceGroup,
+              error: preprocessExists.error,
+            },
+            'Task preprocess_script missing at resolved path',
+          );
+          safeEmitIpcEvent(
+            deps,
+            'task_error',
+            sourceGroup,
+            `Task ${data.taskId} not edited: ${preprocessExists.error}`,
+            { taskId: data.taskId },
           );
           break;
         }
