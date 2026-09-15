@@ -9,6 +9,8 @@ import type {
 import {
   deriveMessageLaneReasonFromDetail,
   deriveTaskLaneReasonFromDetail,
+  MESSAGE_LANE_REASONS,
+  TASK_LANE_REASONS,
   type MessageLaneReason,
   type TaskLaneReason,
 } from '../group-queue.js';
@@ -19,20 +21,6 @@ import {
 } from './agents-page.js';
 import { renderShell, escapeHtml, formatDurationCompact } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
-
-const MESSAGE_LANE_REASONS: readonly MessageLaneReason[] = [
-  'running',
-  'cooling-down',
-  'back-pressure',
-  'retrying',
-  'no-work',
-];
-
-const TASK_LANE_REASONS: readonly TaskLaneReason[] = [
-  'running',
-  'back-pressure',
-  'no-work',
-];
 
 const AGENT_EXEC_STATUSES: readonly AgentExecStatus[] = [
   'executing',

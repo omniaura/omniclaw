@@ -2,6 +2,9 @@ import type { WebStateProvider } from './types.js';
 import {
   deriveMessageLaneReasonFromDetail,
   deriveTaskLaneReasonFromDetail,
+  describeLaneReason,
+  MESSAGE_LANE_REASONS,
+  TASK_LANE_REASONS,
   type MessageLaneReason,
   type TaskLaneReason,
 } from '../group-queue.js';
@@ -9,19 +12,9 @@ import type { IpcEvent } from './ipc-events.js';
 import { renderShell, escapeHtml, formatDurationCompact } from './shared.js';
 import { allPageScripts } from './page-scripts.js';
 
-const MESSAGE_REASON_CODES = new Set<MessageLaneReason>([
-  'running',
-  'cooling-down',
-  'back-pressure',
-  'retrying',
-  'no-work',
-]);
+const MESSAGE_REASON_CODES = new Set<MessageLaneReason>(MESSAGE_LANE_REASONS);
 
-const TASK_REASON_CODES = new Set<TaskLaneReason>([
-  'running',
-  'back-pressure',
-  'no-work',
-]);
+const TASK_REASON_CODES = new Set<TaskLaneReason>(TASK_LANE_REASONS);
 
 export type IpcEventSeverity = 'error' | 'warn' | 'ok';
 
@@ -273,7 +266,11 @@ function renderLaneReason<T extends string>(
   allowedCodes: ReadonlySet<T>,
 ): string {
   const code = allowedCodes.has(reason) ? reason : 'unknown';
-  return `<span class="lane-reason reason-${code}">${escapeHtml(code)}</span>`;
+  const meta = describeLaneReason(code as MessageLaneReason);
+  const title = meta.description
+    ? ` title="${escapeHtml(meta.description)}"`
+    : '';
+  return `<span class="lane-reason reason-${code}"${title}>${escapeHtml(code)}</span>`;
 }
 
 /** Full IPC inspector page with shell. */
