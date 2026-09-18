@@ -72,6 +72,10 @@ export function renderTasksContent(state: WebStateProvider): string {
     `<button class="filter-btn" data-filter="paused">Paused</button>` +
     `<button class="filter-btn" data-filter="completed">Completed</button>` +
     `</div>` +
+    // Text search (composes with the status tabs)
+    `<div class="tasks-search">` +
+    `<input type="text" id="tm-search" class="tasks-search-input" placeholder="Search prompt or agent…" spellcheck="false" autocomplete="off">` +
+    `</div>` +
     `</div>` +
     // Task table
     `<div class="tasks-table-wrap">` +
@@ -132,6 +136,14 @@ export function renderTasks(state: WebStateProvider): string {
   );
 }
 
+/**
+ * Lowercased, searchable text for a task row — used by the client-side
+ * search box to match against the agent/group folder and the full prompt.
+ */
+export function taskSearchText(task: ScheduledTask): string {
+  return `${task.group_folder} ${task.prompt}`.toLowerCase();
+}
+
 /** Render task table body rows. */
 export function renderTaskTableRows(tasks: ScheduledTask[]): string {
   if (tasks.length === 0) return '';
@@ -174,7 +186,7 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
       );
 
       return (
-        `<tr data-task-id="${escapeHtml(task.id)}" data-status="${escapeHtml(task.status)}">` +
+        `<tr data-task-id="${escapeHtml(task.id)}" data-status="${escapeHtml(task.status)}" data-search="${escapeHtml(taskSearchText(task))}">` +
         `<td><span class="badge ${statusClass}">${escapeHtml(task.status)}</span>${runningBadge}</td>` +
         `<td class="td-agent" title="${escapeHtml(task.chat_jid)}">${escapeHtml(task.group_folder)}</td>` +
         `<td class="td-prompt" title="${escapeHtml(task.prompt)}">${escapeHtml(promptShort)}</td>` +
