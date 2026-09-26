@@ -10,6 +10,7 @@ import {
   formatTaskLastRun,
   lastRunOutcomeClass,
   renderAgentDetailContent,
+  renderMessageComposer,
 } from './agent-detail.js';
 
 // ---- Test fixtures ----
@@ -956,5 +957,70 @@ describe('/api/page/agent-detail SPA navigation', () => {
     expect(body).toContain(
       '<title id="page-title">OmniClaw — Agent Not Found</title>',
     );
+  });
+});
+
+// ---- Unit tests for renderMessageComposer ----
+
+describe('renderMessageComposer', () => {
+  it('renders a send form wired to the agent message endpoint', () => {
+    const html = renderMessageComposer('test-agent', [
+      { jid: 'dc:123', displayName: 'general' },
+    ]);
+    expect(html).toContain('send message');
+    expect(html).toContain('data-agent-send-form');
+    expect(html).toContain('data-agent-id="test-agent"');
+    expect(html).toContain('name="channel"');
+    expect(html).toContain('name="content"');
+    expect(html).toContain('name="sender_name"');
+    // Content limit mirrors the server-side cap in handleSendMessage.
+    expect(html).toContain('maxlength="10000"');
+  });
+
+  it('renders one option per channel with jid values and display labels', () => {
+    const html = renderMessageComposer('test-agent', [
+      { jid: 'dc:123', displayName: 'general' },
+      { jid: 'dc:456', displayName: 'ops' },
+    ]);
+    expect(html).toContain('<option value="dc:123">general</option>');
+    expect(html).toContain('<option value="dc:456">ops</option>');
+  });
+
+  it('escapes channel jid and display name to prevent HTML injection', () => {
+    const html = renderMessageComposer('test-agent', [
+      { jid: 'dc:<x>', displayName: '<script>alert(1)</script>' },
+    ]);
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).toContain('dc:&lt;x&gt;');
+  });
+});
+
+// ---- Composer integration in renderAgentDetailContent ----
+
+describe('renderAgentDetailContent message composer', () => {
+  it('renders the composer for a local agent with channels', () => {
+    const data = buildAgentDetailData('test-agent', makeState())!;
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).toContain('data-agent-send-form');
+    expect(html).toContain('send message');
+  });
+
+  it('omits the composer for a remote agent', () => {
+    const data = buildAgentDetailData(
+      'peer-1:remote:agent',
+      makeState(),
+      remotePeers,
+    )!;
+    const html = renderAgentDetailContent(data, 'peer-1:remote:agent');
+    expect(html).not.toContain('data-agent-send-form');
+  });
+
+  it('omits the composer for a local agent with no channels', () => {
+    const state = makeState({ getChannelSubscriptions: () => ({}) });
+    const data = buildAgentDetailData('test-agent', state)!;
+    expect(data.channels).toHaveLength(0);
+    const html = renderAgentDetailContent(data, 'test-agent');
+    expect(html).not.toContain('data-agent-send-form');
   });
 });
