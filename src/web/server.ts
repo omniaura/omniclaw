@@ -437,7 +437,7 @@ export function startWebServer(
       return new Response(
         JSON.stringify({
           error:
-            'Discovery admin routes require authentication (set WEB_PASSWORD or WEB_UI_USER/WEB_UI_PASS or access from a private network)',
+            'Discovery admin routes require authentication (set WEB_PASSWORD or WEB_UI_USER/WEB_UI_PASS)',
         }),
         {
           status: 403,
@@ -1111,6 +1111,7 @@ export function isTrustedLanDiscoveryAdminRequest(
 ): boolean {
   if (!enabled || !pathname.startsWith('/api/discovery/')) return false;
   if (isUnauthDiscoveryRoute(pathname)) return false;
+  if (!isLanReadableDiscoveryRoute(req.method, pathname)) return false;
 
   const remoteAddress = (
     req as unknown as { socket?: { remoteAddress?: string } }
@@ -1125,6 +1126,26 @@ export function isTrustedLanDiscoveryAdminRequest(
   // Bun may not always expose a socket address in tests or some deployments.
   // Preserve the loopback-only fallback for local-only listeners.
   return isLoopbackAddress(listenerHostname);
+}
+
+function isLanReadableDiscoveryRoute(
+  method: string,
+  pathname: string,
+): boolean {
+  if (method.toUpperCase() !== 'GET') return false;
+  return (
+    pathname === '/api/discovery/peers' ||
+    pathname === '/api/discovery/requests' ||
+    pathname === '/api/discovery/state' ||
+    pathname === '/api/discovery/remote-agents' ||
+    /^\/api\/discovery\/peers\/[^/]+\/(agents|stats|logs|context\/(layers|compare))$/.test(
+      pathname,
+    ) ||
+    /^\/api\/discovery\/peers\/[^/]+\/agents\/[^/]+\/avatar\/image$/.test(
+      pathname,
+    ) ||
+    /^\/api\/discovery\/peers\/[^/]+\/chats\/[^/]+\/icon$/.test(pathname)
+  );
 }
 
 function isLoopbackAddress(address?: string): boolean {
