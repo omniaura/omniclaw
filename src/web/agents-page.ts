@@ -8,6 +8,8 @@ import { createHash } from 'crypto';
 
 import {
   deriveMessageLaneReasonFromDetail,
+  describeLaneReason,
+  MESSAGE_LANE_REASONS,
   type GroupQueueDetail,
   type MessageLaneReason,
 } from '../group-queue.js';
@@ -29,13 +31,9 @@ export type AgentExecStatus =
   | 'disabled';
 
 /** Set of reason codes recognized by {@link renderExecStatusBadge}. */
-const KNOWN_MESSAGE_LANE_REASONS: ReadonlySet<MessageLaneReason> = new Set([
-  'running',
-  'cooling-down',
-  'back-pressure',
-  'retrying',
-  'no-work',
-]);
+const KNOWN_MESSAGE_LANE_REASONS: ReadonlySet<MessageLaneReason> = new Set(
+  MESSAGE_LANE_REASONS,
+);
 
 /** Pending work depth for an agent broken out by lane. */
 export interface AgentQueueDepth {
@@ -231,7 +229,7 @@ export function renderExecStatusBadge(
     status !== 'running-task' &&
     status !== 'disabled';
   const reasonBadge = shouldShowReason
-    ? `<span class="lane-reason reason-${reason}" data-exec-reason="${reason}">${escapeHtml(reason as string)}</span>`
+    ? `<span class="lane-reason reason-${reason}" data-exec-reason="${reason}" title="${escapeHtml(describeLaneReason(reason).description)}">${escapeHtml(reason as string)}</span>`
     : '';
   // Surface the running duration only for actively executing agents — the
   // age tells an operator how long the current message or task has been
