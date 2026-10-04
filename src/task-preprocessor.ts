@@ -1,4 +1,5 @@
 import { spawnSync } from 'child_process';
+import { existsSync } from 'fs';
 import path from 'path';
 
 import {
@@ -112,7 +113,9 @@ function resolveWorkflowPath(scriptPath: string, workflowsDir: string): string {
   return resolved;
 }
 
-function defaultWorkflowsDir(task: ScheduledTask): string {
+function defaultWorkflowsDir(
+  task: Pick<ScheduledTask, 'group_folder'>,
+): string {
   if (path.isAbsolute(TASK_WORKFLOWS_DIR)) {
     return TASK_WORKFLOWS_DIR;
   }
@@ -120,6 +123,69 @@ function defaultWorkflowsDir(task: ScheduledTask): string {
   const groupDir = path.resolve(GROUPS_DIR, task.group_folder);
   assertPathWithin(groupDir, GROUPS_DIR, 'task workflow group folder');
   return path.resolve(groupDir, TASK_WORKFLOWS_DIR);
+}
+
+/**
+ * Resolve the absolute workflow directory and file path a preprocess script
+ * will run from, using the same rules as {@link runTaskPreprocessor}. Exposed so
+ * task creation/edit can validate a script *before* it is persisted, instead of
+ * discovering a mismatch only at the next scheduled run. See issue #973.
+ */
+export function resolvePreprocessWorkflowPath(
+  groupFolder: string,
+  preprocessScript: string,
+  options: { workflowsDir?: string } = {},
+): { workflowsDir: string; workflowPath: string } {
+  const workflowsDir = path.resolve(
+    options.workflowsDir ?? defaultWorkflowsDir({ group_folder: groupFolder }),
+  );
+  const workflowPath = resolveWorkflowPath(preprocessScript, workflowsDir);
+  return { workflowsDir, workflowPath };
+}
+
+/**
+ * Validate that a task's preprocess script exists at the path the scheduler
+ * will resolve it from. Returns `ok: true` when there is no script (nothing to
+ * check) or the file is present; otherwise returns an actionable error that
+ * names the resolved directory so the caller can place the file correctly.
+ *
+ * This closes the silent-`blocked` failure mode where a multi-channel agent
+ * writes the workflow under `/workspace/group/task-workflows/` while the
+ * scheduler resolves it under the agent-identity folder
+ * (`/workspace/agent/task-workflows/`). See issue #973.
+ */
+export function checkPreprocessScriptExists(
+  groupFolder: string,
+  preprocessScript: string | null | undefined,
+  options: { workflowsDir?: string } = {},
+): { ok: true } | { ok: false; error: string } {
+  if (!preprocessScript) return { ok: true };
+  let resolved: { workflowsDir: string; workflowPath: string };
+  try {
+    resolved = resolvePreprocessWorkflowPath(
+      groupFolder,
+      preprocessScript,
+      options,
+    );
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+  if (!existsSync(resolved.workflowPath)) {
+    return {
+      ok: false,
+      error:
+        `preprocess_script "${preprocessScript}" was not found at ` +
+        `${resolved.workflowPath}. Create the workflow file in the task's ` +
+        `workflow directory (${resolved.workflowsDir}) before scheduling. ` +
+        `For multi-channel / 4-layer-context agents this directory is the ` +
+        `agent-identity folder mounted at /workspace/agent/task-workflows/, ` +
+        `not /workspace/group/task-workflows/.`,
+    };
+  }
+  return { ok: true };
 }
 
 function parseDecision(stdout: string): TaskPreprocessDecision {
