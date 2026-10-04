@@ -11,6 +11,7 @@ import {
   renderTaskTableRows,
   renderTasks,
   renderTasksContent,
+  taskSearchText,
 } from './tasks.js';
 import type { WebStateProvider } from './types.js';
 
@@ -125,6 +126,46 @@ function makeState(
     resolveDiscordGuildImage: async () => null,
   };
 }
+
+describe('taskSearchText', () => {
+  it('combines lowercased group folder and prompt', () => {
+    const text = taskSearchText(
+      makeTask({ group_folder: 'Ditto-Bot', prompt: 'Sync THE Network' }),
+    );
+    expect(text).toBe('ditto-bot sync the network');
+  });
+});
+
+describe('task search box', () => {
+  it('renders a search input in the task manager header', () => {
+    const html = renderTasksContent(makeState());
+    expect(html).toContain('id="tm-search"');
+    expect(html).toContain('class="tasks-search-input"');
+  });
+
+  it('annotates each row with lowercased searchable text', () => {
+    const html = renderTaskTableRows([
+      makeTask({
+        id: 'task-search',
+        group_folder: 'Research-Agent',
+        prompt: 'Summarize Weekly METRICS',
+      }),
+    ]);
+    expect(html).toContain(
+      'data-search="research-agent summarize weekly metrics"',
+    );
+  });
+
+  it('escapes HTML in the searchable row attribute', () => {
+    const html = renderTaskTableRows([
+      makeTask({ group_folder: 'a"b', prompt: '<x> & "y"' }),
+    ]);
+    expect(html).toContain(
+      'data-search="a&quot;b &lt;x&gt; &amp; &quot;y&quot;"',
+    );
+    expect(html).not.toContain('data-search="a"b');
+  });
+});
 
 describe('renderTaskTableRows', () => {
   it('renders escaped task details and action buttons', () => {
