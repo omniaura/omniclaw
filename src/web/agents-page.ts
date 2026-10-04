@@ -19,6 +19,7 @@ import {
   type AgentChannelData,
 } from './agent-channels.js';
 import type { RemotePeerAgents } from '../discovery/types.js';
+import type { Agent } from '../types.js';
 
 export type AgentExecStatus =
   | 'executing'
@@ -128,6 +129,42 @@ export function getAgentExecReason(
   const detail = queueDetails.find((d) => d.folderKey === folder);
   if (!detail) return null;
   return deriveMessageLaneReasonFromDetail(detail);
+}
+
+/**
+ * Derive an agent's execution status the way the directory table does:
+ * remote agents read as `offline` (their live state lives on the owning host),
+ * operator-disabled local agents as `disabled`, and everything else from the
+ * live queue details. Shared by {@link buildAgentRowsHtml} and
+ * {@link countWorkingAgents} so the per-row badge and the header rollup can
+ * never drift out of sync.
+ */
+export function deriveAgentStatus(
+  agent: AgentChannelData,
+  localAgents: Record<string, Agent>,
+  queueDetails: GroupQueueDetail[],
+): AgentExecStatus {
+  if (agent.remoteInstanceId) return 'offline';
+  if (localAgents[agent.id]?.enabled === false) return 'disabled';
+  return getAgentExecStatus(agent.folder, queueDetails);
+}
+
+/**
+ * Count agents that are actively working — either processing a message
+ * (`executing`) or running a scheduled task (`running-task`). Used to annotate
+ * the agents-directory `total` count so an operator can see at a glance how
+ * much of the fleet is live without scanning the per-row status column.
+ * Disabled, idle, queued, offline, and remote agents are all excluded.
+ */
+export function countWorkingAgents(
+  agentData: AgentChannelData[],
+  localAgents: Record<string, Agent>,
+  queueDetails: GroupQueueDetail[],
+): number {
+  return agentData.reduce((sum, a) => {
+    const status = deriveAgentStatus(a, localAgents, queueDetails);
+    return sum + (status === 'executing' || status === 'running-task' ? 1 : 0);
+  }, 0);
 }
 
 const EXEC_STATUS_LABELS: Record<AgentExecStatus, string> = {
@@ -361,16 +398,11 @@ export function buildAgentRowsHtml(
   const localAgents = state.getAgents();
   return agentData
     .map((a) => {
-      let status: AgentExecStatus;
+      const status = deriveAgentStatus(a, localAgents, queueDetails);
       let reason: MessageLaneReason | null = null;
       let queueDepth: AgentQueueDepth = ZERO_QUEUE_DEPTH;
       let runningMs: number | null = null;
-      if (a.remoteInstanceId) {
-        status = 'offline';
-      } else if (localAgents[a.id]?.enabled === false) {
-        status = 'disabled';
-      } else {
-        status = getAgentExecStatus(a.folder, queueDetails);
+      if (!a.remoteInstanceId && localAgents[a.id]?.enabled !== false) {
         reason = getAgentExecReason(a.folder, queueDetails);
         queueDepth = getAgentQueueDepth(a.folder, queueDetails);
         runningMs = getAgentRunningMs(a.folder, queueDetails);
@@ -409,6 +441,7 @@ export function renderAgentsContent(
   // lives on the owning host. Matches the disabled-status derivation in
   // {@link buildAgentRowsHtml}.
   const localAgentsMap = state.getAgents();
+  const queueDetails = state.getQueueDetails();
   const disabledLocalCount = agentData.reduce(
     (sum, a) =>
       sum +
@@ -419,6 +452,20 @@ export function renderAgentsContent(
     disabledLocalCount > 0
       ? `${localCount} local (${disabledLocalCount} disabled)`
       : `${localCount} local`;
+
+  // How much of the fleet is live right now — executing a message or running a
+  // scheduled task. Surfacing this on the `total` count answers "is anything
+  // actually working?" without scanning the per-row status column. Suppressed
+  // when nothing is working to keep the header quiet at rest.
+  const workingCount = countWorkingAgents(
+    agentData,
+    localAgentsMap,
+    queueDetails,
+  );
+  const totalValue =
+    workingCount > 0
+      ? `${agentData.length} total (${workingCount} working)`
+      : `${agentData.length} total`;
 
   const backendOptions = backends
     .map((b) => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`)
@@ -438,7 +485,7 @@ export function renderAgentsContent(
     `<div class="ap-title-row">` +
     `<h2>Agents</h2>` +
     `<div class="ap-counts">` +
-    `<span class="ap-count">${agentData.length} total</span>` +
+    `<span class="ap-count">${totalValue}</span>` +
     `<span class="ap-count">${localValue}</span>` +
     (remoteCount > 0
       ? `<span class="ap-count">${remoteCount} remote</span>`

@@ -5,6 +5,8 @@ import type { GroupQueueDetail } from '../group-queue.js';
 import { handleRequest } from './routes.js';
 import {
   buildAgentRowsHtml,
+  countWorkingAgents,
+  deriveAgentStatus,
   getAgentExecReason,
   getAgentExecStatus,
   getAgentQueueDepth,
@@ -18,6 +20,7 @@ import {
   shortenModelLabel,
 } from './agents-page.js';
 import type { WebStateProvider } from './types.js';
+import type { AgentChannelData } from './agent-channels.js';
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -408,6 +411,31 @@ describe('renderAgentsContent', () => {
     expect(html).toContain('1 local (1 disabled)');
     expect(html).toContain('1 remote');
   });
+
+  it('annotates the total count with a working rollup when agents are live', () => {
+    const state = makeState();
+    state.getQueueDetails = () => [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+      }),
+    ];
+
+    const html = renderAgentsContent(state);
+
+    expect(html).toContain('1 total (1 working)');
+  });
+
+  it('omits the working rollup when no agent is actively working', () => {
+    const html = renderAgentsContent(makeState());
+
+    expect(html).toContain('1 total</span>');
+    expect(html).not.toContain('working)');
+  });
 });
 
 describe('renderAgentsPage', () => {
@@ -636,6 +664,138 @@ describe('getAgentExecStatus', () => {
     ];
     expect(getAgentExecStatus('test-agent', details)).toBe('offline');
     expect(getAgentExecStatus('other-agent', details)).toBe('executing');
+  });
+});
+
+function makeChannelData(
+  overrides: Partial<AgentChannelData> = {},
+): AgentChannelData {
+  return {
+    id: 'agent-1',
+    name: 'Test Agent',
+    folder: 'test-agent',
+    backend: 'apple-container',
+    agentRuntime: 'claude-agent-sdk',
+    isAdmin: false,
+    channels: [],
+    ...overrides,
+  };
+}
+
+describe('deriveAgentStatus', () => {
+  it('reads remote agents as offline regardless of queue', () => {
+    const details = [
+      makeQueueDetail({
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+      }),
+    ];
+    const agent = makeChannelData({ remoteInstanceId: 'peer-1' });
+    expect(deriveAgentStatus(agent, {}, details)).toBe('offline');
+  });
+
+  it('reads operator-disabled local agents as disabled', () => {
+    const agent = makeChannelData();
+    const agents = { 'agent-1': makeAgent({ enabled: false }) };
+    expect(deriveAgentStatus(agent, agents, [])).toBe('disabled');
+  });
+
+  it('falls back to the live queue status for enabled local agents', () => {
+    const details = [
+      makeQueueDetail({
+        taskLane: {
+          active: true,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+          activeTask: {
+            taskId: 'task-1',
+            promptPreview: 'Run check',
+            startedAt: 1_000,
+            runningMs: 1_000,
+          },
+        },
+      }),
+    ];
+    const agent = makeChannelData();
+    expect(deriveAgentStatus(agent, {}, details)).toBe('running-task');
+  });
+});
+
+describe('countWorkingAgents', () => {
+  it('returns zero when nothing is active', () => {
+    expect(countWorkingAgents([makeChannelData()], {}, [])).toBe(0);
+  });
+
+  it('counts both executing and running-task agents', () => {
+    const agents = [
+      makeChannelData({ id: 'a1', folder: 'a1' }),
+      makeChannelData({ id: 'a2', folder: 'a2' }),
+    ];
+    const details = [
+      makeQueueDetail({
+        folderKey: 'a1',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+      }),
+      makeQueueDetail({
+        folderKey: 'a2',
+        taskLane: {
+          active: true,
+          pendingCount: 0,
+          containerName: 'ctr-2',
+          activeTask: {
+            taskId: 'task-1',
+            promptPreview: 'Run check',
+            startedAt: 1_000,
+            runningMs: 1_000,
+          },
+        },
+      }),
+    ];
+    expect(countWorkingAgents(agents, {}, details)).toBe(2);
+  });
+
+  it('excludes idle, queued, disabled, and remote agents', () => {
+    const agents = [
+      makeChannelData({ id: 'idle', folder: 'idle' }),
+      makeChannelData({ id: 'agent-1', folder: 'disabled-folder' }),
+      makeChannelData({
+        id: 'remote',
+        folder: 'remote',
+        remoteInstanceId: 'p1',
+      }),
+    ];
+    const details = [
+      makeQueueDetail({
+        folderKey: 'idle',
+        messageLane: {
+          active: true,
+          idle: true,
+          pendingCount: 0,
+          containerName: 'ctr-1',
+        },
+      }),
+      // Remote agent's folder has an active lane, but remote reads as offline.
+      makeQueueDetail({
+        folderKey: 'remote',
+        messageLane: {
+          active: true,
+          idle: false,
+          pendingCount: 0,
+          containerName: 'ctr-2',
+        },
+      }),
+    ];
+    const localAgents = { 'agent-1': makeAgent({ enabled: false }) };
+    expect(countWorkingAgents(agents, localAgents, details)).toBe(0);
   });
 });
 
