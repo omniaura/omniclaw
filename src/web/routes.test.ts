@@ -1431,6 +1431,35 @@ describe('conversation export', () => {
     expect(text).toContain('Hi! How can I help?');
   });
 
+  it('returns markdown export with proper formatting', async () => {
+    const state = makeState({
+      getMessages: () => sampleMessages,
+      getChats: () => sampleChats,
+    });
+    const res = await handle(
+      new Request(
+        'http://localhost/api/messages/dc%3A123/export?format=markdown',
+      ),
+      state,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/markdown');
+    expect(res.headers.get('content-disposition')).toContain(
+      'Test_Chat-export.md',
+    );
+
+    const md = await res.text();
+    expect(md).toContain('# Conversation: Test Chat');
+    expect(md).toContain('- **JID:** `dc:123`');
+    expect(md).toContain('- **Messages:** 2');
+    expect(md).toContain('### Alice · 2026-03-01T10:00:00.000Z');
+    expect(md).toContain('Hello there');
+    expect(md).toContain('### Agent · 2026-03-01T10:00:05.000Z');
+    expect(md).toContain('Hi! How can I help?');
+    // Messages are separated by horizontal rules.
+    expect(md).toContain('---');
+  });
+
   it('defaults to JSON format when no format specified', async () => {
     const state = makeState({
       getMessages: () => sampleMessages,

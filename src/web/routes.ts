@@ -838,8 +838,11 @@ function handleExportMessages(url: URL, state: WebStateProvider): Response {
   if (!chatJid) return json({ error: 'Missing chatJid' }, 400);
 
   const format = url.searchParams.get('format') || 'json';
-  if (format !== 'json' && format !== 'text')
-    return json({ error: 'Invalid format. Use "json" or "text".' }, 400);
+  if (format !== 'json' && format !== 'text' && format !== 'markdown')
+    return json(
+      { error: 'Invalid format. Use "json", "text", or "markdown".' },
+      400,
+    );
 
   const limit = Math.min(
     Math.max(1, parseInt(url.searchParams.get('limit') || '5000', 10) || 5000),
@@ -875,6 +878,36 @@ function handleExportMessages(url: URL, state: WebStateProvider): Response {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
         'Content-Disposition': `attachment; filename="${safeName}-export.txt"`,
+      },
+    });
+  }
+
+  if (format === 'markdown') {
+    // Agent/user message content is already markdown, so it is embedded
+    // verbatim under per-message headings for a readable, portable transcript.
+    const lines: string[] = [];
+    lines.push(`# Conversation: ${chatName}`);
+    lines.push('');
+    lines.push(`- **JID:** \`${chatJid}\``);
+    lines.push(`- **Exported:** ${new Date().toISOString()}`);
+    lines.push(`- **Messages:** ${messages.length}`);
+    lines.push('');
+
+    for (const msg of messages) {
+      const time = new Date(msg.timestamp).toISOString();
+      const sender = msg.sender_name || 'Unknown';
+      lines.push('---');
+      lines.push('');
+      lines.push(`### ${sender} · ${time}`);
+      lines.push('');
+      lines.push(msg.content || '');
+      lines.push('');
+    }
+
+    return new Response(lines.join('\n'), {
+      headers: {
+        'Content-Type': 'text/markdown; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${safeName}-export.md"`,
       },
     });
   }
