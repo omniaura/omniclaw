@@ -326,4 +326,76 @@ describe('fetchGitHubDelta', () => {
     expect(secondDigest).toBeNull();
     expect(getDeltaCursor(channelJid)).toBe(until);
   });
+
+  it('returns null without reading config or fetching when no GitHub token is configured', async () => {
+    const channelJid = makeChannelJid('no-token');
+    const fetchMock = mock(() => {
+      throw new Error('fetch should not run without a token');
+    });
+
+    delete process.env.GITHUB_TOKEN;
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    const digest = await fetchGitHubDelta(
+      channelJid,
+      '2026-03-25T12:10:00.000Z',
+    );
+
+    expect(digest).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('advances the cursor and returns null when GitHub API responses are not ok', async () => {
+    const channelJid = makeChannelJid('api-not-ok');
+    const since = '2026-03-25T12:00:00.000Z';
+    const until = '2026-03-25T12:10:00.000Z';
+    const fetchMock = mock(() =>
+      Promise.resolve(new Response('rate limited', { status: 403 })),
+    );
+
+    writeGitHubWatchesConfig({
+      watches: [],
+      githubDeltaContextEnabled: true,
+      channelWatches: [
+        {
+          channelJid,
+          repos: [{ owner: 'omniaura', repo: 'omniclaw' }],
+        },
+      ],
+    });
+    setDeltaCursor(channelJid, since);
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    const digest = await fetchGitHubDelta(channelJid, until);
+
+    expect(digest).toBeNull();
+    expect(getDeltaCursor(channelJid)).toBe(until);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('advances the cursor and returns null when GitHub API requests reject', async () => {
+    const channelJid = makeChannelJid('api-reject');
+    const since = '2026-03-25T12:00:00.000Z';
+    const until = '2026-03-25T12:10:00.000Z';
+    const fetchMock = mock(() => Promise.reject(new Error('network down')));
+
+    writeGitHubWatchesConfig({
+      watches: [],
+      githubDeltaContextEnabled: true,
+      channelWatches: [
+        {
+          channelJid,
+          repos: [{ owner: 'omniaura', repo: 'omniclaw' }],
+        },
+      ],
+    });
+    setDeltaCursor(channelJid, since);
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    const digest = await fetchGitHubDelta(channelJid, until);
+
+    expect(digest).toBeNull();
+    expect(getDeltaCursor(channelJid)).toBe(until);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
