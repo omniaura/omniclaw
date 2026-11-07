@@ -24,7 +24,16 @@ const RESPONSES_DIR = path.join(IPC_DIR, 'responses');
 const USER_REGISTRY_PATH = path.join(IPC_DIR, 'user_registry.json');
 const taskWorkflowsDir =
   process.env.OMNICLAW_TASK_WORKFLOWS_DIR || 'task-workflows';
-const taskWorkflowsPath = `/workspace/group/${taskWorkflowsDir.replace(/^\/+/, '').replace(/\/+$/, '')}/`;
+// A scheduled task's preprocess script is resolved by the host under the
+// task's group folder, which for multi-channel / 4-layer-context agents is the
+// agent-identity folder mounted at /workspace/agent — NOT the channel folder
+// mounted at /workspace/group. Point the docs at the folder that actually maps
+// to the task's group folder so agents write the workflow where the scheduler
+// looks for it. See issue #973.
+const taskWorkspaceRoot = fs.existsSync('/workspace/agent')
+  ? '/workspace/agent'
+  : '/workspace/group';
+const taskWorkflowsPath = `${taskWorkspaceRoot}/${taskWorkflowsDir.replace(/^\/+/, '').replace(/\/+$/, '')}/`;
 
 // Context from environment variables (set by the agent runner)
 const initialChatJid = process.env.OMNICLAW_CHAT_JID!;

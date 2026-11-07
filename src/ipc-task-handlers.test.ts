@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
+import fs from 'fs';
+import path from 'path';
 
+import { GROUPS_DIR, TASK_WORKFLOWS_DIR } from './config.js';
 import {
   _initTestDatabase,
   createTask,
@@ -8,6 +11,7 @@ import {
   setRegisteredGroup,
 } from './db.js';
 import { processTaskIpc, IpcDeps } from './ipc.js';
+import { IpcEventKind } from './web/ipc-events.js';
 import { RegisteredGroup } from './types.js';
 
 // =============================================================================
@@ -941,5 +945,98 @@ describe('processTaskIpc: optional writeTasksSnapshot', () => {
     // Should create the task without error
     const tasks = getAllTasks();
     expect(tasks).toHaveLength(1);
+  });
+});
+
+// =============================================================================
+// processTaskIpc: schedule_task / edit_task preprocess existence check (#973)
+// =============================================================================
+
+describe('processTaskIpc: preprocess_script existence check (issue #973)', () => {
+  const groupWorkflowsDir = path.isAbsolute(TASK_WORKFLOWS_DIR)
+    ? TASK_WORKFLOWS_DIR
+    : path.join(GROUPS_DIR, 'main', TASK_WORKFLOWS_DIR);
+  const scriptName = 'exists-check-973.ts';
+  const scriptPath = path.join(groupWorkflowsDir, scriptName);
+
+  function cleanup() {
+    fs.rmSync(scriptPath, { force: true });
+  }
+
+  async function flushMicrotasks() {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  function withEvents(): {
+    deps: IpcDeps;
+    events: Array<{ kind: IpcEventKind; summary: string }>;
+  } {
+    const events: Array<{ kind: IpcEventKind; summary: string }> = [];
+    return {
+      deps: {
+        ...deps,
+        onIpcEvent: (kind, _sourceGroup, summary) => {
+          events.push({ kind, summary });
+        },
+      },
+      events,
+    };
+  }
+
+  beforeEach(cleanup);
+
+  it('rejects schedule_task when the workflow file is missing', async () => {
+    const { deps: evDeps, events } = withEvents();
+
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'Watch something',
+        schedule_type: 'cron',
+        schedule_value: '0 7 * * *',
+        targetJid: 'main@g.us',
+        preprocess_script: scriptName,
+      } as any,
+      'main',
+      true,
+      evDeps,
+    );
+    await flushMicrotasks();
+
+    expect(getAllTasks()).toHaveLength(0);
+    const errorEvent = events.find((e) => e.kind === 'task_error');
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent?.summary).toContain(scriptName);
+    expect(errorEvent?.summary).toContain('/workspace/agent/task-workflows/');
+  });
+
+  it('creates schedule_task when the workflow file exists', async () => {
+    fs.mkdirSync(groupWorkflowsDir, { recursive: true });
+    fs.writeFileSync(
+      scriptPath,
+      'console.log(JSON.stringify({ action: "skip" }));',
+    );
+
+    try {
+      await processTaskIpc(
+        {
+          type: 'schedule_task',
+          prompt: 'Watch something',
+          schedule_type: 'cron',
+          schedule_value: '0 7 * * *',
+          targetJid: 'main@g.us',
+          preprocess_script: scriptName,
+        } as any,
+        'main',
+        true,
+        deps,
+      );
+
+      const tasks = getAllTasks();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].preprocess_script).toBe(scriptName);
+    } finally {
+      cleanup();
+    }
   });
 });
