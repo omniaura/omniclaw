@@ -85,6 +85,104 @@ export type MessageLaneReason =
  */
 export type TaskLaneReason = 'running' | 'back-pressure' | 'no-work';
 
+/**
+ * Human-readable metadata for a lane reason code, used by the web UI to render
+ * an operator-friendly label and an explanatory tooltip instead of the raw
+ * kebab-case code.
+ */
+export interface LaneReasonMeta {
+  /** Short title-cased label, e.g. `No work`. */
+  label: string;
+  /** One-line explanation surfaced as a tooltip / `title` attribute. */
+  description: string;
+}
+
+/**
+ * Canonical, ordered list of every {@link MessageLaneReason}. This is the
+ * single source of truth for the reason taxonomy — the web surfaces
+ * (`/agents`, `/ipc`, `/system`) derive their count maps and allow-lists from
+ * it rather than repeating the literal set, so adding a new reason code only
+ * requires updating this file and {@link MESSAGE_LANE_REASON_META}.
+ */
+export const MESSAGE_LANE_REASONS: readonly MessageLaneReason[] = [
+  'running',
+  'cooling-down',
+  'back-pressure',
+  'retrying',
+  'no-work',
+];
+
+/** Canonical, ordered list of every {@link TaskLaneReason}. */
+export const TASK_LANE_REASONS: readonly TaskLaneReason[] = [
+  'running',
+  'back-pressure',
+  'no-work',
+];
+
+/**
+ * Operator-facing metadata for each message-lane reason. Keyed by the union so
+ * the compiler rejects any partial map — adding a member to
+ * {@link MessageLaneReason} forces a matching entry here.
+ */
+export const MESSAGE_LANE_REASON_META: Record<
+  MessageLaneReason,
+  LaneReasonMeta
+> = {
+  running: {
+    label: 'Running',
+    description: 'Actively processing a message.',
+  },
+  'cooling-down': {
+    label: 'Cooling down',
+    description: 'Container kept warm and ready to reuse (healthy idle).',
+  },
+  'back-pressure': {
+    label: 'Back-pressure',
+    description: 'Messages are pending but waiting for container capacity.',
+  },
+  retrying: {
+    label: 'Retrying',
+    description: 'Backing off after a recent failure.',
+  },
+  'no-work': {
+    label: 'No work',
+    description: 'No pending messages and no active container.',
+  },
+};
+
+/** Operator-facing metadata for each task-lane reason. */
+export const TASK_LANE_REASON_META: Record<TaskLaneReason, LaneReasonMeta> = {
+  running: {
+    label: 'Running',
+    description: 'Actively executing a scheduled task.',
+  },
+  'back-pressure': {
+    label: 'Back-pressure',
+    description: 'Tasks are pending but waiting for task-container capacity.',
+  },
+  'no-work': {
+    label: 'No work',
+    description: 'No pending tasks and nothing running.',
+  },
+};
+
+/**
+ * Resolve operator-facing metadata for any lane reason code. Message-lane
+ * reasons are a superset of task-lane reasons, so the message map covers both;
+ * unknown codes fall back to a neutral label so the UI never renders `[object]`
+ * or a blank chip.
+ */
+export function describeLaneReason(
+  reason: MessageLaneReason | TaskLaneReason,
+): LaneReasonMeta {
+  return (
+    MESSAGE_LANE_REASON_META[reason as MessageLaneReason] ?? {
+      label: reason,
+      description: '',
+    }
+  );
+}
+
 export interface GroupQueueDetail {
   folderKey: string;
   messageLane: {
