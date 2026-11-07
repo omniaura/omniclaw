@@ -519,6 +519,105 @@ describe('buildHealthData', () => {
     expect(health.queue.max_retries).toBe(17);
   });
 
+  it('reports null queue last_error when no lane carries an error', () => {
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 0,
+          containerName: null,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+    ];
+    const health = buildHealthData(makeState([makeAgent()], details), 0);
+    expect(health.queue.last_error).toBeNull();
+  });
+
+  it('surfaces the newest lane error across groups and lanes', () => {
+    const now = Date.now();
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 0,
+          containerName: null,
+          lastError: { message: 'older message failure', at: now - 10_000 },
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 1,
+      },
+      {
+        folderKey: 'g2',
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 0,
+          containerName: null,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+          // Newest error overall — wins even though it is on the task lane.
+          lastError: { message: 'newest task failure', at: now - 1_000 },
+        },
+        retryCount: 2,
+      },
+    ];
+    const health = buildHealthData(makeState([makeAgent()], details), 0);
+    expect(health.queue.last_error).toEqual({
+      message: 'newest task failure',
+      at: now - 1_000,
+      folder: 'g2',
+      lane: 'task',
+    });
+  });
+
+  it('truncates long queue last_error messages', () => {
+    const long = 'x'.repeat(500);
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 0,
+          containerName: null,
+          lastError: { message: long, at: Date.now() },
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 1,
+      },
+    ];
+    const health = buildHealthData(makeState([makeAgent()], details), 0);
+    const msg = health.queue.last_error?.message ?? '';
+    // Capped at 140 chars: 139 message chars + a single ellipsis.
+    expect(msg.length).toBe(140);
+    expect(msg.endsWith('…')).toBe(true);
+  });
+
   it('rolls up message and task lane reason codes', () => {
     const details: GroupQueueDetail[] = [
       // running message lane + running task lane (active task)
@@ -1128,6 +1227,65 @@ describe('renderSystemContent', () => {
     expect(html).toContain(
       '<span class="metric-value" id="sys-queue-longest-running">\u2014</span>',
     );
+  });
+
+  it('renders an em-dash for the queue last error when no lane has failed', () => {
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: false,
+          idle: true,
+          pendingCount: 0,
+          containerName: null,
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 0,
+      },
+    ];
+    const html = renderSystemContent(makeState([makeAgent()], details), 0);
+    expect(html).toContain(
+      '<span class="metric-value" id="sys-queue-last-error">\u2014</span>',
+    );
+  });
+
+  it('renders the queue last error inline with lane, folder, and a logs link', () => {
+    const details: GroupQueueDetail[] = [
+      {
+        folderKey: 'g1',
+        messageLane: {
+          active: false,
+          idle: false,
+          pendingCount: 0,
+          containerName: null,
+          lastError: {
+            message: 'boom <script>',
+            at: Date.now() - 3_000,
+          },
+        },
+        taskLane: {
+          active: false,
+          pendingCount: 0,
+          containerName: null,
+          activeTask: null,
+        },
+        retryCount: 1,
+      },
+    ];
+    const html = renderSystemContent(makeState([makeAgent()], details), 0);
+    expect(html).toContain('id="sys-queue-last-error"');
+    expect(html).toContain('class="last-error-link"');
+    expect(html).toContain('href="/logs"');
+    // Lane + folder chip.
+    expect(html).toContain('message \u00b7 g1');
+    // Message is HTML-escaped, never rendered as raw markup.
+    expect(html).toContain('boom &lt;script&gt;');
+    expect(html).not.toContain('boom <script>');
   });
 
   it('renders message and task lane reason rollups with stable IDs', () => {

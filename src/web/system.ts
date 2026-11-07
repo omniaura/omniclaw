@@ -34,6 +34,37 @@ const TASK_LANE_REASONS: readonly TaskLaneReason[] = [
   'no-work',
 ];
 
+/**
+ * Most recent lane failure surfaced on the /system queue rollup. Mirrors the
+ * per-lane `lastError` data the IPC inspector shows inline, but reduced to the
+ * single newest error across all groups so the operator sees the latest thing
+ * that went wrong at a glance.
+ */
+export interface QueueLastError {
+  /** Failure message, truncated to {@link QUEUE_LAST_ERROR_MAX_LEN} chars. */
+  message: string;
+  /** Epoch ms when the error was captured. */
+  at: number;
+  /** Group folder key the failing lane belongs to. */
+  folder: string;
+  /** Which lane failed. */
+  lane: 'message' | 'task';
+}
+
+/**
+ * Cap for the queue last-error message on /system. The tile is a glance
+ * surface, not a log viewer, so long stack traces are truncated; the full
+ * text stays available on the IPC inspector and in /logs.
+ */
+const QUEUE_LAST_ERROR_MAX_LEN = 140;
+
+/** Trim and length-cap a lane error message for the /system rollup. */
+function truncateQueueError(message: string): string {
+  const trimmed = message.trim();
+  if (trimmed.length <= QUEUE_LAST_ERROR_MAX_LEN) return trimmed;
+  return trimmed.slice(0, QUEUE_LAST_ERROR_MAX_LEN - 1) + '…';
+}
+
 const AGENT_EXEC_STATUSES: readonly AgentExecStatus[] = [
   'executing',
   'running-task',
@@ -189,6 +220,15 @@ export interface HealthData {
      * `TaskLaneReason` values exposed on the IPC inspector page.
      */
     task_lane_reasons: Record<TaskLaneReason, number>;
+    /**
+     * The single most recent lane error across all groups (by timestamp), or
+     * null when no lane currently carries an error. The retry counts above tell
+     * the operator *how much* is failing; this surfaces *what* the latest
+     * failure was — the actual error text — without drilling into /ipc. The
+     * message is truncated to {@link QUEUE_LAST_ERROR_MAX_LEN} characters; the
+     * full text remains available on the IPC inspector.
+     */
+    last_error: QueueLastError | null;
   };
   /**
    * Aggregate of task run outcomes from the last
@@ -305,6 +345,7 @@ export function buildHealthData(
     'back-pressure': 0,
     'no-work': 0,
   };
+  let queueLastError: QueueLastError | null = null;
   for (const g of queueDetails) {
     pendingMessages += g.messageLane.pendingCount;
     pendingTasks += g.taskLane.pendingCount;
@@ -327,6 +368,27 @@ export function buildHealthData(
     if (g.retryCount > maxRetries) maxRetries = g.retryCount;
     messageLaneReasons[deriveMessageLaneReasonFromDetail(g)]++;
     taskLaneReasons[deriveTaskLaneReasonFromDetail(g)]++;
+    const msgErr = g.messageLane.lastError;
+    if (msgErr && (queueLastError === null || msgErr.at > queueLastError.at)) {
+      queueLastError = {
+        message: truncateQueueError(msgErr.message),
+        at: msgErr.at,
+        folder: g.folderKey,
+        lane: 'message',
+      };
+    }
+    const taskErr = g.taskLane.lastError;
+    if (
+      taskErr &&
+      (queueLastError === null || taskErr.at > queueLastError.at)
+    ) {
+      queueLastError = {
+        message: truncateQueueError(taskErr.message),
+        at: taskErr.at,
+        folder: g.folderKey,
+        lane: 'task',
+      };
+    }
   }
 
   const sinceIso = new Date(
@@ -394,6 +456,7 @@ export function buildHealthData(
       max_retries: maxRetries,
       message_lane_reasons: messageLaneReasons,
       task_lane_reasons: taskLaneReasons,
+      last_error: queueLastError,
     },
     recent_task_outcomes: {
       ...recentOutcomes,
@@ -424,6 +487,30 @@ function metricRow(label: string, value: string, id?: string): string {
     `<div class="metric-row">` +
     `<span class="metric-label">${escapeHtml(label)}</span>` +
     `<span class="metric-value"${idAttr}>${escapeHtml(value)}</span>` +
+    `</div>`
+  );
+}
+
+/**
+ * Render the queue "last error" row. Reuses the same `last-error-*` markup the
+ * IPC inspector uses (styled globally in shared.ts) so the two surfaces look
+ * consistent: a lane/folder chip, the truncated message, and the error age,
+ * linked through to /logs. Renders an em dash when no lane carries an error.
+ */
+function queueLastErrorRow(err: QueueLastError | null): string {
+  const value = err
+    ? `<a href="/logs" class="last-error-link" title="${escapeHtml(err.message)}">` +
+      `<span class="last-error-lane">${escapeHtml(`${err.lane} · ${err.folder}`)}</span>` +
+      `<span class="last-error-text">${escapeHtml(err.message)}</span>` +
+      `<span class="last-error-age">${escapeHtml(
+        formatDurationCompact(Math.max(0, Date.now() - err.at)),
+      )}</span>` +
+      `</a>`
+    : '—';
+  return (
+    `<div class="metric-row">` +
+    `<span class="metric-label">last error</span>` +
+    `<span class="metric-value" id="sys-queue-last-error">${value}</span>` +
     `</div>`
   );
 }
@@ -678,6 +765,7 @@ export function renderSystemContent(
           String(health.queue.max_retries),
           'sys-queue-max-retries',
         ) +
+        queueLastErrorRow(health.queue.last_error) +
         `<div class="metric-sub">message lane reasons</div>` +
         reasonRollup(
           health.queue.message_lane_reasons,
