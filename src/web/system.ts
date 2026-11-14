@@ -158,12 +158,25 @@ export interface HealthData {
      */
     longest_running_task_ms: number;
     /**
+     * Folder key of the group that owns the longest-running task, or null when
+     * no task is running. Lets the operator jump straight to the culprit group
+     * on /ipc instead of scanning every lane to match the age surfaced by
+     * {@link longest_running_task_ms}.
+     */
+    longest_running_task_group: string | null;
+    /**
      * Longest currently-running message run age in milliseconds across all
      * message lanes. Zero when no message lane is active. Operators can spot a
      * stuck message turn from the queue rollup without drilling into /ipc, the
      * same way {@link longest_running_task_ms} surfaces stuck task runs.
      */
     longest_running_message_ms: number;
+    /**
+     * Folder key of the group that owns the longest-running message run, or
+     * null when no message lane is active. Mirrors
+     * {@link longest_running_task_group} for the message lane.
+     */
+    longest_running_message_group: string | null;
     /** Number of group folders whose consecutive retry count is greater than zero. */
     retrying_groups: number;
     /**
@@ -289,7 +302,9 @@ export function buildHealthData(
   let processingGroups = 0;
   let runningTasks = 0;
   let longestRunningTaskMs = 0;
+  let longestRunningTaskGroup: string | null = null;
   let longestRunningMessageMs = 0;
+  let longestRunningMessageGroup: string | null = null;
   let retryingGroups = 0;
   let totalRetries = 0;
   let maxRetries = 0;
@@ -311,8 +326,15 @@ export function buildHealthData(
     if (g.messageLane.active) processingGroups++;
     if (g.taskLane.activeTask) {
       runningTasks++;
-      if (g.taskLane.activeTask.runningMs > longestRunningTaskMs) {
+      // Attribute on >= so the first running task claims ownership even at 0ms
+      // (freshly started), rather than leaving the group null while the row
+      // still renders a running age.
+      if (
+        g.taskLane.activeTask.runningMs >= longestRunningTaskMs ||
+        longestRunningTaskGroup === null
+      ) {
         longestRunningTaskMs = g.taskLane.activeTask.runningMs;
+        longestRunningTaskGroup = g.folderKey;
       }
     }
     const msgRunningMs = g.messageLane.runningMs;
@@ -321,6 +343,7 @@ export function buildHealthData(
       msgRunningMs > longestRunningMessageMs
     ) {
       longestRunningMessageMs = msgRunningMs;
+      longestRunningMessageGroup = g.folderKey;
     }
     if (g.retryCount > 0) retryingGroups++;
     totalRetries += g.retryCount;
@@ -388,7 +411,9 @@ export function buildHealthData(
       processing_groups: processingGroups,
       running_tasks: runningTasks,
       longest_running_task_ms: longestRunningTaskMs,
+      longest_running_task_group: longestRunningTaskGroup,
       longest_running_message_ms: longestRunningMessageMs,
+      longest_running_message_group: longestRunningMessageGroup,
       retrying_groups: retryingGroups,
       total_retries: totalRetries,
       max_retries: maxRetries,
@@ -416,6 +441,17 @@ function formatUptime(seconds: number): string {
   if (m > 0) parts.push(`${m}m`);
   parts.push(`${s}s`);
   return parts.join(' ');
+}
+
+/**
+ * Format a longest-running age with its owning group appended, e.g.
+ * `2.1m · omniaura-discord`. The group is dropped when null (no run) so the
+ * cell reads as a bare duration. `metricRow` escapes the whole string, so the
+ * folder key is safe to interpolate here.
+ */
+function formatRunAgeWithGroup(ms: number, group: string | null): string {
+  const age = formatDurationCompact(ms);
+  return group ? `${age} · ${group}` : age;
 }
 
 function metricRow(label: string, value: string, id?: string): string {
@@ -642,14 +678,20 @@ export function renderSystemContent(
         metricRow(
           'longest running',
           health.queue.running_tasks > 0
-            ? formatDurationCompact(health.queue.longest_running_task_ms)
+            ? formatRunAgeWithGroup(
+                health.queue.longest_running_task_ms,
+                health.queue.longest_running_task_group,
+              )
             : '\u2014',
           'sys-queue-longest-running',
         ) +
         metricRow(
           'longest message run',
           health.queue.processing_groups > 0
-            ? formatDurationCompact(health.queue.longest_running_message_ms)
+            ? formatRunAgeWithGroup(
+                health.queue.longest_running_message_ms,
+                health.queue.longest_running_message_group,
+              )
             : '\u2014',
           'sys-queue-longest-running-message',
         ) +
