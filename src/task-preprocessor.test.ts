@@ -5,7 +5,9 @@ import path from 'path';
 
 import { GROUPS_DIR, TASK_WORKFLOWS_DIR } from './config.js';
 import {
+  checkPreprocessScriptExists,
   normalizePreprocessScriptPath,
+  resolvePreprocessWorkflowPath,
   runTaskPreprocessor,
 } from './task-preprocessor.js';
 import type { ScheduledTask } from './types.js';
@@ -400,4 +402,52 @@ it('resolves the default group task-workflows directory when no override is prov
       },
     );
   }
+});
+
+describe('checkPreprocessScriptExists (issue #973)', () => {
+  it('passes when there is no preprocess script to check', () => {
+    expect(checkPreprocessScriptExists('main', null)).toEqual({ ok: true });
+    expect(checkPreprocessScriptExists('main', undefined)).toEqual({
+      ok: true,
+    });
+  });
+
+  it('passes when the script exists at the resolved workflow path', () => {
+    fs.writeFileSync(
+      path.join(workflowsDir, 'workflow.ts'),
+      'console.log(JSON.stringify({ action: "skip" }));',
+    );
+
+    expect(
+      checkPreprocessScriptExists('main', 'workflow.ts', { workflowsDir }),
+    ).toEqual({ ok: true });
+  });
+
+  it('fails with an actionable error naming the resolved dir when missing', () => {
+    const result = checkPreprocessScriptExists('main', 'missing.ts', {
+      workflowsDir,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected failure');
+    expect(result.error).toContain('missing.ts');
+    expect(result.error).toContain(workflowsDir);
+    expect(result.error).toContain('/workspace/agent/task-workflows/');
+  });
+
+  it('rejects a traversal path without touching the filesystem', () => {
+    const result = checkPreprocessScriptExists('main', '../escape.ts', {
+      workflowsDir,
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('resolves the workflow path under the group task-workflows dir', () => {
+    const { workflowsDir: resolvedDir, workflowPath } =
+      resolvePreprocessWorkflowPath('main', 'workflow.ts', { workflowsDir });
+
+    expect(resolvedDir).toBe(workflowsDir);
+    expect(workflowPath).toBe(path.join(workflowsDir, 'workflow.ts'));
+  });
 });
