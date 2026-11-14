@@ -809,11 +809,13 @@ function tasksScript(): string {
   return `
 var tbody=document.getElementById("tm-tbody");
 var filters=document.getElementById("tm-filters");
+var searchInput=document.getElementById("tm-search");
 var createModal=document.getElementById("tm-create-modal");
 var editModal=document.getElementById("tm-edit-modal");
 var deleteModal=document.getElementById("tm-delete-modal");
 var runPanel=document.getElementById("tm-run-panel");
 var currentFilter="all";
+var currentSearch="";
 var editingTaskId=null;
 var deletingTaskId=null;
 
@@ -984,10 +986,19 @@ filters.addEventListener("click",function(e){
   applyFilter();
 });
 
+// ---- Text search (composes with the status tabs) ----
+if(searchInput){
+  searchInput.addEventListener("input",function(){
+    currentSearch=searchInput.value.trim().toLowerCase();
+    applyFilter();
+  });
+}
+
 function applyFilter(){
   tbody.querySelectorAll("tr[data-task-id]").forEach(function(row){
-    if(currentFilter==="all"){row.classList.remove("hidden");}
-    else{row.classList.toggle("hidden",row.getAttribute("data-status")!==currentFilter);}
+    var statusMatch=currentFilter==="all"||row.getAttribute("data-status")===currentFilter;
+    var searchMatch=!currentSearch||(row.getAttribute("data-search")||"").indexOf(currentSearch)!==-1;
+    row.classList.toggle("hidden",!(statusMatch&&searchMatch));
   });
 }
 
@@ -1296,7 +1307,8 @@ function refreshTasks(){
       var lr=task.last_run?relTime(task.last_run):"\\u2014";
       var los=task.last_outcome_state;
       var lrc=los==="done"?"run-success":(los==="blocked"||los==="abandoned")?"run-error":los?"":task.last_result==="success"?"run-success":task.last_result==="error"?"run-error":"";
-      return '<tr data-task-id="'+window.__esc(task.id)+'" data-status="'+window.__esc(task.status)+'">'
+      var searchText=((task.group_folder||"")+" "+(task.prompt||"")).toLowerCase();
+      return '<tr data-task-id="'+window.__esc(task.id)+'" data-status="'+window.__esc(task.status)+'" data-search="'+window.__esc(searchText)+'">'
         +'<td><span class="badge '+sc+'">'+window.__esc(task.status)+'</span></td>'
         +'<td class="td-agent" title="'+window.__esc(task.chat_jid)+'">'+window.__esc(task.group_folder)+'</td>'
         +'<td class="td-prompt" title="'+window.__esc(task.prompt)+'">'+window.__esc(ps)+'</td>'
