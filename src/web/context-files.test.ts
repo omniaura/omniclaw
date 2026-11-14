@@ -8,12 +8,14 @@ import { listLocalContextFiles } from './context-files.js';
 
 const realExistsSync = fs.existsSync;
 const realReaddirSync = fs.readdirSync;
+const realRealpathSync = fs.realpathSync;
 const realStatSync = fs.statSync;
 const realReadFileSync = fs.readFileSync;
 
 const mockedFs = fs as unknown as {
   existsSync: typeof fs.existsSync;
   readdirSync: typeof fs.readdirSync;
+  realpathSync: typeof fs.realpathSync;
   statSync: typeof fs.statSync;
   readFileSync: typeof fs.readFileSync;
 };
@@ -31,6 +33,7 @@ function file(name: string): FakeDirent {
 afterEach(() => {
   mockedFs.existsSync = realExistsSync;
   mockedFs.readdirSync = realReaddirSync;
+  mockedFs.realpathSync = realRealpathSync;
   mockedFs.statSync = realStatSync;
   mockedFs.readFileSync = realReadFileSync;
 });
@@ -67,6 +70,8 @@ describe('listLocalContextFiles', () => {
       }
       throw new Error(`Unexpected readdir for ${dirPath}`);
     }) as unknown as typeof fs.readdirSync;
+    mockedFs.realpathSync = ((target: fs.PathLike) =>
+      String(target)) as typeof fs.realpathSync;
     mockedFs.statSync = ((target: fs.PathLike) => {
       const filePath = String(target);
       if (filePath === alphaClaude) {
@@ -137,6 +142,8 @@ describe('listLocalContextFiles', () => {
       }
       throw new Error(`Unexpected readdir for ${dirPath}`);
     }) as unknown as typeof fs.readdirSync;
+    mockedFs.realpathSync = ((target: fs.PathLike) =>
+      String(target)) as typeof fs.realpathSync;
     mockedFs.statSync = ((target: fs.PathLike) => {
       const filePath = String(target);
       if (filePath === okClaude) {
@@ -161,6 +168,54 @@ describe('listLocalContextFiles', () => {
         hash: crypto.createHash('sha256').update(okContent).digest('hex'),
         size: okContent.length,
         mtime: '2026-03-12T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('skips CLAUDE.md symlinks that resolve outside groups directory', () => {
+    const root = GROUPS_DIR;
+    const safeClaude = path.join(root, 'safe', 'CLAUDE.md');
+    const symlinkClaude = path.join(root, 'escape', 'CLAUDE.md');
+    const secretPath = path.resolve(root, '..', '.env');
+    const safeContent = 'safe context';
+
+    mockedFs.existsSync = ((target: fs.PathLike) =>
+      target === root) as typeof fs.existsSync;
+    mockedFs.readdirSync = ((target: fs.PathLike) => {
+      const dirPath = String(target);
+      if (dirPath === root) return [dir('safe'), dir('escape')];
+      if (dirPath === path.join(root, 'safe')) return [file('CLAUDE.md')];
+      if (dirPath === path.join(root, 'escape')) return [file('CLAUDE.md')];
+      throw new Error(`Unexpected readdir for ${dirPath}`);
+    }) as unknown as typeof fs.readdirSync;
+    mockedFs.realpathSync = ((target: fs.PathLike) => {
+      const filePath = String(target);
+      if (filePath === safeClaude) return safeClaude;
+      if (filePath === symlinkClaude) return secretPath;
+      throw new Error(`Unexpected realpath for ${filePath}`);
+    }) as typeof fs.realpathSync;
+    mockedFs.statSync = ((target: fs.PathLike) => {
+      const filePath = String(target);
+      if (filePath === safeClaude) {
+        return {
+          size: safeContent.length,
+          mtime: new Date('2026-03-13T00:00:00.000Z'),
+        } as fs.Stats;
+      }
+      throw new Error(`Unexpected stat for ${filePath}`);
+    }) as typeof fs.statSync;
+    mockedFs.readFileSync = ((target: fs.PathLike) => {
+      const filePath = String(target);
+      if (filePath === safeClaude) return safeContent;
+      throw new Error(`Unexpected read for ${filePath}`);
+    }) as typeof fs.readFileSync;
+
+    expect(listLocalContextFiles()).toEqual([
+      {
+        path: 'safe',
+        hash: crypto.createHash('sha256').update(safeContent).digest('hex'),
+        size: safeContent.length,
+        mtime: '2026-03-13T00:00:00.000Z',
       },
     ]);
   });
