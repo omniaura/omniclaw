@@ -158,6 +158,19 @@ export function handleRequest(
       return json({ error: 'Method not allowed' }, 405);
     }
 
+    // Run history export: /api/tasks/{id}/runs/export
+    if (rest.endsWith('/runs/export')) {
+      let taskId: string;
+      try {
+        taskId = decodeURIComponent(rest.slice(0, -'/runs/export'.length));
+      } catch {
+        return json({ error: 'Invalid task ID encoding' }, 400);
+      }
+      if (!taskId) return json({ error: 'Missing task ID' }, 400);
+      if (method === 'GET') return handleExportTaskRuns(taskId, req, state);
+      return json({ error: 'Method not allowed' }, 405);
+    }
+
     // Run now: /api/tasks/{id}/run
     if (rest.endsWith('/run')) {
       let taskId: string;
@@ -470,6 +483,92 @@ function handleGetTaskRuns(
 
   const runs = state.getTaskRunLogs(taskId, limit);
   return json(runs);
+}
+
+/**
+ * Escape a value for a CSV cell: quote when it contains a comma, quote,
+ * or newline, doubling any embedded quotes (RFC 4180).
+ */
+function csvCell(value: string): string {
+  if (/[",\r\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+/**
+ * Export a task's run history for offline audit/analysis.
+ * GET /api/tasks/{id}/runs/export?format=json|csv&limit=N
+ * JSON mirrors the conversation export envelope; CSV is spreadsheet-friendly
+ * (durations, statuses, outcomes) for success-rate / latency analysis.
+ */
+function handleExportTaskRuns(
+  taskId: string,
+  req: Request,
+  state: WebStateProvider,
+): Response {
+  const task = state.getTaskById(taskId);
+  if (!task) return json({ error: 'Task not found' }, 404);
+
+  const url = new URL(req.url);
+  const format = url.searchParams.get('format') || 'json';
+  if (format !== 'json' && format !== 'csv')
+    return json({ error: 'Invalid format. Use "json" or "csv".' }, 400);
+
+  const limit = Math.min(
+    Math.max(1, parseInt(url.searchParams.get('limit') || '1000', 10) || 1000),
+    MAX_EXPORT_LIMIT,
+  );
+
+  const runs = state.getTaskRunLogs(taskId, limit);
+  const safeId = taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  if (format === 'csv') {
+    const header = [
+      'run_at',
+      'status',
+      'duration_ms',
+      'outcome_state',
+      'outcome_reason',
+      'result',
+      'error',
+    ];
+    const lines = [header.join(',')];
+    for (const run of runs) {
+      lines.push(
+        [
+          run.run_at,
+          run.status,
+          String(run.duration_ms),
+          run.outcome_state ?? '',
+          run.outcome_reason ?? '',
+          run.result ?? '',
+          run.error ?? '',
+        ]
+          .map(csvCell)
+          .join(','),
+      );
+    }
+    return new Response(lines.join('\n'), {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="task-${safeId}-runs.csv"`,
+      },
+    });
+  }
+
+  const payload = {
+    task_id: taskId,
+    exported_at: new Date().toISOString(),
+    run_count: runs.length,
+    runs,
+  };
+  return new Response(JSON.stringify(payload, null, 2), {
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Disposition': `attachment; filename="task-${safeId}-runs.json"`,
+    },
+  });
 }
 
 function handleGetTaskRunPhases(
