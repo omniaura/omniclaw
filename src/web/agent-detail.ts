@@ -266,6 +266,46 @@ export function buildAgentDetailData(
   };
 }
 
+/**
+ * Render the message composer for a local agent. Lets an operator inject a
+ * one-off message into any subscribed channel directly from the Web UI,
+ * driving the existing `POST /api/agents/:id/message` endpoint (which enqueues
+ * the message for the agent exactly as if it had arrived from the channel).
+ *
+ * Callers gate rendering to local agents with at least one channel — remote
+ * agents are driven by their owning peer, and an agent with no channels has
+ * nowhere to send. The content textarea caps at 10000 characters to mirror the
+ * server-side limit in `handleSendMessage`, giving fast client-side feedback
+ * before the request is made.
+ */
+export function renderMessageComposer(
+  agentId: string,
+  channels: Array<{ jid: string; displayName: string }>,
+  esc: (s: string) => string = escapeHtml,
+): string {
+  const channelOptions = channels
+    .map(
+      (ch) => `<option value="${esc(ch.jid)}">${esc(ch.displayName)}</option>`,
+    )
+    .join('');
+  return (
+    `<div class="ad-section ad-send-section">` +
+    `<h3 class="ad-section-title">send message</h3>` +
+    `<form class="ad-send-form" data-agent-send-form data-agent-id="${esc(agentId)}">` +
+    `<div class="ad-send-row">` +
+    `<select class="ad-send-channel" name="channel" required>${channelOptions}</select>` +
+    `<input type="text" class="ad-send-sender" name="sender_name" placeholder="Web UI Admin" maxlength="120" autocomplete="off">` +
+    `</div>` +
+    `<textarea class="ad-send-content" name="content" placeholder="Message to inject into the channel…" maxlength="10000" required></textarea>` +
+    `<div class="ad-send-actions">` +
+    `<span class="ad-send-help td-dim">Delivered to the agent as if it arrived from the channel.</span>` +
+    `<button class="btn btn-sm btn-primary" type="submit">send</button>` +
+    `</div>` +
+    `</form>` +
+    `</div>`
+  );
+}
+
 /** Render agent detail content (no shell wrapper). */
 export function renderAgentDetailContent(
   data: AgentDetailData | null,
@@ -446,6 +486,13 @@ export function renderAgentDetailContent(
         `Claude → claude-opus-4-7, OpenCode → anthropic/claude-sonnet-4-5, Codex → CODEX_MODEL, Cursor → CURSOR_AGENT_MODEL. ` +
         `Leave blank to fall back to .env.</div>` +
         `</div>`
+      : '') +
+    // Message composer (local agents with at least one channel). Injects a
+    // one-off message into a subscribed channel via POST
+    // /api/agents/:id/message. Remote agents are driven by their owning peer,
+    // and an agent with no channels has nowhere to send.
+    (!data.remoteInstanceId && data.channels.length > 0
+      ? renderMessageComposer(data.id, data.channels)
       : '') +
     // Channels section
     `<div class="ad-section">` +
