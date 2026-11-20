@@ -43,20 +43,20 @@ Source: `src/web/system.ts` (`HealthData`, `renderSystemContent`).
 
 Source: `HealthData.queue` in `src/web/system.ts`.
 
-| Field                  | Source                                     | Meaning                                                                       |
-| ---------------------- | ------------------------------------------ | ----------------------------------------------------------------------------- |
-| `groups`               | `queueDetails.length`                      | Group folders the orchestrator is currently tracking.                         |
-| `processing`           | groups with `messageLane.active === true`  | Lanes actively processing inbound messages right now.                         |
-| `running tasks`        | groups with `taskLane.activeTask !== null` | Scheduled tasks currently executing across all task lanes.                    |
-| `longest running`      | `max(taskLane.activeTask.runningMs)`       | Age of the oldest in-flight task. Stays at `—` when no task is running.       |
-| `longest message run`  | `max(messageLane.runningMs)`               | Age of the oldest in-flight message run. Stays at `—` when `processing` is 0. |
-| `pending msgs`         | sum of `messageLane.pendingCount`          | Messages queued across all groups (back-pressure ceiling).                    |
-| `pending tasks`        | sum of `taskLane.pendingCount`             | Scheduled tasks queued across all groups.                                     |
-| `retrying`             | groups with `retryCount > 0`               | Breadth of retry pressure — how many groups are currently in backoff.         |
-| `total retries`        | sum of `retryCount`                        | Intensity — one group stuck retrying many times will inflate this.            |
-| `max retries`          | `max(retryCount)`                          | Highest individual retry depth, useful for spotting a single stuck group.     |
-| `message lane reasons` | reason-code rollup (see below)             | Distribution of message lanes across the 5 message reason codes.              |
-| `task lane reasons`    | reason-code rollup (see below)             | Distribution of task lanes across the 3 task reason codes.                    |
+| Field                  | Source                                     | Meaning                                                                                                                                                             |
+| ---------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `groups`               | `queueDetails.length`                      | Group folders the orchestrator is currently tracking.                                                                                                               |
+| `processing`           | groups with `messageLane.active === true`  | Lanes actively processing inbound messages right now.                                                                                                               |
+| `running tasks`        | groups with `taskLane.activeTask !== null` | Scheduled tasks currently executing across all task lanes.                                                                                                          |
+| `longest running`      | `max(taskLane.activeTask.runningMs)`       | Age of the oldest in-flight task, suffixed with `· <group>` (the owning folder key) so you can jump straight to it on `/ipc`. Stays at `—` when no task is running. |
+| `longest message run`  | `max(messageLane.runningMs)`               | Age of the oldest in-flight message run, suffixed with `· <group>` for the owning folder key. Stays at `—` when `processing` is 0.                                  |
+| `pending msgs`         | sum of `messageLane.pendingCount`          | Messages queued across all groups (back-pressure ceiling).                                                                                                          |
+| `pending tasks`        | sum of `taskLane.pendingCount`             | Scheduled tasks queued across all groups.                                                                                                                           |
+| `retrying`             | groups with `retryCount > 0`               | Breadth of retry pressure — how many groups are currently in backoff.                                                                                               |
+| `total retries`        | sum of `retryCount`                        | Intensity — one group stuck retrying many times will inflate this.                                                                                                  |
+| `max retries`          | `max(retryCount)`                          | Highest individual retry depth, useful for spotting a single stuck group.                                                                                           |
+| `message lane reasons` | reason-code rollup (see below)             | Distribution of message lanes across the 5 message reason codes.                                                                                                    |
+| `task lane reasons`    | reason-code rollup (see below)             | Distribution of task lanes across the 3 task reason codes.                                                                                                          |
 
 ### Agent exec-state breakdown
 

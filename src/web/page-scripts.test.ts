@@ -358,9 +358,24 @@ describe('system page script', () => {
 
     expect(script).toContain('getElementById("sys-queue-longest-running")');
     // Mirrors the server-side ternary in renderSystemContent so /system and
-    // the poll loop agree when no task is running.
+    // the poll loop agree when no task is running, and appends the owning
+    // group folder key when one is running.
     expect(script).toContain(
-      'h.queue.running_tasks>0?fmtDur(h.queue.longest_running_task_ms):"—"',
+      'h.queue.running_tasks>0?(h.queue.longest_running_task_group?fmtDur(h.queue.longest_running_task_ms)+" · "+h.queue.longest_running_task_group:fmtDur(h.queue.longest_running_task_ms)):"—"',
+    );
+  });
+
+  it('live-updates the longest message run row with its owning group', () => {
+    const script = allPageScripts().system;
+
+    // Previously only the task version was wired into the poll loop; the
+    // message run age was static until a full page reload. Mirror the task
+    // handler so both stream live, group-attributed.
+    expect(script).toContain(
+      'getElementById("sys-queue-longest-running-message")',
+    );
+    expect(script).toContain(
+      'h.queue.processing_groups>0?(h.queue.longest_running_message_group?fmtDur(h.queue.longest_running_message_ms)+" · "+h.queue.longest_running_message_group:fmtDur(h.queue.longest_running_message_ms)):"—"',
     );
   });
 
