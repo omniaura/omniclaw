@@ -969,6 +969,128 @@ describe('handleRequest task run logs', () => {
   });
 });
 
+// ---- Task run history export ----
+
+describe('GET /api/tasks/{id}/runs/export', () => {
+  const sampleRuns: TaskRunLog[] = [
+    {
+      task_id: 'task-001',
+      run_at: '2026-03-10T12:00:00.000Z',
+      duration_ms: 5000,
+      status: 'success',
+      result: 'All good, said "hi"',
+      error: null,
+      outcome_state: 'done',
+      outcome_reason: 'finished cleanly',
+    },
+    {
+      task_id: 'task-001',
+      run_at: '2026-03-10T11:00:00.000Z',
+      duration_ms: 2000,
+      status: 'error',
+      result: null,
+      error: 'boom,\ncrash',
+    },
+  ];
+
+  function exportState(): WebStateProvider {
+    return {
+      ...makeState(makeAgent()),
+      getTaskById: (id) =>
+        id === 'task-001' ? makeTask({ id: 'task-001' }) : undefined,
+      getTaskRunLogs: (taskId, limit) =>
+        taskId === 'task-001' ? sampleRuns.slice(0, limit ?? 20) : [],
+    };
+  }
+
+  it('returns 404 for unknown task', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/api/tasks/nonexistent/runs/export'),
+      makeState(makeAgent()),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('exports JSON by default with an envelope', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/api/tasks/task-001/runs/export'),
+      exportState(),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('application/json');
+    expect(res.headers.get('Content-Disposition')).toContain(
+      'task-task-001-runs.json',
+    );
+    const body = (await res.json()) as {
+      task_id: string;
+      run_count: number;
+      runs: TaskRunLog[];
+    };
+    expect(body.task_id).toBe('task-001');
+    expect(body.run_count).toBe(2);
+    expect(body.runs).toHaveLength(2);
+  });
+
+  it('exports CSV with a header and RFC-4180 escaping', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/api/tasks/task-001/runs/export?format=csv'),
+      exportState(),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/csv');
+    expect(res.headers.get('Content-Disposition')).toContain(
+      'task-task-001-runs.csv',
+    );
+    const text = await res.text();
+    const lines = text.split('\n');
+    expect(lines[0]).toBe(
+      'run_at,status,duration_ms,outcome_state,outcome_reason,result,error',
+    );
+    // First run: quoted result because it contains a comma and quotes.
+    expect(lines[1]).toContain('"All good, said ""hi"""');
+    // Second run: error field with comma + newline stays quoted (so it does
+    // not split into extra CSV rows).
+    expect(text).toContain('"boom,\ncrash"');
+  });
+
+  it('rejects an invalid format', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/api/tasks/task-001/runs/export?format=xml'),
+      exportState(),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects non-GET methods', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/api/tasks/task-001/runs/export', {
+        method: 'POST',
+      }),
+      exportState(),
+    );
+    expect(res.status).toBe(405);
+  });
+
+  it('caps the limit at MAX_EXPORT_LIMIT', async () => {
+    let receivedLimit = -1;
+    const state: WebStateProvider = {
+      ...exportState(),
+      getTaskRunLogs: (_taskId, limit) => {
+        receivedLimit = limit ?? -1;
+        return sampleRuns;
+      },
+    };
+    const res = await handleRequest(
+      new Request(
+        'http://localhost/api/tasks/task-001/runs/export?limit=999999',
+      ),
+      state,
+    );
+    expect(res.status).toBe(200);
+    expect(receivedLimit).toBe(5000);
+  });
+});
+
 // ---- Task run phase events ----
 
 describe('GET /api/tasks/{id}/runs/{runAt}/phases', () => {
