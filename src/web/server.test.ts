@@ -1533,6 +1533,96 @@ describe('SSE', () => {
   });
 });
 
+// ---- GET /api/logs/recent ----
+
+describe('GET /api/logs/recent', () => {
+  it('returns buffered structured log records as JSON', async () => {
+    const restoreLoggerBridge = ensureLoggerSubscriptionBridge();
+    try {
+      handle = startWebServer(testConfig(), makeState());
+      const marker = `recent-log-${Date.now()}`;
+      logger.info(marker);
+
+      const res = await authedFetch('/api/logs/recent');
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toContain('application/json');
+      const body = (await res.json()) as {
+        logs: Array<Record<string, unknown>>;
+        total: number;
+      };
+      expect(Array.isArray(body.logs)).toBe(true);
+      expect(body.total).toBeGreaterThan(0);
+      const found = body.logs.find((r) => r.msg === marker);
+      expect(found).toBeTruthy();
+      expect(found?.level).toBe('info');
+    } finally {
+      restoreLoggerBridge();
+    }
+  });
+
+  it('filters by level', async () => {
+    const restoreLoggerBridge = ensureLoggerSubscriptionBridge();
+    try {
+      handle = startWebServer(testConfig(), makeState());
+      const marker = `recent-warn-${Date.now()}`;
+      logger.info(`info-noise-${Date.now()}`);
+      logger.warn(marker);
+
+      const res = await authedFetch('/api/logs/recent?level=warn');
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        logs: Array<Record<string, unknown>>;
+      };
+      expect(body.logs.length).toBeGreaterThan(0);
+      expect(body.logs.every((r) => r.level === 'warn')).toBe(true);
+      expect(body.logs.some((r) => r.msg === marker)).toBe(true);
+    } finally {
+      restoreLoggerBridge();
+    }
+  });
+
+  it('ignores an invalid level filter and returns all levels', async () => {
+    const restoreLoggerBridge = ensureLoggerSubscriptionBridge();
+    try {
+      handle = startWebServer(testConfig(), makeState());
+      logger.info(`recent-any-${Date.now()}`);
+
+      const res = await authedFetch('/api/logs/recent?level=bogus');
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        logs: Array<Record<string, unknown>>;
+      };
+      expect(body.logs.length).toBeGreaterThan(0);
+    } finally {
+      restoreLoggerBridge();
+    }
+  });
+
+  it('honors the limit query parameter', async () => {
+    const restoreLoggerBridge = ensureLoggerSubscriptionBridge();
+    try {
+      handle = startWebServer(testConfig(), makeState());
+      for (let i = 0; i < 5; i++)
+        logger.info(`recent-limit-${i}-${Date.now()}`);
+
+      const res = await authedFetch('/api/logs/recent?limit=2');
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        logs: Array<Record<string, unknown>>;
+      };
+      expect(body.logs.length).toBe(2);
+    } finally {
+      restoreLoggerBridge();
+    }
+  });
+
+  it('rejects non-GET methods', async () => {
+    handle = startWebServer(testConfig(), makeState());
+    const res = await authedFetch('/api/logs/recent', { method: 'POST' });
+    expect(res.status).toBe(405);
+  });
+});
+
 // ---- CORS ----
 
 describe('CORS', () => {
