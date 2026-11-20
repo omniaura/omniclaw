@@ -182,7 +182,11 @@ export function renderTaskTableRows(tasks: ScheduledTask[]): string {
         `<span class="sched-label">${escapeHtml(schedLabel)}</span></td>` +
         `<td class="td-time" title="${escapeHtml(task.next_run ?? '')}">${escapeHtml(nextRun)}</td>` +
         `<td class="td-time ${lastResultClass}" title="${escapeHtml(task.last_run ?? '')}">${escapeHtml(lastRun)}${outcomeBadge}</td>` +
-        `<td><span class="badge badge-sm">${escapeHtml(task.context_mode)}</span></td>` +
+        `<td><span class="badge badge-sm">${escapeHtml(task.context_mode)}</span>` +
+        (task.preprocess_script
+          ? ` <span class="badge badge-sm badge-preprocess" title="Preprocess: ${escapeHtml(task.preprocess_script)}">fn</span>`
+          : '') +
+        `</td>` +
         `<td class="td-actions">` +
         `<button class="btn btn-sm btn-toggle" data-tm-action="toggle" data-status="${toggleStatus}">${toggleLabel}</button>` +
         runButton +
@@ -282,6 +286,11 @@ function renderTaskModal(
     `<option value="isolated">Isolated</option>` +
     `<option value="group">Group (with history)</option>` +
     `</select></div>` +
+    // Optional preprocess script — a relative JS/TS path in the task
+    // workflows dir that decides run/skip/error and can rewrite the prompt.
+    `<div class="form-group"><label for="${prefix}-preprocess">Preprocess Script <span class="form-optional">(optional)</span></label>` +
+    `<input id="${prefix}-preprocess" type="text" placeholder="e.g. daily-digest.ts" maxlength="512" autocomplete="off">` +
+    `<div class="form-hint">Relative path to a JS/TS file in the task workflows dir. Runs before each execution to decide run/skip/error and optionally rewrite the prompt. Leave blank for none.</div></div>` +
     `<div id="${prefix}-error" class="form-error"></div>` +
     `<div class="form-actions">` +
     `<button type="button" class="btn" id="${prefix}-cancel">Cancel</button>` +

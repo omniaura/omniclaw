@@ -148,6 +148,32 @@ describe('renderTaskTableRows', () => {
     expect(html).toContain('data-tm-action="run"');
   });
 
+  it('surfaces a preprocess badge only for tasks with a preprocess script', () => {
+    const html = renderTaskTableRows([
+      makeTask({ id: 'task-pre', preprocess_script: 'daily-digest.ts' }),
+      makeTask({ id: 'task-plain', preprocess_script: null }),
+    ]);
+
+    const preRow = html.slice(
+      html.indexOf('data-task-id="task-pre"'),
+      html.indexOf('data-task-id="task-plain"'),
+    );
+    const plainRow = html.slice(html.indexOf('data-task-id="task-plain"'));
+
+    expect(preRow).toContain('badge-preprocess');
+    expect(preRow).toContain('Preprocess: daily-digest.ts');
+    expect(plainRow).not.toContain('badge-preprocess');
+  });
+
+  it('escapes preprocess script paths in the badge tooltip', () => {
+    const html = renderTaskTableRows([
+      makeTask({ id: 'task-x', preprocess_script: 'a<b>&"c.ts' }),
+    ]);
+
+    expect(html).toContain('Preprocess: a&lt;b&gt;&amp;&quot;c.ts');
+    expect(html).not.toContain('Preprocess: a<b>');
+  });
+
   it('omits the Run button for completed tasks', () => {
     const html = renderTaskTableRows([
       makeTask({ id: 'task-active', status: 'active' }),
@@ -509,6 +535,18 @@ describe('renderTasksContent', () => {
     expect(html).toContain('data-filter="active"');
     expect(html).toContain('Test Agent');
     expect(html).toContain('general');
+  });
+
+  it('exposes an optional preprocess script field in both create and edit modals', () => {
+    const html = renderTasksContent(makeState([makeTask()]));
+
+    // Create modal field
+    expect(html).toContain('id="tmc-preprocess"');
+    // Edit modal field
+    expect(html).toContain('id="tme-preprocess"');
+    // Label + hint copy
+    expect(html).toContain('Preprocess Script');
+    expect(html).toContain('task workflows dir');
   });
 
   it('renders the empty state when no tasks exist', () => {
