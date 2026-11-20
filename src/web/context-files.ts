@@ -35,8 +35,10 @@ export function listLocalContextFiles(): ContextFileEntry[] {
       } else if (entry.name === 'CLAUDE.md') {
         try {
           assertPathWithin(fullPath, GROUPS_DIR, 'listContextFiles');
-          const stat = fs.statSync(fullPath);
-          const content = fs.readFileSync(fullPath, 'utf-8');
+          const realPath = fs.realpathSync(fullPath);
+          assertPathWithin(realPath, GROUPS_DIR, 'listContextFiles');
+          const stat = fs.statSync(realPath);
+          const content = fs.readFileSync(realPath, 'utf-8');
           const hash = crypto
             .createHash('sha256')
             .update(content)
