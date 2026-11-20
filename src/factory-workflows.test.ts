@@ -219,6 +219,46 @@ describe('FactoryWorkflowStore claims', () => {
     db.close();
   });
 
+  it('releases only the matching owner claim when ownerRunId is provided', () => {
+    const { db, store } = makeStore();
+    store.acquireClaim({
+      workflowId: 'workflow-1',
+      repo: 'omniaura/omniclaw',
+      ownerAgentId: 'ocpeyton',
+      ownerRunId: 'run-1',
+      phase: 'impl',
+      ttlMs: 60_000,
+      now: new Date('2026-05-04T00:00:00.000Z'),
+    });
+
+    store.releaseClaim('workflow-1', 'wrong-run');
+    expect(store.getClaim('workflow-1')?.ownerRunId).toBe('run-1');
+
+    store.releaseClaim('workflow-1', 'run-1');
+    expect(store.getClaim('workflow-1')).toBeUndefined();
+
+    db.close();
+  });
+
+  it('releases a workflow claim without requiring owner identity', () => {
+    const { db, store } = makeStore();
+    store.acquireClaim({
+      workflowId: 'workflow-1',
+      repo: 'omniaura/omniclaw',
+      ownerAgentId: 'ocpeyton',
+      ownerRunId: 'run-1',
+      phase: 'impl',
+      ttlMs: 60_000,
+      now: new Date('2026-05-04T00:00:00.000Z'),
+    });
+
+    store.releaseClaim('workflow-1');
+
+    expect(store.getClaim('workflow-1')).toBeUndefined();
+
+    db.close();
+  });
+
   it('persists records and claims across database reopen', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'omniclaw-factory-'));
     tempDirs.push(dir);
