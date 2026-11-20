@@ -539,7 +539,7 @@ describe('basic auth', () => {
     expect(apiRes.status).toBe(200);
   });
 
-  it('allows discovery admin routes from private network without credentials', async () => {
+  it('allows discovery read routes from private network without credentials', async () => {
     setTestDiscoveryContext();
     handle = startWebServer(testConfig({ auth: undefined }), makeState());
 
@@ -549,7 +549,7 @@ describe('basic auth', () => {
     await expect(res.json()).resolves.toEqual([]);
   });
 
-  it('allows discovery admin routes from loopback with trusted LAN mode enabled', async () => {
+  it('allows discovery read routes from loopback with trusted LAN mode enabled', async () => {
     setTestDiscoveryContext();
     handle = startWebServer(
       testConfig({ auth: undefined, trustLanDiscoveryAdmin: true }),
@@ -559,6 +559,23 @@ describe('basic auth', () => {
     const res = await fetch(url('/api/discovery/requests'));
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual([]);
+  });
+
+  it('rejects discovery mutation routes without configured credentials', async () => {
+    setTestDiscoveryContext();
+    handle = startWebServer(testConfig({ auth: undefined }), makeState());
+
+    const res = await fetch(url('/api/discovery/state'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    });
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error:
+        'Discovery admin routes require authentication (set WEB_PASSWORD or WEB_UI_USER/WEB_UI_PASS)',
+    });
   });
 
   it('allows authenticated peer routes without Basic Auth', async () => {
@@ -659,6 +676,27 @@ describe('isTrustedLanDiscoveryAdminRequest', () => {
         true,
       ),
     ).toBe(true);
+  });
+
+  it('rejects trusted LAN peers for discovery mutation routes', () => {
+    const req = Object.assign(
+      new Request('http://evil.example/api/discovery/state', {
+        method: 'POST',
+        headers: { Host: 'evil.example' },
+      }),
+      {
+        socket: { remoteAddress: '192.168.1.25' },
+      },
+    ) as Request;
+
+    expect(
+      isTrustedLanDiscoveryAdminRequest(
+        req,
+        '/api/discovery/state',
+        undefined,
+        true,
+      ),
+    ).toBe(false);
   });
 
   it('rejects public peers even when the listener is bound to a private LAN IP', () => {
